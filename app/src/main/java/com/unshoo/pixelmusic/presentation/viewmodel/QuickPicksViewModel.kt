@@ -167,9 +167,11 @@ class QuickPicksViewModel @Inject constructor(
                     fetchYoutubeSongs(category)
                 }
                 if (songs.isNotEmpty()) {
-                    _quickPicks.value = songs
+                    // Shuffle the fetched recommendations pool so that refreshing or loading always presents fresh, randomized selections
+                    val shuffledSongs = songs.shuffled()
+                    _quickPicks.value = shuffledSongs
                     if (category == "All") {
-                        saveToCache(songs, _categories.value)
+                        saveToCache(shuffledSongs, _categories.value)
                     }
                 }
                 Timber.tag("QuickPicks").d("Loaded ${songs.size} songs for category: $category")

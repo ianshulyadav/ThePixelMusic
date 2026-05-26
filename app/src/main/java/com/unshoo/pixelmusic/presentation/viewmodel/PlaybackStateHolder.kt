@@ -642,9 +642,15 @@ class PlaybackStateHolder @Inject constructor(
     private suspend fun applyNewQueueToPlayer(newQueue: List<Song>, targetIndex: Int) {
         val masterPlayer = dualPlayerEngine.masterPlayer
         val safeTargetIndex = targetIndex.coerceIn(0, (newQueue.size - 1).coerceAtLeast(0))
-        val currentMediaItem = masterPlayer.currentMediaItem
-        val currentPosition = masterPlayer.currentPosition
-        val shouldResumePlayback = masterPlayer.playWhenReady || masterPlayer.isPlaying
+        
+        // Ensure ExoPlayer queries run strictly on the Main thread
+        val (currentMediaItem, currentPosition, shouldResumePlayback) = withContext(Dispatchers.Main) {
+            Triple(
+                masterPlayer.currentMediaItem,
+                masterPlayer.currentPosition,
+                masterPlayer.playWhenReady || masterPlayer.isPlaying
+            )
+        }
 
         // 1. Map new queue to MediaItem instances (reusing current playing item where possible to prevent pops)
         val preparedMediaItems = withContext(Dispatchers.Default) {
@@ -658,11 +664,13 @@ class PlaybackStateHolder @Inject constructor(
         }
 
         // 2. Atomically update the player's timeline on the Main thread.
-        masterPlayer.setMediaItems(preparedMediaItems, safeTargetIndex, currentPosition)
-        if (shouldResumePlayback) {
-            masterPlayer.playWhenReady = true
-            if (!masterPlayer.isPlaying) {
-                masterPlayer.play()
+        withContext(Dispatchers.Main) {
+            masterPlayer.setMediaItems(preparedMediaItems, safeTargetIndex, currentPosition)
+            if (shouldResumePlayback) {
+                masterPlayer.playWhenReady = true
+                if (!masterPlayer.isPlaying) {
+                    masterPlayer.play()
+                }
             }
         }
     }
@@ -714,8 +722,8 @@ class PlaybackStateHolder @Inject constructor(
                             queueStateHolder.saveOriginalQueueState(currentSongs, currentQueueSourceName)
                         }
 
-                        val currentMediaId = player.currentMediaItem?.mediaId ?: currentSong?.id
-                        val playerCurrentIndex = player.currentMediaItemIndex
+                        val currentMediaId = withContext(Dispatchers.Main) { player.currentMediaItem?.mediaId } ?: currentSong?.id
+                        val playerCurrentIndex = withContext(Dispatchers.Main) { player.currentMediaItemIndex }
                             .takeIf { it in currentSongs.indices }
                         val currentIndex = when {
                             playerCurrentIndex != null && currentMediaId != null &&
@@ -769,7 +777,7 @@ class PlaybackStateHolder @Inject constructor(
                         }
 
                         val originalQueue = queueStateHolder.originalQueueOrder
-                        val currentSongId = currentSong?.id ?: player.currentMediaItem?.mediaId
+                        val currentSongId = currentSong?.id ?: withContext(Dispatchers.Main) { player.currentMediaItem?.mediaId }
                         val originalIndex = originalQueue.indexOfFirst { it.id == currentSongId }.takeIf { it >= 0 }
 
                         if (originalIndex == null) {
