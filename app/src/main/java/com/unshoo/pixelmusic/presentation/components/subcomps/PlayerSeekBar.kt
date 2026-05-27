@@ -60,12 +60,20 @@ fun PlayerSeekBar(
     }
 
     var isUserSeeking by remember(songId) { mutableStateOf(false) }
+    var lastSeekFinishedTime by remember(songId) { mutableStateOf(0L) }
+    var targetSeekFraction by remember(songId) { mutableFloatStateOf(-1f) }
     var seekFraction by remember(songId) { mutableFloatStateOf(progressFraction) }
     val lastHapticStep = remember { intArrayOf(-1) }
 
-    LaunchedEffect(progressFraction) {
+    LaunchedEffect(progressFraction, isUserSeeking) {
         if (!isUserSeeking) {
-            seekFraction = progressFraction
+            val now = System.currentTimeMillis()
+            val timeSinceSeek = now - lastSeekFinishedTime
+            val diffFraction = kotlin.math.abs(progressFraction - targetSeekFraction)
+            if (targetSeekFraction < 0f || timeSinceSeek > 5000L || diffFraction < 0.04f) {
+                seekFraction = progressFraction
+                targetSeekFraction = -1f
+            }
         }
     }
 
@@ -114,8 +122,11 @@ fun PlayerSeekBar(
                     }
                 },
                 onValueCommit = { finalFraction ->
+                    seekFraction = finalFraction
                     onSeek((finalFraction * totalDuration).roundToLong())
                     onSeekPreview?.invoke(null)
+                    targetSeekFraction = finalFraction
+                    lastSeekFinishedTime = System.currentTimeMillis()
                     isUserSeeking = false
                 },
                 strokeWidth = 5.dp, // Was trackHeight

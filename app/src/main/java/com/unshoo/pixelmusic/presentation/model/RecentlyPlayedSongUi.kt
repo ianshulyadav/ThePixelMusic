@@ -1,15 +1,19 @@
 package com.unshoo.pixelmusic.presentation.model
 
+import android.os.Parcelable
+import kotlinx.parcelize.Parcelize
 import com.unshoo.pixelmusic.data.model.Song
 import com.unshoo.pixelmusic.data.stats.PlaybackStatsRepository
 import com.unshoo.pixelmusic.data.stats.StatsTimeRange
 import java.time.ZoneId
 import java.time.temporal.TemporalAdjusters
 
+@Parcelize
 data class RecentlyPlayedSongUiModel(
     val song: Song,
     val lastPlayedTimestamp: Long
-)
+) : Parcelable
+
 
 fun mapRecentlyPlayedSongs(
     playbackHistory: List<PlaybackStatsRepository.PlaybackHistoryEntry>,

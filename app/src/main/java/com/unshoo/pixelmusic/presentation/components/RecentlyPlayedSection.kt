@@ -36,6 +36,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
@@ -43,9 +44,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.unshoo.pixelmusic.R
 import com.unshoo.pixelmusic.data.model.Song
 import com.unshoo.pixelmusic.presentation.model.RecentlyPlayedSongUiModel
+import com.unshoo.pixelmusic.presentation.viewmodel.ThemeStateHolder
+import com.unshoo.pixelmusic.ui.theme.LocalPixelMusicDarkTheme
 
 private val HomeRecentlyPlayedPillHeight = 58.dp
 private val HomeRecentlyPlayedPillSpacing = 8.dp
@@ -71,6 +75,7 @@ fun RecentlyPlayedSection(
     songs: List<RecentlyPlayedSongUiModel>,
     onSongClick: (Song) -> Unit,
     onOpenAllClick: () -> Unit,
+    themeStateHolder: ThemeStateHolder,
     currentSongId: String? = null,
     contentPadding: PaddingValues = HomeRecentlyPlayedDefaultContentPadding,
     modifier: Modifier = Modifier
@@ -167,16 +172,17 @@ fun RecentlyPlayedSection(
                             if (startContentPadding > 0.dp) {
                                 Spacer(modifier = Modifier.width(startContentPadding))
                             }
-                            row.pills.forEach { cell ->
-                                key(cell.item.song.id) {
-                                    RecentlyPlayedPill(
-                                        item = cell.item,
-                                        isCurrentSong = currentSongId == cell.item.song.id,
-                                        modifier = Modifier.width(cell.width),
-                                        onClick = { onSongClick(cell.item.song) }
-                                    )
-                                }
-                            }
+                             row.pills.forEach { cell ->
+                                 key(cell.item.song.id) {
+                                     RecentlyPlayedPill(
+                                         item = cell.item,
+                                         isCurrentSong = currentSongId == cell.item.song.id,
+                                         themeStateHolder = themeStateHolder,
+                                         modifier = Modifier.width(cell.width),
+                                         onClick = { onSongClick(cell.item.song) }
+                                     )
+                                 }
+                             }
                             if (endContentPadding > 0.dp) {
                                 Spacer(modifier = Modifier.width(endContentPadding))
                             }
@@ -241,27 +247,44 @@ private fun resolveRecentlyPlayedRowTargets(totalItems: Int): IntArray {
 private fun RecentlyPlayedPill(
     item: RecentlyPlayedSongUiModel,
     isCurrentSong: Boolean,
+    themeStateHolder: ThemeStateHolder,
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
+    val isDark = LocalPixelMusicDarkTheme.current
+    val albumColorSchemeState by remember(item.song.albumArtUriString, themeStateHolder) {
+        themeStateHolder.getAlbumColorSchemeFlow(item.song.albumArtUriString.orEmpty())
+    }.collectAsStateWithLifecycle()
+
+    val albumColorScheme = remember(albumColorSchemeState, isDark) {
+        albumColorSchemeState?.let { if (isDark) it.dark else it.light }
+    }
+
+    val fallbackContainer = if (isCurrentSong) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer
+    val fallbackTitle = if (isCurrentSong) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+    val fallbackArtist = if (isCurrentSong) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.80f) else MaterialTheme.colorScheme.onSurfaceVariant
+
+    val targetContainerColor = albumColorScheme?.primaryContainer ?: fallbackContainer
+    val targetTitleColor = albumColorScheme?.onPrimaryContainer ?: fallbackTitle
+    val targetArtistColor = albumColorScheme?.onPrimaryContainer?.copy(alpha = 0.80f) ?: fallbackArtist
+
     val animatedCorner by animateDpAsState(
         targetValue = if (isCurrentSong) 14.dp else (HomeRecentlyPlayedPillHeight / 2),
         animationSpec = tween(durationMillis = 280),
         label = "pillCorner"
     )
     val animatedContainer by animateColorAsState(
-        targetValue = if (isCurrentSong) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
+        targetValue = targetContainerColor,
         animationSpec = tween(durationMillis = 280),
         label = "pillContainer"
     )
     val titleColor by animateColorAsState(
-        targetValue = if (isCurrentSong) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+        targetValue = targetTitleColor,
         animationSpec = tween(durationMillis = 280),
         label = "pillTitleColor"
     )
     val artistColor by animateColorAsState(
-        targetValue = if (isCurrentSong) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.80f)
-        else MaterialTheme.colorScheme.onSurfaceVariant,
+        targetValue = targetArtistColor,
         animationSpec = tween(durationMillis = 280),
         label = "pillArtistColor"
     )

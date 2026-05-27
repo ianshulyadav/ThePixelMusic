@@ -848,4 +848,14 @@ class PlaybackStateHolder @Inject constructor(
             }
         }
     }
+
+    fun onCleared() {
+        stopProgressUpdates()
+        remoteSeekUnlockJob?.cancel()
+        remoteSeekUnlockJob = null
+        shuffleToggleJob?.cancel()
+        shuffleToggleJob = null
+        // scope = null // scope in our class is private val scope: CoroutineScope = appScope, so we don't need to nullify it if it is not mutable, or we can just skip nullifying it.
+    }
 }
+
