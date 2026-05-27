@@ -20,6 +20,7 @@ import android.content.Intent.EXTRA_STREAM
 import androidx.media3.common.util.UnstableApi
 import com.unshoo.pixelmusic.data.preferences.AppThemeMode
 import com.unshoo.pixelmusic.data.preferences.ThemePreferencesRepository
+import com.unshoo.pixelmusic.data.preferences.ThemePreference
 import javax.inject.Inject
 
 @UnstableApi
@@ -51,7 +52,14 @@ class ExternalPlayerActivity : ComponentActivity() {
                 AppThemeMode.LIGHT -> false
                 else -> systemDarkTheme
             }
-            PixelMusicTheme(darkTheme = useDarkTheme) {
+            val playerThemePreference by themePreferencesRepository.playerThemePreferenceFlow.collectAsStateWithLifecycle(initialValue = ThemePreference.ALBUM_ART)
+            val colorPalette by themePreferencesRepository.colorPalettePreferenceFlow.collectAsStateWithLifecycle(initialValue = "SAGE")
+            val dynamicColorEnabled = playerThemePreference == ThemePreference.DYNAMIC
+            PixelMusicTheme(
+                darkTheme = useDarkTheme,
+                dynamicColor = dynamicColorEnabled,
+                colorPalette = colorPalette
+            ) {
                 ExternalPlayerOverlay(
                     playerViewModel = playerViewModel,
                     onDismiss = { finish() },

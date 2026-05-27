@@ -606,6 +606,19 @@ fun SettingsCategoryScreen(
                                     onSelectionChanged = { settingsViewModel.setAppThemeMode(it) },
                                     leadingIcon = { Icon(Icons.Outlined.LightMode, null, tint = MaterialTheme.colorScheme.secondary) }
                                 )
+                                ThemeSelectorItem(
+                                    label = stringResource(R.string.setcat_app_color_palette_label),
+                                    description = stringResource(R.string.setcat_app_color_palette_desc),
+                                    options = mapOf(
+                                        "SAGE" to stringResource(R.string.setcat_color_palette_sage),
+                                        "PURPLE" to stringResource(R.string.setcat_color_palette_purple),
+                                        "BLUE" to stringResource(R.string.setcat_color_palette_blue),
+                                        "ORANGE" to stringResource(R.string.setcat_color_palette_orange)
+                                    ),
+                                    selectedKey = uiState.colorPalette,
+                                    onSelectionChanged = { settingsViewModel.setColorPalette(it) },
+                                    leadingIcon = { Icon(Icons.Outlined.Palette, null, tint = MaterialTheme.colorScheme.secondary) }
+                                )
                                 SwitchSettingItem(
                                     title = stringResource(R.string.setcat_smooth_corners_title),
                                     subtitle = stringResource(R.string.setcat_smooth_corners_subtitle),
