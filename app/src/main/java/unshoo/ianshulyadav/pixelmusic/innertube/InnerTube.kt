@@ -362,15 +362,17 @@ class InnerTube {
         params: String? = null,
         continuation: String? = null,
         setLogin: Boolean = false,
+        forceAnonymous: Boolean = false,
     ) = withRetry {
         httpClient.post("browse") {
-            ytClient(client, setLogin = setLogin || useLoginForBrowse)
+            val finalSetLogin = if (forceAnonymous) false else (setLogin || useLoginForBrowse)
+            ytClient(client, setLogin = finalSetLogin)
             setBody(
                 BrowseBody(
                     context = client.toContext(
                         locale,
                         visitorData,
-                        if (setLogin || useLoginForBrowse) dataSyncId else null
+                        if (finalSetLogin) dataSyncId else null
                     ),
                     browseId = browseId,
                     params = params,

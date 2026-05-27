@@ -3215,6 +3215,11 @@ class PlayerViewModel @Inject constructor(
 
                     mediaItem?.let { transitionedItem ->
                         val song = resolveSongFromMediaItem(transitionedItem)
+                        if (song != null && (song.id.startsWith("youtube_") || song.youtubeId != null)) {
+                            viewModelScope.launch(Dispatchers.IO) {
+                                saveYoutubeSongsToDb(listOf(song))
+                            }
+                        }
                         
                         // Offline check for Telegram songs
                         if (song?.contentUriString?.startsWith("telegram:") == true) {
@@ -4007,8 +4012,12 @@ class PlayerViewModel @Inject constructor(
             }
         }
     }
-
     fun addSongToQueue(song: Song) {
+        if (song.id.startsWith("youtube_") || song.youtubeId != null) {
+            viewModelScope.launch(Dispatchers.IO) {
+                saveYoutubeSongsToDb(listOf(song))
+            }
+        }
         mediaController?.let { controller ->
             val mediaItem = buildPlaybackMediaItem(song)
             controller.addMediaItem(mediaItem)
@@ -4017,6 +4026,11 @@ class PlayerViewModel @Inject constructor(
     }
 
     fun addSongNextToQueue(song: Song) {
+        if (song.id.startsWith("youtube_") || song.youtubeId != null) {
+            viewModelScope.launch(Dispatchers.IO) {
+                saveYoutubeSongsToDb(listOf(song))
+            }
+        }
         mediaController?.let { controller ->
             val mediaItem = buildPlaybackMediaItem(song)
 
@@ -4030,7 +4044,6 @@ class PlayerViewModel @Inject constructor(
             // Queue UI is synced via onTimelineChanged listener
         }
     }
-
     private fun buildPlaybackMediaItem(song: Song, playlistId: String? = null): MediaItem {
         val baseItem = MediaItemBuilder.build(song)
         if (playlistId == null) {
@@ -4806,6 +4819,10 @@ class PlayerViewModel @Inject constructor(
         )
     }
 
+    fun showAiPlaylistSheet() {
+        aiStateHolder.showAiPlaylistSheet()
+    }
+
     fun setAlbumsListView(isList: Boolean) {
         viewModelScope.launch {
             userPreferencesRepository.setAlbumsListView(isList)
@@ -4828,20 +4845,16 @@ class PlayerViewModel @Inject constructor(
         searchStateHolder.performSearch(query)
     }
 
+    fun loadMoreSearch() {
+        searchStateHolder.loadMoreSearch()
+    }
+
     fun deleteSearchHistoryItem(query: String) {
         searchStateHolder.deleteSearchHistoryItem(query)
     }
 
     fun clearSearchHistory() {
         searchStateHolder.clearSearchHistory()
-    }
-
-    // --- AI Playlist Generation ---
-
-    // --- AI Playlist Generation ---
-
-    fun showAiPlaylistSheet() {
-        aiStateHolder.showAiPlaylistSheet()
     }
 
     fun dismissAiPlaylistSheet() {

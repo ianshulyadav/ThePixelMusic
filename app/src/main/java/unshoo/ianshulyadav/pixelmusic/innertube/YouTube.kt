@@ -1000,7 +1000,8 @@ object YouTube {
                 client = WEB_REMIX,
                 browseId = "FEmusic_charts",
                 params = "ggMGCgQIgAQ%3D",
-                continuation = continuation
+                continuation = continuation,
+                forceAnonymous = true
             ).body<BrowseResponse>()
         
             var sections = parseChartsSections(response)
@@ -1009,7 +1010,8 @@ object YouTube {
                     client = WEB_REMIX,
                     browseId = "FEmusic_charts",
                     params = null,
-                    continuation = null
+                    continuation = null,
+                    forceAnonymous = true
                 ).body<BrowseResponse>()
                 sections = parseChartsSections(fallbackResponse)
             }
