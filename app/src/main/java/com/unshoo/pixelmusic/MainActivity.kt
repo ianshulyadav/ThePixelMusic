@@ -103,6 +103,7 @@ import com.unshoo.pixelmusic.data.preferences.AppThemeMode
 import com.unshoo.pixelmusic.data.preferences.NavBarStyle
 import com.unshoo.pixelmusic.data.preferences.sanitizeNavBarCornerRadius
 import com.unshoo.pixelmusic.data.preferences.ThemePreferencesRepository
+import com.unshoo.pixelmusic.data.preferences.ThemePreference
 import com.unshoo.pixelmusic.data.preferences.UserPreferencesRepository
 import com.unshoo.pixelmusic.data.service.MusicService
 import com.unshoo.pixelmusic.data.worker.SyncManager
@@ -237,6 +238,9 @@ class MainActivity : ComponentActivity() {
                 AppThemeMode.LIGHT -> false
                 else -> systemDarkTheme
             }
+            val playerThemePreference by themePreferencesRepository.playerThemePreferenceFlow.collectAsStateWithLifecycle(initialValue = ThemePreference.ALBUM_ART)
+            val colorPalette by themePreferencesRepository.colorPalettePreferenceFlow.collectAsStateWithLifecycle(initialValue = "SAGE")
+            val dynamicColorEnabled = playerThemePreference == ThemePreference.DYNAMIC
             val isSetupComplete by mainViewModel.isSetupComplete.collectAsStateWithLifecycle()
             
             // Crash report dialog state
@@ -278,7 +282,9 @@ class MainActivity : ComponentActivity() {
             }
 
             PixelMusicTheme(
-                darkTheme = useDarkTheme
+                darkTheme = useDarkTheme,
+                dynamicColor = dynamicColorEnabled,
+                colorPalette = colorPalette
             ) {
                 var contentVisible by remember { mutableStateOf(false) }
                 val contentAlpha by animateFloatAsState(
