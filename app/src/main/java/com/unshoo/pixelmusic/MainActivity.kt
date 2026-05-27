@@ -79,6 +79,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
 
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -654,6 +656,7 @@ class MainActivity : ComponentActivity() {
         val navBarCompactMode by playerViewModel.navBarCompactMode.collectAsStateWithLifecycle()
         val navBarCornerRadiusRaw by playerViewModel.navBarCornerRadius.collectAsStateWithLifecycle()
         val navBarCornerRadius = sanitizeNavBarCornerRadius(navBarCornerRadiusRaw)
+        val isMiniPlayerDismissing by playerViewModel.isMiniPlayerDismissing.collectAsStateWithLifecycle()
         val hapticsEnabled by playerViewModel.hapticsEnabled.collectAsStateWithLifecycle()
         val rootView = LocalView.current
         val platformHapticFeedback = LocalHapticFeedback.current
@@ -780,7 +783,6 @@ class MainActivity : ComponentActivity() {
                 modifier = Modifier.fillMaxSize(),
                 bottomBar = {
                     if (shouldRenderNavigationBar) {
-                        val playerContentExpansionFraction = playerViewModel.playerContentExpansionFraction.value
                         val currentSongId by remember {
                             playerViewModel.stablePlayerState
                                 .map { it.currentSong?.id }
@@ -789,58 +791,46 @@ class MainActivity : ComponentActivity() {
                         val showPlayerContentArea = currentSongId != null
                         val navBarElevation = 3.dp
 
-                        val playerContentActualBottomRadiusTargetValue by remember(
-                            navBarStyle,
-                            showPlayerContentArea,
-                            playerContentExpansionFraction,
-                            navBarCornerRadius
-                        ) {
-                            derivedStateOf {
-                                if (navBarStyle == NavBarStyle.FULL_WIDTH) {
-                                    return@derivedStateOf lerp(navBarCornerRadius.dp, 26.dp, playerContentExpansionFraction)
-                                }
-
-                                if (showPlayerContentArea) {
-                                    if (playerContentExpansionFraction < 0.2f) {
-                                        lerp(navBarCornerRadius.dp, 26.dp, (playerContentExpansionFraction / 0.2f).coerceIn(0f, 1f))
-                                    } else {
-                                        26.dp
-                                    }
-                                } else {
-                                    navBarCornerRadius.dp
-                                }
-                            }
-                        }
-
-                        val playerContentActualBottomRadius by animateDpAsState(
-                            targetValue = playerContentActualBottomRadiusTargetValue,
-                            animationSpec = androidx.compose.animation.core.spring(
-                                dampingRatio = androidx.compose.animation.core.Spring.DampingRatioNoBouncy,
-                                stiffness = androidx.compose.animation.core.Spring.StiffnessMedium
-                            ),
-                            label = "PlayerContentBottomRadius"
-                        )
-
-                        val navBarHideFraction = if (showPlayerContentArea) playerContentExpansionFraction else 0f
-                        val navBarHideFractionClamped = navBarHideFraction.coerceIn(0f, 1f)
-
                         val animatedNavBarCornerRadius by animateDpAsState(
                             targetValue = navBarCornerRadius.dp,
                             animationSpec = tween(400),
                             label = "NavBarCornerRadius"
                         )
 
-                        val actualShape = remember(playerContentActualBottomRadius, showPlayerContentArea, navBarStyle, animatedNavBarCornerRadius) {
-                            val bottomRadius = if (navBarStyle == NavBarStyle.FULL_WIDTH) 0.dp else animatedNavBarCornerRadius
-                            AbsoluteSmoothCornerShape(
-                                cornerRadiusTL = playerContentActualBottomRadius,
-                                smoothnessAsPercentBR = 60,
-                                cornerRadiusTR = playerContentActualBottomRadius,
-                                smoothnessAsPercentTL = 60,
-                                cornerRadiusBL = bottomRadius,
-                                smoothnessAsPercentTR = 60,
-                                cornerRadiusBR = bottomRadius,
-                                smoothnessAsPercentBL = 60
+                        val animatedDefaultTopCornerRadius by animateDpAsState(
+                            targetValue = if (showPlayerContentArea && !isMiniPlayerDismissing) 10.dp else navBarCornerRadius.dp,
+                            animationSpec = tween(400),
+                            label = "NavBarDefaultTopCornerRadius"
+                        )
+
+                        val actualShape = remember(
+                            navBarStyle,
+                            showPlayerContentArea,
+                            isMiniPlayerDismissing,
+                            navBarCornerRadius,
+                            animatedNavBarCornerRadius,
+                            animatedDefaultTopCornerRadius
+                        ) {
+                            DynamicSmoothCornerShape(
+                                topRadiusProvider = {
+                                    val fraction = playerViewModel.playerContentExpansionFraction.value
+                                    if (navBarStyle == NavBarStyle.DEFAULT) {
+                                        animatedDefaultTopCornerRadius
+                                    } else if (navBarStyle == NavBarStyle.FULL_WIDTH) {
+                                        lerp(navBarCornerRadius.dp, 26.dp, fraction)
+                                    } else if (showPlayerContentArea) {
+                                        if (fraction < 0.2f) {
+                                            lerp(navBarCornerRadius.dp, 26.dp, (fraction / 0.2f).coerceIn(0f, 1f))
+                                        } else {
+                                            26.dp
+                                        }
+                                    } else {
+                                        navBarCornerRadius.dp
+                                    }
+                                },
+                                bottomRadiusProvider = {
+                                    if (navBarStyle == NavBarStyle.FULL_WIDTH) 0.dp else animatedNavBarCornerRadius
+                                }
                             )
                         }
 
@@ -851,16 +841,6 @@ class MainActivity : ComponentActivity() {
                         }
                         val bottomBarPaddingPx = remember(bottomBarPadding, density) {
                             with(density) { bottomBarPadding.toPx() }
-                        }
-                        val animatedTranslationY by remember(
-                            navBarHideFractionClamped,
-                            componentHeightPx,
-                            shadowOverflowPx,
-                            bottomBarPaddingPx,
-                        ) {
-                            derivedStateOf {
-                                (componentHeightPx + shadowOverflowPx + bottomBarPaddingPx) * navBarHideFractionClamped
-                            }
                         }
 
                         Box(
@@ -880,7 +860,12 @@ class MainActivity : ComponentActivity() {
                                     .padding(bottom = bottomBarPadding)
                                     .onSizeChanged { componentHeightPx = it.height }
                                     .graphicsLayer {
-                                        translationY = animatedTranslationY
+                                        val hideFraction = if (showPlayerContentArea) {
+                                            playerViewModel.playerContentExpansionFraction.value.coerceIn(0f, 1f)
+                                        } else {
+                                            0f
+                                        }
+                                        translationY = (componentHeightPx + shadowOverflowPx + bottomBarPaddingPx) * hideFraction
                                         alpha = 1f
                                     }
                                     .height(navBarHeight)
@@ -943,6 +928,29 @@ class MainActivity : ComponentActivity() {
                             onSearchBarActiveChange = { isSearchBarActive = it },
                             onOpenSidebar = { scope.launch { drawerState.open() } }
                         )
+
+                        val isExpandedOrExpanding by remember {
+                            derivedStateOf {
+                                playerViewModel.playerContentExpansionFraction.value > 0.01f
+                            }
+                        }
+                        AnimatedVisibility(
+                            visible = isExpandedOrExpanding,
+                            enter = fadeIn(animationSpec = tween(durationMillis = 350)),
+                            exit = fadeOut(animationSpec = tween(durationMillis = 350)),
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(MaterialTheme.colorScheme.surfaceContainerLowest.copy(alpha = 0.6f))
+                                    .pointerInput(Unit) {
+                                        detectTapGestures {
+                                            playerViewModel.collapsePlayerSheet()
+                                        }
+                                    }
+                            )
+                        }
 
                         UnifiedPlayerSheetV2(
                             playerViewModel = playerViewModel,
@@ -1086,6 +1094,29 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
     }
+}
 
-
+private class DynamicSmoothCornerShape(
+    private val topRadiusProvider: () -> androidx.compose.ui.unit.Dp,
+    private val bottomRadiusProvider: () -> androidx.compose.ui.unit.Dp
+) : androidx.compose.ui.graphics.Shape {
+    override fun createOutline(
+        size: androidx.compose.ui.geometry.Size,
+        layoutDirection: androidx.compose.ui.unit.LayoutDirection,
+        density: androidx.compose.ui.unit.Density
+    ): androidx.compose.ui.graphics.Outline {
+        val topRadius = topRadiusProvider()
+        val bottomRadius = bottomRadiusProvider()
+        val delegate = AbsoluteSmoothCornerShape(
+            cornerRadiusTL = topRadius,
+            smoothnessAsPercentTL = 60,
+            cornerRadiusTR = topRadius,
+            smoothnessAsPercentTR = 60,
+            cornerRadiusBL = bottomRadius,
+            smoothnessAsPercentBL = 60,
+            cornerRadiusBR = bottomRadius,
+            smoothnessAsPercentBR = 60
+        )
+        return delegate.createOutline(size, layoutDirection, density)
+    }
 }

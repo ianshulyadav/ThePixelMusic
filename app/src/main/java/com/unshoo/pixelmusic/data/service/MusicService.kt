@@ -268,28 +268,20 @@ class MusicService : MediaLibraryService() {
     }
 
     private val playerSwapListener: (Player) -> Unit = { newPlayer ->
-        serviceScope.launch(Dispatchers.Main) {
-            publishMediaSessionPlayer(newPlayer, "Swapped MediaSession player to new instance.")
-            prepareReplayGainForTransitionPlayer(newPlayer)
-        }
+        publishMediaSessionPlayer(newPlayer, "Swapped MediaSession player to new instance.")
+        prepareReplayGainForTransitionPlayer(newPlayer)
     }
 
     private val transitionDisplayPlayerListener: (Player) -> Unit = { displayPlayer ->
-        serviceScope.launch(Dispatchers.Main) {
-            publishMediaSessionPlayer(
-                displayPlayer,
-                "Published incoming crossfade player to MediaSession."
-            )
-            prepareReplayGainForTransitionPlayer(displayPlayer)
-        }
+        publishMediaSessionPlayer(
+            displayPlayer,
+            "Published incoming crossfade player to MediaSession."
+        )
+        prepareReplayGainForTransitionPlayer(displayPlayer)
     }
 
     private val transitionFinishedListener: () -> Unit = {
-        // Dispatch to Main so it runs after any pending playerSwapListener coroutine
-        // has completed — otherwise onTransitionFinished() may see stale state.
-        serviceScope.launch(Dispatchers.Main) {
-            onTransitionFinished()
-        }
+        onTransitionFinished()
     }
 
     private fun publishMediaSessionPlayer(player: Player, logMessage: String) {
@@ -412,6 +404,9 @@ class MusicService : MediaLibraryService() {
         
         // Ensure engine is ready (re-initialize if service was restarted)
         engine.initialize()
+        engine.setOnPlayerAboutToBeReleasedListener { oldPlayer ->
+            oldPlayer.removeListener(playerListener)
+        }
         userSelectedVolume = engine.masterPlayer.volume.coerceIn(0f, 1f)
         syncLocalListeningStatsFromPlayer(engine.masterPlayer)
 
@@ -1658,6 +1653,7 @@ class MusicService : MediaLibraryService() {
             release()
             mediaSession = null
         }
+        engine.setOnPlayerAboutToBeReleasedListener {}
         engine.release()
         controller.release()
         serviceScope.cancel()

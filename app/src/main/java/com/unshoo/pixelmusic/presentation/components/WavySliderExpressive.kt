@@ -126,15 +126,21 @@ fun WavySliderExpressive(
             return@LaunchedEffect
         }
 
+        val start = renderedNormalizedProgress.floatValue
+        if (abs(start - target) > 0.1f) {
+            renderedNormalizedProgress.floatValue = target
+            lastProgressUpdateNanos = System.nanoTime()
+            return@LaunchedEffect
+        }
+
         val nowNanos = System.nanoTime()
         val intervalMs = if (lastProgressUpdateNanos == 0L) {
             180L
         } else {
-            ((nowNanos - lastProgressUpdateNanos) / 1_000_000L).coerceAtLeast(1L)
+            ((nowNanos - lastProgressUpdateNanos) / 1_000_000L).coerceIn(1L, 250L)
         }
         lastProgressUpdateNanos = nowNanos
 
-        val start = renderedNormalizedProgress.floatValue
         if (abs(start - target) <= 0.0001f) {
             renderedNormalizedProgress.floatValue = target
             return@LaunchedEffect

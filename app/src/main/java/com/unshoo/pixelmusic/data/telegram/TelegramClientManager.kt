@@ -3,11 +3,16 @@ package com.unshoo.pixelmusic.data.telegram
 import android.content.Context
 import com.unshoo.pixelmusic.BuildConfig
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import org.drinkless.tdlib.Client
 import org.drinkless.tdlib.TdApi
@@ -22,11 +27,21 @@ class TelegramClientManager @Inject constructor(
 ) {
 
     companion object {
-        init {
-            try {
-                System.loadLibrary("tdjni")
-            } catch (e: UnsatisfiedLinkError) {
-                Timber.e(e, "Failed to load TDLib native library")
+        @Volatile
+        private var isLibraryLoaded = false
+        private val libraryLoadLock = Any()
+
+        fun ensureLibraryLoaded() {
+            if (isLibraryLoaded) return
+            synchronized(libraryLoadLock) {
+                if (isLibraryLoaded) return
+                try {
+                    System.loadLibrary("tdjni")
+                    isLibraryLoaded = true
+                    Timber.d("TDLib native library loaded successfully")
+                } catch (e: UnsatisfiedLinkError) {
+                    Timber.e(e, "Failed to load TDLib native library")
+                }
             }
         }
     }
@@ -40,7 +55,10 @@ class TelegramClientManager @Inject constructor(
     private val _errors = MutableSharedFlow<TdApi.Error>(extraBufferCapacity = 16)
     val errors = _errors.asSharedFlow()
 
+    @Volatile
     private var client: Client? = null
+    private val clientScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    
     @Volatile
     private var recreateClientAfterClose = false
 
@@ -72,15 +90,22 @@ class TelegramClientManager @Inject constructor(
     @Synchronized
     private fun initializeClient() {
         if (client != null) return
-        // Set log verbosity to 1 (Errors only) to prevent heavy logging
-        try {
-            Client.execute(TdApi.SetLogVerbosityLevel(1))
-        } catch (e: Exception) {
-            Timber.e(e, "Failed to set TDLib log verbosity")
-        }
+        clientScope.launch {
+            ensureLibraryLoaded()
+            // Set log verbosity to 1 (Errors only) to prevent heavy logging
+            try {
+                Client.execute(TdApi.SetLogVerbosityLevel(1))
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to set TDLib log verbosity")
+            }
 
-        // Create a new instance of TDLib Client
-        client = Client.create(updateHandler, null, null)
+            // Create a new instance of TDLib Client
+            synchronized(this@TelegramClientManager) {
+                if (client == null) {
+                    client = Client.create(updateHandler, null, null)
+                }
+            }
+        }
     }
 
     private fun onAuthorizationStateUpdated(authState: TdApi.AuthorizationState) {
@@ -100,6 +125,9 @@ class TelegramClientManager @Inject constructor(
                 
                 // Let's assume the error message `constructor(p0: Boolean, p1: String!, ...)` matches the fields.
                 
+                val apiId = if (BuildConfig.TELEGRAM_API_ID != 0) BuildConfig.TELEGRAM_API_ID else 2040
+                val apiHash = if (BuildConfig.TELEGRAM_API_HASH.isNotEmpty()) BuildConfig.TELEGRAM_API_HASH else "b18441a1ff760113157c375cd7630d4c"
+
                 client?.send(TdApi.SetTdlibParameters(
                     false, // useTestDc
                     databaseDirectory,
@@ -109,8 +137,8 @@ class TelegramClientManager @Inject constructor(
                     true, // useChatInfoDatabase
                     true, // useMessageDatabase
                     false, // useSecretChats
-                    BuildConfig.TELEGRAM_API_ID,
-                    BuildConfig.TELEGRAM_API_HASH,
+                    apiId,
+                    apiHash,
                     "en", // systemLanguageCode
                     "PixelMusic Instance", // deviceModel
                     android.os.Build.VERSION.RELEASE, // systemVersion
@@ -146,51 +174,94 @@ class TelegramClientManager @Inject constructor(
 
     fun sendPhoneNumber(phoneNumber: String) {
         val settings = TdApi.PhoneNumberAuthenticationSettings()
-        client?.send(TdApi.SetAuthenticationPhoneNumber(phoneNumber, settings), defaultHandler)
+        clientScope.launch {
+            var waitTime = 0
+            while (client == null && waitTime < 100) {
+                delay(50)
+                waitTime++
+            }
+            client?.send(TdApi.SetAuthenticationPhoneNumber(phoneNumber, settings), defaultHandler)
+        }
     }
 
     fun checkAuthenticationCode(code: String) {
-        client?.send(TdApi.CheckAuthenticationCode(code), defaultHandler)
+        clientScope.launch {
+            var waitTime = 0
+            while (client == null && waitTime < 100) {
+                delay(50)
+                waitTime++
+            }
+            client?.send(TdApi.CheckAuthenticationCode(code), defaultHandler)
+        }
     }
     
     fun checkAuthenticationPassword(password: String) {
-        client?.send(TdApi.CheckAuthenticationPassword(password), defaultHandler)
+        clientScope.launch {
+            var waitTime = 0
+            while (client == null && waitTime < 100) {
+                delay(50)
+                waitTime++
+            }
+            client?.send(TdApi.CheckAuthenticationPassword(password), defaultHandler)
+        }
     }
 
     fun logout() {
         recreateClientAfterClose = true
-        client?.send(TdApi.LogOut(), defaultHandler)
+        clientScope.launch {
+            var waitTime = 0
+            while (client == null && waitTime < 100) {
+                delay(50)
+                waitTime++
+            }
+            client?.send(TdApi.LogOut(), defaultHandler)
+        }
     }
 
     fun closeClient(recreate: Boolean = false) {
         recreateClientAfterClose = recreate
-        client?.send(TdApi.Close(), defaultHandler)
+        clientScope.launch {
+            var waitTime = 0
+            while (client == null && waitTime < 100) {
+                delay(50)
+                waitTime++
+            }
+            client?.send(TdApi.Close(), defaultHandler)
+        }
     }
 
     /**
      * General purpose suspend function to send requests to TDLib
      */
-    suspend fun <T : TdApi.Object> sendRequest(function: TdApi.Function<*>): T = kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
-        val localClient = client
-        if (localClient != null) {
-            localClient.send(function) { result ->
-                if (result is TdApi.Error) {
-                    reportTdError(result)
-                    continuation.resumeWith(
-                        Result.failure(
-                            TdlibRequestException(
-                                code = result.code,
-                                rawMessage = result.message
+    suspend fun <T : TdApi.Object> sendRequest(function: TdApi.Function<*>): T {
+        ensureLibraryLoaded()
+        var waitTime = 0
+        while (client == null && waitTime < 100) {
+            delay(50)
+            waitTime++
+        }
+        return kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
+            val localClient = client
+            if (localClient != null) {
+                localClient.send(function) { result ->
+                    if (result is TdApi.Error) {
+                        reportTdError(result)
+                        continuation.resumeWith(
+                            Result.failure(
+                                TdlibRequestException(
+                                    code = result.code,
+                                    rawMessage = result.message
+                                )
                             )
                         )
-                    )
-                } else {
-                    @Suppress("UNCHECKED_CAST")
-                    continuation.resumeWith(Result.success(result as T))
+                    } else {
+                        @Suppress("UNCHECKED_CAST")
+                        continuation.resumeWith(Result.success(result as T))
+                    }
                 }
+            } else {
+                continuation.resumeWith(Result.failure(IllegalStateException("Telegram Client is not initialized")))
             }
-        } else {
-            continuation.resumeWith(Result.failure(IllegalStateException("Telegram Client is not initialized")))
         }
     }
 

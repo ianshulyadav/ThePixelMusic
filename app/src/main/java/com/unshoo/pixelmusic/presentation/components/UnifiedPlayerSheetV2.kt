@@ -437,7 +437,8 @@ fun UnifiedPlayerSheetV2(
         hapticFeedback = hapticFeedback,
         offsetAnimatable = offsetAnimatable,
         screenWidthPx = screenWidthPx,
-        onDismissPlaylistAndShowUndo = { playerViewModel.dismissPlaylistAndShowUndo() }
+        onDismissPlaylistAndShowUndo = { playerViewModel.dismissPlaylistAndShowUndo() },
+        onDismissStarted = { playerViewModel.setMiniPlayerDismissing(true) }
     )
 
     QueueSheetRuntimeEffects(
