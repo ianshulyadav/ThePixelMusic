@@ -669,10 +669,10 @@ class DualPlayerEngine @Inject constructor(
             // bufferForPlaybackMs: Start playback after 500ms buffer (instant feel)
             // bufferForPlaybackAfterRebufferMs: After stall restart after 1s (user req: min 1s)
             .setBufferDurationsMs(
-                /* minBufferMs                   = */ 2_000,   // reduced from 15s — faster startup
+                /* minBufferMs                   = */ 20_000,   // robust background reserve (20s) preventing stalls on slow network
                 /* maxBufferMs                   = */ 50_000,  // buffer up to 50 s
                 /* bufferForPlaybackMs           = */ 500,     // start after 0.5 s (instant feel)
-                /* bufferForPlaybackAfterRebufferMs = */ 1_000 // after stall: restart after 1 s (was 1.5s)
+                /* bufferForPlaybackAfterRebufferMs = */ 1_500 // after stall: restart after 1.5 s
             )
             .setBackBuffer(15_000, /* retainBackBufferFromKeyframe = */ true)
             .build()

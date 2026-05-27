@@ -9,6 +9,8 @@ import android.os.Build
 import android.os.Trace // Import Trace
 import android.provider.MediaStore
 import android.util.Log
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import androidx.hilt.work.HiltWorker
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
@@ -1627,56 +1629,66 @@ constructor(
         try {
             val settings = youtubeDatastoreRepository.settings.first()
             val appDatabase = com.unshoo.pixelmusic.data.database.youtube.AppDatabase.getInstance(applicationContext)
+            val isMobile = isMobileNetwork(applicationContext)
+            val localPlaylistsExist = appDatabase.playlistRepository().getAll().isNotEmpty()
 
             // 1. Fetch remote user-created playlists (delta sync — only insert new songs)
-            try {
-                val remotePlaylists = YoutubePlaylistDataSource().retrieveAll(settings)
-                remotePlaylists.forEach { playlistInfo ->
-                    val existingPlaylist = appDatabase.playlistRepository().getPlaylistById(playlistInfo.id)
-                    val existingSongCount = existingPlaylist?.info?.lastSyncSongCount ?: 0
+            if (!isMobile || !localPlaylistsExist) {
+                try {
+                    val remotePlaylists = YoutubePlaylistDataSource().retrieveAll(settings)
+                    remotePlaylists.forEach { playlistInfo ->
+                        val existingPlaylist = appDatabase.playlistRepository().getPlaylistById(playlistInfo.id)
+                        val existingSongCount = existingPlaylist?.info?.lastSyncSongCount ?: 0
 
-                    val emptyPlaylist = Playlist(playlistInfo, emptyList())
-                    val fullPlaylist = YoutubePlaylistDataSource().retrieveOne(emptyPlaylist, settings)
+                        val emptyPlaylist = Playlist(playlistInfo, emptyList())
+                        val fullPlaylist = YoutubePlaylistDataSource().retrieveOne(emptyPlaylist, settings)
 
-                    // Delta check: only process if song count changed or first sync
-                    if (fullPlaylist.songs.size != existingSongCount || existingPlaylist == null) {
-                        // Use preserving insert — keeps existing downloaded songs intact
-                        appDatabase.playlistRepository().insertPlaylistWithSongsPreserving(
-                            fullPlaylist,
-                            appDatabase.songRepository()
-                        )
-                        Log.i(TAG, "Delta synced playlist '${playlistInfo.title}': ${fullPlaylist.songs.size} songs (was $existingSongCount)")
-                    } else {
-                        Log.d(TAG, "Skipping playlist '${playlistInfo.title}' — no changes (${existingSongCount} songs)")
+                        // Delta check: only process if song count changed or first sync
+                        if (fullPlaylist.songs.size != existingSongCount || existingPlaylist == null) {
+                            // Use preserving insert — keeps existing downloaded songs intact
+                            appDatabase.playlistRepository().insertPlaylistWithSongsPreserving(
+                                fullPlaylist,
+                                appDatabase.songRepository()
+                            )
+                            Log.i(TAG, "Delta synced playlist '${playlistInfo.title}': ${fullPlaylist.songs.size} songs (was $existingSongCount)")
+                        } else {
+                            Log.d(TAG, "Skipping playlist '${playlistInfo.title}' — no changes (${existingSongCount} songs)")
+                        }
+                        // NOTE: Auto-download removed. Users download via playlist options menu (Component 24).
                     }
-                    // NOTE: Auto-download removed. Users download via playlist options menu (Component 24).
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to fetch remote YouTube playlists", e)
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to fetch remote YouTube playlists", e)
+            } else {
+                Log.i(TAG, "SyncWorker: Mobile data active and local playlists exist. Bypassing heavy cloud sync.")
             }
 
             // 2. Fetch and sync Liked Songs playlist ("LM") — delta sync and mapping removed
             val remoteLikedSongsList: List<com.unshoo.pixelmusic.data.model.youtube.Song> = emptyList()
 
             // 3. Fetch missing genres (rate limited: 10 per sync cycle)
-            try {
-                val songsWithoutGenre = appDatabase.songRepository().getSongsWithoutGenre()
-                val targetSongs = songsWithoutGenre
-                    .sortedByDescending { it.downloadTimestamp }
-                    .take(10)
+            if (!isMobile) {
+                try {
+                    val songsWithoutGenre = appDatabase.songRepository().getSongsWithoutGenre()
+                    val targetSongs = songsWithoutGenre
+                        .sortedByDescending { it.downloadTimestamp }
+                        .take(10)
 
-                targetSongs.forEach { song ->
-                    val fetchedGenre = com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.extractGenre(song.youtubeId)
-                    if (fetchedGenre != null) {
-                        appDatabase.songRepository().updateGenre(song.youtubeId, fetchedGenre)
-                        val unifiedId = toUnifiedYoutubeSongId(song.youtubeId)
-                        musicDao.updateSongGenre(unifiedId, fetchedGenre)
-                        Log.i(TAG, "Fetched genre '$fetchedGenre' for YouTube song '${song.title}'")
+                    targetSongs.forEach { song ->
+                        val fetchedGenre = com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.extractGenre(song.youtubeId)
+                        if (fetchedGenre != null) {
+                            appDatabase.songRepository().updateGenre(song.youtubeId, fetchedGenre)
+                            val unifiedId = toUnifiedYoutubeSongId(song.youtubeId)
+                            musicDao.updateSongGenre(unifiedId, fetchedGenre)
+                            Log.i(TAG, "Fetched genre '$fetchedGenre' for YouTube song '${song.title}'")
+                        }
+                        kotlinx.coroutines.delay(500)
                     }
-                    kotlinx.coroutines.delay(500)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to fetch and update YouTube genres", e)
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to fetch and update YouTube genres", e)
+            } else {
+                Log.i(TAG, "SyncWorker: Mobile data active. Skipping missing genres network fetch.")
             }
 
             val allPlaylists = playlistPreferencesRepository.getPlaylistsOnce()
@@ -2004,5 +2016,12 @@ constructor(
             // ignore
         }
         return seconds * 1000
+    }
+
+    private fun isMobileNetwork(context: Context): Boolean {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
+        val activeNetwork = cm.activeNetwork ?: return false
+        val capabilities = cm.getNetworkCapabilities(activeNetwork) ?: return false
+        return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
     }
 }

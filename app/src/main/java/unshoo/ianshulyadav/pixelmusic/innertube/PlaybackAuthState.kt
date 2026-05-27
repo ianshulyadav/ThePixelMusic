@@ -21,7 +21,7 @@ data class PlaybackAuthState(
     val poToken: String? = null,
     val poTokenGvs: String? = null,
     val poTokenPlayer: String? = null,
-    val webClientPoTokenEnabled: Boolean = false,
+    val webClientPoTokenEnabled: Boolean = true,
 ) {
     val hasLoginCookie: Boolean
         get() {
@@ -66,13 +66,23 @@ data class PlaybackAuthState(
         if (explicit != null) return explicit
         if (!webClientPoTokenEnabled) return null
         if (!needsServiceIntegrity(client)) return null
-        return poTokenPlayer ?: poToken
+        val token = poTokenPlayer ?: poToken
+        if (token.isNullOrBlank()) {
+            val id = sessionId ?: java.util.UUID.randomUUID().toString()
+            return unshoo.ianshulyadav.pixelmusic.innertube.utils.PoTokenGenerator.generateSessionToken(id)
+        }
+        return token
     }
 
     fun resolveGvsPoToken(client: YouTubeClient? = null): String? {
         if (client != null && !needsServiceIntegrity(client)) return null
         if (!webClientPoTokenEnabled) return null
-        return poTokenGvs ?: poToken
+        val token = poTokenGvs ?: poToken
+        if (token.isNullOrBlank()) {
+            val id = sessionId ?: java.util.UUID.randomUUID().toString()
+            return unshoo.ianshulyadav.pixelmusic.innertube.utils.PoTokenGenerator.generateSessionToken(id)
+        }
+        return token
     }
 
     companion object {

@@ -30,6 +30,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.layout.offset
+import androidx.compose.animation.core.Animatable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -53,6 +58,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -772,10 +778,27 @@ fun SearchResultsList(
         }
     }
 
+    val lazyListState = rememberLazyListState()
+
+    LaunchedEffect(lazyListState) {
+        snapshotFlow {
+            val layoutInfo = lazyListState.layoutInfo
+            val totalItemsNumber = layoutInfo.totalItemsCount
+            val lastVisibleItemIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            totalItemsNumber > 0 && lastVisibleItemIndex >= totalItemsNumber - 5
+        }.distinctUntilChanged()
+            .collect { nearEnd ->
+                if (nearEnd) {
+                    playerViewModel.loadMoreSearch()
+                }
+            }
+    }
+
     val imePadding = WindowInsets.ime.getBottom(localDensity).dp
     val systemBarPaddingBottom = WindowInsets.systemBars.asPaddingValues().calculateBottomPadding() + 94.dp
 
     LazyColumn(
+        state = lazyListState,
         modifier = Modifier
             .fillMaxSize()
             .clip(
@@ -830,13 +853,24 @@ fun SearchResultsList(
                     Box(modifier = Modifier.padding(bottom = 12.dp)) {
                         when (item) {
                             is SearchResultItem.SongItem -> {
-                                EnhancedSongListItem(
-                                    song = item.song,
-                                    isPlaying = isPlaying,
-                                    isCurrentSong = currentPlayingSongId == item.song.id,
-                                    onMoreOptionsClick = onSongMoreOptionsClick,
-                                    onClick = { onSongResultClick(item.song) }
-                                )
+                                SwipeActionWrapper(
+                                    onSwipeRight = {
+                                        playerViewModel.addSongNextToQueue(item.song)
+                                        playerViewModel.sendToast("Added to Play Next")
+                                    },
+                                    onSwipeLeft = {
+                                        playerViewModel.addSongToQueue(item.song)
+                                        playerViewModel.sendToast("Added to Queue")
+                                    }
+                                ) {
+                                    EnhancedSongListItem(
+                                        song = item.song,
+                                        isPlaying = isPlaying,
+                                        isCurrentSong = currentPlayingSongId == item.song.id,
+                                        onMoreOptionsClick = onSongMoreOptionsClick,
+                                        onClick = { onSongResultClick(item.song) }
+                                    )
+                                }
                             }
 
                             is SearchResultItem.AlbumItem -> {
@@ -1222,8 +1256,7 @@ fun SearchResultPlaylistItem(
         }
     }
 }
-
-@androidx.annotation.OptIn(UnstableApi::class)
+@androidx.annotation.OptIn(UnstableApi::class)
 @Composable
 fun SearchFilterChip(
     filterType: SearchFilterType,
@@ -1263,4 +1296,119 @@ fun SearchFilterChip(
              null
          }
     )
+}
+
+@Composable
+fun SwipeActionWrapper(
+    onSwipeRight: () -> Unit,
+    onSwipeLeft: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit
+) {
+    val coroutineScope = rememberCoroutineScope()
+    val dragOffset = remember { Animatable(0f) }
+    val density = LocalDensity.current
+    val thresholdPx = remember(density) { with(density) { 90.dp.toPx() } }
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(
+                when {
+                    dragOffset.value > 0 -> Color(0xFF2E7D32) // Soft Green
+                    dragOffset.value < 0 -> Color(0xFF1565C0) // Soft Blue
+                    else -> Color.Transparent
+                }
+            )
+    ) {
+        if (dragOffset.value > 0) {
+            Row(
+                modifier = Modifier
+                    .matchParentSize()
+                    .padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Start
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.PlayArrow,
+                    contentDescription = "Play Next",
+                    tint = Color.White,
+                    modifier = Modifier.size(28.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Play Next",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+        } else if (dragOffset.value < 0) {
+            Row(
+                modifier = Modifier
+                    .matchParentSize()
+                    .padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.End
+            ) {
+                Text(
+                    text = "Add to Queue",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Icon(
+                    imageVector = Icons.AutoMirrored.Rounded.PlaylistPlay,
+                    contentDescription = "Add to Queue",
+                    tint = Color.White,
+                    modifier = Modifier.size(28.dp)
+                )
+            }
+        }
+
+        Box(
+            modifier = Modifier
+                .offset { IntOffset(dragOffset.value.toInt(), 0) }
+                .background(MaterialTheme.colorScheme.background)
+                .pointerInput(Unit) {
+                    detectHorizontalDragGestures(
+                        onDragEnd = {
+                            coroutineScope.launch {
+                                val finalOffset = dragOffset.value
+                                if (finalOffset > thresholdPx) {
+                                    onSwipeRight()
+                                } else if (finalOffset < -thresholdPx) {
+                                    onSwipeLeft()
+                                }
+                                dragOffset.animateTo(0f)
+                            }
+                        },
+                        onDragCancel = {
+                            coroutineScope.launch {
+                                dragOffset.animateTo(0f)
+                            }
+                        },
+                        onHorizontalDrag = { change, dragAmount ->
+                            change.consume()
+                            coroutineScope.launch {
+                                val currentOffset = dragOffset.value
+                                val newOffset = currentOffset + dragAmount
+                                val dampenedOffset = if (newOffset > thresholdPx) {
+                                    thresholdPx + (newOffset - thresholdPx) * 0.3f
+                                } else if (newOffset < -thresholdPx) {
+                                    -thresholdPx + (newOffset + thresholdPx) * 0.3f
+                                } else {
+                                    newOffset
+                                }
+                                dragOffset.snapTo(dampenedOffset)
+                            }
+                        }
+                    )
+                }
+        ) {
+            content()
+        }
+    }
 }
