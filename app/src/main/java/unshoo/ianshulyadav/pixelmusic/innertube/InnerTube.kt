@@ -165,6 +165,7 @@ class InnerTube {
         client: YouTubeClient,
         setLogin: Boolean = false,
         authState: PlaybackAuthState = currentAuthState(),
+        forceAnonymous: Boolean = false,
     ) {
         val requestOrigin = client.requestOrigin()
         val requestReferer = client.requestReferer()
@@ -176,7 +177,9 @@ class InnerTube {
             append("X-YouTube-Client-Version", client.clientVersion)
             append("X-Origin", requestOrigin)
             append("Referer", requestReferer)
-            authState.visitorData?.let { append("X-Goog-Visitor-Id", it) }
+            if (!forceAnonymous) {
+                authState.visitorData?.let { append("X-Goog-Visitor-Id", it) }
+            }
             if (setLogin && client.loginSupported) {
                 authState.cookie?.let { cookie ->
                     append("cookie", cookie)
@@ -366,12 +369,12 @@ class InnerTube {
     ) = withRetry {
         httpClient.post("browse") {
             val finalSetLogin = if (forceAnonymous) false else (setLogin || useLoginForBrowse)
-            ytClient(client, setLogin = finalSetLogin)
+            ytClient(client, setLogin = finalSetLogin, forceAnonymous = forceAnonymous)
             setBody(
                 BrowseBody(
                     context = client.toContext(
                         locale,
-                        visitorData,
+                        if (forceAnonymous) null else visitorData,
                         if (finalSetLogin) dataSyncId else null
                     ),
                     browseId = browseId,
