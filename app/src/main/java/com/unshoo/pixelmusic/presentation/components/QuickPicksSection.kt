@@ -44,7 +44,7 @@ import com.unshoo.pixelmusic.presentation.components.SmartImage
 private val QuickPicksPillHeight = 56.dp
 private val QuickPicksPillSpacing = 8.dp
 private const val QuickPicksPillsPerColumn = 3
-private const val QuickPicksLimit = 24
+private const val QuickPicksLimit = 48
 private val QuickPicksPillArtSize = 36.dp
 private val QuickPicksWidthSteps = listOf(148.dp, 166.dp, 184.dp, 202.dp, 220.dp)
 

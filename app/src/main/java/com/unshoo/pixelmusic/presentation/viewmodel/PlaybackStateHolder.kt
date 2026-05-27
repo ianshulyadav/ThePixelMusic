@@ -147,13 +147,13 @@ class PlaybackStateHolder @Inject constructor(
             }
 
             val controller = mediaController
-            if (
-                controller != null &&
-                !controller.isPlaying &&
-                controller.currentMediaItem?.mediaId == snapshotMediaId &&
-                _currentPosition.value == 0L
-            ) {
-                _currentPosition.value = snapshotPositionMs
+            if (controller != null) {
+                val (isPlaying, currentMediaId) = withContext(Dispatchers.Main) {
+                    controller.isPlaying to controller.currentMediaItem?.mediaId
+                }
+                if (!isPlaying && currentMediaId == snapshotMediaId && _currentPosition.value == 0L) {
+                    _currentPosition.value = snapshotPositionMs
+                }
             }
         }
     }
@@ -167,9 +167,30 @@ class PlaybackStateHolder @Inject constructor(
             val updated = update(current)
             // Auto-populate index from MediaController if not explicitly set by the update
             if (updated.currentMediaItemIndex == -1) {
-                mediaController?.let { controller ->
-                    updated.copy(currentMediaItemIndex = controller.currentMediaItemIndex)
-                } ?: updated
+                val controller = mediaController
+                if (controller != null) {
+                    if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+                        updated.copy(currentMediaItemIndex = controller.currentMediaItemIndex)
+                    } else {
+                        // We are on a background thread. Asynchronously fetch on Main thread and update state flow.
+                        scope.launch(Dispatchers.Main) {
+                            val mainController = mediaController
+                            if (mainController != null) {
+                                val index = mainController.currentMediaItemIndex
+                                _stablePlayerState.update { state ->
+                                    if (state.currentMediaItemIndex == -1) {
+                                        state.copy(currentMediaItemIndex = index)
+                                    } else {
+                                        state
+                                    }
+                                }
+                            }
+                        }
+                        updated
+                    }
+                } else {
+                    updated
+                }
             } else {
                 updated
             }
@@ -533,7 +554,7 @@ class PlaybackStateHolder @Inject constructor(
 
     fun startProgressUpdates() {
         stopProgressUpdates()
-        progressJob = scope?.launch {
+        progressJob = scope?.launch(Dispatchers.Main) {
             while (true) {
                 val tickMs = currentProgressTickMs()
                 val castSession = castStateHolder.castSession.value

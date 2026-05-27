@@ -890,6 +890,20 @@ fun SettingsCategoryScreen(
                                     leadingIcon = { Icon(painterResource(R.drawable.rounded_queue_music_24), null, tint = MaterialTheme.colorScheme.secondary) }
                                 )
                                 SwitchSettingItem(
+                                    title = stringResource(R.string.setcat_auto_queue_enabled_title),
+                                    subtitle = stringResource(R.string.setcat_auto_queue_enabled_desc),
+                                    checked = uiState.autoQueueEnabled,
+                                    onCheckedChange = { settingsViewModel.setAutoQueueEnabled(it) },
+                                    leadingIcon = { Icon(painterResource(R.drawable.rounded_queue_music_24), null, tint = MaterialTheme.colorScheme.secondary) }
+                                )
+                                SwitchSettingItem(
+                                    title = stringResource(R.string.setcat_avoid_repetitive_songs_title),
+                                    subtitle = stringResource(R.string.setcat_avoid_repetitive_songs_desc),
+                                    checked = uiState.avoidRepetitiveSongs,
+                                    onCheckedChange = { settingsViewModel.setAvoidRepetitiveSongs(it) },
+                                    leadingIcon = { Icon(painterResource(R.drawable.rounded_shuffle_24), null, tint = MaterialTheme.colorScheme.secondary) }
+                                )
+                                SwitchSettingItem(
                                     title = stringResource(R.string.setcat_preload_queue_enabled_title),
                                     subtitle = stringResource(R.string.setcat_preload_queue_enabled_desc),
                                     checked = uiState.preloadQueueEnabled,

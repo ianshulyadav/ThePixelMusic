@@ -217,70 +217,68 @@ fun ExploreScreen(
                         }
 
                         // 1) Detailed Charts at the very top
-                        if (uiState.selectedFilter == "All" || uiState.selectedFilter == "Charts") {
-                            if (uiState.chartsPage != null && uiState.chartsPage!!.sections.isNotEmpty()) {
-                                uiState.chartsPage!!.sections.forEachIndexed { index, chartSection ->
-                                    item(key = "chart_${chartSection.title}_${index}_header") {
-                                        SectionHeader(title = chartSection.title)
-                                    }
+                        if (uiState.chartsPage != null && uiState.chartsPage!!.sections.isNotEmpty()) {
+                            uiState.chartsPage!!.sections.forEachIndexed { index, chartSection ->
+                                item(key = "chart_${chartSection.title}_${index}_header") {
+                                    SectionHeader(title = chartSection.title)
+                                }
 
-                                    val songItems = chartSection.items.filterIsInstance<SongItem>()
-                                    if (songItems.isNotEmpty()) {
-                                        val songListNative = songItems.map { it.toNativeSong() }
-                                        items(songItems.size) { idx ->
-                                            val songItem = songItems[idx]
-                                            val songNative = songListNative[idx]
-                                            EnhancedSongListItem(
-                                                modifier = Modifier.padding(horizontal = 16.dp),
-                                                song = songNative,
-                                                isPlaying = isPlaying && currentSongId == songNative.id,
-                                                isCurrentSong = currentSongId == songNative.id,
-                                                onClick = {
-                                                    playerViewModel.showAndPlaySong(
-                                                        songNative,
-                                                        songListNative,
-                                                        chartSection.title
-                                                    )
-                                                },
-                                                onMoreOptionsClick = {
-                                                    playerViewModel.selectSongForInfo(songNative)
-                                                }
-                                            )
-                                        }
-                                    } else {
-                                        item(key = "chart_${chartSection.title}_${index}_list") {
-                                            LazyRow(
-                                                contentPadding = PaddingValues(horizontal = 16.dp),
-                                                horizontalArrangement = Arrangement.spacedBy(16.dp)
-                                            ) {
-                                                items(chartSection.items) { item ->
-                                                    when (item) {
-                                                        is AlbumItem -> {
-                                                            AlbumCarouselItem(
-                                                                album = item,
-                                                                onClick = {
-                                                                    navController.navigateSafely(Screen.AlbumDetail.createRoute(item.browseId))
-                                                                }
-                                                            )
-                                                        }
-                                                        is ArtistItem -> {
-                                                            ArtistCardItem(
-                                                                artist = item,
-                                                                onClick = {
-                                                                    navController.navigateSafely(Screen.ArtistDetail.createRoute(item.id))
-                                                                }
-                                                            )
-                                                        }
-                                                        is PlaylistItem -> {
-                                                            PlaylistCardItem(
-                                                                playlist = item,
-                                                                onClick = {
-                                                                    navController.navigateSafely(Screen.PlaylistDetail.createRoute(item.id))
-                                                                }
-                                                            )
-                                                        }
-                                                        else -> {}
+                                val songItems = chartSection.items.filterIsInstance<SongItem>()
+                                if (songItems.isNotEmpty()) {
+                                    val songListNative = songItems.map { it.toNativeSong() }
+                                    items(songItems.size) { idx ->
+                                        val songItem = songItems[idx]
+                                        val songNative = songListNative[idx]
+                                        EnhancedSongListItem(
+                                            modifier = Modifier.padding(horizontal = 16.dp),
+                                            song = songNative,
+                                            isPlaying = isPlaying && currentSongId == songNative.id,
+                                            isCurrentSong = currentSongId == songNative.id,
+                                            onClick = {
+                                                playerViewModel.showAndPlaySong(
+                                                    songNative,
+                                                    songListNative,
+                                                    chartSection.title
+                                                )
+                                            },
+                                            onMoreOptionsClick = {
+                                                playerViewModel.selectSongForInfo(songNative)
+                                            }
+                                        )
+                                    }
+                                } else {
+                                    item(key = "chart_${chartSection.title}_${index}_list") {
+                                        LazyRow(
+                                            contentPadding = PaddingValues(horizontal = 16.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                        ) {
+                                            items(chartSection.items) { item ->
+                                                when (item) {
+                                                    is AlbumItem -> {
+                                                        AlbumCarouselItem(
+                                                            album = item,
+                                                            onClick = {
+                                                                navController.navigateSafely(Screen.AlbumDetail.createRoute(item.browseId))
+                                                            }
+                                                        )
                                                     }
+                                                    is ArtistItem -> {
+                                                        ArtistCardItem(
+                                                            artist = item,
+                                                            onClick = {
+                                                                navController.navigateSafely(Screen.ArtistDetail.createRoute(item.id))
+                                                            }
+                                                        )
+                                                    }
+                                                    is PlaylistItem -> {
+                                                        PlaylistCardItem(
+                                                            playlist = item,
+                                                            onClick = {
+                                                                navController.navigateSafely(Screen.PlaylistDetail.createRoute(item.id))
+                                                            }
+                                                        )
+                                                    }
+                                                    else -> {}
                                                 }
                                             }
                                         }

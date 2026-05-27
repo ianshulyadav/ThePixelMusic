@@ -149,6 +149,8 @@ class MusicService : MediaLibraryService() {
     lateinit var appScope: CoroutineScope
     @Inject
     lateinit var youtubeDatastoreRepository: YoutubeDatastoreRepository
+    @Inject
+    lateinit var engagementDao: com.unshoo.pixelmusic.data.database.EngagementDao
 
     private var replayGainEnabled = false
     private var replayGainUseAlbumGain = false
@@ -421,7 +423,7 @@ class MusicService : MediaLibraryService() {
         engine.addTransitionFinishedListener(transitionFinishedListener)
 
         // Attach YouTube radio-mode auto-queue and stream-URL preloader
-        AutoQueueManager.attach(engine.masterPlayer, this, youtubeDatastoreRepository, serviceScope, musicDao)
+        AutoQueueManager.attach(engine.masterPlayer, this, youtubeDatastoreRepository, serviceScope, musicDao, engagementDao)
         QueuePreloadManager.attach(engine.masterPlayer, this, youtubeDatastoreRepository, serviceScope)
 
         controller.initialize()

@@ -19,6 +19,7 @@ data class UmihiSettings(
     val lyricsMiniPlayerAlignment: String = "LEFT",
     val useImmersiveLyricsStatusBar: Boolean = true,
     val autoQueueEnabled: Boolean = true,
+    val avoidRepetitiveSongs: Boolean = false,
     val preloadQueueEnabled: Boolean = true,
     val preloadQueueSize: Int = 5,
 ) {
