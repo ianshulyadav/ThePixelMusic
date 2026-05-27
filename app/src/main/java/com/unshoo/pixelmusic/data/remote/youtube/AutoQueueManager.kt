@@ -54,6 +54,7 @@ object AutoQueueManager {
     private var datastoreRepository: DatastoreRepository? = null
     private var playerRef: Player? = null
     private var musicDaoRef: MusicDao? = null
+    private var engagementDaoRef: com.unshoo.pixelmusic.data.database.EngagementDao? = null
 
     private val playerListener = object : Player.Listener {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
@@ -72,13 +73,15 @@ object AutoQueueManager {
         context: Context,
         datastoreRepo: DatastoreRepository,
         coroutineScope: CoroutineScope,
-        musicDao: MusicDao
+        musicDao: MusicDao,
+        engagementDao: com.unshoo.pixelmusic.data.database.EngagementDao
     ) {
         scope = coroutineScope
         contextRef = context.applicationContext
         datastoreRepository = datastoreRepo
         playerRef = player
         musicDaoRef = musicDao
+        engagementDaoRef = engagementDao
         player.addListener(playerListener)
         printd("AutoQueueManager attached")
     }
@@ -101,6 +104,7 @@ object AutoQueueManager {
         contextRef = null
         datastoreRepository = null
         musicDaoRef = null
+        engagementDaoRef = null
     }
 
     fun reset() {
@@ -158,10 +162,104 @@ object AutoQueueManager {
         }
     }
 
+    private suspend fun getYoutubeVideoId(songId: String): String? {
+        if (songId.startsWith("youtube_")) {
+            return songId.substringAfter("youtube_")
+        }
+        if (songId.startsWith("youtube://")) {
+            return songId.substringAfter("youtube://")
+        }
+        val cached = localToYoutubeIdMap[songId]
+        if (cached != null) return cached
+
+        val longId = songId.toLongOrNull()
+        if (longId != null && longId < 0) {
+            val songEntity = musicDaoRef?.getSongByIdOnce(longId)
+            if (songEntity?.contentUriString?.startsWith("youtube://") == true) {
+                val vidId = songEntity.contentUriString.removePrefix("youtube://")
+                localToYoutubeIdMap[songId] = vidId
+                return vidId
+            }
+        }
+        return null
+    }
+
+    private suspend fun getDbSongByIdString(idStr: String): Song? {
+        val dao = musicDaoRef ?: return null
+        val longId = idStr.toLongOrNull()
+        if (longId != null) {
+            return dao.getSongByIdOnce(longId)?.toSong()
+        }
+        if (idStr.startsWith("youtube_")) {
+            val videoId = idStr.substringAfter("youtube_")
+            val dbId = getDatabaseIdForYoutubeId(videoId)
+            return dao.getSongByIdOnce(dbId)?.toSong()
+        }
+        return null
+    }
+
+    private fun isSameSong(id1: String, id2: String): Boolean {
+        if (id1 == id2) return true
+        val yt1 = if (id1.startsWith("youtube_")) id1.substringAfter("youtube_") else if (id1.startsWith("youtube://")) id1.substringAfter("youtube://") else null
+        val yt2 = if (id2.startsWith("youtube_")) id2.substringAfter("youtube_") else if (id2.startsWith("youtube://")) id2.substringAfter("youtube://") else null
+        if (yt1 != null && yt2 != null) {
+            return yt1 == yt2
+        }
+        return false
+    }
+
+    private suspend fun getNewFamiliarSongs(
+        currentQueueIds: Set<String>,
+        avoidIds: Set<String>
+    ): List<Song> {
+        val dao = musicDaoRef ?: return emptyList()
+        val engagementDao = engagementDaoRef
+        
+        val favoriteSongs = try {
+            dao.getFavoriteSongsList(emptyList(), false, 0).map { it.toSong() }
+        } catch (e: Exception) {
+            emptyList()
+        }
+
+        val playedMultipleTimesSongs = mutableListOf<Song>()
+        if (engagementDao != null) {
+            val engagements = try {
+                engagementDao.getAllEngagements()
+            } catch (e: Exception) {
+                emptyList()
+            }
+            val idsPlayedMultiple = engagements.filter { it.playCount >= 2 }.map { it.songId }.toSet()
+            for (idStr in idsPlayedMultiple) {
+                val dbSong = getDbSongByIdString(idStr)
+                if (dbSong != null) {
+                    playedMultipleTimesSongs.add(dbSong)
+                }
+            }
+        }
+
+        val librarySongs = try {
+            dao.getAllSongsList().map { it.toSong() }
+        } catch (e: Exception) {
+            emptyList()
+        }
+
+        val combined = (favoriteSongs + playedMultipleTimesSongs + librarySongs).distinctBy { it.id }
+
+        val filtered = combined.filter { song ->
+            val songIdStr = song.id
+            val isAlreadyInQueue = currentQueueIds.any { isSameSong(it, songIdStr) }
+            val isAvoid = avoidIds.any { isSameSong(it, songIdStr) }
+            !isAlreadyInQueue && !isAvoid
+        }
+
+        return filtered.shuffled()
+    }
+
     private suspend fun refillQueueLoop(currentId: String, forceRefresh: Boolean) {
         val player = playerRef ?: return
         val dao = musicDaoRef ?: return
         val context = contextRef ?: return
+        val engagementDao = engagementDaoRef
 
         val entryPoint = try {
             dagger.hilt.android.EntryPointAccessors.fromApplication(
@@ -243,57 +341,146 @@ object AutoQueueManager {
 
             printd("AutoQueueManager: Refilling queue. Remaining: $remaining, Target: $TARGET_QUEUE_SIZE, Loop: $loopCount")
 
-            val isOnline = connectivityStateHolder?.isOnline?.value ?: true
-
-            if (!isOnline) {
-                printd("AutoQueueManager: Device is offline. Appending local related songs.")
-                fetchAndAppendLocal(currentId, player)
-                continue
+            val currentQueueIds = withContext(Dispatchers.Main) {
+                if (playerRef == null) emptySet()
+                else (0 until player.mediaItemCount).mapNotNull { player.getMediaItemAt(it).mediaId }.toSet()
             }
 
-            // Online flow: Resolve YouTube Video ID for the song
-            var matchedVideoId: String? = null
-            if (!isLocal) {
-                matchedVideoId = resolvedVideoId
-            } else {
-                matchedVideoId = localToYoutubeIdMap[currentId]
-                if (matchedVideoId == null) {
-                    printd("AutoQueueManager: Matching local song $currentId to YouTube online.")
-                    val songId = currentId.toLongOrNull()
-                    val localSong = if (songId != null) dao.getSongByIdOnce(songId) else null
-                    if (localSong != null) {
-                        val query = "${localSong.title} ${localSong.artistName}"
-                        val searchResult = YouTube.search(query, YouTube.SearchFilter.FILTER_SONG).getOrNull()
-                        val firstSongItem = searchResult?.items?.firstOrNull { it is unshoo.ianshulyadav.pixelmusic.innertube.models.SongItem } as? unshoo.ianshulyadav.pixelmusic.innertube.models.SongItem
-                        if (firstSongItem != null) {
-                            matchedVideoId = firstSongItem.id
-                            localToYoutubeIdMap[currentId] = matchedVideoId
-                            printd("AutoQueueManager: Successfully matched $currentId -> $matchedVideoId")
+            val highlyRotatedIds = mutableSetOf<String>()
+            val engagements = try {
+                engagementDao?.getAllEngagements()
+            } catch (e: Exception) {
+                null
+            }
+            if (engagements != null) {
+                for (eng in engagements) {
+                    if (eng.playCount > 8) {
+                        highlyRotatedIds.add(eng.songId)
+                        val ytId = getYoutubeVideoId(eng.songId)
+                        if (ytId != null) {
+                            highlyRotatedIds.add(ytId)
+                            highlyRotatedIds.add("youtube_$ytId")
+                            highlyRotatedIds.add(getDatabaseIdForYoutubeId(ytId).toString())
                         }
                     }
                 }
             }
 
-            if (matchedVideoId != null) {
-                printd("AutoQueueManager: Fetching related songs online for YouTube ID: $matchedVideoId")
-                val success = fetchAndAppendOnline(matchedVideoId, player)
-                if (!success) {
-                    printd("AutoQueueManager: Online related fetch failed. Falling back to local related.")
-                    fetchAndAppendLocal(currentId, player)
+            val recentlyPlayedSongs = mutableListOf<Song>()
+            val recentlyPlayedIds = mutableSetOf<String>()
+            val recents = try {
+                engagementDao?.getRecentlyPlayedSongs(30)
+            } catch (e: Exception) {
+                null
+            }
+            if (recents != null) {
+                for (eng in recents) {
+                    recentlyPlayedIds.add(eng.songId)
+                    val ytId = getYoutubeVideoId(eng.songId)
+                    if (ytId != null) {
+                        recentlyPlayedIds.add(ytId)
+                        recentlyPlayedIds.add("youtube_$ytId")
+                        recentlyPlayedIds.add(getDatabaseIdForYoutubeId(ytId).toString())
+                    }
+                    val song = getDbSongByIdString(eng.songId)
+                    if (song != null) {
+                        recentlyPlayedSongs.add(song)
+                    }
+                }
+            }
+
+            val settings = datastoreRepository?.settings?.first() ?: return
+            val avoidIds = if (settings.avoidRepetitiveSongs) {
+                highlyRotatedIds + recentlyPlayedIds
+            } else {
+                highlyRotatedIds
+            }
+
+            val songsToAdd = mutableListOf<Song>()
+
+            // A. Prioritize new familiar songs (liked, playCount >= 2, library; not highly rotated / recently played)
+            val newFamiliar = getNewFamiliarSongs(currentQueueIds, highlyRotatedIds + recentlyPlayedIds)
+            songsToAdd.addAll(newFamiliar.take(6))
+
+            // B. Mix in a very few recently played songs (not highly rotated)
+            val recentMixCandidates = recentlyPlayedSongs.filter { song ->
+                val songIdStr = song.id
+                val isInQueue = currentQueueIds.any { isSameSong(it, songIdStr) }
+                val isHighlyRotated = highlyRotatedIds.any { isSameSong(it, songIdStr) }
+                val isAlreadySelected = songsToAdd.any { isSameSong(it.id, songIdStr) }
+                !isInQueue && !isHighlyRotated && !isAlreadySelected
+            }
+            songsToAdd.addAll(recentMixCandidates.shuffled().take(1))
+
+            // C. Discover new tracks matching current playing song
+            val isOnline = connectivityStateHolder?.isOnline?.value ?: true
+            var discovered = emptyList<Song>()
+            
+            if (isOnline) {
+                var matchedVideoId: String? = null
+                if (!isLocal) {
+                    matchedVideoId = resolvedVideoId
+                } else {
+                    matchedVideoId = localToYoutubeIdMap[currentId]
+                    if (matchedVideoId == null) {
+                        val songId = currentId.toLongOrNull()
+                        val localSong = if (songId != null) dao.getSongByIdOnce(songId) else null
+                        if (localSong != null) {
+                            val query = "${localSong.title} ${localSong.artistName}"
+                            val searchResult = YouTube.search(query, YouTube.SearchFilter.FILTER_SONG).getOrNull()
+                            val firstSongItem = searchResult?.items?.firstOrNull { it is unshoo.ianshulyadav.pixelmusic.innertube.models.SongItem } as? unshoo.ianshulyadav.pixelmusic.innertube.models.SongItem
+                            if (firstSongItem != null) {
+                                matchedVideoId = firstSongItem.id
+                                localToYoutubeIdMap[currentId] = matchedVideoId
+                            }
+                        }
+                    }
+                }
+
+                if (matchedVideoId != null) {
+                    val related = fetchOnlineRelated(matchedVideoId)
+                    if (related.isNotEmpty()) {
+                        saveRelatedSongsToDb(matchedVideoId, related, player)
+                        discovered = related
+                    } else {
+                        discovered = fetchLocalRelated(currentId, currentQueueIds)
+                    }
+                } else {
+                    discovered = fetchLocalRelated(currentId, currentQueueIds)
                 }
             } else {
-                printd("AutoQueueManager: No YouTube match found for local song. Falling back to local related.")
-                fetchAndAppendLocal(currentId, player)
+                discovered = fetchLocalRelated(currentId, currentQueueIds)
             }
+
+            val filteredDiscovered = discovered.filter { song ->
+                val songIdStr = song.id
+                val isInQueue = currentQueueIds.any { isSameSong(it, songIdStr) }
+                val isAvoid = avoidIds.any { isSameSong(it, songIdStr) }
+                val isAlreadySelected = songsToAdd.any { isSameSong(it.id, songIdStr) }
+                !isInQueue && !isAvoid && !isAlreadySelected
+            }
+
+            songsToAdd.addAll(filteredDiscovered.take(8))
+
+            if (songsToAdd.isEmpty()) {
+                printd("AutoQueueManager: No songs to add, breaking.")
+                break
+            }
+
+            val mediaItems = songsToAdd.map { MediaItemBuilder.build(it) }
+            withContext(Dispatchers.Main) {
+                player.addMediaItems(mediaItems)
+            }
+            printd("AutoQueueManager: Appended ${mediaItems.size} songs to queue")
         }
     }
 
-    private suspend fun fetchAndAppendOnline(videoId: String, player: Player): Boolean {
+    private suspend fun fetchOnlineRelated(videoId: String): List<Song> {
         try {
             val endpoint = currentWatchEndpoint ?: WatchEndpoint(videoId = videoId, playlistId = "RDAMVM$videoId")
             val result = YouTube.next(endpoint = endpoint, continuation = continuationToken, followAutomixPreview = true)
             
-            var fetchSuccess = false
+            var fetchedSongs = emptyList<Song>()
             result.onSuccess { nextResult ->
                 continuationToken = nextResult.continuation
                 currentWatchEndpoint = nextResult.endpoint
@@ -303,11 +490,9 @@ object AutoQueueManager {
                     .filter { it.id !in addedVideoIdsLocal }
 
                 if (filteredItems.isEmpty()) {
-                    printd("AutoQueueManager: No new related songs found from YouTube")
                     return@onSuccess
                 }
 
-                // Add to history
                 filteredItems.forEach { addedVideoIds.add(it.id) }
                 if (addedVideoIds.size > MAX_HISTORY) {
                     val excess = addedVideoIds.size - MAX_HISTORY
@@ -315,51 +500,32 @@ object AutoQueueManager {
                     addedVideoIds.removeAll(toRemove.toSet())
                 }
 
-                // Map to native Songs and MediaItems
-                val nativeSongs = filteredItems.map { it.toNativeSong() }
-                val mediaItems = nativeSongs.map { MediaItemBuilder.build(it) }
-
-                // Insert into the local database to preserve related maps and enable Quick Picks
-                saveRelatedSongsToDb(videoId, nativeSongs, player)
-
-                withContext(Dispatchers.Main) {
-                    player.addMediaItems(mediaItems)
-                }
-                
-                printd("AutoQueueManager: Appended ${mediaItems.size} online related songs to queue")
-                fetchSuccess = true
+                fetchedSongs = filteredItems.map { it.toNativeSong() }
             }.onFailure { e ->
-                printe("AutoQueueManager: Failed to fetch related: ${e.message}")
+                printe("AutoQueueManager: Failed to fetch related online: ${e.message}")
             }
-            return fetchSuccess
+            return fetchedSongs
         } catch (e: Exception) {
-            printe("AutoQueueManager: Exception fetching related songs: ${e.message}")
-            return false
+            printe("AutoQueueManager: Exception fetching online related songs: ${e.message}")
+            return emptyList()
         }
     }
 
-    private suspend fun fetchAndAppendLocal(songIdStr: String, player: Player) {
-        val dao = musicDaoRef ?: return
+    private suspend fun fetchLocalRelated(songIdStr: String, currentQueueIds: Set<String>): List<Song> {
+        val dao = musicDaoRef ?: return emptyList()
         try {
             val songId = songIdStr.toLongOrNull()
             val currentSong = if (songId != null) dao.getSongByIdOnce(songId) else null
             
-            // Get current queue IDs to avoid duplicates
-            val currentQueueIds = withContext(Dispatchers.Main) {
-                if (playerRef == null) emptySet()
-                else (0 until player.mediaItemCount).mapNotNull { player.getMediaItemAt(it).mediaId }.toSet()
-            }
-            
             var filtered = emptyList<SongEntity>()
 
             if (currentSong != null) {
-                // Get local related songs based on artist, album, genre, and playlists
                 val relatedEntities = dao.getLocalRelatedSongs(
                     songId = currentSong.id,
                     artistId = currentSong.artistId,
                     albumId = currentSong.albumId,
                     genre = currentSong.genre,
-                    limit = 10
+                    limit = 15
                 ).toMutableList()
                 
                 filtered = relatedEntities.filter { 
@@ -367,18 +533,12 @@ object AutoQueueManager {
                 }
             }
             
-            // Solid offline fallback: if we don't have enough specific related songs, query any random local songs
             if (filtered.size < 5) {
                 val allLocalSongs = dao.getAllSongsList()
                 val extraLocal = allLocalSongs.filter {
                     it.id.toString() !in addedVideoIds && it.id.toString() !in currentQueueIds && (currentSong == null || it.id != currentSong.id)
                 }.shuffled().take(15)
                 filtered = (filtered + extraLocal).distinctBy { it.id }
-            }
-            
-            if (filtered.isEmpty()) {
-                printd("AutoQueueManager: No local fallback songs found in database")
-                return
             }
             
             filtered.forEach { addedVideoIds.add(it.id.toString()) }
@@ -388,15 +548,10 @@ object AutoQueueManager {
                 addedVideoIds.removeAll(toRemove.toSet())
             }
             
-            val nativeSongs = filtered.map { it.toSong() }
-            val mediaItems = nativeSongs.map { MediaItemBuilder.build(it) }
-            
-            withContext(Dispatchers.Main) {
-                player.addMediaItems(mediaItems)
-            }
-            printd("AutoQueueManager: Appended ${mediaItems.size} local related songs to queue")
+            return filtered.map { it.toSong() }
         } catch (e: Exception) {
             printe("AutoQueueManager: Exception fetching local related songs: ${e.message}")
+            return emptyList()
         }
     }
 
@@ -416,8 +571,8 @@ object AutoQueueManager {
                 // Check if source song exists in DB, if not, insert it first!
                 val exists = dao.getSongByIdOnce(sourceLongId) != null
                 if (!exists) {
-                    val currentMediaItem = withContext(Dispatchers.Main) {
-                        player.currentMediaItem
+                    val (currentMediaItem, playerDuration) = withContext(Dispatchers.Main) {
+                        Pair(player.currentMediaItem, player.duration)
                     }
                     if (currentMediaItem != null) {
                         val title = currentMediaItem.mediaMetadata.title?.toString() ?: ""
@@ -448,7 +603,7 @@ object AutoQueueManager {
                             albumId = albumLongId,
                             contentUriString = "youtube://$sourceVideoId",
                             albumArtUriString = upgradeThumbnailUrlToHighQuality(currentMediaItem.mediaMetadata.artworkUri?.toString()),
-                            duration = player.duration.coerceAtLeast(0L),
+                            duration = playerDuration.coerceAtLeast(0L),
                             genre = "YouTube",
                             filePath = "",
                             parentDirectoryPath = "/Cloud/YouTube",

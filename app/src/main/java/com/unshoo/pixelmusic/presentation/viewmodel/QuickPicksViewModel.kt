@@ -209,28 +209,42 @@ class QuickPicksViewModel @Inject constructor(
             defaultHome
         }
 
-        val quickPicksSection = targetHome.sections.firstOrNull {
+        // Filter sections to exclude recently played / listen again / library / history
+        val initialSections = targetHome.sections.filter {
+            !it.title.contains("listen again", ignoreCase = true) &&
+            !it.title.contains("recently played", ignoreCase = true) &&
+            !it.title.contains("history", ignoreCase = true) &&
+            !it.title.contains("library", ignoreCase = true)
+        }
+
+        val preferredSection = initialSections.firstOrNull {
             it.title.contains("quick picks", ignoreCase = true) ||
             it.title.contains("quick", ignoreCase = true)
-        } ?: targetHome.sections.firstOrNull()
+        }
 
-        if (quickPicksSection != null) {
-            accountSongsPool.addAll(quickPicksSection.items.filterIsInstance<SongItem>())
+        if (preferredSection != null) {
+            accountSongsPool.addAll(preferredSection.items.filterIsInstance<SongItem>())
+        } else {
+            initialSections.forEach { section ->
+                accountSongsPool.addAll(section.items.filterIsInstance<SongItem>())
+            }
         }
 
         // Load continuation pages if we have less than 50 songs
         var continuation = targetHome.continuation
         var pages = 0
-        while (continuation != null && accountSongsPool.distinctBy { it.id }.size < 50 && pages < 3) {
+        while (continuation != null && accountSongsPool.distinctBy { it.id }.size < 50 && pages < 4) {
             val continuationHome = YouTube.home(continuation = continuation).getOrNull()
             if (continuationHome != null) {
-                val nextQuickPicks = continuationHome.sections.firstOrNull {
-                    it.title.contains("quick picks", ignoreCase = true) ||
-                    it.title.contains("quick", ignoreCase = true)
-                } ?: continuationHome.sections.firstOrNull()
+                val nextSections = continuationHome.sections.filter {
+                    !it.title.contains("listen again", ignoreCase = true) &&
+                    !it.title.contains("recently played", ignoreCase = true) &&
+                    !it.title.contains("history", ignoreCase = true) &&
+                    !it.title.contains("library", ignoreCase = true)
+                }
 
-                if (nextQuickPicks != null) {
-                    accountSongsPool.addAll(nextQuickPicks.items.filterIsInstance<SongItem>())
+                nextSections.forEach { section ->
+                    accountSongsPool.addAll(section.items.filterIsInstance<SongItem>())
                 }
                 continuation = continuationHome.continuation
                 pages++
@@ -240,7 +254,7 @@ class QuickPicksViewModel @Inject constructor(
         }
 
         val filteredSongs = accountSongsPool.filterVideo(pureYtMusicOnly)
-        val uniqueSongs = filteredSongs.distinctBy { it.id }
+        val uniqueSongs = filteredSongs.distinctBy { it.id }.take(50)
         return uniqueSongs.map { it.toNativeSong() }
     }
 }

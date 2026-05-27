@@ -120,6 +120,8 @@ data class SettingsUiState(
     val storageLimitMb: Int = 2048,
     val preloadQueueEnabled: Boolean = true,
     val preloadQueueSize: Int = 5,
+    val autoQueueEnabled: Boolean = true,
+    val avoidRepetitiveSongs: Boolean = false,
     val playerStreamClient: PlayerStreamClient = PlayerStreamClient.ANDROID_VR,
     val pureYtMusicOnly: Boolean = false
 )
@@ -494,7 +496,9 @@ class SettingsViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         preloadQueueEnabled = settings.preloadQueueEnabled,
-                        preloadQueueSize = settings.preloadQueueSize
+                        preloadQueueSize = settings.preloadQueueSize,
+                        autoQueueEnabled = settings.autoQueueEnabled,
+                        avoidRepetitiveSongs = settings.avoidRepetitiveSongs
                     )
                 }
             }
@@ -1477,6 +1481,18 @@ class SettingsViewModel @Inject constructor(
     fun setPreloadQueueSize(size: Int) {
         viewModelScope.launch {
             datastoreRepository.save(DatastoreRepository.PreferenceKeys.PRELOAD_QUEUE_SIZE, size)
+        }
+    }
+
+    fun setAutoQueueEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            datastoreRepository.save(DatastoreRepository.PreferenceKeys.AUTO_QUEUE_ENABLED, enabled)
+        }
+    }
+
+    fun setAvoidRepetitiveSongs(enabled: Boolean) {
+        viewModelScope.launch {
+            datastoreRepository.save(DatastoreRepository.PreferenceKeys.AVOID_REPETITIVE_SONGS, enabled)
         }
     }
 }

@@ -322,4 +322,8 @@
     <string name="setcat_preload_queue_enabled_desc">Proactively resolve stream URLs and cache album art for upcoming songs in the queue.</string>
     <string name="setcat_preload_queue_size_title">Queue Preload Size</string>
     <string name="setcat_preload_queue_size_desc">Number of upcoming songs to resolve and cache in the queue.</string>
+    <string name="setcat_auto_queue_enabled_title">Dynamic Queue (Autoplay)</string>
+    <string name="setcat_auto_queue_enabled_desc">Automatically refill queue with related tracks when remaining count is low.</string>
+    <string name="setcat_avoid_repetitive_songs_title">Avoid Repetitive Songs</string>
+    <string name="setcat_avoid_repetitive_songs_desc">Filter out recently played or highly rotated tracks from the dynamic queue.</string>
 </resources>
