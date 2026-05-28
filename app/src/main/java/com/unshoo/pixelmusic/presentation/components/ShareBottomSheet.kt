@@ -795,28 +795,16 @@ private fun isPackageInstalled(context: Context, packageName: String): Boolean {
 }
 
 private fun shareToSnapchat(context: Context, imageUri: android.net.Uri) {
-    val intent = Intent("com.snapchat.android.MARKETING_OPT_IN_STORY").apply {
+    val intent = Intent(Intent.ACTION_SEND).apply {
         type = "image/png"
-        putExtra("com.snapchat.android.backgroundImage", imageUri)
-        putExtra("com.snapchat.android.attachmentUrl", GITHUB_LINK)
+        putExtra(Intent.EXTRA_STREAM, imageUri)
         `package` = SNAPCHAT_PACKAGE
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
     try {
         context.startActivity(intent)
     } catch (e: Exception) {
-        // Fallback to generic share
-        val fallback = Intent(Intent.ACTION_SEND).apply {
-            type = "image/png"
-            putExtra(Intent.EXTRA_STREAM, imageUri)
-            `package` = SNAPCHAT_PACKAGE
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        try {
-            context.startActivity(fallback)
-        } catch (ex: Exception) {
-            Toast.makeText(context, "Snapchat not available", Toast.LENGTH_SHORT).show()
-        }
+        Toast.makeText(context, "Snapchat not available", Toast.LENGTH_SHORT).show()
     }
 }
 
