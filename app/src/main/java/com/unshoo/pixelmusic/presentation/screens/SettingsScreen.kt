@@ -490,7 +490,7 @@ fun SettingsScreen(
                                     .padding(vertical = 8.dp, horizontal = 4.dp)
                             ) {
                                 Icon(
-                                    imageVector = Icons.AutoMirrored.Rounded.Logout,
+                                    imageVector = Icons.Rounded.Logout,
                                     contentDescription = null,
                                     tint = MaterialTheme.colorScheme.error,
                                     modifier = Modifier.size(24.dp)
