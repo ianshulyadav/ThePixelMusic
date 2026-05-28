@@ -175,6 +175,7 @@ fun SearchScreen(
     val stablePlayerState by playerViewModel.stablePlayerState.collectAsStateWithLifecycle()
     val favoriteSongIds by playerViewModel.favoriteSongIds.collectAsStateWithLifecycle()
     val selectedSongForInfo by playerViewModel.selectedSongForInfo.collectAsStateWithLifecycle()
+    val searchSource by playerViewModel.searchSource.collectAsStateWithLifecycle()
     var showSongInfoBottomSheet by remember { mutableStateOf(false) }
     val keyboardController = LocalSoftwareKeyboardController.current
     val searchInputFocusRequester = remember { FocusRequester() }
@@ -291,8 +292,13 @@ fun SearchScreen(
                                 expanded = false,
                                 onExpandedChange = {},
                                 placeholder = {
+                                    val placeholderText = if (searchSource == com.unshoo.pixelmusic.data.preferences.SearchSource.LOCAL) {
+                                        "Search Local Library..."
+                                    } else {
+                                        stringResource(R.string.search_placeholder)
+                                    }
                                     Text(
-                                        stringResource(R.string.search_placeholder),
+                                        placeholderText,
                                         style = MaterialTheme.typography.bodyLarge,
                                         color = MaterialTheme.colorScheme.primary
                                     )
@@ -306,24 +312,44 @@ fun SearchScreen(
                                     )
                                 },
                                 trailingIcon = {
-                                    if (searchQuery.isNotBlank()) {
+                                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                                         IconButton(
-                                            onClick = {
-                                                searchQuery = ""
-                                                playerViewModel.updateSearchQuery("")
-                                            },
+                                            onClick = { playerViewModel.toggleSearchSource() },
                                             modifier = Modifier
                                                 .size(48.dp)
                                                 .clip(CircleShape)
-                                                .background(
-                                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f)
-                                                )
                                         ) {
+                                            val iconRes = if (searchSource == com.unshoo.pixelmusic.data.preferences.SearchSource.LOCAL) {
+                                                R.drawable.rounded_library_music_24
+                                            } else {
+                                                R.drawable.ic_youtube
+                                            }
                                             Icon(
-                                                imageVector = Icons.Rounded.Close,
-                                                contentDescription = stringResource(R.string.cd_clear_search_query),
-                                                tint = MaterialTheme.colorScheme.primary
+                                                painter = painterResource(id = iconRes),
+                                                contentDescription = "Toggle Search Source",
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(24.dp)
                                             )
+                                        }
+                                        if (searchQuery.isNotBlank()) {
+                                            IconButton(
+                                                onClick = {
+                                                    searchQuery = ""
+                                                    playerViewModel.updateSearchQuery("")
+                                                },
+                                                modifier = Modifier
+                                                    .size(48.dp)
+                                                    .clip(CircleShape)
+                                                    .background(
+                                                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f)
+                                                    )
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Rounded.Close,
+                                                    contentDescription = stringResource(R.string.cd_clear_search_query),
+                                                    tint = MaterialTheme.colorScheme.primary
+                                                )
+                                            }
                                         }
                                     }
                                 },

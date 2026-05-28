@@ -18,6 +18,8 @@ import org.json.JSONObject
 import timber.log.Timber
 import unshoo.ianshulyadav.pixelmusic.innertube.YouTube
 import com.unshoo.pixelmusic.data.preferences.UserPreferencesRepository
+import com.unshoo.pixelmusic.data.preferences.QuickPicks
+import com.unshoo.pixelmusic.data.repository.MusicRepository
 import kotlinx.coroutines.flow.first
 import unshoo.ianshulyadav.pixelmusic.innertube.models.filterVideo
 import unshoo.ianshulyadav.pixelmusic.innertube.models.SongItem
@@ -34,7 +36,8 @@ private const val CACHE_MAX_AGE_MS = 6 * 60 * 60 * 1000L
 @HiltViewModel
 class QuickPicksViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val userPreferencesRepository: UserPreferencesRepository
+    private val userPreferencesRepository: UserPreferencesRepository,
+    private val musicRepository: MusicRepository
 ) : ViewModel() {
 
     private val _quickPicks = MutableStateFlow<List<Song>>(emptyList())
@@ -54,7 +57,13 @@ class QuickPicksViewModel @Inject constructor(
     init {
         // Immediately populate from cache so the UI shows something on relaunch
         loadFromCache()
-        loadQuickPicks("All")
+        viewModelScope.launch {
+            userPreferencesRepository.discoverFlow.collect { discover ->
+                if (_selectedCategory.value == "All") {
+                    loadQuickPicks("All")
+                }
+            }
+        }
     }
 
     fun setCategory(category: String) {
@@ -165,24 +174,66 @@ class QuickPicksViewModel @Inject constructor(
     private fun loadQuickPicks(category: String) {
         viewModelScope.launch {
             _isLoading.value = true
-            // Keep existing cached list visible while fetching
             try {
-                val songs = withContext(Dispatchers.IO) {
-                    fetchYoutubeSongs(category)
-                }
-                if (songs.isNotEmpty()) {
-                    // Shuffle the fetched recommendations pool so that refreshing or loading always presents fresh, randomized selections
-                    val shuffledSongs = songs.shuffled()
-                    _quickPicks.value = shuffledSongs
-                    if (category == "All") {
-                        saveToCache(shuffledSongs, _categories.value)
+                if (category == "All") {
+                    val discover = userPreferencesRepository.discoverFlow.first()
+                    when (discover) {
+                        QuickPicks.DONT_SHOW -> {
+                            _quickPicks.value = emptyList()
+                        }
+                        QuickPicks.QUICK_PICKS -> {
+                            val localPool = withContext(Dispatchers.IO) {
+                                musicRepository.getQuickPicks(150).first()
+                            }
+                            if (localPool.isNotEmpty()) {
+                                val songs = localPool.shuffled().take(20)
+                                _quickPicks.value = songs
+                                saveToCache(songs, _categories.value)
+                            } else {
+                                loadOnlineQuickPicks(category)
+                            }
+                        }
+                        QuickPicks.LAST_LISTEN -> {
+                            val lastPlayed = withContext(Dispatchers.IO) {
+                                musicRepository.getLastPlayedSong()
+                            }
+                            val related = if (lastPlayed != null) {
+                                withContext(Dispatchers.IO) {
+                                    val id = lastPlayed.id.toLongOrNull()
+                                    if (id != null) musicRepository.getRelatedSongs(id, 50) else emptyList()
+                                }
+                            } else {
+                                emptyList()
+                            }
+                            if (related.isNotEmpty()) {
+                                val songs = related.shuffled().take(20)
+                                _quickPicks.value = songs
+                                saveToCache(songs, _categories.value)
+                            } else {
+                                loadOnlineQuickPicks(category)
+                            }
+                        }
                     }
+                } else {
+                    loadOnlineQuickPicks(category)
                 }
-                Timber.tag("QuickPicks").d("Loaded ${songs.size} songs for category: $category")
             } catch (e: Exception) {
-                Timber.tag("QuickPicks").e(e, "Error fetching quick picks for category: $category")
+                Timber.tag("QuickPicks").e(e, "Error loading quick picks")
             } finally {
                 _isLoading.value = false
+            }
+        }
+    }
+
+    private suspend fun loadOnlineQuickPicks(category: String) {
+        val songs = withContext(Dispatchers.IO) {
+            fetchYoutubeSongs(category)
+        }
+        if (songs.isNotEmpty()) {
+            val shuffledSongs = songs.shuffled()
+            _quickPicks.value = shuffledSongs
+            if (category == "All") {
+                saveToCache(shuffledSongs, _categories.value)
             }
         }
     }

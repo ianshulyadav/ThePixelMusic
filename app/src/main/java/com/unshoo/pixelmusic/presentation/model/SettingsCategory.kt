@@ -9,6 +9,7 @@ import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Palette
+import androidx.compose.material.icons.rounded.Language
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.unshoo.pixelmusic.R
 
@@ -24,6 +25,12 @@ enum class SettingsCategory(
         titleRes = R.string.settings_category_library_title,
         subtitleRes = R.string.settings_category_library_subtitle,
         icon = Icons.Rounded.LibraryMusic
+    ),
+    CONTENT(
+        id = "content",
+        titleRes = R.string.settings_category_content_title,
+        subtitleRes = R.string.settings_category_content_subtitle,
+        icon = Icons.Rounded.Language
     ),
     APPEARANCE(
         id = "appearance",

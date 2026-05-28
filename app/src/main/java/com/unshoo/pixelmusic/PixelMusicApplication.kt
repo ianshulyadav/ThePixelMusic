@@ -91,6 +91,21 @@ class PixelMusicApplication : Application(), ImageLoaderFactory, Configuration.P
             )
         )
 
+        // Bind Content Language and Country to YouTube.locale
+        startupScope.launch {
+            kotlinx.coroutines.flow.combine(
+                userPreferencesRepository.get().contentLanguageFlow,
+                userPreferencesRepository.get().contentCountryFlow
+            ) { language, country ->
+                unshoo.ianshulyadav.pixelmusic.innertube.models.YouTubeLocale(
+                    gl = country,
+                    hl = language
+                )
+            }.collect { locale ->
+                unshoo.ianshulyadav.pixelmusic.innertube.YouTube.locale = locale
+            }
+        }
+
         // Benchmark variant intentionally restarts/kills app process during tests.
         // Avoid persisting those events as user-facing crash reports.
         if (BuildConfig.BUILD_TYPE != "benchmark") {

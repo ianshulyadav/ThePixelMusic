@@ -88,6 +88,14 @@ import androidx.compose.material.icons.rounded.Restore
 import androidx.compose.material.icons.rounded.Science
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Timer
+import androidx.compose.material.icons.outlined.Translate
+import androidx.compose.material.icons.outlined.Public
+import androidx.compose.material.icons.outlined.QueueMusic
+import androidx.compose.material.icons.outlined.Explicit
+import androidx.compose.material.icons.outlined.VideoLibrary
+import androidx.compose.material.icons.outlined.TrendingUp
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BottomAppBar
 import androidx.compose.material3.ButtonDefaults
@@ -404,7 +412,106 @@ fun SettingsCategoryScreen(
                Column(
                     modifier = Modifier.background(Color.Transparent)
                ) {
-                    when (category) {
+                     when (category) {
+                        SettingsCategory.CONTENT -> {
+                            SettingsSubsection(title = "Content Customization") {
+                                ThemeSelectorItem(
+                                    label = stringResource(R.string.settings_content_language_title),
+                                    description = stringResource(R.string.settings_content_language_desc),
+                                    options = com.unshoo.pixelmusic.data.preferences.LanguageCodeToName,
+                                    selectedKey = uiState.contentLanguage,
+                                    onSelectionChanged = { key ->
+                                        settingsViewModel.setContentLanguage(key)
+                                    },
+                                    leadingIcon = { Icon(Icons.Outlined.Translate, null, tint = MaterialTheme.colorScheme.secondary) }
+                                )
+                                ThemeSelectorItem(
+                                    label = stringResource(R.string.settings_content_country_title),
+                                    description = stringResource(R.string.settings_content_country_desc),
+                                    options = com.unshoo.pixelmusic.data.preferences.CountryCodeToName,
+                                    selectedKey = uiState.contentCountry,
+                                    onSelectionChanged = { key ->
+                                        settingsViewModel.setContentCountry(key)
+                                    },
+                                    leadingIcon = { Icon(Icons.Outlined.Public, null, tint = MaterialTheme.colorScheme.secondary) }
+                                )
+                                ThemeSelectorItem(
+                                    label = stringResource(R.string.settings_playlist_suggestion_title),
+                                    description = stringResource(R.string.settings_playlist_suggestion_desc),
+                                    options = mapOf(
+                                        com.unshoo.pixelmusic.data.preferences.PlaylistSuggestionSource.PLAYLIST_TITLE.name to "Playlist Title",
+                                        com.unshoo.pixelmusic.data.preferences.PlaylistSuggestionSource.PLAYLIST_CONTENT.name to "Playlist Content",
+                                        com.unshoo.pixelmusic.data.preferences.PlaylistSuggestionSource.BOTH.name to "Both"
+                                    ),
+                                    selectedKey = uiState.playlistSuggestionSource.name,
+                                    onSelectionChanged = { key ->
+                                        settingsViewModel.setPlaylistSuggestionSource(
+                                            com.unshoo.pixelmusic.data.preferences.PlaylistSuggestionSource.valueOf(key)
+                                        )
+                                    },
+                                    leadingIcon = { Icon(Icons.Outlined.QueueMusic, null, tint = MaterialTheme.colorScheme.secondary) }
+                                )
+                                SwitchSettingItem(
+                                    title = stringResource(R.string.settings_hide_explicit_title),
+                                    subtitle = stringResource(R.string.settings_hide_explicit_desc),
+                                    checked = uiState.hideExplicit,
+                                    onCheckedChange = { settingsViewModel.setHideExplicit(it) },
+                                    leadingIcon = { Icon(Icons.Outlined.Explicit, null, tint = MaterialTheme.colorScheme.secondary) }
+                                )
+                                SwitchSettingItem(
+                                    title = stringResource(R.string.settings_hide_video_title),
+                                    subtitle = stringResource(R.string.settings_hide_video_desc),
+                                    checked = uiState.hideVideo,
+                                    onCheckedChange = { settingsViewModel.setHideVideo(it) },
+                                    leadingIcon = { Icon(Icons.Outlined.VideoLibrary, null, tint = MaterialTheme.colorScheme.secondary) }
+                                )
+                                ThemeSelectorItem(
+                                    label = stringResource(R.string.settings_my_top_size_title),
+                                    description = stringResource(R.string.settings_my_top_size_desc),
+                                    options = mapOf(
+                                        "20" to "20 songs",
+                                        "50" to "50 songs",
+                                        "100" to "100 songs"
+                                    ),
+                                    selectedKey = uiState.topSize,
+                                    onSelectionChanged = { key ->
+                                        settingsViewModel.setTopSize(key)
+                                    },
+                                    leadingIcon = { Icon(Icons.Outlined.TrendingUp, null, tint = MaterialTheme.colorScheme.secondary) }
+                                )
+                                ThemeSelectorItem(
+                                    label = stringResource(R.string.settings_set_quick_picks_title),
+                                    description = stringResource(R.string.settings_set_quick_picks_desc),
+                                    options = mapOf(
+                                        com.unshoo.pixelmusic.data.preferences.QuickPicks.QUICK_PICKS.name to "Quick Picks (Discover)",
+                                        com.unshoo.pixelmusic.data.preferences.QuickPicks.LAST_LISTEN.name to "Last Listen",
+                                        com.unshoo.pixelmusic.data.preferences.QuickPicks.DONT_SHOW.name to "Don't Show"
+                                    ),
+                                    selectedKey = uiState.discover.name,
+                                    onSelectionChanged = { key ->
+                                        settingsViewModel.setDiscover(
+                                            com.unshoo.pixelmusic.data.preferences.QuickPicks.valueOf(key)
+                                        )
+                                    },
+                                    leadingIcon = { Icon(Icons.Outlined.AutoAwesome, null, tint = MaterialTheme.colorScheme.secondary) }
+                                )
+                                ThemeSelectorItem(
+                                    label = stringResource(R.string.settings_quick_picks_mode_title),
+                                    description = stringResource(R.string.settings_quick_picks_mode_desc),
+                                    options = mapOf(
+                                        com.unshoo.pixelmusic.data.preferences.QuickPicksDisplayMode.CARD.name to "Card Carousel",
+                                        com.unshoo.pixelmusic.data.preferences.QuickPicksDisplayMode.LIST.name to "List Grid"
+                                    ),
+                                    selectedKey = uiState.quickPicksDisplayMode.name,
+                                    onSelectionChanged = { key ->
+                                        settingsViewModel.setQuickPicksDisplayMode(
+                                            com.unshoo.pixelmusic.data.preferences.QuickPicksDisplayMode.valueOf(key)
+                                        )
+                                    },
+                                    leadingIcon = { Icon(Icons.Outlined.GridView, null, tint = MaterialTheme.colorScheme.secondary) }
+                                )
+                            }
+                        }
                         SettingsCategory.LIBRARY -> {
                             SettingsSubsection(title = stringResource(R.string.setcat_library_structure)) {
                                 SettingsItem(

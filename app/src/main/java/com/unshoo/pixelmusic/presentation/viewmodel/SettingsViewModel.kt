@@ -18,6 +18,9 @@ import com.unshoo.pixelmusic.data.preferences.LibraryNavigationMode
 import com.unshoo.pixelmusic.data.preferences.ThemePreference
 import com.unshoo.pixelmusic.data.preferences.UserPreferencesRepository
 import com.unshoo.pixelmusic.data.preferences.PlayerStreamClient
+import com.unshoo.pixelmusic.data.preferences.PlaylistSuggestionSource
+import com.unshoo.pixelmusic.data.preferences.QuickPicks
+import com.unshoo.pixelmusic.data.preferences.QuickPicksDisplayMode
 import com.unshoo.pixelmusic.data.database.AiUsageDao
 import com.unshoo.pixelmusic.data.database.AiUsageEntity
 import com.unshoo.pixelmusic.data.preferences.AiPreferencesRepository
@@ -124,7 +127,15 @@ data class SettingsUiState(
     val autoQueueEnabled: Boolean = true,
     val avoidRepetitiveSongs: Boolean = false,
     val playerStreamClient: PlayerStreamClient = PlayerStreamClient.ANDROID_VR,
-    val pureYtMusicOnly: Boolean = false
+    val pureYtMusicOnly: Boolean = false,
+    val contentLanguage: String = "en",
+    val contentCountry: String = "US",
+    val playlistSuggestionSource: PlaylistSuggestionSource = PlaylistSuggestionSource.BOTH,
+    val hideExplicit: Boolean = false,
+    val hideVideo: Boolean = false,
+    val topSize: String = "50",
+    val discover: QuickPicks = QuickPicks.QUICK_PICKS,
+    val quickPicksDisplayMode: QuickPicksDisplayMode = QuickPicksDisplayMode.LIST
 )
 
 data class FailedSongInfo(
@@ -765,11 +776,100 @@ class SettingsViewModel @Inject constructor(
                 _uiState.update { it.copy(pureYtMusicOnly = enabled) }
             }
         }
+
+        viewModelScope.launch {
+            userPreferencesRepository.contentLanguageFlow.collect { value ->
+                _uiState.update { it.copy(contentLanguage = value) }
+            }
+        }
+        viewModelScope.launch {
+            userPreferencesRepository.contentCountryFlow.collect { value ->
+                _uiState.update { it.copy(contentCountry = value) }
+            }
+        }
+        viewModelScope.launch {
+            userPreferencesRepository.playlistSuggestionSourceFlow.collect { value ->
+                _uiState.update { it.copy(playlistSuggestionSource = value) }
+            }
+        }
+        viewModelScope.launch {
+            userPreferencesRepository.hideExplicitFlow.collect { value ->
+                _uiState.update { it.copy(hideExplicit = value) }
+            }
+        }
+        viewModelScope.launch {
+            userPreferencesRepository.hideVideoFlow.collect { value ->
+                _uiState.update { it.copy(hideVideo = value) }
+            }
+        }
+        viewModelScope.launch {
+            userPreferencesRepository.topSizeFlow.collect { value ->
+                _uiState.update { it.copy(topSize = value) }
+            }
+        }
+        viewModelScope.launch {
+            userPreferencesRepository.discoverFlow.collect { value ->
+                _uiState.update { it.copy(discover = value) }
+            }
+        }
+        viewModelScope.launch {
+            userPreferencesRepository.quickPicksDisplayModeFlow.collect { value ->
+                _uiState.update { it.copy(quickPicksDisplayMode = value) }
+            }
+        }
     }
 
     fun setPureYtMusicOnly(enabled: Boolean) {
         viewModelScope.launch {
             userPreferencesRepository.setPureYtMusicOnly(enabled)
+        }
+    }
+
+    fun setContentLanguage(language: String) {
+        viewModelScope.launch {
+            userPreferencesRepository.setContentLanguage(language)
+        }
+    }
+
+    fun setContentCountry(country: String) {
+        viewModelScope.launch {
+            userPreferencesRepository.setContentCountry(country)
+        }
+    }
+
+    fun setPlaylistSuggestionSource(source: PlaylistSuggestionSource) {
+        viewModelScope.launch {
+            userPreferencesRepository.setPlaylistSuggestionSource(source)
+        }
+    }
+
+    fun setHideExplicit(hide: Boolean) {
+        viewModelScope.launch {
+            userPreferencesRepository.setHideExplicit(hide)
+        }
+    }
+
+    fun setHideVideo(hide: Boolean) {
+        viewModelScope.launch {
+            userPreferencesRepository.setHideVideo(hide)
+        }
+    }
+
+    fun setTopSize(size: String) {
+        viewModelScope.launch {
+            userPreferencesRepository.setTopSize(size)
+        }
+    }
+
+    fun setDiscover(discover: QuickPicks) {
+        viewModelScope.launch {
+            userPreferencesRepository.setDiscover(discover)
+        }
+    }
+
+    fun setQuickPicksDisplayMode(mode: QuickPicksDisplayMode) {
+        viewModelScope.launch {
+            userPreferencesRepository.setQuickPicksDisplayMode(mode)
         }
     }
 

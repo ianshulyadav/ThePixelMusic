@@ -323,6 +323,26 @@ class MusicRepositoryImpl @Inject constructor(
         musicDao.getSongsByArtistName(artistName, limit).map { it.toSong() }
     }
 
+    override fun getQuickPicks(limit: Int): Flow<List<Song>> {
+        return musicDao.quickPicks(limit).map { entities ->
+            entities.map { it.toSong() }
+        }.distinctUntilChanged().flowOn(Dispatchers.IO)
+    }
+
+    override fun getForgottenFavorites(thirtyDaysAgo: Long): Flow<List<Song>> {
+        return musicDao.forgottenFavorites(thirtyDaysAgo).map { entities ->
+            entities.map { it.toSong() }
+        }.distinctUntilChanged().flowOn(Dispatchers.IO)
+    }
+
+    override suspend fun getLastPlayedSong(): Song? = withContext(Dispatchers.IO) {
+        musicDao.getLastPlayedSong()?.toSong()
+    }
+
+    override suspend fun getRelatedSongs(songId: Long, limit: Int): List<Song> = withContext(Dispatchers.IO) {
+        musicDao.getRelatedSongs(songId, limit).map { it.toSong() }
+    }
+
     override suspend fun getSongsPage(
         limit: Int,
         offset: Int,

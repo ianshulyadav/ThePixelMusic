@@ -8,6 +8,24 @@
     <!-- SettingsCategory enum (grid) -->
     <string name="settings_category_library_title">Music Management</string>
     <string name="settings_category_library_subtitle">Manage folders, refresh library, parsing options</string>
+    <string name="settings_category_content_title">Content</string>
+    <string name="settings_category_content_subtitle">Content country, language, filters and suggestion sources</string>
+    <string name="settings_content_language_title">Content Language</string>
+    <string name="settings_content_language_desc">Set preferred YouTube Music content language</string>
+    <string name="settings_content_country_title">Content Country</string>
+    <string name="settings_content_country_desc">Set preferred YouTube Music content country</string>
+    <string name="settings_playlist_suggestion_title">Playlist Suggestion Source</string>
+    <string name="settings_playlist_suggestion_desc">Source for playlist song suggestions</string>
+    <string name="settings_hide_explicit_title">Hide Explicit Content</string>
+    <string name="settings_hide_explicit_desc">Do not show songs marked as explicit</string>
+    <string name="settings_hide_video_title">Hide Videos</string>
+    <string name="settings_hide_video_desc">Do not show video results in search and feeds</string>
+    <string name="settings_my_top_size_title">My Top Size</string>
+    <string name="settings_my_top_size_desc">Number of songs to include in Top Stats list</string>
+    <string name="settings_set_quick_picks_title">Set Quick Picks</string>
+    <string name="settings_set_quick_picks_desc">Choose content source mode for Quick Picks section</string>
+    <string name="settings_quick_picks_mode_title">Quick Picks Display Mode</string>
+    <string name="settings_quick_picks_mode_desc">Configure Quick Picks visual display layout style</string>
     <string name="settings_category_appearance_title">Appearance</string>
     <string name="settings_category_appearance_subtitle">Themes, layout, and visual styles</string>
     <string name="settings_category_playback_title">Playback</string>

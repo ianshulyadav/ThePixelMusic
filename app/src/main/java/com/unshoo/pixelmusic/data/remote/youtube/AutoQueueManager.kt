@@ -237,13 +237,8 @@ object AutoQueueManager {
             }
         }
 
-        val librarySongs = try {
-            dao.getAllSongsList().map { it.toSong() }
-        } catch (e: Exception) {
-            emptyList()
-        }
-
-        val combined = (favoriteSongs + playedMultipleTimesSongs + librarySongs).distinctBy { it.id }
+        // Only include popular songs (either explicitly favorited or played >= 2 times)
+        val combined = (favoriteSongs + playedMultipleTimesSongs).distinctBy { it.id }
 
         val filtered = combined.filter { song ->
             val songIdStr = song.id
@@ -408,7 +403,8 @@ object AutoQueueManager {
                 val isInQueue = currentQueueIds.any { isSameSong(it, songIdStr) }
                 val isHighlyRotated = highlyRotatedIds.any { isSameSong(it, songIdStr) }
                 val isAlreadySelected = songsToAdd.any { isSameSong(it.id, songIdStr) }
-                !isInQueue && !isHighlyRotated && !isAlreadySelected
+                val isPopular = song.isFavorite || (engagementDao?.getPlayCount(song.id) ?: 0) >= 2
+                isPopular && !isInQueue && !isHighlyRotated && !isAlreadySelected
             }
             songsToAdd.addAll(recentMixCandidates.shuffled().take(1))
 
@@ -513,11 +509,25 @@ object AutoQueueManager {
 
     private suspend fun fetchLocalRelated(songIdStr: String, currentQueueIds: Set<String>): List<Song> {
         val dao = musicDaoRef ?: return emptyList()
+        val engagementDao = engagementDaoRef
         try {
             val songId = songIdStr.toLongOrNull()
             val currentSong = if (songId != null) dao.getSongByIdOnce(songId) else null
             
             var filtered = emptyList<SongEntity>()
+
+            // Get popular local song IDs (play count >= 2)
+            val popularIds = mutableSetOf<String>()
+            if (engagementDao != null) {
+                try {
+                    val engagements = engagementDao.getAllEngagements()
+                    engagements.filter { it.playCount >= 2 }.forEach {
+                        popularIds.add(it.songId)
+                    }
+                } catch (e: Exception) {
+                    // Ignore
+                }
+            }
 
             if (currentSong != null) {
                 val relatedEntities = dao.getLocalRelatedSongs(
@@ -529,14 +539,16 @@ object AutoQueueManager {
                 ).toMutableList()
                 
                 filtered = relatedEntities.filter { 
-                    it.id.toString() !in addedVideoIds && it.id.toString() !in currentQueueIds
+                    val isPopular = it.isFavorite || popularIds.contains(it.id.toString())
+                    isPopular && it.id.toString() !in addedVideoIds && it.id.toString() !in currentQueueIds
                 }
             }
             
             if (filtered.size < 5) {
                 val allLocalSongs = dao.getAllSongsList()
                 val extraLocal = allLocalSongs.filter {
-                    it.id.toString() !in addedVideoIds && it.id.toString() !in currentQueueIds && (currentSong == null || it.id != currentSong.id)
+                    val isPopular = it.isFavorite || popularIds.contains(it.id.toString())
+                    isPopular && it.id.toString() !in addedVideoIds && it.id.toString() !in currentQueueIds && (currentSong == null || it.id != currentSong.id)
                 }.shuffled().take(15)
                 filtered = (filtered + extraLocal).distinctBy { it.id }
             }

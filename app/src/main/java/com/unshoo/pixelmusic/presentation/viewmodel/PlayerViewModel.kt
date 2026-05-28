@@ -319,6 +319,30 @@ class PlayerViewModel @Inject constructor(
             initialValue = persistentListOf()
         )
 
+    val searchSource: StateFlow<com.unshoo.pixelmusic.data.preferences.SearchSource> = userPreferencesRepository.searchSourceFlow.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = com.unshoo.pixelmusic.data.preferences.SearchSource.ONLINE
+    )
+
+    val quickPicksDisplayMode: StateFlow<com.unshoo.pixelmusic.data.preferences.QuickPicksDisplayMode> = userPreferencesRepository.quickPicksDisplayModeFlow.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = com.unshoo.pixelmusic.data.preferences.QuickPicksDisplayMode.LIST
+    )
+
+    fun toggleSearchSource() {
+        viewModelScope.launch {
+            val current = searchSource.value
+            val next = if (current == com.unshoo.pixelmusic.data.preferences.SearchSource.ONLINE) {
+                com.unshoo.pixelmusic.data.preferences.SearchSource.LOCAL
+            } else {
+                com.unshoo.pixelmusic.data.preferences.SearchSource.ONLINE
+            }
+            userPreferencesRepository.setSearchSource(next)
+        }
+    }
+
     private val _showNoInternetDialog = MutableSharedFlow<Unit>(
         extraBufferCapacity = 1,
         onBufferOverflow = BufferOverflow.DROP_OLDEST
@@ -1151,6 +1175,37 @@ class PlayerViewModel @Inject constructor(
                         lyricsStateHolder.loadLyricsForSong(hydratedSong, lyricsSourcePreference.value)
                     }
                 }
+        }
+
+        viewModelScope.launch {
+            combine(
+                playerUiState.map { it.currentPlaybackQueue }.distinctUntilChanged(),
+                stablePlayerState.map { it.currentMediaItemIndex }.distinctUntilChanged(),
+                lyricsSourcePreference
+            ) { queue, index, sourcePref ->
+                Triple(queue, index, sourcePref)
+            }
+            .collect { (queue, index, sourcePref) ->
+                if (index in queue.indices) {
+                    val nextSongs = mutableListOf<Song>()
+                    val qSize = queue.size
+                    if (qSize > 1) {
+                        val nextIndex1 = (index + 1) % qSize
+                        if (nextIndex1 != index) {
+                            nextSongs.add(queue[nextIndex1])
+                        }
+                        if (qSize > 2) {
+                            val nextIndex2 = (index + 2) % qSize
+                            if (nextIndex2 != index && nextIndex2 != nextIndex1) {
+                                nextSongs.add(queue[nextIndex2])
+                            }
+                        }
+                    }
+                    if (nextSongs.isNotEmpty()) {
+                        preCacheLyricsForSongs(nextSongs, sourcePref)
+                    }
+                }
+            }
         }
     }
 
@@ -4222,17 +4277,34 @@ class PlayerViewModel @Inject constructor(
     }
 
     /**
-     * Adds all selected songs to the end of the queue.
-     * Clears selection after adding.
+     * Adds multiple songs to the end of the queue in a single transaction.
      */
-    fun addSelectedToQueue(songs: List<Song>) {
-        songs.forEach { addSongToQueue(it) }
+    fun addSongsToQueue(songs: List<Song>) {
+        if (songs.isEmpty()) return
+        val youtubeSongs = songs.filter { it.id.startsWith("youtube_") || it.youtubeId != null }
+        if (youtubeSongs.isNotEmpty()) {
+            viewModelScope.launch(Dispatchers.IO) {
+                saveYoutubeSongsToDb(youtubeSongs)
+            }
+        }
+        mediaController?.let { controller ->
+            val mediaItems = songs.map { buildPlaybackMediaItem(it) }
+            controller.addMediaItems(mediaItems)
+        }
         viewModelScope.launch {
             val n = songs.size
             _toastEvents.emit(
                 context.resources.getQuantityString(R.plurals.n_songs_added_to_queue, n, n),
             )
         }
+    }
+
+    /**
+     * Adds all selected songs to the end of the queue.
+     * Clears selection after adding.
+     */
+    fun addSelectedToQueue(songs: List<Song>) {
+        addSongsToQueue(songs)
         multiSelectionStateHolder.clearSelection()
     }
 
@@ -5241,6 +5313,21 @@ class PlayerViewModel @Inject constructor(
             } ?: return@launch
             if (_selectedSongForInfo.value?.id == song.id) {
                 _selectedSongForInfo.value = hydrated
+            }
+        }
+    }
+
+    private var preCacheLyricsJob: Job? = null
+
+    private fun preCacheLyricsForSongs(songs: List<Song>, sourcePref: LyricsSourcePreference) {
+        preCacheLyricsJob?.cancel()
+        preCacheLyricsJob = viewModelScope.launch(Dispatchers.IO) {
+            songs.forEach { song ->
+                try {
+                    musicRepository.getLyrics(song = song, sourcePreference = sourcePref)
+                } catch (e: Exception) {
+                    Log.w("PlayerViewModel", "Failed to pre-cache lyrics for song ${song.title}: ${e.message}")
+                }
             }
         }
     }
