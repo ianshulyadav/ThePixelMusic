@@ -99,6 +99,11 @@ interface MusicRepository {
     suspend fun getSongsByGenre(genre: String, excludeId: Long = 0, limit: Int = 10): List<Song>
     suspend fun getSongsByArtistName(artistName: String, limit: Int = 5): List<Song>
 
+    fun getQuickPicks(limit: Int = 20): Flow<List<Song>>
+    fun getForgottenFavorites(thirtyDaysAgo: Long): Flow<List<Song>>
+    suspend fun getLastPlayedSong(): Song?
+    suspend fun getRelatedSongs(songId: Long, limit: Int = 10): List<Song>
+
     /**
      * Returns a bounded song page without materializing the full library.
      */

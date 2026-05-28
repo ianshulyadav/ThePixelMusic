@@ -2102,6 +2102,29 @@ interface MusicDao {
     @Query("SELECT * FROM songs WHERE artist_name LIKE '%' || :artistName || '%' ORDER BY RANDOM() LIMIT :limit")
     suspend fun getSongsByArtistName(artistName: String, limit: Int = 5): List<SongEntity>
 
+    @Query("""
+        SELECT * FROM songs 
+        WHERE id IN (
+            SELECT CAST(song_id AS INTEGER) 
+            FROM song_engagements 
+            WHERE play_count >= 3 AND last_played_timestamp < :thirtyDaysAgo
+        )
+        ORDER BY RANDOM()
+    """)
+    fun forgottenFavorites(thirtyDaysAgo: Long): Flow<List<SongEntity>>
+
+    @Query("""
+        SELECT * FROM songs 
+        WHERE id = (
+            SELECT CAST(song_id AS INTEGER) 
+            FROM song_engagements 
+            WHERE last_played_timestamp > 0 
+            ORDER BY last_played_timestamp DESC 
+            LIMIT 1
+        )
+    """)
+    suspend fun getLastPlayedSong(): SongEntity?
+
 
     companion object {
         /**

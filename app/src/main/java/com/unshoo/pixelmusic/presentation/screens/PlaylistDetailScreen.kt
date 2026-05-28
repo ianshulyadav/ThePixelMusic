@@ -38,6 +38,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.automirrored.rounded.Sort
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.DeleteOutline
@@ -307,16 +308,14 @@ fun PlaylistDetailScreen(
                             contentDescription = sortSongsLabel
                         )
                     }
-                    if (!isFolderPlaylist) {
-                        FilledTonalIconButton(
-                            modifier = Modifier.padding(end = 10.dp),
-                            colors = IconButtonDefaults.filledIconButtonColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                contentColor = MaterialTheme.colorScheme.onSurface
-                            ),
-                            onClick = { showPlaylistOptionsSheet = true }
-                        ) { Icon(Icons.Filled.MoreVert, moreOptionsLabel) }
-                    }
+                    FilledTonalIconButton(
+                        modifier = Modifier.padding(end = 10.dp),
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            contentColor = MaterialTheme.colorScheme.onSurface
+                        ),
+                        onClick = { showPlaylistOptionsSheet = true }
+                    ) { Icon(Icons.Filled.MoreVert, moreOptionsLabel) }
                 },
                 scrollBehavior = scrollBehavior
             )
@@ -719,7 +718,7 @@ fun PlaylistDetailScreen(
             }
         )
     }
-    if (showPlaylistOptionsSheet && !isFolderPlaylist) {
+    if (showPlaylistOptionsSheet) {
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
         ModalBottomSheet(
@@ -727,11 +726,6 @@ fun PlaylistDetailScreen(
             sheetState = sheetState,
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
             tonalElevation = 4.dp,
-//            dragHandle = {
-//                SheetDefaults.DragHandle(
-//                    color = MaterialTheme.colorScheme.onSurfaceVariant
-//                )
-//            }
         ) {
             Column(
                 modifier = Modifier
@@ -758,37 +752,47 @@ fun PlaylistDetailScreen(
                     }
                 }
                 PlaylistActionItem(
-                    icon = painterResource(R.drawable.rounded_edit_24),
-                    label = editPlaylistLabel,
+                    icon = rememberVectorPainter(Icons.AutoMirrored.Rounded.QueueMusic),
+                    label = stringResource(R.string.cd_add_all_to_queue),
                     onClick = {
                         showPlaylistOptionsSheet = false
-                        showEditPlaylistDialog = true
+                        playerViewModel.addSongsToQueue(localReorderableSongs)
                     }
                 )
-                PlaylistActionItem(
-                    icon = painterResource(R.drawable.rounded_delete_24),
-                    label = deletePlaylistLabel,
-                    onClick = {
-                        showPlaylistOptionsSheet = false
-                        showDeleteConfirmation = true
-                    }
-                )
-                PlaylistActionItem(
-                    icon = painterResource(R.drawable.outline_graph_1_24),
-                    label = setDefaultTransitionLabel,
-                    onClick = {
-                        showPlaylistOptionsSheet = false
-                        navController.navigateSafely(Screen.EditTransition.createRoute(playlistId))
-                    }
-                )
-                PlaylistActionItem(
-                    icon = painterResource(R.drawable.rounded_attach_file_24),
-                    label = exportPlaylistLabel,
-                    onClick = {
-                        showPlaylistOptionsSheet = false
-                        m3uExportLauncher.launch("${currentPlaylist?.name ?: fallbackPlaylistName}.m3u")
-                    }
-                )
+                if (!isFolderPlaylist) {
+                    PlaylistActionItem(
+                        icon = painterResource(R.drawable.rounded_edit_24),
+                        label = editPlaylistLabel,
+                        onClick = {
+                            showPlaylistOptionsSheet = false
+                            showEditPlaylistDialog = true
+                        }
+                    )
+                    PlaylistActionItem(
+                        icon = painterResource(R.drawable.rounded_delete_24),
+                        label = deletePlaylistLabel,
+                        onClick = {
+                            showPlaylistOptionsSheet = false
+                            showDeleteConfirmation = true
+                        }
+                    )
+                    PlaylistActionItem(
+                        icon = painterResource(R.drawable.outline_graph_1_24),
+                        label = setDefaultTransitionLabel,
+                        onClick = {
+                            showPlaylistOptionsSheet = false
+                            navController.navigateSafely(Screen.EditTransition.createRoute(playlistId))
+                        }
+                    )
+                    PlaylistActionItem(
+                        icon = painterResource(R.drawable.rounded_attach_file_24),
+                        label = exportPlaylistLabel,
+                        onClick = {
+                            showPlaylistOptionsSheet = false
+                            m3uExportLauncher.launch("${currentPlaylist?.name ?: fallbackPlaylistName}.m3u")
+                        }
+                    )
+                }
                 PlaylistActionItem(
                     icon = rememberVectorPainter(Icons.Rounded.Download),
                     label = downloadPlaylistLabel,

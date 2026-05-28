@@ -103,6 +103,7 @@ fun ExploreScreen(
     val stablePlayerState by playerViewModel.stablePlayerState.collectAsStateWithLifecycle()
     val isPlaying by remember(stablePlayerState) { mutableStateOf(stablePlayerState.isPlaying) }
     val currentSongId = stablePlayerState.currentSong?.id
+    val quickPicksDisplayMode by playerViewModel.quickPicksDisplayMode.collectAsStateWithLifecycle()
     val pullRefreshState = rememberPullToRefreshState()
 
     val surfaceColor = MaterialTheme.colorScheme.surface
@@ -324,7 +325,8 @@ fun ExploreScreen(
                                     onSeeAllClick = {
                                         navController.navigateSafely(Screen.QuickPicksAll.route)
                                     },
-                                    currentSongId = currentSongId
+                                    currentSongId = currentSongId,
+                                    displayMode = quickPicksDisplayMode
                                 )
                             }
                         }

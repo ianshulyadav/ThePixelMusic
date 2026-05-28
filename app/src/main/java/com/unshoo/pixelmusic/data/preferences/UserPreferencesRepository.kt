@@ -73,6 +73,50 @@ enum class PlayerStreamClient {
     WEB_REMIX,
 }
 
+enum class PlaylistSuggestionSource {
+    PLAYLIST_TITLE, PLAYLIST_CONTENT, BOTH
+}
+
+enum class QuickPicks {
+    QUICK_PICKS, LAST_LISTEN, DONT_SHOW
+}
+
+enum class QuickPicksDisplayMode {
+    CARD, LIST
+}
+
+enum class SearchSource {
+    LOCAL, ONLINE
+}
+
+val LanguageCodeToName = mapOf(
+    "en" to "English",
+    "es" to "Español",
+    "fr" to "Français",
+    "de" to "Deutsch",
+    "it" to "Italiano",
+    "pt" to "Português",
+    "ja" to "日本語",
+    "ko" to "한국어",
+    "zh" to "中文",
+    "ru" to "Русский",
+    "hi" to "हिन्दी"
+)
+
+val CountryCodeToName = mapOf(
+    "US" to "United States",
+    "GB" to "United Kingdom",
+    "CA" to "Canada",
+    "AU" to "Australia",
+    "DE" to "Germany",
+    "FR" to "France",
+    "JP" to "Japan",
+    "KR" to "South Korea",
+    "IN" to "India",
+    "BR" to "Brazil",
+    "RU" to "Russia"
+)
+
 
 @Singleton
 class UserPreferencesRepository
@@ -257,6 +301,15 @@ constructor(
         val SUBSCRIBED_ARTIST_IDS = stringSetPreferencesKey("subscribed_artist_ids")
         val PLAYER_STREAM_CLIENT = stringPreferencesKey("player_stream_client")
         val PURE_YT_MUSIC_ONLY = booleanPreferencesKey("pure_yt_music_only")
+        val CONTENT_LANGUAGE = stringPreferencesKey("content_language")
+        val CONTENT_COUNTRY = stringPreferencesKey("content_country")
+        val PLAYLIST_SUGGESTION_SOURCE = stringPreferencesKey("playlist_suggestion_source")
+        val HIDE_EXPLICIT = booleanPreferencesKey("hide_explicit")
+        val HIDE_VIDEO = booleanPreferencesKey("hide_video")
+        val TOP_SIZE = stringPreferencesKey("top_size")
+        val DISCOVER = stringPreferencesKey("discover")
+        val QUICK_PICKS_DISPLAY_MODE = stringPreferencesKey("quick_picks_display_mode")
+        val SEARCH_SOURCE = stringPreferencesKey("search_source")
     }
 
     val appRebrandDialogShownFlow: Flow<Boolean> =
@@ -1944,6 +1997,125 @@ constructor(
             } else {
                 preferences[PreferencesKeys.SUBSCRIBED_ARTIST_IDS] = current - artistId
             }
+        }
+    }
+
+    val contentLanguageFlow: Flow<String> =
+        dataStore.data.map { preferences ->
+            preferences[PreferencesKeys.CONTENT_LANGUAGE] ?: "en"
+        }.distinctUntilChanged()
+
+    suspend fun setContentLanguage(language: String) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.CONTENT_LANGUAGE] = language
+        }
+    }
+
+    val contentCountryFlow: Flow<String> =
+        dataStore.data.map { preferences ->
+            preferences[PreferencesKeys.CONTENT_COUNTRY] ?: "US"
+        }.distinctUntilChanged()
+
+    suspend fun setContentCountry(country: String) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.CONTENT_COUNTRY] = country
+        }
+    }
+
+    val playlistSuggestionSourceFlow: Flow<PlaylistSuggestionSource> =
+        dataStore.data.map { preferences ->
+            val stored = preferences[PreferencesKeys.PLAYLIST_SUGGESTION_SOURCE]
+            try {
+                if (stored != null) PlaylistSuggestionSource.valueOf(stored) else PlaylistSuggestionSource.BOTH
+            } catch (e: Exception) {
+                PlaylistSuggestionSource.BOTH
+            }
+        }.distinctUntilChanged()
+
+    suspend fun setPlaylistSuggestionSource(source: PlaylistSuggestionSource) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.PLAYLIST_SUGGESTION_SOURCE] = source.name
+        }
+    }
+
+    val hideExplicitFlow: Flow<Boolean> =
+        dataStore.data.map { preferences ->
+            preferences[PreferencesKeys.HIDE_EXPLICIT] ?: false
+        }.distinctUntilChanged()
+
+    suspend fun setHideExplicit(hide: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.HIDE_EXPLICIT] = hide
+        }
+    }
+
+    val hideVideoFlow: Flow<Boolean> =
+        dataStore.data.map { preferences ->
+            preferences[PreferencesKeys.HIDE_VIDEO] ?: false
+        }.distinctUntilChanged()
+
+    suspend fun setHideVideo(hide: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.HIDE_VIDEO] = hide
+        }
+    }
+
+    val topSizeFlow: Flow<String> =
+        dataStore.data.map { preferences ->
+            preferences[PreferencesKeys.TOP_SIZE] ?: "50"
+        }.distinctUntilChanged()
+
+    suspend fun setTopSize(size: String) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.TOP_SIZE] = size
+        }
+    }
+
+    val discoverFlow: Flow<QuickPicks> =
+        dataStore.data.map { preferences ->
+            val stored = preferences[PreferencesKeys.DISCOVER]
+            try {
+                if (stored != null) QuickPicks.valueOf(stored) else QuickPicks.QUICK_PICKS
+            } catch (e: Exception) {
+                QuickPicks.QUICK_PICKS
+            }
+        }.distinctUntilChanged()
+
+    suspend fun setDiscover(discover: QuickPicks) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.DISCOVER] = discover.name
+        }
+    }
+
+    val quickPicksDisplayModeFlow: Flow<QuickPicksDisplayMode> =
+        dataStore.data.map { preferences ->
+            val stored = preferences[PreferencesKeys.QUICK_PICKS_DISPLAY_MODE]
+            try {
+                if (stored != null) QuickPicksDisplayMode.valueOf(stored) else QuickPicksDisplayMode.LIST
+            } catch (e: Exception) {
+                QuickPicksDisplayMode.LIST
+            }
+        }.distinctUntilChanged()
+
+    suspend fun setQuickPicksDisplayMode(mode: QuickPicksDisplayMode) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.QUICK_PICKS_DISPLAY_MODE] = mode.name
+        }
+    }
+
+    val searchSourceFlow: Flow<SearchSource> =
+        dataStore.data.map { preferences ->
+            val stored = preferences[PreferencesKeys.SEARCH_SOURCE]
+            try {
+                if (stored != null) SearchSource.valueOf(stored) else SearchSource.ONLINE
+            } catch (e: Exception) {
+                SearchSource.ONLINE
+            }
+        }.distinctUntilChanged()
+
+    suspend fun setSearchSource(source: SearchSource) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.SEARCH_SOURCE] = source.name
         }
     }
 }

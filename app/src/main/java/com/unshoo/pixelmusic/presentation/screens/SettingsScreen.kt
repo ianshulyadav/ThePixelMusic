@@ -486,6 +486,7 @@ private fun getCategoryColors(category: SettingsCategory, isDark: Boolean): Pair
     return if (isDark) {
         when (category) {
             SettingsCategory.LIBRARY -> Color(0xFF004A77) to Color(0xFFC2E7FF) 
+            SettingsCategory.CONTENT -> Color(0xFF005049) to Color(0xFF88FFD9)
             SettingsCategory.APPEARANCE -> Color(0xFF7D5260) to Color(0xFFFFD8E4) 
             SettingsCategory.PLAYBACK -> Color(0xFF633B48) to Color(0xFFFFD8EC) 
             SettingsCategory.BEHAVIOR -> Color(0xFF3E4C63) to Color(0xFFD7E3FF)
@@ -499,6 +500,7 @@ private fun getCategoryColors(category: SettingsCategory, isDark: Boolean): Pair
     } else {
         when (category) {
             SettingsCategory.LIBRARY -> Color(0xFFD7E3FF) to Color(0xFF005AC1)
+            SettingsCategory.CONTENT -> Color(0xFF88FFD9) to Color(0xFF005049)
             SettingsCategory.APPEARANCE -> Color(0xFFFFD8E4) to Color(0xFF631835)
             SettingsCategory.PLAYBACK -> Color(0xFFFFD8EC) to Color(0xFF631B4B)
             SettingsCategory.BEHAVIOR -> Color(0xFFD7E3FF) to Color(0xFF253347)

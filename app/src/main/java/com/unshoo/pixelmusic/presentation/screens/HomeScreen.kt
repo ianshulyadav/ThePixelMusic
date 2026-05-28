@@ -151,6 +151,7 @@ fun HomeScreen(
     val curatedYourMixSongs by playerViewModel.yourMixSongs.collectAsStateWithLifecycle()
     val homeMixPreviewSongs by playerViewModel.homeMixPreviewSongs.collectAsStateWithLifecycle()
     val playbackHistory by playerViewModel.playbackHistory.collectAsStateWithLifecycle()
+    val quickPicksDisplayMode by playerViewModel.quickPicksDisplayMode.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
 
     val usesFallbackHomeMix = remember(curatedYourMixSongs, dailyMixSongs) {
@@ -380,7 +381,8 @@ fun HomeScreen(
                             onSeeAllClick = {
                                 navController.navigateSafely(Screen.QuickPicksAll.route)
                             },
-                            currentSongId = currentSong?.id
+                            currentSongId = currentSong?.id,
+                            displayMode = quickPicksDisplayMode
                         )
                     }
                 }

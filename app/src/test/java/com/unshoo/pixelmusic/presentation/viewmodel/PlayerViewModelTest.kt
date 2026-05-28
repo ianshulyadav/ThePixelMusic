@@ -115,6 +115,7 @@ class PlayerViewModelTest {
     private val _selectedSearchFilterFlow = MutableStateFlow(SearchFilterType.ALL)
     private val _castSessionFlow = MutableStateFlow<com.google.android.gms.cast.framework.CastSession?>(null)
     private val _repeatModeFlow = MutableStateFlow(Player.REPEAT_MODE_OFF)
+    private val _stablePlayerStateFlow = MutableStateFlow(StablePlayerState(currentSong = null))
     private lateinit var mockController: MediaController
     private val controllerRepeatModeWrites = mutableListOf<Int>()
     private var controllerRepeatMode = Player.REPEAT_MODE_OFF
@@ -191,8 +192,7 @@ class PlayerViewModelTest {
         every { mockConnectivityStateHolder.initialize() } just runs
         every { mockConnectivityStateHolder.offlinePlaybackBlocked } returns MutableSharedFlow()
 
-        val stablePlayerState = MutableStateFlow(StablePlayerState(currentSong = null))
-        every { mockPlaybackStateHolder.stablePlayerState } returns stablePlayerState
+        every { mockPlaybackStateHolder.stablePlayerState } returns _stablePlayerStateFlow
         every { mockPlaybackStateHolder.setMediaController(any()) } just runs // Added missing mock
 
         every { mockSleepTimerStateHolder.initialize(any(), any(), any(), any(), any()) } just runs // Added missing mock
@@ -700,4 +700,47 @@ class PlayerViewModelTest {
         // Correctly update the flow that PlayerViewModel collects
         _allSongsFlow.value = songs.toImmutableList()
     }
+
+    @Nested
+    @DisplayName("Lyrics Pre-caching Tests")
+    inner class LyricsPreCachingTests {
+        private val song1 = Song(id = "1", title = "Song 1", artist = "Artist A", genre = "Rock", albumArtUriString = "cover1.png", artistId = 1L, albumId = 1L, contentUriString = "content://dummy/1", duration = 180000L, bitrate = null, sampleRate = null, album = "Album", path = "path", mimeType = "audio/mpeg")
+        private val song2 = Song(id = "2", title = "Song 2", artist = "Artist B", genre = "Pop", albumArtUriString = "cover2.png", artistId = 2L, albumId = 2L, contentUriString = "content://dummy/2", duration = 200000L, bitrate = null, sampleRate = null, album = "Album", path = "path", mimeType = "audio/mpeg")
+        private val song3 = Song(id = "3", title = "Song 3", artist = "Artist C", genre = "Jazz", albumArtUriString = "cover3.png", artistId = 3L, albumId = 3L, contentUriString = "content://dummy/3", duration = 210000L, bitrate = null, sampleRate = null, album = "Album", path = "path", mimeType = "audio/mpeg")
+
+        @Test
+        fun `when queue is set, lyrics for next 2 songs are cached`() = runTest {
+            mockkObject(MediaItemBuilder)
+            every { MediaItemBuilder.build(any()) } returns MediaItem.Builder()
+                .setMediaId("test")
+                .setUri("file:///tmp/test.mp3")
+                .build()
+            val mockedPlaybackUri = mockk<android.net.Uri>(relaxed = true)
+            every { mockedPlaybackUri.scheme } returns "file"
+            every { MediaItemBuilder.playbackUri(any<Song>()) } returns mockedPlaybackUri
+
+            coEvery { mockMusicRepository.getLyrics(any(), any(), any()) } returns null
+            every { mockMusicRepository.getSong("1") } returns flowOf(song1)
+            every { mockMusicRepository.getSong("2") } returns flowOf(song2)
+            every { mockMusicRepository.getSong("3") } returns flowOf(song3)
+            
+            // Set current index in stable player state to 0
+            _stablePlayerStateFlow.value = StablePlayerState(
+                currentSong = song1,
+                currentMediaItemIndex = 0
+            )
+            
+            val testSongs = listOf(song1, song2, song3)
+            playerViewModel.playSongs(testSongs, song1, "Test Queue")
+            advanceUntilIdle()
+
+            coVerify(atLeast = 1) { 
+                mockMusicRepository.getLyrics(song2, any(), false) 
+            }
+            coVerify(atLeast = 1) { 
+                mockMusicRepository.getLyrics(song3, any(), false) 
+            }
+        }
+    }
 }
+

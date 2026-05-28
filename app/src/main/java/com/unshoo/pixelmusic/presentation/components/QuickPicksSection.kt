@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.unshoo.pixelmusic.data.model.Song
 import com.unshoo.pixelmusic.presentation.components.SmartImage
+import com.unshoo.pixelmusic.data.preferences.QuickPicksDisplayMode
 
 private val QuickPicksPillHeight = 56.dp
 private val QuickPicksPillSpacing = 8.dp
@@ -57,6 +58,7 @@ fun QuickPicksSection(
     onSongClick: (Song) -> Unit,
     onSeeAllClick: (() -> Unit)? = null,
     currentSongId: String? = null,
+    displayMode: QuickPicksDisplayMode = QuickPicksDisplayMode.LIST,
     modifier: Modifier = Modifier
 ) {
     if (songs.isEmpty()) return
@@ -107,27 +109,108 @@ fun QuickPicksSection(
                 }
             }
         }
+        
+        if (displayMode == QuickPicksDisplayMode.CARD) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(scrollState)
+                    .padding(horizontal = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                songs.take(20).forEach { song ->
+                    QuickPickCard(
+                        song = song,
+                        isPlaying = song.id == currentSongId,
+                        onClick = { onSongClick(song) }
+                    )
+                }
+            }
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(sectionHeight)
+                    .horizontalScroll(scrollState),
+                verticalArrangement = Arrangement.spacedBy(QuickPicksPillSpacing)
+            ) {
+                rows.forEach { row ->
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(QuickPicksPillSpacing),
+                        modifier = Modifier.padding(start = 8.dp)
+                    ) {
+                        row.pills.forEach { cell ->
+                            QuickPickPill(
+                                song = cell.song,
+                                width = cell.width,
+                                isPlaying = cell.song.id == currentSongId,
+                                onClick = { onSongClick(cell.song) }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun QuickPickCard(
+    song: Song,
+    isPlaying: Boolean,
+    onClick: () -> Unit
+) {
+    val targetBg = if (isPlaying) MaterialTheme.colorScheme.primaryContainer
+    else MaterialTheme.colorScheme.surfaceContainerLow
+    val bgColor by animateColorAsState(
+        targetValue = targetBg,
+        animationSpec = tween(durationMillis = 220),
+        label = "QuickPickBg"
+    )
+    Card(
+        onClick = onClick,
+        modifier = Modifier
+            .width(140.dp)
+            .padding(bottom = 8.dp),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = bgColor),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(sectionHeight)
-                .horizontalScroll(scrollState),
-            verticalArrangement = Arrangement.spacedBy(QuickPicksPillSpacing)
+                .padding(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            rows.forEach { row ->
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(QuickPicksPillSpacing),
-                    modifier = Modifier.padding(start = 8.dp)
-                ) {
-                    row.pills.forEach { cell ->
-                        QuickPickPill(
-                            song = cell.song,
-                            width = cell.width,
-                            isPlaying = cell.song.id == currentSongId,
-                            onClick = { onSongClick(cell.song) }
-                        )
-                    }
-                }
+            val artUri = song.albumArtUriString
+            SmartImage(
+                model = artUri,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .size(124.dp)
+                    .align(Alignment.CenterHorizontally)
+            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp)
+            ) {
+                Text(
+                    text = song.title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = song.artist,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
         }
     }

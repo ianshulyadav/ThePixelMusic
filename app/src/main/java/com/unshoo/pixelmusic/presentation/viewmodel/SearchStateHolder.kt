@@ -38,6 +38,8 @@ import javax.inject.Singleton
 import kotlinx.coroutines.FlowPreview
 
 import com.unshoo.pixelmusic.data.preferences.UserPreferencesRepository
+import com.unshoo.pixelmusic.data.preferences.SearchSource
+import com.unshoo.pixelmusic.data.repository.MusicRepository
 import kotlinx.coroutines.flow.first
 
 /**
@@ -47,7 +49,8 @@ import kotlinx.coroutines.flow.first
 @Singleton
 class SearchStateHolder @Inject constructor(
     @param:dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
-    private val userPreferencesRepository: UserPreferencesRepository
+    private val userPreferencesRepository: UserPreferencesRepository,
+    private val musicRepository: MusicRepository
 ) {
     companion object {
         const val SEARCH_DEBOUNCE_MS = 150L
@@ -114,6 +117,23 @@ class SearchStateHolder @Inject constructor(
                     val query = request.query
                     if (query.isBlank()) {
                         _searchResults.value = persistentListOf()
+                        return@collectLatest
+                    }
+
+                    val source = userPreferencesRepository.searchSourceFlow.first()
+                    if (source == SearchSource.LOCAL) {
+                        try {
+                            musicRepository.searchAll(query, _selectedSearchFilter.value).collectLatest { results ->
+                                if (request.requestId == latestSearchRequestId.get()) {
+                                    _searchResults.value = results.toImmutableList()
+                                }
+                            }
+                        } catch (_: CancellationException) {
+                        } catch (e: Exception) {
+                            if (request.requestId == latestSearchRequestId.get()) {
+                                Timber.e(e, "Local search error: $query")
+                            }
+                        }
                         return@collectLatest
                     }
 
@@ -337,15 +357,34 @@ class SearchStateHolder @Inject constructor(
     }
 
     fun loadSearchHistory(limit: Int = 15) {
-        // History stub – no local DB
+        scope?.launch {
+            val history = musicRepository.getRecentSearchHistory(limit)
+            _searchHistory.value = history.toImmutableList()
+        }
     }
 
     fun onSearchQuerySubmitted(query: String) {
-        // No-op — history not persisted locally
+        scope?.launch {
+            if (query.isNotBlank()) {
+                musicRepository.addSearchHistoryItem(query)
+                loadSearchHistory()
+            }
+        }
     }
 
-    fun deleteSearchHistoryItem(query: String) {}
-    fun clearSearchHistory() { _searchHistory.value = persistentListOf() }
+    fun deleteSearchHistoryItem(query: String) {
+        scope?.launch {
+            musicRepository.deleteSearchHistoryItemByQuery(query)
+            loadSearchHistory()
+        }
+    }
+
+    fun clearSearchHistory() {
+        scope?.launch {
+            musicRepository.clearSearchHistory()
+            _searchHistory.value = persistentListOf()
+        }
+    }
 
     fun onCleared() {
         searchJob?.cancel()
