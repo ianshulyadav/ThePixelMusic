@@ -810,7 +810,7 @@ private fun ShareableCard(
             // Centerpiece Floating Card
             Card(
                 modifier = Modifier
-                    .fillMaxWidth()
+                    .fillMaxWidth(0.84f)
                     .weight(1f, fill = false)
                     .shadow(24.dp, shape = RoundedCornerShape(24.dp)),
                 shape = RoundedCornerShape(24.dp),
