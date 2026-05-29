@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -36,7 +37,8 @@ data class ExternalAccountUiModel(
 
 data class AccountsUiState(
     val connectedAccounts: List<ExternalAccountUiModel> = emptyList(),
-    val disconnectedServices: List<ExternalServiceAccount> = emptyList()
+    val disconnectedServices: List<ExternalServiceAccount> = emptyList(),
+    val userName: String? = null
 )
 
 @HiltViewModel
@@ -82,6 +84,23 @@ class AccountsViewModel @Inject constructor(
         connected to playlistCount
     }
 
+    private val telegramUsernameFlow = telegramRepository.authorizationState
+        .map { state ->
+            if (state is TdApi.AuthorizationStateReady) {
+                try {
+                    kotlinx.coroutines.withTimeoutOrNull(5000) {
+                        val me = telegramRepository.getMe()
+                        me?.firstName?.trim()?.takeIf { it.isNotEmpty() }
+                    }
+                } catch (e: Exception) {
+                    null
+                }
+            } else {
+                null
+            }
+        }
+        .onStart { emit(null) }
+
     val uiState: StateFlow<AccountsUiState> = combine(
         combine(
             listOf(
@@ -90,11 +109,20 @@ class AccountsViewModel @Inject constructor(
                 youtubeStateFlow
             )
         ) { it.toList() },
-        loggingOutServices
-    ) { states, activeLogouts ->
+        loggingOutServices,
+        datastoreRepository.ytUsername,
+        telegramUsernameFlow
+    ) { states, activeLogouts, ytName, tgName ->
         val (telegramConnected, telegramChannelCount) = states[0] as Pair<Boolean, Int>
         val (gDriveConnected, gDriveFolderCount) = states[1] as Pair<Boolean, Int>
         val (youtubeConnected, youtubePlaylistCount) = states[2] as Pair<Boolean, Int>
+
+        val calculatedUserName = when {
+            gDriveConnected && !gDriveRepository.userDisplayName.isNullOrBlank() -> gDriveRepository.userDisplayName
+            youtubeConnected && ytName.isNotBlank() -> ytName
+            telegramConnected && !tgName.isNullOrBlank() -> tgName
+            else -> null
+        }
 
         val connectedAccounts = buildList {
             if (telegramConnected) {
@@ -102,7 +130,7 @@ class AccountsViewModel @Inject constructor(
                     ExternalAccountUiModel(
                         service = ExternalServiceAccount.TELEGRAM,
                         title = "Telegram",
-                        accountLabel = "Active Telegram session",
+                        accountLabel = if (!tgName.isNullOrBlank()) tgName else "Active Telegram session",
                         syncedContentLabel = formatCount(
                             count = telegramChannelCount,
                             singular = "synced channel",
@@ -136,7 +164,7 @@ class AccountsViewModel @Inject constructor(
                     ExternalAccountUiModel(
                         service = ExternalServiceAccount.YOUTUBE,
                         title = "YouTube Client",
-                        accountLabel = "YouTube session connected",
+                        accountLabel = if (ytName.isNotBlank()) ytName else "YouTube session connected",
                         syncedContentLabel = formatCount(
                             count = youtubePlaylistCount,
                             singular = "synced playlist",
@@ -156,7 +184,8 @@ class AccountsViewModel @Inject constructor(
 
         AccountsUiState(
             connectedAccounts = connectedAccounts,
-            disconnectedServices = disconnectedServices
+            disconnectedServices = disconnectedServices,
+            userName = calculatedUserName
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AccountsUiState())
 

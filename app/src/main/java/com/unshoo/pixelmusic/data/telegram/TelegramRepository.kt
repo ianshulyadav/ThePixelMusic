@@ -99,6 +99,15 @@ class TelegramRepository @Inject constructor(
         clientManager.logout()
     }
 
+    suspend fun getMe(): TdApi.User? {
+        if (!isReady()) return null
+        return try {
+            clientManager.sendRequest<TdApi.User>(TdApi.GetMe())
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     private suspend fun runAuthRequest(
         timeoutMs: Long,
         block: suspend () -> TdApi.Object
