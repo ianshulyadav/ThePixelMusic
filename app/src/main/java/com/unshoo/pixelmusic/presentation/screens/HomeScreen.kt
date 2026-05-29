@@ -115,7 +115,10 @@ import com.unshoo.pixelmusic.presentation.telegram.auth.TelegramLoginActivity
 import com.unshoo.pixelmusic.presentation.viewmodel.PlayerViewModel
 import com.unshoo.pixelmusic.presentation.viewmodel.SettingsViewModel
 import com.unshoo.pixelmusic.presentation.viewmodel.StatsViewModel
+import com.unshoo.pixelmusic.presentation.viewmodel.AccountsViewModel
+import com.unshoo.pixelmusic.presentation.viewmodel.ExternalServiceAccount
 import com.unshoo.pixelmusic.ui.theme.ExpTitleTypography
+import com.unshoo.pixelmusic.ui.theme.GoogleSansRounded
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.delay
@@ -139,6 +142,7 @@ fun HomeScreen(
     statsViewModel: StatsViewModel = hiltViewModel(),
     quickPicksViewModel: QuickPicksViewModel = hiltViewModel(),
     favoriteArtistReleasesViewModel: FavoriteArtistReleasesViewModel = hiltViewModel(),
+    accountsViewModel: AccountsViewModel = hiltViewModel(),
     onOpenSidebar: () -> Unit
 ) {
     val context = LocalContext.current
@@ -147,6 +151,20 @@ fun HomeScreen(
         (context as? android.app.Activity)?.intent?.getBooleanExtra("is_benchmark", false) ?: false
     }
     val settingsUiState by settingsViewModel.uiState.collectAsStateWithLifecycle()
+    val accountsUiState by accountsViewModel.uiState.collectAsStateWithLifecycle()
+    val userName = remember(accountsUiState) {
+        val rawName = accountsUiState.userName
+        if (!rawName.isNullOrBlank()) {
+            val cleanName = if (rawName.startsWith("@")) rawName.substring(1) else rawName
+            if (!cleanName.contains("@")) {
+                cleanName.split(" ").firstOrNull()?.trim()
+            } else {
+                cleanName.substringBefore("@").split(".", "_", "-").firstOrNull()?.replaceFirstChar { it.uppercase() }
+            }
+        } else {
+            null
+        }
+    }
     val dailyMixSongs by playerViewModel.dailyMixSongs.collectAsStateWithLifecycle()
     val curatedYourMixSongs by playerViewModel.yourMixSongs.collectAsStateWithLifecycle()
     val homeMixPreviewSongs by playerViewModel.homeMixPreviewSongs.collectAsStateWithLifecycle()
@@ -367,6 +385,13 @@ fun HomeScreen(
                 ),
                 verticalArrangement = Arrangement.spacedBy(24.dp)
             ) {
+                item(
+                    key = "home_greeting",
+                    contentType = "home_greeting"
+                ) {
+                    HomeGreetingHeader(userName = userName)
+                }
+
                 // Quick Picks (above Your Mix, shown when there is engagement data)
                 if (quickPicks.isNotEmpty()) {
                     item(
@@ -911,6 +936,102 @@ private fun rememberYourMixTitleStyle(): TextStyle {
             fontWeight = FontWeight(760),
             fontSize = 64.sp,
             lineHeight = 62.sp
+        )
+    }
+}
+
+@Composable
+fun HomeGreetingHeader(userName: String?) {
+    val greeting = remember(userName) {
+        val calendar = java.util.Calendar.getInstance()
+        val hour = calendar.get(java.util.Calendar.HOUR_OF_DAY)
+        val greetings = when (hour) {
+            in 5..11 -> if (userName != null) {
+                listOf(
+                    "Rise and grind, $userName ☕",
+                    "Morning vibe check, $userName ✨",
+                    "Aura +100 this morning, $userName 🌅",
+                    "Wakey wakey, $userName 🎧",
+                    "New day, new tunes, $userName 🎵"
+                )
+            } else {
+                listOf(
+                    "Rise and grind ☕",
+                    "Morning vibe check ✨",
+                    "Aura +100 this morning 🌅",
+                    "Wakey wakey 🎧",
+                    "New day, new tunes 🎵"
+                )
+            }
+            in 12..16 -> if (userName != null) {
+                listOf(
+                    "Midday energy boost, $userName ⚡",
+                    "Sun's out, beats out, $userName ☀️",
+                    "Cruising through the day, $userName 🚙",
+                    "Vibe check, $userName 🎧",
+                    "Lunch break soundtrack, $userName 🍕"
+                )
+            } else {
+                listOf(
+                    "Midday energy boost ⚡",
+                    "Sun's out, beats out ☀️",
+                    "Cruising through the day 🚙",
+                    "Vibe check: immaculate 🎧",
+                    "Lunch break soundtrack 🍕"
+                )
+            }
+            in 17..21 -> if (userName != null) {
+                listOf(
+                    "Sunset vibes, $userName 🌇",
+                    "Unwinding time, $userName 🌌",
+                    "Evening wind down, $userName 🌙",
+                    "Chill mode: ON, $userName 🛋️",
+                    "Main character energy, $userName ✨"
+                )
+            } else {
+                listOf(
+                    "Sunset vibes 🌇",
+                    "Unwinding time 🌌",
+                    "Evening wind down 🌙",
+                    "Chill mode: ON 🛋️",
+                    "Main character energy ✨"
+                )
+            }
+            else -> if (userName != null) {
+                listOf(
+                    "Late night thoughts, $userName 🌙",
+                    "Midnight memories, $userName ✨",
+                    "Insomnia club, $userName 🌌",
+                    "Under the stars, $userName 🌌",
+                    "Rest easy, $userName 💤"
+                )
+            } else {
+                listOf(
+                    "Late night thoughts 🌙",
+                    "Midnight memories ✨",
+                    "Insomnia club 🌌",
+                    "Under the stars 🌌",
+                    "Rest easy 💤"
+                )
+            }
+        }
+        greetings.random()
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp)
+            .padding(top = 16.dp)
+    ) {
+        Text(
+            text = greeting,
+            fontFamily = GoogleSansRounded,
+            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.headlineLarge.copy(
+                fontSize = 30.sp
+            ),
+            color = MaterialTheme.colorScheme.onSurface
         )
     }
 }
