@@ -238,7 +238,7 @@ fun ShareBottomSheet(
                             .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f))
                     )
                 }
-                // ΓöÇΓöÇ Header ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+                // ── Header ──────────────────────────────────────────────────
                 Spacer(Modifier.height(8.dp))
                 Text(
                     text = stringResource(R.string.share_sheet_title),
@@ -257,7 +257,7 @@ fun ShareBottomSheet(
                 )
                 Spacer(Modifier.height(12.dp))
 
-                // ΓöÇΓöÇ Card Mode Tabs (Song / Lyrics) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+                // ── Card Mode Tabs (Song / Lyrics) ──────────────────────────
                 if (hasLyrics) {
                     Row(
                         modifier = Modifier
@@ -316,7 +316,7 @@ fun ShareBottomSheet(
                     Spacer(Modifier.height(12.dp))
                 }
 
-                // ΓöÇΓöÇ 9:16 Card Preview (Capturable) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+                // ── 9:16 Card Preview (Capturable) ──────────────────────────
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -346,7 +346,7 @@ fun ShareBottomSheet(
                 }
                 Spacer(Modifier.height(12.dp))
 
-                // ΓöÇΓöÇ Dynamic Theme Selector Carousel (Circular Swatches) ΓöÇΓöÇΓöÇΓöÇΓöÇ
+                // ── Dynamic Theme Selector Carousel (Circular Swatches) ─────
                 Column(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalAlignment = Alignment.CenterHorizontally
@@ -469,7 +469,7 @@ fun ShareBottomSheet(
                 }
                 Spacer(Modifier.height(12.dp))
 
-                // ΓöÇΓöÇ Interactive Lyric Selector (When Lyric Mode Active) ΓöÇΓöÇΓöÇΓöÇΓöÇ
+                // ── Interactive Lyric Selector (When Lyric Mode Active) ─────
                 if (selectedCardMode == 1 && cleanedLyrics.isNotEmpty()) {
                     LyricLineSelector(
                         lines = cleanedLyrics,
@@ -491,7 +491,7 @@ fun ShareBottomSheet(
                     Spacer(Modifier.height(16.dp))
                 }
 
-                // ΓöÇΓöÇ Primary Share Actions (Horizontal scroll) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+                // ── Primary Share Actions (Horizontal scroll) ───────────────
                 LazyRow(
                     modifier = Modifier.fillMaxWidth(),
                     contentPadding = PaddingValues(horizontal = 20.dp),
@@ -653,7 +653,7 @@ fun ShareBottomSheet(
                                     )
                                     // Include YouTube Music link when sharing a YT song
                                     val linkSuffix = if (!song.youtubeId.isNullOrEmpty()) {
-                                        "\n≡ƒÄ╡ https://music.youtube.com/watch?v=${song.youtubeId}"
+                                        "\n🎵 https://music.youtube.com/watch?v=${song.youtubeId}"
                                     } else {
                                         "\n$GITHUB_LINK"
                                     }
@@ -662,7 +662,7 @@ fun ShareBottomSheet(
                                         putExtra(Intent.EXTRA_STREAM, uri)
                                         putExtra(
                                             Intent.EXTRA_TEXT,
-                                            "${song.title} ΓÇö ${song.displayArtist}$linkSuffix"
+                                            "${song.title} — ${song.displayArtist}$linkSuffix"
                                         )
                                         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                                     }
@@ -682,7 +682,7 @@ fun ShareBottomSheet(
                 )
                 Spacer(Modifier.height(4.dp))
 
-                // ΓöÇΓöÇ Secondary Actions ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+                // ── Secondary Actions ────────────────────────────────────────
                 ShareListItem(
                     icon = Icons.AutoMirrored.Rounded.PlaylistAdd,
                     title = stringResource(R.string.share_action_add_to_playlist),
@@ -757,9 +757,9 @@ fun ShareBottomSheet(
     }
 }
 
-// ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// ────────────────────────────────────────────────────────────────────────────
 // Shareable Card Composable (9:16 captures)
-// ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// ────────────────────────────────────────────────────────────────────────────
 @Composable
 private fun ShareableCard(
     modifier: Modifier = Modifier,
@@ -791,7 +791,7 @@ private fun ShareableCard(
             .shadow(elevation = 16.dp, shape = cardShape, clip = true)
             .clip(cardShape)
     ) {
-        // ΓöÇΓöÇ 1. Dynamic Background Render ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+        // ── 1. Dynamic Background Render ─────────────────────────────────────
         when (themeStyle) {
             ShareThemeStyle.DYNAMIC_PALETTE -> {
                 Box(
@@ -937,18 +937,20 @@ private fun ShareableCard(
                 )
         )
 
-        // ── 2. Perfectly Centered Card ───────────────────────────────────────
+        // ── 2. Content Column ───────────────────────────────────────────────
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 20.dp, vertical = 24.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.height(8.dp))
 
+            // Centerpiece Floating Card (Player Styled & Frost Blended)
             Card(
                 modifier = Modifier
-                    .fillMaxWidth()
+                    .fillMaxWidth(0.86f)
                     .weight(1f, fill = false)
                     .shadow(16.dp, shape = RoundedCornerShape(20.dp)),
                 shape = RoundedCornerShape(20.dp),
@@ -959,6 +961,36 @@ private fun ShareableCard(
             ) {
                 if (!isLyricsMode) {
                     // SONG SHARE CARD (MINI PLAYER WIDGET DESIGN)
+                    val audioFormatInfo = remember(song) {
+                        val sampleRateStr = when (val sr = song.sampleRate) {
+                            null, 0 -> "44.1 kHz"
+                            in 1..2000 -> "$sr Hz"
+                            else -> {
+                                val khz = sr / 1000f
+                                if (khz % 1 == 0f) "${khz.toInt()}.0 kHz" else "${String.format("%.1f", khz)} kHz"
+                            }
+                        }
+                        val bitrateStr = when (val br = song.bitrate) {
+                            null, 0 -> {
+                                if (!song.youtubeId.isNullOrEmpty()) "128 kbps" else "320 kbps"
+                            }
+                            else -> {
+                                val kbps = if (br > 2000) br / 1000 else br
+                                "$kbps kbps"
+                            }
+                        }
+                        val codecStr = when {
+                            song.mimeType?.contains("opus", ignoreCase = true) == true -> "OPUS"
+                            song.mimeType?.contains("ogg", ignoreCase = true) == true -> "OGG"
+                            song.mimeType?.contains("flac", ignoreCase = true) == true -> "FLAC"
+                            song.mimeType?.contains("aac", ignoreCase = true) == true -> "AAC"
+                            song.mimeType?.contains("m4a", ignoreCase = true) == true -> "AAC"
+                            !song.youtubeId.isNullOrEmpty() -> "OPUS"
+                            else -> "MP3"
+                        }
+                        "$sampleRateStr • $bitrateStr • $codecStr"
+                    }
+
                     val formattedDuration = remember(song.duration) {
                         val totalSecs = song.duration / 1000
                         val mins = totalSecs / 60
@@ -974,7 +1006,7 @@ private fun ShareableCard(
                     }
 
                     Column(
-                        modifier = Modifier.padding(16.dp),
+                        modifier = Modifier.padding(14.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         // 1. Square Album Art with soft glow
@@ -993,39 +1025,34 @@ private fun ShareableCard(
                             )
                         }
 
-                        Spacer(Modifier.height(12.dp))
+                        Spacer(Modifier.height(8.dp))
 
-                        // 2. Song Details (Centered layout)
+                        // 2. Song Details (Left-aligned for a modern player layout)
                         Column(
-                            verticalArrangement = Arrangement.spacedBy(2.dp),
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
+                            verticalArrangement = Arrangement.spacedBy(1.dp),
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)
                         ) {
                             Text(
                                 text = song.title,
                                 fontFamily = GoogleSansRounded,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 20.sp,
+                                fontSize = 16.sp,
                                 color = lightScheme.onPrimaryContainer,
                                 maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.fillMaxWidth()
+                                overflow = TextOverflow.Ellipsis
                             )
                             Text(
                                 text = song.displayArtist,
                                 fontFamily = GoogleSansRounded,
                                 fontWeight = FontWeight.Medium,
-                                fontSize = 14.sp,
+                                fontSize = 12.sp,
                                 color = lightScheme.onPrimaryContainer.copy(alpha = 0.65f),
                                 maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.fillMaxWidth()
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
 
-                        Spacer(Modifier.height(16.dp))
+                        Spacer(Modifier.height(10.dp))
 
                         // 3. Sleek Wavy Progress / Seek Bar with Thumb
                         Row(
@@ -1036,7 +1063,7 @@ private fun ShareableCard(
                             Text(
                                 text = formattedProgress,
                                 color = lightScheme.onPrimaryContainer.copy(alpha = 0.6f),
-                                fontSize = 11.sp,
+                                fontSize = 9.sp,
                                 fontFamily = GoogleSansRounded,
                                 fontWeight = FontWeight.Bold
                             )
@@ -1070,10 +1097,94 @@ private fun ShareableCard(
                             Text(
                                 text = formattedDuration,
                                 color = lightScheme.onPrimaryContainer.copy(alpha = 0.6f),
-                                fontSize = 11.sp,
+                                fontSize = 9.sp,
                                 fontFamily = GoogleSansRounded,
                                 fontWeight = FontWeight.Bold
                             )
+                        }
+
+                        Spacer(Modifier.height(4.dp))
+
+                        // 3.5. Metadata Pill
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(lightScheme.onPrimaryContainer.copy(alpha = 0.08f))
+                                .padding(horizontal = 10.dp, vertical = 4.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = audioFormatInfo,
+                                fontFamily = GoogleSansRounded,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 9.sp,
+                                color = lightScheme.onPrimaryContainer.copy(alpha = 0.7f),
+                                letterSpacing = 0.3.sp
+                            )
+                        }
+
+                        Spacer(Modifier.height(10.dp))
+
+                        // 4. Playback Controls Row (Dynamic Capsule Shape)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .width(68.dp)
+                                    .height(44.dp)
+                                    .clip(RoundedCornerShape(22.dp))
+                                    .background(lightScheme.primary)
+                                    .clickable { },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.SkipPrevious,
+                                    contentDescription = null,
+                                    tint = lightScheme.onPrimary,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                            
+                            Spacer(modifier = Modifier.width(12.dp))
+
+                            Box(
+                                modifier = Modifier
+                                    .width(84.dp)
+                                    .height(44.dp)
+                                    .clip(RoundedCornerShape(22.dp))
+                                    .background(lightScheme.tertiaryContainer)
+                                    .clickable { },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.PlayArrow,
+                                    contentDescription = null,
+                                    tint = lightScheme.onTertiaryContainer,
+                                    modifier = Modifier.size(26.dp)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(12.dp))
+
+                            Box(
+                                modifier = Modifier
+                                    .width(68.dp)
+                                    .height(44.dp)
+                                    .clip(RoundedCornerShape(22.dp))
+                                    .background(lightScheme.primary)
+                                    .clickable { },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.SkipNext,
+                                    contentDescription = null,
+                                    tint = lightScheme.onPrimary,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
                         }
                     }
                 } else {
@@ -1125,8 +1236,7 @@ private fun ShareableCard(
                         // 2. Verses Quote Block
                         Column(
                             verticalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalAlignment = Alignment.CenterHorizontally
+                            modifier = Modifier.fillMaxWidth()
                         ) {
                             if (selectedLyrics.isEmpty()) {
                                 Text(
@@ -1152,7 +1262,7 @@ private fun ShareableCard(
                                 selectedLyrics.forEach { line ->
                                     Row(
                                         verticalAlignment = Alignment.Top,
-                                        horizontalArrangement = Arrangement.Center,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
                                         Icon(
@@ -1161,7 +1271,6 @@ private fun ShareableCard(
                                             tint = lightScheme.primary.copy(alpha = 0.7f),
                                             modifier = Modifier.size(16.dp).offset(y = 2.dp)
                                         )
-                                        Spacer(Modifier.width(8.dp))
                                         Text(
                                             text = line,
                                             fontFamily = GoogleSansRounded,
@@ -1169,8 +1278,8 @@ private fun ShareableCard(
                                             fontSize = fontSize,
                                             lineHeight = lineHeight,
                                             color = lightScheme.onPrimaryContainer,
-                                            textAlign = TextAlign.Center,
-                                            modifier = Modifier.weight(1f, fill = false)
+                                            textAlign = TextAlign.Start,
+                                            modifier = Modifier.weight(1f)
                                         )
                                     }
                                 }
@@ -1248,69 +1357,66 @@ private fun ShareableCard(
                 }
             }
 
-            Spacer(Modifier.weight(1f))
-        }
+            Spacer(Modifier.height(16.dp))
 
-        // ── 3. Snapchat Replicated Link Clip Pill (Floating at Bottom Center) ───────
-        val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color.Black.copy(alpha = 0.35f))
-                    .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
-                    .clickable {
-                        try {
-                            uriHandler.openUri(GITHUB_LINK)
-                        } catch (e: Exception) {
-                            // Fallback
-                        }
-                    }
-                    .padding(horizontal = 10.dp, vertical = 5.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            // ── 3. Snapchat Replicated Link Clip Pill ────────────────────────
+            val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Rounded.Link,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(11.dp)
-                )
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Color.Black.copy(alpha = 0.35f))
+                        .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(20.dp))
+                        .clickable {
+                            try {
+                                uriHandler.openUri(GITHUB_LINK)
+                            } catch (e: Exception) {
+                                // Fallback
+                            }
+                        }
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Link,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Text(
+                        text = "PixelMusic",
+                        fontFamily = GoogleSansRounded,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        color = Color.White
+                    )
+                    Icon(
+                        imageVector = Icons.Rounded.ChevronRight,
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.8f),
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
                 Text(
-                    text = "PixelMusic",
+                    text = "github.com/ianshulyadav",
                     fontFamily = GoogleSansRounded,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 10.sp,
-                    color = Color.White
-                )
-                Icon(
-                    imageVector = Icons.Rounded.ChevronRight,
-                    contentDescription = null,
-                    tint = Color.White.copy(alpha = 0.8f),
-                    modifier = Modifier.size(12.dp)
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 9.sp,
+                    color = Color.White.copy(alpha = 0.4f),
+                    textAlign = TextAlign.Center
                 )
             }
-            Text(
-                text = "github.com/ianshulyadav",
-                fontFamily = GoogleSansRounded,
-                fontWeight = FontWeight.Medium,
-                fontSize = 8.sp,
-                color = Color.White.copy(alpha = 0.35f),
-                textAlign = TextAlign.Center
-            )
-        }
         }
     }
+}
 
-// ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// ────────────────────────────────────────────────────────────────────────────
 // Scrollable Lyric Multi-Selector Composable
-// ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// ────────────────────────────────────────────────────────────────────────────
 @Composable
 private fun LyricLineSelector(
     lines: List<String>,
@@ -1390,9 +1496,9 @@ private fun LyricLineSelector(
     }
 }
 
-// ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// ────────────────────────────────────────────────────────────────────────────
 // Share Action Chip Composable
-// ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// ────────────────────────────────────────────────────────────────────────────
 @Composable
 private fun ShareActionChip(
     icon: @Composable () -> Unit,
@@ -1428,9 +1534,9 @@ private fun ShareActionChip(
     }
 }
 
-// ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// ────────────────────────────────────────────────────────────────────────────
 // Share List Item Composable
-// ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// ────────────────────────────────────────────────────────────────────────────
 @Composable
 private fun ShareListItem(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
@@ -1474,9 +1580,9 @@ private fun ShareListItem(
     )
 }
 
-// ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// ────────────────────────────────────────────────────────────────────────────
 // Platform Helpers
-// ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// ────────────────────────────────────────────────────────────────────────────
 private fun isPackageInstalled(context: Context, packageName: String): Boolean {
     return try {
         context.packageManager.getPackageInfo(packageName, 0)
