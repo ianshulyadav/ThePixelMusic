@@ -1,10 +1,19 @@
 package com.unshoo.pixelmusic.presentation.viewmodel
 
+import android.content.Context
 import android.os.SystemClock
 import androidx.media3.common.C
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
+import androidx.work.workDataOf
 import com.unshoo.pixelmusic.data.DailyMixManager
+import com.unshoo.pixelmusic.data.database.EngagementDao
+import com.unshoo.pixelmusic.data.database.MusicDao
 import com.unshoo.pixelmusic.data.model.Song
+import com.unshoo.pixelmusic.data.remote.youtube.SongDownloadWorker
 import com.unshoo.pixelmusic.data.stats.PlaybackStatsRepository
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -30,8 +39,11 @@ import timber.log.Timber
  */
 @Singleton
 class ListeningStatsTracker @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val dailyMixManager: DailyMixManager,
-    private val playbackStatsRepository: PlaybackStatsRepository
+    private val playbackStatsRepository: PlaybackStatsRepository,
+    private val engagementDao: EngagementDao,
+    private val musicDao: MusicDao
 ) {
     private var currentSession: ActiveSession? = null
     private var pendingVoluntarySongId: String? = null
@@ -74,7 +86,9 @@ class ListeningStatsTracker @Inject constructor(
             isPlaying = isPlaying,
             title = song?.title,
             artist = song?.displayArtist,
-            thumbnail = song?.albumArtUriString
+            thumbnail = song?.albumArtUriString,
+            genre = song?.genre,
+            album = song?.album
         )
     }
 
@@ -103,7 +117,9 @@ class ListeningStatsTracker @Inject constructor(
         isPlaying: Boolean,
         title: String? = null,
         artist: String? = null,
-        thumbnail: String? = null
+        thumbnail: String? = null,
+        genre: String? = null,
+        album: String? = null
     ) {
         finalizeCurrentSession()
         val safeSongId = songId?.takeIf { it.isNotBlank() }
@@ -127,7 +143,9 @@ class ListeningStatsTracker @Inject constructor(
             isVoluntary = pendingVoluntarySongId == safeSongId,
             title = title,
             artist = artist,
-            thumbnail = thumbnail
+            thumbnail = thumbnail,
+            genre = genre,
+            album = album
         )
         if (pendingVoluntarySongId == safeSongId) {
             pendingVoluntarySongId = null
@@ -170,7 +188,9 @@ class ListeningStatsTracker @Inject constructor(
             isPlaying = isPlaying,
             title = song?.title,
             artist = song?.displayArtist,
-            thumbnail = song?.albumArtUriString
+            thumbnail = song?.albumArtUriString,
+            genre = song?.genre,
+            album = song?.album
         )
     }
 
@@ -199,7 +219,9 @@ class ListeningStatsTracker @Inject constructor(
         isPlaying: Boolean,
         title: String? = null,
         artist: String? = null,
-        thumbnail: String? = null
+        thumbnail: String? = null,
+        genre: String? = null,
+        album: String? = null
     ) {
         val safeSongId = songId?.takeIf { it.isNotBlank() }
         if (safeSongId == null) {
@@ -225,7 +247,9 @@ class ListeningStatsTracker @Inject constructor(
             isPlaying = isPlaying,
             title = title,
             artist = artist,
-            thumbnail = thumbnail
+            thumbnail = thumbnail,
+            genre = genre,
+            album = album
         )
     }
 
@@ -271,7 +295,9 @@ class ListeningStatsTracker @Inject constructor(
                 forceSynchronous = forceSynchronousPersistence,
                 title = session.title,
                 artist = session.artist,
-                thumbnail = session.thumbnail
+                thumbnail = session.thumbnail,
+                genre = session.genre,
+                album = session.album
             )
         }
         currentSession = null
@@ -299,17 +325,21 @@ class ListeningStatsTracker @Inject constructor(
         forceSynchronous: Boolean,
         title: String? = null,
         artist: String? = null,
-        thumbnail: String? = null
+        thumbnail: String? = null,
+        genre: String? = null,
+        album: String? = null
     ) {
         persistenceScope.launch {
             runCatching {
                 persistPlaybackInternal(
-                    songId = songId, 
-                    listened = listened, 
+                    songId = songId,
+                    listened = listened,
                     timestamp = timestamp,
                     title = title,
                     artist = artist,
-                    thumbnail = thumbnail
+                    thumbnail = thumbnail,
+                    genre = genre,
+                    album = album
                 )
             }.onFailure { throwable ->
                 Timber.e(throwable, "Failed to persist listening session for song=%s", songId)
@@ -318,12 +348,14 @@ class ListeningStatsTracker @Inject constructor(
     }
 
     private suspend fun persistPlaybackInternal(
-        songId: String, 
-        listened: Long, 
+        songId: String,
+        listened: Long,
         timestamp: Long,
         title: String? = null,
         artist: String? = null,
-        thumbnail: String? = null
+        thumbnail: String? = null,
+        genre: String? = null,
+        album: String? = null
     ) {
         dailyMixManager.recordPlay(
             songId = songId,
@@ -336,8 +368,50 @@ class ListeningStatsTracker @Inject constructor(
             timestamp = timestamp,
             title = title,
             artist = artist,
-            thumbnail = thumbnail
+            thumbnail = thumbnail,
+            genre = genre,
+            album = album
         )
+        // Auto-cache YouTube songs played 3+ times: trigger a background download
+        // so frequently-listened songs become fully available offline.
+        triggerAutoCacheIfNeeded(songId)
+    }
+
+    /**
+     * Checks whether a YouTube song has been played enough times to warrant
+     * automatic offline caching. Silently enqueues [SongDownloadWorker] if:
+     * - The song is sourced from YouTube (content URI starts with "youtube://")
+     * - Play count has reached or exceeded [AUTO_CACHE_PLAY_COUNT_THRESHOLD]
+     * - The song is not already cached locally (file_path is blank)
+     */
+    private suspend fun triggerAutoCacheIfNeeded(songId: String) {
+        try {
+            val playCount = engagementDao.getPlayCount(songId) ?: return
+            if (playCount < AUTO_CACHE_PLAY_COUNT_THRESHOLD) return
+
+            // Resolve the Room numeric ID to look up the song entity
+            val numericId = songId.toLongOrNull() ?: return
+            val songEntity = musicDao.getSongByIdOnce(numericId) ?: return
+
+            // Only auto-cache YouTube-streamed songs that aren't already downloaded
+            val contentUri = songEntity.contentUriString
+            if (!contentUri.startsWith("youtube://")) return
+            if (songEntity.filePath.isNotBlank()) return // Already cached
+
+            val youtubeId = contentUri.removePrefix("youtube://")
+            if (youtubeId.isBlank()) return
+
+            val workName = "auto_cache_$youtubeId"
+            val request = OneTimeWorkRequestBuilder<SongDownloadWorker>()
+                .setInputData(workDataOf(SongDownloadWorker.SONG_KEY to youtubeId))
+                .addTag("auto_cache")
+                .build()
+            WorkManager.getInstance(context)
+                .enqueueUniqueWork(workName, ExistingWorkPolicy.KEEP, request)
+            Timber.d("Auto-cache triggered for YouTube song $youtubeId (play count = $playCount)")
+        } catch (e: Exception) {
+            Timber.w(e, "Auto-cache check failed for song $songId")
+        }
     }
 
     private fun accumulateRealtimeListening(session: ActiveSession, nowRealtime: Long) {
@@ -359,6 +433,8 @@ class ListeningStatsTracker @Inject constructor(
     companion object {
         private val MIN_SESSION_LISTEN_MS = 15000L
         private const val MAX_INTERNAL_PLAYBACK_HISTORY_ITEMS = 500
+        /** Number of plays before a YouTube song is auto-downloaded for offline use. */
+        private const val AUTO_CACHE_PLAY_COUNT_THRESHOLD = 3
     }
 }
 
@@ -377,5 +453,7 @@ data class ActiveSession(
     val isVoluntary: Boolean,
     val title: String? = null,
     val artist: String? = null,
-    val thumbnail: String? = null
+    val thumbnail: String? = null,
+    val genre: String? = null,
+    val album: String? = null
 )

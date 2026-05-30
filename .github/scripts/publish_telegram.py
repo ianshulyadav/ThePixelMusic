@@ -11,11 +11,21 @@ def main():
     release_url  = os.environ['RELEASE_URL']
     commit_url   = os.environ['COMMIT_URL']
 
+    try:
+        commit_author = subprocess.check_output(['git', 'log', '-1', '--pretty=format:%an']).decode('utf-8').strip()
+        commit_message = subprocess.check_output(['git', 'log', '-1', '--pretty=format:%s']).decode('utf-8').strip()
+    except Exception:
+        commit_author = "Unknown"
+        commit_message = "New release build"
+
     caption = (
-        f"<b>📱 PixelMusic v{version} — Release</b>\n\n"
-        f"<b>Changes:</b>\n{changelog}\n\n"
-        f"<b>Commit:</b> <a href='{commit_url}'>{commit_sha[:7]}</a>\n"
+        f"📱 <b>PixelMusic v{version} — Release</b>\n\n"
+        f"<b>Commit by:</b> {commit_author}\n"
+        f"<b>Commit message:</b> {commit_message}\n"
+        f"<b>Commit:</b> <a href='{commit_url}'>#{commit_sha[:7]}</a>\n"
         f"<b>Release:</b> <a href='{release_url}'>GitHub Release ↗</a>\n\n"
+        f"<b>Changes:</b>\n"
+        f"{changelog}\n\n"
         f"🚀 All APKs attached below."
     )
 

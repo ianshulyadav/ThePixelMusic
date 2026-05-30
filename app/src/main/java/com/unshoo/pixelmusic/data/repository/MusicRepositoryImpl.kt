@@ -273,6 +273,24 @@ class MusicRepositoryImpl @Inject constructor(
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
+    override fun getPaginatedYouTubeOnlyArtists(
+        sortOption: SortOption
+    ): Flow<PagingData<Artist>> {
+        return flowOf(
+            Pager(
+                config = defaultLibraryPagingConfig,
+                pagingSourceFactory = {
+                    musicDao.getYouTubeOnlyArtistsPaginated(
+                        sortOrder = sortOption.storageKey
+                    )
+                }
+            ).flow
+        ).flatMapLatest { it }
+            .map { pagingData -> pagingData.map { entity -> entity.toArtist() } }
+            .flowOn(Dispatchers.IO)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
     override fun getPaginatedFavoriteSongs(sortOption: SortOption, storageFilter: StorageFilter): Flow<PagingData<Song>> {
         return songRepository.getPaginatedFavoriteSongs(sortOption, storageFilter)
     }

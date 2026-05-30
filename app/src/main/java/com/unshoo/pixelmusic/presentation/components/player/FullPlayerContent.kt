@@ -43,6 +43,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -144,6 +145,7 @@ import com.unshoo.pixelmusic.presentation.viewmodel.LyricsSearchUiState
 import com.unshoo.pixelmusic.presentation.viewmodel.PlayerSheetState
 import com.unshoo.pixelmusic.presentation.viewmodel.PlayerViewModel
 import com.unshoo.pixelmusic.ui.theme.GoogleSansRounded
+import com.unshoo.pixelmusic.ui.theme.LocalPixelMusicDarkTheme
 import com.unshoo.pixelmusic.utils.AudioMetaUtils.mimeTypeToFormat
 import com.unshoo.pixelmusic.utils.LyricsImportFailureReason
 import com.unshoo.pixelmusic.utils.LyricsImportSecurity
@@ -1071,6 +1073,7 @@ fun FullPlayerContent(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .navigationBarsPadding()
                         .padding(bottom = 32.dp)
                 ) {
                     // Header: Cover + Metadata
@@ -2786,11 +2789,17 @@ private fun BottomToggleRow(
     val rowCorners = 60.dp
     val inactiveBg = LocalMaterialTheme.current.onSurface.copy(alpha = 0.07f)
     val inactiveContentColor = LocalMaterialTheme.current.onSurface
+    val isDark = LocalPixelMusicDarkTheme.current
+    val containerBg = if (isDark) {
+        LocalMaterialTheme.current.surfaceContainer.copy(alpha = 0.5f)
+    } else {
+        Color.White.copy(alpha = 0.9f)
+    }
 
 
     Box(
         modifier = modifier.background(
-            color = LocalMaterialTheme.current.surfaceContainer.copy(alpha = 0.35f),
+            color = containerBg,
             shape = AbsoluteSmoothCornerShape(
                 cornerRadiusBL = rowCorners,
                 smoothnessAsPercentTR = 60,
@@ -2829,9 +2838,9 @@ private fun BottomToggleRow(
                 modifier = commonModifier,
                 active = isShuffleEnabled,
                 enabled = !isShuffleTransitionInProgress,
-                activeColor = LocalMaterialTheme.current.primaryFixed,
+                activeColor = LocalMaterialTheme.current.primary,
                 activeCornerRadius = rowCorners,
-                activeContentColor = LocalMaterialTheme.current.onPrimaryFixed,
+                activeContentColor = LocalMaterialTheme.current.onPrimary,
                 inactiveColor = inactiveBg,
                 inactiveContentColor = inactiveContentColor,
                 onClick = onShuffleToggle,
@@ -2847,9 +2856,9 @@ private fun BottomToggleRow(
             ToggleSegmentButton(
                 modifier = commonModifier,
                 active = repeatActive,
-                activeColor = LocalMaterialTheme.current.secondaryFixed,
+                activeColor = LocalMaterialTheme.current.secondary,
                 activeCornerRadius = rowCorners,
-                activeContentColor = LocalMaterialTheme.current.onSecondaryFixed,
+                activeContentColor = LocalMaterialTheme.current.onSecondary,
                 inactiveColor = inactiveBg,
                 inactiveContentColor = inactiveContentColor,
                 onClick = onRepeatToggle,
@@ -2859,9 +2868,9 @@ private fun BottomToggleRow(
             ToggleSegmentButton(
                 modifier = commonModifier,
                 active = isFavorite,
-                activeColor = LocalMaterialTheme.current.tertiaryFixed,
+                activeColor = LocalMaterialTheme.current.tertiary,
                 activeCornerRadius = rowCorners,
-                activeContentColor = LocalMaterialTheme.current.onTertiaryFixed,
+                activeContentColor = LocalMaterialTheme.current.onTertiary,
                 inactiveColor = inactiveBg,
                 inactiveContentColor = inactiveContentColor,
                 onClick = onFavoriteToggle,

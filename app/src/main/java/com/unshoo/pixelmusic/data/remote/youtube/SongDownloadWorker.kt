@@ -145,7 +145,12 @@ class SongDownloadWorker(
 
     private fun parseYoutubeArtistNames(artistStr: String): List<String> {
         if (artistStr.isBlank()) return listOf("Unknown Artist")
-        return artistStr.split(",", "&", "•", " feat.", " ft.", " vs ").map { it.trim() }.filter { it.isNotEmpty() }
+        val parsed = artistStr
+            .split(Regex("\\s*[,/&;+、•]\\s*|\\s+(?:feat\\.|ft\\.|vs)\\s+|\\s+and\\s+", RegexOption.IGNORE_CASE))
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+        return if (parsed.isEmpty()) listOf("Unknown Artist") else parsed
     }
 
     private suspend fun ensureYoutubeSongInLibrary(song: Song) {

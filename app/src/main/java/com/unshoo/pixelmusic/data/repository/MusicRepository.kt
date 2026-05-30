@@ -45,6 +45,15 @@ interface MusicRepository {
     ): Flow<PagingData<Artist>>
 
     /**
+     * Returns paginated artists for the Library Artists tab, filtered to only
+     * YouTube Music artists (negative IDs). Excludes local MediaStore artists that
+     * may have unsplit combined artist strings.
+     */
+    fun getPaginatedYouTubeOnlyArtists(
+        sortOption: com.unshoo.pixelmusic.data.model.SortOption
+    ): Flow<PagingData<Artist>>
+
+    /**
      * Returns paginated favorite songs for efficient display.
      * @return Flow of PagingData<Song> for use with LazyPagingItems.
      */

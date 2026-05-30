@@ -2,6 +2,8 @@ package com.unshoo.pixelmusic.presentation.components
 
 import android.app.Activity
 import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -451,10 +453,30 @@ fun SongInfoBottomSheet(
                                                         .fillMaxHeight(),
                                                     onClick = {
                                                         try {
+                                                            val isYtSong = !song.youtubeId.isNullOrEmpty()
+                                                            val link = if (isYtSong) {
+                                                                "https://music.youtube.com/watch?v=${song.youtubeId}"
+                                                            } else {
+                                                                "https://github.com/ianshulyadav/PixelMusic"
+                                                            }
+                                                            
+                                                            // Copy to clipboard
+                                                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                                            val clip = ClipData.newPlainText(
+                                                                if (isYtSong) "YouTube Music Link" else "GitHub Link",
+                                                                link
+                                                            )
+                                                            clipboard.setPrimaryClip(clip)
+                                                            Toast.makeText(
+                                                                context,
+                                                                if (isYtSong) "YouTube Music link copied to clipboard" else "App link copied to clipboard",
+                                                                Toast.LENGTH_SHORT
+                                                            ).show()
+
+                                                            // Share the text link
                                                             val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                                                type = "audio/*"
-                                                                putExtra(Intent.EXTRA_STREAM, song.contentUriString.toUri())
-                                                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                                type = "text/plain"
+                                                                putExtra(Intent.EXTRA_TEXT, "${song.title} — ${song.displayArtist}\n🎵 $link")
                                                             }
                                                             context.startActivity(
                                                                 Intent.createChooser(
@@ -464,10 +486,10 @@ fun SongInfoBottomSheet(
                                                             )
                                                         } catch (e: Exception) {
                                                             Toast.makeText(
-                                                            context,
-                                                            context.getString(R.string.error_share_song_format, e.localizedMessage ?: ""),
-                                                            Toast.LENGTH_LONG
-                                                        ).show()
+                                                                context,
+                                                                context.getString(R.string.error_share_song_format, e.localizedMessage ?: ""),
+                                                                Toast.LENGTH_LONG
+                                                            ).show()
                                                         }
                                                     },
                                                     shape = CircleShape

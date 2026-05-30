@@ -1430,6 +1430,30 @@ interface MusicDao {
         sortOrder: String
     ): PagingSource<Int, ArtistEntity>
 
+    /**
+     * Returns only YouTube Music artists (id < 0) for the Library Artists tab.
+     * Filters out local MediaStore artists which may have combined/unsplit artist strings.
+     */
+    @Query("""
+        SELECT artists.id, artists.name, artists.image_url, artists.custom_image_uri,
+               artists.channel_id, COUNT(DISTINCT songs.id) AS track_count
+        FROM songs
+        INNER JOIN song_artist_cross_ref ON song_artist_cross_ref.song_id = songs.id
+        INNER JOIN artists ON artists.id = song_artist_cross_ref.artist_id
+        WHERE artists.id < 0
+        GROUP BY artists.id
+        ORDER BY
+            CASE WHEN :sortOrder = 'artist_name_az' THEN artists.name END COLLATE NOCASE ASC,
+            CASE WHEN :sortOrder = 'artist_name_za' THEN artists.name END COLLATE NOCASE DESC,
+            CASE WHEN :sortOrder = 'artist_num_songs_desc' THEN track_count END DESC,
+            CASE WHEN :sortOrder = 'artist_num_songs_asc' THEN track_count END ASC,
+            artists.name COLLATE NOCASE ASC,
+            artists.id ASC
+    """)
+    fun getYouTubeOnlyArtistsPaginated(
+        sortOrder: String
+    ): PagingSource<Int, ArtistEntity>
+
     @Query("""
         SELECT artists.id, artists.name, artists.image_url, artists.custom_image_uri,
                COUNT(DISTINCT songs.id) AS track_count

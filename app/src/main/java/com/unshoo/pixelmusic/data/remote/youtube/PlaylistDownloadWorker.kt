@@ -8,6 +8,7 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.unshoo.pixelmusic.data.database.youtube.AppDatabase
 import com.unshoo.pixelmusic.data.model.youtube.Song
+import com.unshoo.pixelmusic.data.model.youtube.PlaylistSongCrossRef
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -111,6 +112,13 @@ class PlaylistDownloadWorker(
                                     val mainId = -(15_000_000_000_000L + song.youtubeId.hashCode().toLong().absoluteValue)
                                     val parentDir = File(audioPath).parentFile?.absolutePath ?: ""
                                     musicDao.updateSongFilePathAndParent(mainId, audioPath, parentDir)
+                                    
+                                    playlistRepository.insertCrossRef(
+                                        PlaylistSongCrossRef(
+                                            playlistId = Constants.Downloads.DOWNLOADED_PLAYLIST_ID,
+                                            songId = song.youtubeId
+                                        )
+                                    )
                                 }
                                 UmihiNotificationManager.showPlaylistDownloadProgress(
                                     appContext,
@@ -164,7 +172,12 @@ class PlaylistDownloadWorker(
 
     private fun parseYoutubeArtistNames(artistStr: String): List<String> {
         if (artistStr.isBlank()) return listOf("Unknown Artist")
-        return artistStr.split(",", "&", "•", " feat.", " ft.", " vs ").map { it.trim() }.filter { it.isNotEmpty() }
+        val parsed = artistStr
+            .split(Regex("\\s*[,/&;+、•]\\s*|\\s+(?:feat\\.|ft\\.|vs)\\s+|\\s+and\\s+", RegexOption.IGNORE_CASE))
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+        return if (parsed.isEmpty()) listOf("Unknown Artist") else parsed
     }
 
     private suspend fun ensureYoutubeSongInLibrary(song: Song) {
