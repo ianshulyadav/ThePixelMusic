@@ -1,9 +1,18 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.dagger.hilt.android)
     alias(libs.plugins.ksp)
     alias(libs.plugins.kotlin.serialization)
+}
+
+val keystoreProperties = Properties().apply {
+    val propFile = rootProject.file("keystore.properties")
+    if (propFile.exists()) {
+        propFile.inputStream().use { load(it) }
+    }
 }
 
 android {
@@ -14,8 +23,21 @@ android {
         applicationId = "com.unshoo.pixelmusic"
         minSdk = 30
         targetSdk = 37
-        versionCode = (project.findProperty("APP_VERSION_CODE") as String).toInt()
-        versionName = project.findProperty("APP_VERSION_NAME") as String
+        versionCode = (project.findProperty("APP_VERSION_CODE") as? String)?.toInt() ?: 1
+        versionName = (project.findProperty("APP_VERSION_NAME") as? String) ?: "1.0.0"
+    }
+
+    val keystoreExists = rootProject.file("keystore.properties").exists() && rootProject.file("vz-pixelmusic.jks").exists()
+
+    signingConfigs {
+        if (keystoreExists) {
+            create("release") {
+                storeFile = rootProject.file("vz-pixelmusic.jks")
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
     }
 
     buildTypes {
@@ -26,6 +48,9 @@ android {
         }
 
         release {
+            if (keystoreExists) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
