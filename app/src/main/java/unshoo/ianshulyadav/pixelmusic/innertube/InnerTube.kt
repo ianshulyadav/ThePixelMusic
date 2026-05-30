@@ -39,6 +39,7 @@ import okhttp3.Dns
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.dnsoverhttps.DnsOverHttps
+import java.net.InetAddress
 import kotlinx.coroutines.delay
 import java.util.*
 import kotlin.io.encoding.Base64
@@ -101,19 +102,41 @@ class InnerTube {
             httpClient = createClient()
         }
 
+    private fun safelyGetInetAddress(host: String): InetAddress? {
+        return try {
+            InetAddress.getByName(host)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     private val cloudflareDns by lazy {
         val bootstrapClient = OkHttpClient.Builder().build()
+        val dnsIps = listOfNotNull(
+            safelyGetInetAddress("1.1.1.1"),
+            safelyGetInetAddress("1.0.0.1"),
+            safelyGetInetAddress("2606:4700:4700::1111"),
+            safelyGetInetAddress("2606:4700:4700::1001")
+        )
         DnsOverHttps.Builder()
             .client(bootstrapClient)
-            .url("https://1.1.1.1/dns-query".toHttpUrl())
+            .url("https://cloudflare-dns.com/dns-query".toHttpUrl())
+            .bootstrapDnsHosts(dnsIps)
             .build()
     }
 
     private val googleDns by lazy {
         val bootstrapClient = OkHttpClient.Builder().build()
+        val dnsIps = listOfNotNull(
+            safelyGetInetAddress("8.8.8.8"),
+            safelyGetInetAddress("8.8.4.4"),
+            safelyGetInetAddress("2001:4860:4860::8888"),
+            safelyGetInetAddress("2001:4860:4860::8844")
+        )
         DnsOverHttps.Builder()
             .client(bootstrapClient)
-            .url("https://8.8.8.8/dns-query".toHttpUrl())
+            .url("https://dns.google/dns-query".toHttpUrl())
+            .bootstrapDnsHosts(dnsIps)
             .build()
     }
 

@@ -1,56 +1,60 @@
 import os
 import subprocess
+import html
 
 def main():
     bot_token    = os.environ['TELEGRAM_BOT_TOKEN']
     chat_id      = os.environ['TELEGRAM_CHAT_ID']
     thread_id    = os.environ.get('TELEGRAM_THREAD_ID', '')
     version      = os.environ['VERSION_NAME']
-    changelog    = os.environ['CHANGELOG']
     commit_sha   = os.environ['COMMIT_SHA']
-    release_url  = os.environ['RELEASE_URL']
-    commit_url   = os.environ['COMMIT_URL']
 
     try:
         commit_author = subprocess.check_output(['git', 'log', '-1', '--pretty=format:%an']).decode('utf-8').strip()
-        commit_message = subprocess.check_output(['git', 'log', '-1', '--pretty=format:%s']).decode('utf-8').strip()
+        commit_message = subprocess.check_output(['git', 'log', '-1', '--pretty=format:%B']).decode('utf-8').strip()
+        commit_message = "\n".join([line for line in commit_message.split("\n") if line.strip()])
     except Exception:
         commit_author = "Unknown"
         commit_message = "New release build"
 
+    # HTML escape variables to avoid Telegram parsing errors
+    commit_author = html.escape(commit_author)
+    commit_message = html.escape(commit_message)
+
     caption = (
-        f"📱 <b>PixelMusic v{version} — Release</b>\n\n"
-        f"<b>Commit by:</b> {commit_author}\n"
-        f"<b>Commit message:</b> {commit_message}\n"
-        f"<b>Commit:</b> <a href='{commit_url}'>#{commit_sha[:7]}</a>\n"
-        f"<b>Release:</b> <a href='{release_url}'>GitHub Release ↗</a>\n\n"
-        f"<b>Changes:</b>\n"
-        f"{changelog}\n\n"
-        f"🚀 All APKs attached below."
+        f"Commit by: {commit_author}\n"
+        f"Commit\nmessage: {commit_message}\n"
+        f"Commit hash: #{commit_sha[:7]}\n"
+        f"Device: mobile, wearos\n"
+        f"ABI: arm64, armeabi, universal, x86_64\n"
+        f"Files: 5\n"
+        f"Version: Android >= 11"
     )
 
     apks = [
-        ("app/build/outputs/apk/release/app-universal-release.apk",   caption),
-        ("app/build/outputs/apk/release/app-arm64-v8a-release.apk",   "<code>arm64-v8a</code> — Modern phones (Pixel, Samsung, OnePlus…)"),
-        ("app/build/outputs/apk/release/app-armeabi-v7a-release.apk", "<code>armeabi-v7a</code> — Older / budget ARM phones"),
-        ("app/build/outputs/apk/release/app-x86_64-release.apk",      "<code>x86_64</code> — Emulators &amp; Chromebooks"),
+        ("wear/build/outputs/apk/release/wear-release.apk", "app-wearos-release.apk", caption),
+        ("app/build/outputs/apk/release/app-armeabi-v7a-release.apk", "app-mobile-armeabi-release.apk", ""),
+        ("app/build/outputs/apk/release/app-x86_64-release.apk", "app-mobile-x86_64-release.apk", ""),
+        ("app/build/outputs/apk/release/app-arm64-v8a-release.apk", "app-mobile-arm64-release.apk", ""),
+        ("app/build/outputs/apk/release/app-universal-release.apk", "app-mobile-universal-release.apk", ""),
     ]
 
     url = f"https://api.telegram.org/bot{bot_token}/sendDocument"
 
-    for apk_path, cap in apks:
+    for apk_path, display_name, cap in apks:
         args = [
             "curl", "-s",
-            "-F", f"document=@{apk_path}",
+            "-F", f"document=@{apk_path};filename={display_name}",
             "--form-string", f"chat_id={chat_id}",
             "--form-string", "parse_mode=HTML",
-            "--form-string", f"caption={cap}",
         ]
+        if cap:
+            args += ["--form-string", f"caption={cap}"]
         if thread_id:
             args += ["--form-string", f"message_thread_id={thread_id}"]
         args.append(url)
         
-        print(f"Sending {apk_path}...")
+        print(f"Sending {apk_path} as {display_name}...")
         result = subprocess.run(args, capture_output=True, text=True)
         print(f"Sent {apk_path}. Output: {result.stdout}")
         if result.stderr:
