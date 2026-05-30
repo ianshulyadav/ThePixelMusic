@@ -1703,11 +1703,11 @@ class PlaylistViewModel @Inject constructor(
     }
 
     private fun toUnifiedYoutubeAlbumId(albumName: String): Long {
-        return -(15_000_000_000_000L + albumName.hashCode().toLong().absoluteValue)
+        return -(16_000_000_000_000L + albumName.lowercase().hashCode().toLong().absoluteValue)
     }
 
     private fun toUnifiedYoutubeArtistId(artistName: String): Long {
-        return -(15_000_000_000_000L + artistName.hashCode().toLong().absoluteValue)
+        return -(17_000_000_000_000L + artistName.lowercase().hashCode().toLong().absoluteValue)
     }
 
     private fun parseYoutubeArtistNames(artistStr: String): List<String> {
@@ -1744,7 +1744,7 @@ class PlaylistViewModel @Inject constructor(
                         val allYtSongs = ytPlaylistPage.songs.toMutableList()
                         var continuation = ytPlaylistPage.songsContinuation ?: ytPlaylistPage.continuation
                         var pages = 0
-                        while (continuation != null && pages < 10) {
+                        while (continuation != null && pages < 20) {
                             var contResult = YouTube.playlistContinuation(continuation)
                             // Retry once on failure
                             if (contResult.isFailure) {
