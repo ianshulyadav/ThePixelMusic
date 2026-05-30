@@ -1983,7 +1983,10 @@ constructor(
 
     private fun parseYoutubeArtistNames(rawArtist: String): List<String> {
         if (rawArtist.isBlank()) return listOf("Unknown Artist")
-        val parsed = rawArtist.split(Regex("\\s*[,/&;+、]\\s*"))
+        // Split on common separators. Include " and " (with word-boundary spaces) to handle
+        // natural-language artist lists like "Armaan Khan and Sameer Khan".
+        val parsed = rawArtist
+            .split(Regex("\\s*[,/&;+、]\\s*|\\s+and\\s+", RegexOption.IGNORE_CASE))
             .map { it.trim() }
             .filter { it.isNotBlank() }
             .distinct()

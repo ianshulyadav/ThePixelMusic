@@ -65,6 +65,7 @@ internal fun MiniPlayerContentInternal(
     isPlaying: Boolean,
     isCastConnecting: Boolean,
     isPreparingPlayback: Boolean,
+    isBuffering: Boolean = false,
     onPlayPause: () -> Unit,
     onPrevious: () -> Unit,
     cornerRadiusAlb: Dp,
@@ -72,7 +73,7 @@ internal fun MiniPlayerContentInternal(
     modifier: Modifier = Modifier
 ) {
     val hapticFeedback = LocalHapticFeedback.current
-    val controlsEnabled = !isCastConnecting && !isPreparingPlayback
+    val controlsEnabled = !isCastConnecting && !isPreparingPlayback && !isBuffering
 
     val previousInteraction = remember { MutableInteractionSource() }
     val playPauseInteraction = remember { MutableInteractionSource() }
@@ -186,12 +187,19 @@ internal fun MiniPlayerContentInternal(
                 },
             contentAlignment = Alignment.Center
         ) {
-            Icon(
-                imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                contentDescription = if (isPlaying) "Pausar" else "Reproducir",
-                tint = LocalMaterialTheme.current.onPrimary,
-                modifier = Modifier.size(22.dp)
-            )
+            if (isPreparingPlayback || isBuffering) {
+                CircularWavyProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    color = LocalMaterialTheme.current.onPrimary
+                )
+            } else {
+                Icon(
+                    imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                    contentDescription = if (isPlaying) "Pausar" else "Reproducir",
+                    tint = LocalMaterialTheme.current.onPrimary,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
         }
 
         Spacer(modifier = Modifier.width(8.dp))

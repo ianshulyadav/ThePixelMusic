@@ -45,6 +45,10 @@ import dagger.hilt.components.SingletonComponent
 import com.unshoo.pixelmusic.presentation.viewmodel.ConnectivityStateHolder
 import com.unshoo.pixelmusic.data.preferences.UserPreferencesRepository
 import com.unshoo.pixelmusic.data.preferences.AlbumArtQuality
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Dispatchers
 
 @EntryPoint
 @InstallIn(SingletonComponent::class)
@@ -85,10 +89,13 @@ fun SmartImage(
     val connectivityStateHolder = entryPoint.connectivityStateHolder()
     val userPreferencesRepository = entryPoint.userPreferencesRepository()
 
-    val isMeteredNetwork by connectivityStateHolder.isMeteredNetwork.collectAsState()
-    val albumArtQualityWifi by userPreferencesRepository.albumArtQualityFlow.collectAsState(initial = AlbumArtQuality.ORIGINAL)
-    val albumArtQualityMobile by userPreferencesRepository.albumArtQualityMobileFlow.collectAsState(initial = AlbumArtQuality.ORIGINAL)
-    val performanceModeEnabled by userPreferencesRepository.performanceModeEnabledFlow.collectAsState(initial = false)
+    // Initialize the shared Compose State-backed cache once
+    SmartImageCache.initialize(connectivityStateHolder, userPreferencesRepository)
+
+    val isMeteredNetwork = SmartImageCache.isMeteredNetwork
+    val albumArtQualityWifi = SmartImageCache.albumArtQualityWifi
+    val albumArtQualityMobile = SmartImageCache.albumArtQualityMobile
+    val performanceModeEnabled = SmartImageCache.performanceModeEnabled
 
     val effectiveQuality = if (performanceModeEnabled) {
         AlbumArtQuality.LOW
@@ -307,5 +314,45 @@ private fun Placeholder(
             modifier = Modifier.size(32.dp),
             contentScale = ContentScale.Fit
         )
+    }
+}
+
+object SmartImageCache {
+    var isMeteredNetwork by androidx.compose.runtime.mutableStateOf(false)
+    var albumArtQualityWifi by androidx.compose.runtime.mutableStateOf(AlbumArtQuality.ORIGINAL)
+    var albumArtQualityMobile by androidx.compose.runtime.mutableStateOf(AlbumArtQuality.ORIGINAL)
+    var performanceModeEnabled by androidx.compose.runtime.mutableStateOf(false)
+
+    @Volatile
+    private var isInitialized = false
+    private val cacheScope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main.immediate
+    )
+
+    fun initialize(
+        connectivityStateHolder: ConnectivityStateHolder,
+        userPreferencesRepository: UserPreferencesRepository
+    ) {
+        if (isInitialized) return
+        synchronized(this) {
+            if (isInitialized) return
+            isInitialized = true
+        }
+
+        // Pre-warm with initial values from ConnectivityStateHolder
+        isMeteredNetwork = connectivityStateHolder.isMeteredNetwork.value
+
+        cacheScope.launch {
+            connectivityStateHolder.isMeteredNetwork.collect { isMeteredNetwork = it }
+        }
+        cacheScope.launch {
+            userPreferencesRepository.albumArtQualityFlow.collect { albumArtQualityWifi = it }
+        }
+        cacheScope.launch {
+            userPreferencesRepository.albumArtQualityMobileFlow.collect { albumArtQualityMobile = it }
+        }
+        cacheScope.launch {
+            userPreferencesRepository.performanceModeEnabledFlow.collect { performanceModeEnabled = it }
+        }
     }
 }

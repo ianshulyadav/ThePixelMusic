@@ -379,9 +379,10 @@ fun ShareBottomSheet(
                                             modifier = Modifier
                                                 .fillMaxSize()
                                                 .background(
-                                                    brush = Brush.verticalGradient(
+                                                    brush = Brush.linearGradient(
                                                         colors = listOf(
                                                             colorScheme.primaryContainer,
+                                                            colorScheme.secondaryContainer.copy(alpha = 0.6f),
                                                             colorScheme.surfaceContainerLow
                                                         )
                                                     )
@@ -401,9 +402,10 @@ fun ShareBottomSheet(
                                             modifier = Modifier
                                                 .fillMaxSize()
                                                 .background(
-                                                    brush = Brush.verticalGradient(
+                                                    brush = Brush.linearGradient(
                                                         colors = listOf(
-                                                            primaryColor,
+                                                            primaryColor.copy(alpha = 0.85f),
+                                                            tertiaryColor.copy(alpha = 0.7f),
                                                             colorScheme.surfaceContainerHighest
                                                         )
                                                     )
@@ -587,25 +589,25 @@ fun ShareBottomSheet(
                         )
                     }
 
-                    // Copy YT Link (if available)
+                    // Copy YT Music Link (if available)
                     if (!song.youtubeId.isNullOrEmpty()) {
                         item {
                             ShareActionChip(
                                 icon = {
                                     Icon(
-                                        imageVector = Icons.Rounded.Link,
+                                        imageVector = Icons.Rounded.MusicNote,
                                         contentDescription = null,
                                         modifier = Modifier.size(22.dp)
                                     )
                                 },
-                                label = stringResource(R.string.share_action_copy_yt_link),
+                                label = "YT Music Link",
                                 containerColor = Color(0xFFFF0000).copy(alpha = 0.12f),
                                 contentColor = Color(0xFFFF0000),
                                 onClick = {
-                                    val ytLink = "https://youtu.be/${song.youtubeId}"
+                                    val ytMusicLink = "https://music.youtube.com/watch?v=${song.youtubeId}"
                                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                    clipboard.setPrimaryClip(ClipData.newPlainText("YouTube Link", ytLink))
-                                    Toast.makeText(context, context.getString(R.string.share_link_copied), Toast.LENGTH_SHORT).show()
+                                    clipboard.setPrimaryClip(ClipData.newPlainText("YouTube Music Link", ytMusicLink))
+                                    Toast.makeText(context, "YouTube Music link copied", Toast.LENGTH_SHORT).show()
                                 }
                             )
                         }
@@ -632,17 +634,18 @@ fun ShareBottomSheet(
                                         "${context.packageName}.fileprovider",
                                         file
                                     )
+                                    // Include YouTube Music link when sharing a YT song
+                                    val linkSuffix = if (!song.youtubeId.isNullOrEmpty()) {
+                                        "\n🎵 https://music.youtube.com/watch?v=${song.youtubeId}"
+                                    } else {
+                                        "\n$GITHUB_LINK"
+                                    }
                                     val shareIntent = Intent(Intent.ACTION_SEND).apply {
                                         type = "image/png"
                                         putExtra(Intent.EXTRA_STREAM, uri)
                                         putExtra(
                                             Intent.EXTRA_TEXT,
-                                            context.getString(
-                                                R.string.share_text_format,
-                                                song.title,
-                                                song.displayArtist,
-                                                GITHUB_LINK
-                                            )
+                                            "${song.title} — ${song.displayArtist}$linkSuffix"
                                         )
                                         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                                     }
@@ -673,16 +676,51 @@ fun ShareBottomSheet(
                     }
                 )
 
-                ShareListItem(
-                    icon = Icons.Rounded.ContentCopy,
-                    title = stringResource(R.string.share_action_copy_github_link),
-                    subtitle = GITHUB_LINK,
-                    onClick = {
-                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        clipboard.setPrimaryClip(ClipData.newPlainText("GitHub", GITHUB_LINK))
-                        Toast.makeText(context, context.getString(R.string.share_link_copied), Toast.LENGTH_SHORT).show()
-                    }
-                )
+                // Open in YouTube Music (for YT songs) or GitHub link (for local songs)
+                if (!song.youtubeId.isNullOrEmpty()) {
+                    val ytMusicLink = "https://music.youtube.com/watch?v=${song.youtubeId}"
+                    ShareListItem(
+                        icon = Icons.Rounded.OpenInNew,
+                        title = "Open in YouTube Music",
+                        subtitle = ytMusicLink,
+                        onClick = {
+                            val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(ytMusicLink)).apply {
+                                // Try to open in the YT Music app first
+                                setPackage("com.google.android.apps.youtube.music")
+                            }
+                            val resolved = context.packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
+                            if (resolved != null) {
+                                context.startActivity(intent)
+                            } else {
+                                // Fallback: open in browser
+                                context.startActivity(
+                                    Intent(Intent.ACTION_VIEW, android.net.Uri.parse(ytMusicLink))
+                                )
+                            }
+                        }
+                    )
+                    ShareListItem(
+                        icon = Icons.Rounded.ContentCopy,
+                        title = "Copy YouTube Music Link",
+                        subtitle = ytMusicLink,
+                        onClick = {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            clipboard.setPrimaryClip(ClipData.newPlainText("YouTube Music Link", ytMusicLink))
+                            Toast.makeText(context, "YouTube Music link copied", Toast.LENGTH_SHORT).show()
+                        }
+                    )
+                } else {
+                    ShareListItem(
+                        icon = Icons.Rounded.ContentCopy,
+                        title = stringResource(R.string.share_action_copy_github_link),
+                        subtitle = GITHUB_LINK,
+                        onClick = {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            clipboard.setPrimaryClip(ClipData.newPlainText("GitHub", GITHUB_LINK))
+                            Toast.makeText(context, context.getString(R.string.share_link_copied), Toast.LENGTH_SHORT).show()
+                        }
+                    )
+                }
             }
         }
     }
@@ -735,9 +773,10 @@ private fun ShareableCard(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(
-                            brush = Brush.verticalGradient(
+                            brush = Brush.linearGradient(
                                 colors = listOf(
-                                    colorScheme.primaryContainer.copy(alpha = 0.95f),
+                                    colorScheme.primaryContainer,
+                                    colorScheme.secondaryContainer.copy(alpha = 0.6f),
                                     colorScheme.surfaceContainerLow
                                 )
                             )
@@ -749,10 +788,11 @@ private fun ShareableCard(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(
-                            brush = Brush.verticalGradient(
+                            brush = Brush.linearGradient(
                                 colors = listOf(
-                                    primaryColor.copy(alpha = 0.9f),
-                                    colorScheme.surfaceContainerHighest.copy(alpha = 0.95f)
+                                    primaryColor.copy(alpha = 0.85f),
+                                    tertiaryColor.copy(alpha = 0.7f),
+                                    colorScheme.surfaceContainerHighest
                                 )
                             )
                         )
@@ -769,7 +809,20 @@ private fun ShareableCard(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(Color.Black.copy(alpha = 0.55f))
+                            .background(Color.Black.copy(alpha = 0.45f))
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                brush = Brush.radialGradient(
+                                    colors = listOf(
+                                        Color.Transparent,
+                                        Color.Black.copy(alpha = 0.6f)
+                                    ),
+                                    radius = 1000f
+                                )
+                            )
                     )
                 }
             }
@@ -777,27 +830,27 @@ private fun ShareableCard(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color(0xFF0A0A0A))
+                        .background(Color(0xFF070707))
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(380.dp)
+                            .size(420.dp)
                             .align(Alignment.TopStart)
-                            .offset(x = (-100).dp, y = (-50).dp)
+                            .offset(x = (-120).dp, y = (-60).dp)
                             .background(
                                 brush = Brush.radialGradient(
-                                    colors = listOf(primaryColor.copy(alpha = 0.15f), Color.Transparent)
+                                    colors = listOf(primaryColor.copy(alpha = 0.18f), Color.Transparent)
                                 )
                             )
                     )
                     Box(
                         modifier = Modifier
-                            .size(380.dp)
+                            .size(420.dp)
                             .align(Alignment.BottomEnd)
-                            .offset(x = 100.dp, y = 50.dp)
+                            .offset(x = 120.dp, y = 60.dp)
                             .background(
                                 brush = Brush.radialGradient(
-                                    colors = listOf(primaryColor.copy(alpha = 0.12f), Color.Transparent)
+                                    colors = listOf(primaryColor.copy(alpha = 0.15f), Color.Transparent)
                                 )
                             )
                     )
@@ -826,7 +879,7 @@ private fun ShareableCard(
                 .fillMaxSize()
                 .background(
                     brush = Brush.radialGradient(
-                        colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.5f)),
+                        colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.45f)),
                         radius = 1200f
                     )
                 )
@@ -842,31 +895,31 @@ private fun ShareableCard(
         ) {
             Spacer(Modifier.height(8.dp))
 
-            // Centerpiece Floating Card
+            // Centerpiece Floating Card (Player Styled & Frost Blended)
             Card(
                 modifier = Modifier
-                    .fillMaxWidth(0.84f)
+                    .fillMaxWidth(0.79f)
                     .weight(1f, fill = false)
-                    .shadow(24.dp, shape = RoundedCornerShape(24.dp)),
-                shape = RoundedCornerShape(24.dp),
+                    .shadow(16.dp, shape = RoundedCornerShape(22.dp)),
+                shape = RoundedCornerShape(22.dp),
                 colors = CardDefaults.cardColors(
-                    containerColor = Color(0xFF0F0F0F).copy(alpha = 0.72f)
+                    containerColor = Color.Black.copy(alpha = 0.35f)
                 ),
-                border = BorderStroke(1.2.dp, Color.White.copy(alpha = 0.15f))
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.18f))
             ) {
                 if (!isLyricsMode) {
-                    // SONG SHARE CARD
+                    // SONG SHARE CARD (MINI PLAYER WIDGET DESIGN)
                     Column(
-                        modifier = Modifier.padding(10.dp),
-                        horizontalAlignment = Alignment.Start
+                        modifier = Modifier.padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        // Square Album Art
+                        // 1. Square Album Art with soft glow
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .aspectRatio(1f)
-                                .shadow(8.dp, shape = RoundedCornerShape(12.dp), clip = true)
-                                .clip(RoundedCornerShape(12.dp))
+                                .shadow(12.dp, shape = RoundedCornerShape(14.dp), clip = true)
+                                .clip(RoundedCornerShape(14.dp))
                         ) {
                             SmartImage(
                                 model = song.albumArtUriString,
@@ -876,18 +929,18 @@ private fun ShareableCard(
                             )
                         }
 
-                        Spacer(Modifier.height(8.dp))
+                        Spacer(Modifier.height(14.dp))
 
-                        // Song Details
+                        // 2. Song Details (Left-aligned for a modern player layout)
                         Column(
                             verticalArrangement = Arrangement.spacedBy(2.dp),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)
                         ) {
                             Text(
                                 text = song.title,
                                 fontFamily = GoogleSansRounded,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 17.sp,
+                                fontSize = 18.sp,
                                 color = Color.White,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -896,23 +949,109 @@ private fun ShareableCard(
                                 text = song.displayArtist,
                                 fontFamily = GoogleSansRounded,
                                 fontWeight = FontWeight.Medium,
-                                fontSize = 12.sp,
+                                fontSize = 13.sp,
                                 color = Color.White.copy(alpha = 0.65f),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
 
-                        Spacer(Modifier.height(8.dp))
+                        Spacer(Modifier.height(16.dp))
 
-                        // Official Branding Row
+                        // 3. Sleek Progress / Seek Bar
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "1:24",
+                                color = Color.White.copy(alpha = 0.5f),
+                                fontSize = 10.sp,
+                                fontFamily = GoogleSansRounded,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(4.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White.copy(alpha = 0.2f))
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxHeight()
+                                        .fillMaxWidth(0.38f)
+                                        .clip(CircleShape)
+                                        .background(
+                                            brush = Brush.horizontalGradient(
+                                                colors = listOf(primaryColor, tertiaryColor)
+                                            )
+                                        )
+                                )
+                            }
+                            Text(
+                                text = "3:40",
+                                color = Color.White.copy(alpha = 0.5f),
+                                fontSize = 10.sp,
+                                fontFamily = GoogleSansRounded,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        Spacer(Modifier.height(18.dp))
+
+                        // 4. Playback Controls Row
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.SkipPrevious,
+                                contentDescription = null,
+                                tint = Color.White.copy(alpha = 0.85f),
+                                modifier = Modifier.size(24.dp)
+                            )
+                            
+                            Spacer(modifier = Modifier.width(20.dp))
+
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White)
+                                    .shadow(4.dp, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.PlayArrow,
+                                    contentDescription = null,
+                                    tint = Color.Black,
+                                    modifier = Modifier.size(26.dp)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(20.dp))
+
+                            Icon(
+                                imageVector = Icons.Rounded.SkipNext,
+                                contentDescription = null,
+                                tint = Color.White.copy(alpha = 0.85f),
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+
+                        Spacer(Modifier.height(18.dp))
+
+                        // 5. Official Branding Row
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(18.dp)
+                                    .size(16.dp)
                                     .clip(RoundedCornerShape(4.dp))
                                     .background(primaryColor),
                                 contentAlignment = Alignment.Center
@@ -922,7 +1061,7 @@ private fun ShareableCard(
                                     contentDescription = null,
                                     tint = onPrimaryColor,
                                     modifier = Modifier
-                                        .padding(3.dp)
+                                        .padding(2.5.dp)
                                         .fillMaxSize()
                                 )
                             }
@@ -931,34 +1070,37 @@ private fun ShareableCard(
                                 fontFamily = GoogleSansRounded,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 11.sp,
-                                color = Color.White
+                                color = Color.White,
+                                letterSpacing = 0.5.sp
                             )
                         }
                     }
                 } else {
                     // LYRICS SHARE CARD
                     Column(
-                        modifier = Modifier.padding(12.dp)
+                        modifier = Modifier.padding(16.dp)
                     ) {
-                        // Card Header
+                        // 1. Header (Mini Song Card style)
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
                             SmartImage(
                                 model = song.albumArtUriString,
                                 contentDescription = null,
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(RoundedCornerShape(6.dp))
+                                    .size(44.dp)
+                                    .shadow(4.dp, RoundedCornerShape(8.dp), clip = true)
+                                    .clip(RoundedCornerShape(8.dp))
                             )
-                            Column {
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = song.title,
                                     fontFamily = GoogleSansRounded,
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 13.sp,
+                                    fontSize = 14.sp,
                                     color = Color.White,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
@@ -967,7 +1109,7 @@ private fun ShareableCard(
                                     text = song.displayArtist,
                                     fontFamily = GoogleSansRounded,
                                     fontWeight = FontWeight.Medium,
-                                    fontSize = 11.sp,
+                                    fontSize = 12.sp,
                                     color = Color.White.copy(alpha = 0.6f),
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
@@ -975,15 +1117,13 @@ private fun ShareableCard(
                             }
                         }
 
-                        Spacer(Modifier.height(8.dp))
-
+                        Spacer(Modifier.height(12.dp))
                         HorizontalDivider(color = Color.White.copy(alpha = 0.12f), thickness = 1.dp)
+                        Spacer(Modifier.height(14.dp))
 
-                        Spacer(Modifier.height(8.dp))
-
-                        // Verses Quote Block
+                        // 2. Verses Quote Block
                         Column(
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             if (selectedLyrics.isEmpty()) {
@@ -994,64 +1134,111 @@ private fun ShareableCard(
                                     fontSize = 14.sp,
                                     color = Color.White.copy(alpha = 0.4f),
                                     textAlign = TextAlign.Center,
-                                    modifier = Modifier.fillMaxWidth()
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp)
                                 )
                             } else {
                                 val fontSize = when (selectedLyrics.size) {
-                                    1 -> 20.sp
+                                    1 -> 19.sp
                                     2, 3 -> 16.sp
                                     else -> 13.sp
                                 }
                                 val lineHeight = when (selectedLyrics.size) {
-                                    1 -> 26.sp
-                                    2, 3 -> 22.sp
-                                    else -> 18.sp
+                                    1 -> 25.sp
+                                    2, 3 -> 21.sp
+                                    else -> 17.sp
                                 }
                                 selectedLyrics.forEach { line ->
-                                    Text(
-                                        text = line,
-                                        fontFamily = GoogleSansRounded,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = fontSize,
-                                        lineHeight = lineHeight,
-                                        color = Color.White,
-                                        textAlign = TextAlign.Start
-                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.Top,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.FormatQuote,
+                                            contentDescription = null,
+                                            tint = primaryColor.copy(alpha = 0.6f),
+                                            modifier = Modifier.size(16.dp).offset(y = 2.dp)
+                                        )
+                                        Text(
+                                            text = line,
+                                            fontFamily = GoogleSansRounded,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = fontSize,
+                                            lineHeight = lineHeight,
+                                            color = Color.White,
+                                            textAlign = TextAlign.Start,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
                                 }
                             }
                         }
 
                         Spacer(Modifier.weight(1f))
 
-                        Spacer(Modifier.height(8.dp))
+                        Spacer(Modifier.height(12.dp))
 
-                        // App Branding Row
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        // 3. Mini Progress line to match Player widget theme
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(3.dp)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.15f))
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(18.dp)
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(primaryColor),
-                                contentAlignment = Alignment.Center
+                                    .fillMaxHeight()
+                                    .fillMaxWidth(0.55f)
+                                    .clip(CircleShape)
+                                    .background(primaryColor)
+                            )
+                        }
+
+                        Spacer(Modifier.height(14.dp))
+
+                        // 4. App Branding Row
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Icon(
-                                    painter = painterResource(R.drawable.pixelmusic_base_monochrome),
-                                    contentDescription = null,
-                                    tint = onPrimaryColor,
+                                Box(
                                     modifier = Modifier
-                                        .padding(3.dp)
-                                        .fillMaxSize()
+                                        .size(16.dp)
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(primaryColor),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        painter = painterResource(R.drawable.pixelmusic_base_monochrome),
+                                        contentDescription = null,
+                                        tint = onPrimaryColor,
+                                        modifier = Modifier
+                                            .padding(2.5.dp)
+                                            .fillMaxSize()
+                                    )
+                                }
+                                Text(
+                                    text = "PixelMusic",
+                                    fontFamily = GoogleSansRounded,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.sp,
+                                    color = Color.White
                                 )
                             }
+                            
                             Text(
-                                text = "PixelMusic",
+                                text = "Lyric Card",
                                 fontFamily = GoogleSansRounded,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 11.sp,
-                                color = Color.White
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 9.sp,
+                                color = Color.White.copy(alpha = 0.4f),
+                                letterSpacing = 1.sp
                             )
                         }
                     }

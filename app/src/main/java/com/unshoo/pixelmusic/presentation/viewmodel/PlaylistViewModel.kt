@@ -97,6 +97,9 @@ class PlaylistViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(PlaylistUiState())
     val uiState: StateFlow<PlaylistUiState> = _uiState.asStateFlow()
 
+    private val _syncingPlaylists = MutableStateFlow<Set<String>>(emptySet())
+    val syncingPlaylists: StateFlow<Set<String>> = _syncingPlaylists.asStateFlow()
+
     private var currentPlaylistSetVideoIds: List<String> = emptyList()
 
     val youtubeLoggedInFlow = datastoreRepository.cookies
@@ -1704,6 +1707,180 @@ class PlaylistViewModel @Inject constructor(
         val source = _uiState.value.currentPlaylistDetails?.source
         if (source == "YOUTUBE") {
             loadPlaylistDetails(currentId)
+        }
+    }
+
+    private fun toUnifiedYoutubeSongId(youtubeId: String): Long {
+        return -(15_000_000_000_000L + youtubeId.hashCode().toLong().absoluteValue)
+    }
+
+    private fun toUnifiedYoutubeAlbumId(albumName: String): Long {
+        return -(15_000_000_000_000L + albumName.hashCode().toLong().absoluteValue)
+    }
+
+    private fun toUnifiedYoutubeArtistId(artistName: String): Long {
+        return -(15_000_000_000_000L + artistName.hashCode().toLong().absoluteValue)
+    }
+
+    private fun parseYoutubeArtistNames(artistStr: String): List<String> {
+        if (artistStr.isBlank()) return listOf("Unknown Artist")
+        // Split on common separators including natural-language " and " connector
+        val parsed = artistStr
+            .split(Regex("\\s*[,/&;+、•]\\s*|\\s+(?:feat\\.|ft\\.|vs)\\s+|\\s+and\\s+", RegexOption.IGNORE_CASE))
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+        return if (parsed.isEmpty()) listOf("Unknown Artist") else parsed
+    }
+
+    fun syncYouTubePlaylist(playlistId: String) {
+        if (_syncingPlaylists.value.contains(playlistId)) return
+        _syncingPlaylists.update { it + playlistId }
+        
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val playlist = playlistPreferencesRepository.userPlaylistsFlow.first().find { it.id == playlistId }
+                if (playlist != null && playlist.source == "YOUTUBE") {
+                    val ytPlaylistResult = YouTube.playlist(playlistId)
+                    if (ytPlaylistResult.isSuccess) {
+                        val ytPlaylistPage = ytPlaylistResult.getOrThrow()
+                        val ytPlaylist = ytPlaylistPage.playlist
+                        val allYtSongs = ytPlaylistPage.songs.toMutableList()
+                        var continuation = ytPlaylistPage.songsContinuation ?: ytPlaylistPage.continuation
+                        var pages = 0
+                        while (continuation != null && pages < 10) {
+                            val contResult = YouTube.playlistContinuation(continuation)
+                            if (contResult.isSuccess) {
+                                val contPage = contResult.getOrThrow()
+                                allYtSongs.addAll(contPage.songs)
+                                continuation = contPage.continuation
+                                pages++
+                            } else {
+                                break
+                            }
+                        }
+                        val allNativeSongs = allYtSongs.map { it.toNativeSong() }
+                        
+                        // Insert standard Room entity fields
+                        val songsToInsert = allNativeSongs.map { song ->
+                            val parsedArtists = parseYoutubeArtistNames(song.artist)
+                            val primaryArtistName = parsedArtists.firstOrNull() ?: "Unknown Artist"
+                            val primaryArtistId = toUnifiedYoutubeArtistId(primaryArtistName)
+                            
+                            val artistsJson = try {
+                                val arr = org.json.JSONArray()
+                                parsedArtists.forEachIndexed { idx, name ->
+                                    val obj = org.json.JSONObject()
+                                    obj.put("id", toUnifiedYoutubeArtistId(name))
+                                    obj.put("name", name)
+                                    obj.put("primary", idx == 0)
+                                    arr.put(obj)
+                                }
+                                arr.toString()
+                            } catch (e: Exception) {
+                                null
+                            }
+                            
+                            val songId = toUnifiedYoutubeSongId(song.id)
+                            SongEntity(
+                                id = songId,
+                                title = song.title,
+                                artistName = song.artist,
+                                artistId = primaryArtistId,
+                                albumArtist = null,
+                                albumName = "YouTube Music",
+                                albumId = toUnifiedYoutubeAlbumId("YouTube Music"),
+                                contentUriString = "youtube://${song.id}",
+                                albumArtUriString = song.albumArtUriString,
+                                duration = song.duration,
+                                genre = "YouTube Music",
+                                filePath = "",
+                                parentDirectoryPath = "youtube://",
+                                isFavorite = false,
+                                lyrics = null,
+                                trackNumber = 0,
+                                year = 0,
+                                dateAdded = System.currentTimeMillis(),
+                                mimeType = "audio/webm",
+                                bitrate = null,
+                                sampleRate = null,
+                                telegramChatId = null,
+                                telegramFileId = null,
+                                artistsJson = artistsJson,
+                                sourceType = SourceType.YOUTUBE
+                            )
+                        }
+                        
+                        // We also need to map the unique albums and artists to insert them to avoid foreign key violations
+                        val uniqueArtists = allNativeSongs.flatMap { parseYoutubeArtistNames(it.artist) }.distinct().map { name ->
+                            ArtistEntity(
+                                id = toUnifiedYoutubeArtistId(name),
+                                name = name,
+                                trackCount = 0,
+                                imageUrl = null
+                            )
+                        }
+                        
+                        val crossRefs = allNativeSongs.flatMap { song ->
+                            val parsedArtists = parseYoutubeArtistNames(song.artist)
+                            parsedArtists.mapIndexed { index, name ->
+                                SongArtistCrossRef(
+                                    songId = toUnifiedYoutubeSongId(song.id),
+                                    artistId = toUnifiedYoutubeArtistId(name),
+                                    isPrimary = index == 0
+                                )
+                            }
+                        }
+                        
+                        val albumToInsert = AlbumEntity(
+                            id = toUnifiedYoutubeAlbumId("YouTube Music"),
+                            title = "YouTube Music",
+                            artistName = "YouTube Music",
+                            artistId = toUnifiedYoutubeArtistId("YouTube Music"),
+                            songCount = 0,
+                            dateAdded = System.currentTimeMillis(),
+                            year = 0,
+                            albumArtUriString = ytPlaylist.thumbnail
+                        )
+                        
+                        musicDao.incrementalSyncMusicData(
+                            songs = songsToInsert,
+                            albums = listOf(albumToInsert),
+                            artists = uniqueArtists,
+                            crossRefs = crossRefs,
+                            deletedSongIds = emptyList()
+                        )
+                        
+                        val updatedIds = allNativeSongs.map { it.id }
+                        playlistPreferencesRepository.updatePlaylist(
+                            playlist.copy(
+                                name = ytPlaylist.title,
+                                songIds = updatedIds,
+                                coverImageUri = ytPlaylist.thumbnail
+                            )
+                        )
+                        
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(context, "Playlist sync successful!", Toast.LENGTH_SHORT).show()
+                        }
+                        
+                        if (_uiState.value.currentPlaylistDetails?.id == playlistId) {
+                            loadPlaylistDetails(playlistId)
+                        }
+                    } else {
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(context, "Failed to sync playlist from YouTube", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("PlaylistViewModel", "Failed to sync YouTube playlist: $playlistId", e)
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "Sync failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            } finally {
+                _syncingPlaylists.update { it - playlistId }
+            }
         }
     }
 }

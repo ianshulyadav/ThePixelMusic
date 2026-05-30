@@ -2,6 +2,7 @@ package com.unshoo.pixelmusic.presentation.screens
 
 import com.unshoo.pixelmusic.presentation.navigation.navigateSafely
 import com.unshoo.pixelmusic.presentation.navigation.navigateSafelyReplacing
+import android.widget.Toast
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -182,6 +183,11 @@ fun PlaylistDetailScreen(
     val currentPlaylist = uiState.currentPlaylistDetails
     val isFolderPlaylist = currentPlaylist?.id?.startsWith(FOLDER_PLAYLIST_PREFIX) == true
     val songsInPlaylist = uiState.currentPlaylistSongs
+    val isPlaylistFullyDownloaded by remember(songsInPlaylist) {
+        derivedStateOf {
+            songsInPlaylist.isNotEmpty() && songsInPlaylist.all { it.path.isNotBlank() }
+        }
+    }
 
     LaunchedEffect(playlistId) {
         playlistViewModel.loadPlaylistDetails(playlistId)
@@ -548,16 +554,20 @@ fun PlaylistDetailScreen(
 
                         FilledTonalIconButton(
                             onClick = {
-                                playerViewModel.downloadPlaylistSongs(currentPlaylist.id, currentPlaylist.songIds)
+                                if (isPlaylistFullyDownloaded) {
+                                    Toast.makeText(context, "Playlist already fully downloaded", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    playerViewModel.downloadPlaylistSongs(currentPlaylist.id, currentPlaylist.songIds)
+                                }
                             },
                             colors = IconButtonDefaults.filledTonalIconButtonColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                contentColor = MaterialTheme.colorScheme.onSurface
+                                containerColor = if (isPlaylistFullyDownloaded) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                                contentColor = if (isPlaylistFullyDownloaded) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
                             ),
                             modifier = Modifier.size(actionButtonsHeight)
                         ) {
                             Icon(
-                                imageVector = Icons.Rounded.Download,
+                                imageVector = if (isPlaylistFullyDownloaded) Icons.Rounded.Check else Icons.Rounded.Download,
                                 contentDescription = downloadPlaylistLabel
                             )
                         }
@@ -794,16 +804,18 @@ fun PlaylistDetailScreen(
                         }
                     )
                 }
-                PlaylistActionItem(
-                    icon = rememberVectorPainter(Icons.Rounded.Download),
-                    label = downloadPlaylistLabel,
-                    onClick = {
-                        showPlaylistOptionsSheet = false
-                        currentPlaylist?.let { playlist ->
-                            playerViewModel.downloadPlaylistSongs(playlist.id, playlist.songIds)
+                if (!isPlaylistFullyDownloaded) {
+                    PlaylistActionItem(
+                        icon = rememberVectorPainter(Icons.Rounded.Download),
+                        label = downloadPlaylistLabel,
+                        onClick = {
+                            showPlaylistOptionsSheet = false
+                            currentPlaylist?.let { playlist ->
+                                playerViewModel.downloadPlaylistSongs(playlist.id, playlist.songIds)
+                            }
                         }
-                    }
-                )
+                    )
+                }
             }
         }
     }

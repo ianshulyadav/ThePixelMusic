@@ -13,6 +13,7 @@ import androidx.media3.common.Player
 import com.unshoo.pixelmusic.R
 import com.unshoo.pixelmusic.presentation.components.LocalMaterialTheme
 import com.unshoo.pixelmusic.presentation.components.ToggleSegmentButton
+import com.unshoo.pixelmusic.ui.theme.LocalPixelMusicDarkTheme
 import racra.compose.smooth_corner_rect_library.AbsoluteSmoothCornerShape
 
 @Composable
@@ -32,14 +33,20 @@ fun BottomToggleRow(
     onActiveColorTertiary: Color = MaterialTheme.colorScheme.onTertiary,
     inactiveColor: Color = MaterialTheme.colorScheme.surfaceContainerHighest,
     inactiveContentColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
-    containerColor: Color = MaterialTheme.colorScheme.surfaceContainer
+    containerColor: Color? = null
 ) {
     val isFavorite = isFavoriteProvider()
     val rowCorners = 60.dp
+    val isDark = LocalPixelMusicDarkTheme.current
+    val resolvedContainerColor = containerColor ?: if (isDark) {
+        MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.5f)
+    } else {
+        Color.White.copy(alpha = 0.9f)
+    }
 
     Box(
         modifier = modifier.background(
-            color = containerColor,
+            color = resolvedContainerColor,
             shape = AbsoluteSmoothCornerShape(
                 cornerRadiusBL = rowCorners,
                 smoothnessAsPercentTR = 60,

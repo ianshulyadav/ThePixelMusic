@@ -54,6 +54,14 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.unshoo.pixelmusic.presentation.viewmodel.PlaylistViewModel
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material3.IconButton
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -357,6 +365,7 @@ fun PlaylistItem(
     onLongPress: () -> Unit = {},
     onPlaylistSelectionToggle: () -> Unit = {}
 ) {
+    val playlistViewModel: PlaylistViewModel = hiltViewModel()
     val playlistPreviewSongIds = remember(playlist.songIds) {
         playlist.songIds.take(4)
     }
@@ -526,6 +535,40 @@ fun PlaylistItem(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            }
+
+            if (playlist.source == "YOUTUBE") {
+                val syncingPlaylists by playlistViewModel.syncingPlaylists.collectAsStateWithLifecycle()
+                val isSyncing = syncingPlaylists.contains(playlist.id)
+
+                val transition = rememberInfiniteTransition(label = "syncRotation")
+                val rotationAngle by transition.animateFloat(
+                    initialValue = 0f,
+                    targetValue = if (isSyncing) 360f else 0f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(1500, easing = LinearEasing),
+                        repeatMode = RepeatMode.Restart
+                    ),
+                    label = "rotationAngle"
+                )
+
+                IconButton(
+                    onClick = {
+                        playlistViewModel.syncYouTubePlaylist(playlist.id)
+                    },
+                    modifier = Modifier.padding(end = 4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Sync,
+                        contentDescription = "Sync YouTube Playlist",
+                        modifier = Modifier
+                            .size(22.dp)
+                            .graphicsLayer {
+                                rotationZ = rotationAngle
+                            },
+                        tint = if (isSyncing) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
 
             if (isSelected && isSelectionMode) {

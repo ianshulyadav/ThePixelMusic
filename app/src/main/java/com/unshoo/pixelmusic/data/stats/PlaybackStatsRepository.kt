@@ -58,7 +58,10 @@ class PlaybackStatsRepository @Inject constructor(
         val endTimestamp: Long? = null,
         val title: String? = null,
         val artist: String? = null,
-        val thumbnail: String? = null
+        val thumbnail: String? = null,
+        // Rich metadata stored so stats work even if the song is later removed from library
+        val genre: String? = null,
+        val album: String? = null
     )
 
     data class PlaybackHistoryEntry(
@@ -174,12 +177,17 @@ class PlaybackStatsRepository @Inject constructor(
         timestamp: Long = System.currentTimeMillis(),
         title: String? = null,
         artist: String? = null,
-        thumbnail: String? = null
+        thumbnail: String? = null,
+        genre: String? = null,
+        album: String? = null
     ) = withContext(Dispatchers.IO) {
         if (songId.isBlank()) return@withContext
         val coercedTimestamp = timestamp.coerceAtLeast(0L)
         val coercedDuration = durationMs.coerceAtLeast(0L)
         val start = (coercedTimestamp - coercedDuration).coerceAtLeast(0L)
+        // Sanitize placeholder values — don't store known fallback/unknown strings
+        val safeGenre = genre?.takeIf { it.isNotBlank() && it !in UNKNOWN_GENRE_KEYS }
+        val safeAlbum = album?.takeIf { it.isNotBlank() && it !in UNKNOWN_ALBUM_KEYS }
         val sanitizedEvent = PlaybackEvent(
             songId = songId,
             timestamp = coercedTimestamp,
@@ -188,7 +196,9 @@ class PlaybackStatsRepository @Inject constructor(
             endTimestamp = coercedTimestamp,
             title = title,
             artist = artist,
-            thumbnail = thumbnail
+            thumbnail = thumbnail,
+            genre = safeGenre,
+            album = safeAlbum
         )
         val writeSucceeded = updateEventsAtomically { events ->
             val cutoff = sanitizedEvent.endMillis() - MAX_HISTORY_AGE_MS
@@ -292,9 +302,12 @@ class PlaybackStatsRepository @Inject constructor(
 
         val topGenres = segmentsBySong.entries
             .groupBy { (songId, _) ->
+                // Use stored event genre as fallback when song is no longer in library
                 val genre = songMap[songId]?.genre
-                if (genre.isNullOrBlank()) "Unknown Genre" else genre
+                    ?: normalizedEvents.lastOrNull { it.songId == songId }?.genre
+                if (genre.isNullOrBlank() || genre in UNKNOWN_GENRE_KEYS) null else genre
             }
+            .filterKeys { it != null }
             .map { (genre, groupedSongs) ->
                 val flattened = groupedSongs.flatMap { it.value }
                 val uniqueArtists = groupedSongs
@@ -304,7 +317,7 @@ class PlaybackStatsRepository @Inject constructor(
                     .distinctBy { it.normalizedArtistKey() }
                     .size
                 GenrePlaybackSummary(
-                    genre = genre,
+                    genre = genre!!,
                     totalDurationMs = flattened.sumOf { it.durationMs },
                     playCount = flattened.size,
                     uniqueArtists = uniqueArtists
@@ -373,6 +386,8 @@ class PlaybackStatsRepository @Inject constructor(
                     )
                 }
             }
+            // Filter out unknown/placeholder artist entries — they clutter the top list
+            .filter { it.artist != UNKNOWN_ARTIST && it.artist.normalizedArtistKey() != "unknown artist" }
             .groupBy { it.artist }
             .map { (artist, artistSongs) ->
                 val flattened = artistSongs.flatMap { it.segments }
@@ -396,8 +411,12 @@ class PlaybackStatsRepository @Inject constructor(
         val topAlbums = segmentsBySong.entries
             .groupBy { (songId, _) ->
                 val song = songMap[songId]
-                song?.album?.takeIf { it.isNotBlank() } ?: "Unknown Album"
+                // Use event-stored album as fallback; filter out known placeholder values
+                val rawAlbum = song?.album?.takeIf { it.isNotBlank() }
+                    ?: normalizedEvents.lastOrNull { it.songId == songId }?.album
+                if (rawAlbum.isNullOrBlank() || rawAlbum in UNKNOWN_ALBUM_KEYS) null else rawAlbum
             }
+            .filterKeys { it != null }
             .map { (album, groupedSongs) ->
                 val flattened = groupedSongs.flatMap { it.value }
                 val uniqueSongCount = groupedSongs.size
@@ -406,7 +425,7 @@ class PlaybackStatsRepository @Inject constructor(
                     .mapNotNull { songMap[it.key] }
                     .firstOrNull()
                 AlbumPlaybackSummary(
-                    album = album,
+                    album = album!!,
                     albumArtUri = firstSong?.albumArtUriString,
                     totalDurationMs = flattened.sumOf { it.durationMs },
                     playCount = flattened.size,
@@ -1100,9 +1119,17 @@ class PlaybackStatsRepository @Inject constructor(
         private const val DEFAULT_PLAYBACK_HISTORY_LIMIT = 500
         private const val MAX_PLAYBACK_HISTORY_LIMIT = 5_000
         private const val MAX_FILE_UPDATE_RETRIES = 3
-        private const val UNKNOWN_ARTIST = "Unknown Artist"
+        const val UNKNOWN_ARTIST = "Unknown Artist"
         private val MAX_HISTORY_AGE_MS = TimeUnit.DAYS.toMillis(730) // Keep roughly two years of history
         private const val SEGMENT_JOIN_TOLERANCE_MS = 0L
+        /** Genre values that are placeholder/fallback and should not appear in top-genre stats. */
+        val UNKNOWN_GENRE_KEYS: Set<String> = setOf(
+            "Unknown Genre", "unknown genre", "YouTube Music", "youtube music"
+        )
+        /** Album values that are placeholder/fallback and should not appear in top-album stats. */
+        val UNKNOWN_ALBUM_KEYS: Set<String> = setOf(
+            "Unknown Album", "unknown album", "YouTube Music", "youtube music"
+        )
     }
 }
 

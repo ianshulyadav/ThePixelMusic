@@ -120,14 +120,12 @@ class LibraryStateHolder @Inject constructor(
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val artistsPagingFlow: Flow<androidx.paging.PagingData<Artist>> =
-        combine(
-            _currentArtistSortOption,
-            effectiveStorageFilter
-        ) { sort, filter ->
-            sort to filter
-        }.flatMapLatest { (sortOption, filter) ->
-            // All artists in DB (local + YouTube subscribed — synced by YouTubeLibrarySyncManager)
-            musicRepository.getPaginatedArtists(sortOption, filter)
+        _currentArtistSortOption.flatMapLatest { sortOption ->
+            // Show only YouTube Music artists — individual artists from the user's YT library/subscriptions.
+            // These have negative IDs (assigned by toUnifiedYoutubeArtistId) and are properly split
+            // per-artist via parseYoutubeArtistNames. Local MediaStore artists with combined
+            // "Artist1, Artist2" name strings are intentionally excluded from this tab.
+            musicRepository.getPaginatedYouTubeOnlyArtists(sortOption)
         }.flowOn(Dispatchers.IO)
 
     @OptIn(ExperimentalCoroutinesApi::class)
