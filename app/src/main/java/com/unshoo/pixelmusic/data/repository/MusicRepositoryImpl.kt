@@ -1051,7 +1051,7 @@ class MusicRepositoryImpl @Inject constructor(
             genre = genre?.takeIf { it.isNotBlank() } ?: "YouTube Music",
             filePath = "",
             parentDirectoryPath = "youtube://",
-            isFavorite = true,
+            isFavorite = false,
             lyrics = null,
             trackNumber = 0,
             year = 0,
@@ -1608,17 +1608,16 @@ class MusicRepositoryImpl @Inject constructor(
                    else null
             if (youtubeId != null) {
                 val songId = toUnifiedYoutubeSongId(youtubeId)
-                val exists = musicDao.getSongsByIdsListSimple(listOf(songId)).isNotEmpty()
-                if (!exists) {
-                    insertYoutubeSongSkeleton(
-                        youtubeId = youtubeId,
-                        title = song.title,
-                        artist = song.artist,
-                        thumbnailUrl = song.albumArtUriString,
-                        duration = song.duration,
-                        genre = song.genre ?: "YouTube Music"
-                    )
-                }
+                // Always upsert — don't skip if exists, so stale metadata (title/thumbnail/duration)
+                // gets refreshed when the playlist is re-synced
+                insertYoutubeSongSkeleton(
+                    youtubeId = youtubeId,
+                    title = song.title,
+                    artist = song.artist,
+                    thumbnailUrl = song.albumArtUriString,
+                    duration = song.duration,
+                    genre = song.genre ?: "YouTube Music"
+                )
                 ytSongs.add(
                     com.unshoo.pixelmusic.data.model.youtube.Song(
                         youtubeId = youtubeId,
