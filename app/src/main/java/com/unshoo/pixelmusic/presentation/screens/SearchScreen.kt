@@ -782,18 +782,7 @@ fun SearchResultsList(
         { song: Song ->
             // INSTANT PLAYBACK FIX: Always play the song immediately via showAndPlaySong.
             // This gives instant response on tap without waiting for a network call.
-            // For YouTube songs, we also kick off a background radio expansion to fill the queue.
             playerViewModel.showAndPlaySong(song, songResultsQueue, searchQueueName)
-
-            val youtubeId = song.youtubeId
-                ?: if (song.id.startsWith("youtube_")) song.id.substringAfter("youtube_") else null
-            if (youtubeId != null) {
-                // Asynchronously expand the queue via radio endpoint (background, non-blocking)
-                playerViewModel.playRadio(
-                    unshoo.ianshulyadav.pixelmusic.innertube.models.WatchEndpoint(videoId = youtubeId),
-                    song.title
-                )
-            }
             onItemSelected()
         }
     }
