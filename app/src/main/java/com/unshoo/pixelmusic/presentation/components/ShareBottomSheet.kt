@@ -957,36 +957,6 @@ private fun ShareableCard(
             ) {
                 if (!isLyricsMode) {
                     // SONG SHARE CARD (MINI PLAYER WIDGET DESIGN)
-                    val audioFormatInfo = remember(song) {
-                        val sampleRateStr = when (val sr = song.sampleRate) {
-                            null, 0 -> "44.1 kHz"
-                            in 1..2000 -> "$sr Hz"
-                            else -> {
-                                val khz = sr / 1000f
-                                if (khz % 1 == 0f) "${khz.toInt()}.0 kHz" else "${String.format("%.1f", khz)} kHz"
-                            }
-                        }
-                        val bitrateStr = when (val br = song.bitrate) {
-                            null, 0 -> {
-                                if (!song.youtubeId.isNullOrEmpty()) "128 kbps" else "320 kbps"
-                            }
-                            else -> {
-                                val kbps = if (br > 2000) br / 1000 else br
-                                "$kbps kbps"
-                            }
-                        }
-                        val codecStr = when {
-                            song.mimeType?.contains("opus", ignoreCase = true) == true -> "OPUS"
-                            song.mimeType?.contains("ogg", ignoreCase = true) == true -> "OGG"
-                            song.mimeType?.contains("flac", ignoreCase = true) == true -> "FLAC"
-                            song.mimeType?.contains("aac", ignoreCase = true) == true -> "AAC"
-                            song.mimeType?.contains("m4a", ignoreCase = true) == true -> "AAC"
-                            !song.youtubeId.isNullOrEmpty() -> "OPUS"
-                            else -> "MP3"
-                        }
-                        "$sampleRateStr • $bitrateStr • $codecStr"
-                    }
-
                     val formattedDuration = remember(song.duration) {
                         val totalSecs = song.duration / 1000
                         val mins = totalSecs / 60
@@ -1002,7 +972,7 @@ private fun ShareableCard(
                     }
 
                     Column(
-                        modifier = Modifier.padding(top = 10.dp, bottom = 10.dp, start = 18.dp, end = 18.dp),
+                        modifier = Modifier.padding(top = 6.dp, bottom = 10.dp, start = 18.dp, end = 18.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         // 1. Square Album Art with soft glow
@@ -1021,11 +991,11 @@ private fun ShareableCard(
                             )
                         }
 
-                        Spacer(Modifier.height(6.dp))
+                        Spacer(Modifier.height(4.dp))
 
                         // 2. Song Details (Left-aligned for a modern player layout)
                         Column(
-                            verticalArrangement = Arrangement.spacedBy(1.dp),
+                            verticalArrangement = Arrangement.spacedBy(0.dp),
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)
                         ) {
                             Text(
@@ -1033,6 +1003,7 @@ private fun ShareableCard(
                                 fontFamily = GoogleSansRounded,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp,
+                                lineHeight = 16.sp,
                                 color = lightScheme.onPrimaryContainer,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -1042,6 +1013,7 @@ private fun ShareableCard(
                                 fontFamily = GoogleSansRounded,
                                 fontWeight = FontWeight.Medium,
                                 fontSize = 11.sp,
+                                lineHeight = 13.sp,
                                 color = lightScheme.onPrimaryContainer.copy(alpha = 0.65f),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -1099,27 +1071,7 @@ private fun ShareableCard(
                             )
                         }
 
-                        Spacer(Modifier.height(3.dp))
-
-                        // 3.5. Metadata Pill
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(lightScheme.onPrimaryContainer.copy(alpha = 0.08f))
-                                .padding(horizontal = 10.dp, vertical = 3.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = audioFormatInfo,
-                                fontFamily = GoogleSansRounded,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 9.sp,
-                                color = lightScheme.onPrimaryContainer.copy(alpha = 0.7f),
-                                letterSpacing = 0.3.sp
-                            )
-                        }
-
-                        Spacer(Modifier.height(6.dp))
+                        Spacer(Modifier.height(8.dp))
 
                         // 4. Playback Controls Row (Dynamic Capsule Shape)
                         Row(
