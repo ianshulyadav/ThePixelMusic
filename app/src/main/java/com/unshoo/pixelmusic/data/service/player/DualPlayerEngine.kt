@@ -291,7 +291,8 @@ class DualPlayerEngine @Inject constructor(
                     val isPostSeekBuffering = lastSeekAtMs > 0L && timeSinceSeekMs < 1_500L
                     if (audioOffloadEnabled && !transitionRunning &&
                         lastPlayingAtMs > 0L && timeSincePlayingMs < 500L &&
-                        !isPostSeekBuffering
+                        !isPostSeekBuffering &&
+                        isLikelyLocalMedia(playerA.currentMediaItem)
                     ) {
                         disableAudioOffloadForSession(
                             reason = "HAL offload reset detected: STATE_BUFFERING after ${timeSincePlayingMs}ms of playback"
