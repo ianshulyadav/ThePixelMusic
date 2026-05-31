@@ -1633,6 +1633,7 @@ constructor(
             val localPlaylistsExist = appDatabase.playlistRepository().getAll().isNotEmpty()
 
             // 1. Fetch remote user-created playlists (delta sync — only insert new songs)
+            var remotePlaylistsSuccess = false
             try {
                 val remotePlaylists = YoutubePlaylistDataSource().retrieveAll(settings)
                 remotePlaylists.forEach { playlistInfo ->
@@ -1655,8 +1656,14 @@ constructor(
                     }
                     // NOTE: Auto-download removed. Users download via playlist options menu (Component 24).
                 }
+                remotePlaylistsSuccess = true
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to fetch remote YouTube playlists", e)
+            }
+
+            if (!remotePlaylistsSuccess && settings.cookies.raw.isNotBlank()) {
+                Log.w(TAG, "SyncWorker: Remote YouTube playlist fetch failed, but user is logged in. Aborting YouTube sync to prevent wiping local synchronized library.")
+                return
             }
 
             // 2. Fetch and sync Liked Songs playlist ("LM") — delta sync and mapping removed
