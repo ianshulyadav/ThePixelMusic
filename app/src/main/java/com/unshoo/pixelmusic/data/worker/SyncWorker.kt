@@ -1841,7 +1841,7 @@ constructor(
 
             // Upsert actual YouTube playlists
             youtubePlaylists.forEach { playlist ->
-                val playlistSongIds = playlist.songs.map { toUnifiedYoutubeSongId(it.youtubeId).toString() }
+                val playlistSongIds = playlist.songs.map { "youtube_${it.youtubeId}" }
 
                 // Check if already exists in main database to avoid overwriting user edits or custom playlist attributes
                 val existing = allPlaylists.find { it.id == playlist.info.id }

@@ -1782,7 +1782,8 @@ class PlaylistViewModel @Inject constructor(
                                 null
                             }
                             
-                            val songId = toUnifiedYoutubeSongId(song.id)
+                            val rawYtId = song.youtubeId ?: song.id.removePrefix("youtube_")
+                            val songId = toUnifiedYoutubeSongId(rawYtId)
                             SongEntity(
                                 id = songId,
                                 title = song.title,
@@ -1791,7 +1792,7 @@ class PlaylistViewModel @Inject constructor(
                                 albumArtist = null,
                                 albumName = "YouTube Music",
                                 albumId = toUnifiedYoutubeAlbumId("YouTube Music"),
-                                contentUriString = "youtube://${song.id}",
+                                contentUriString = "youtube://$rawYtId",
                                 albumArtUriString = song.albumArtUriString,
                                 duration = song.duration,
                                 genre = "YouTube Music",
@@ -1826,7 +1827,7 @@ class PlaylistViewModel @Inject constructor(
                             val parsedArtists = parseYoutubeArtistNames(song.artist)
                             parsedArtists.mapIndexed { index, name ->
                                 SongArtistCrossRef(
-                                    songId = toUnifiedYoutubeSongId(song.id),
+                                    songId = toUnifiedYoutubeSongId(song.youtubeId ?: song.id.removePrefix("youtube_")),
                                     artistId = toUnifiedYoutubeArtistId(name),
                                     isPrimary = index == 0
                                 )
