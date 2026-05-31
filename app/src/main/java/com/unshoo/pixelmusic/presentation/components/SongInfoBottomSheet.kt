@@ -308,6 +308,7 @@ fun SongInfoBottomSheet(
     val pagerState = androidx.compose.foundation.pager.rememberPagerState(pageCount = { 2 })
     val scope = androidx.compose.runtime.rememberCoroutineScope()
 
+    val currentColorScheme = MaterialTheme.colorScheme
     ModalBottomSheet(
         onDismissRequest = {
             if (!showEditSheet) {
@@ -316,10 +317,15 @@ fun SongInfoBottomSheet(
         },
         sheetState = sheetState,
     ) {
-        // AQUÍ APLICAMOS EL FIX: Anulamos la fábrica de overscroll para todo lo que esté aquí adentro
-        CompositionLocalProvider(
-            LocalOverscrollFactory provides null
+        MaterialTheme(
+            colorScheme = currentColorScheme,
+            typography = MaterialTheme.typography,
+            shapes = MaterialTheme.shapes
         ) {
+            // AQUÍ APLICAMOS EL FIX: Anulamos la fábrica de overscroll para todo lo que esté aquí adentro
+            CompositionLocalProvider(
+                LocalOverscrollFactory provides null
+            ) {
             val view = LocalView.current
             LaunchedEffect(view) {
                 var parent = view.parent
@@ -1000,6 +1006,7 @@ fun SongInfoBottomSheet(
                     }
                 }
             }
+        }
         }
     }
 

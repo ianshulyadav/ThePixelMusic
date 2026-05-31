@@ -189,25 +189,27 @@ fun ShareBottomSheet(
         file
     }
 
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = MaterialTheme.typography,
-        shapes = MaterialTheme.shapes
-    ) {
-        val sheetShape = AbsoluteSmoothCornerShape(
+    val sheetShape = remember {
+        AbsoluteSmoothCornerShape(
             cornerRadiusTR = 28.dp, smoothnessAsPercentBR = 60,
             cornerRadiusBR = 0.dp, smoothnessAsPercentTL = 60,
             cornerRadiusTL = 28.dp, smoothnessAsPercentBL = 60,
             cornerRadiusBL = 0.dp, smoothnessAsPercentTR = 60
         )
-        ModalBottomSheet(
-            onDismissRequest = onDismiss,
-            sheetState = sheetState,
-            containerColor = Color.Transparent,
-            shape = sheetShape,
-            dragHandle = null
+    }
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Color.Transparent,
+        shape = sheetShape,
+        dragHandle = null
+    ) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography = MaterialTheme.typography,
+            shapes = MaterialTheme.shapes
         ) {
-        CompositionLocalProvider(LocalOverscrollFactory provides null) {
+            CompositionLocalProvider(LocalOverscrollFactory provides null) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1545,10 +1547,17 @@ private fun ShareListItem(
     onClick: () -> Unit
 ) {
     ListItem(
-        modifier = Modifier.clickable(onClick = onClick),
+        modifier = Modifier
+            .padding(horizontal = 20.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick),
+        colors = ListItemDefaults.colors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f)
+        ),
         headlineContent = {
             Text(
                 text = title,
+                fontFamily = GoogleSansRounded,
                 fontWeight = FontWeight.Medium,
                 style = MaterialTheme.typography.bodyLarge
             )
@@ -1556,6 +1565,7 @@ private fun ShareListItem(
         supportingContent = {
             Text(
                 text = subtitle,
+                fontFamily = GoogleSansRounded,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
@@ -1567,7 +1577,7 @@ private fun ShareListItem(
                 modifier = Modifier
                     .size(44.dp)
                     .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(

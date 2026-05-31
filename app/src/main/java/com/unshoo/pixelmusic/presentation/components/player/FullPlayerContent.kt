@@ -112,6 +112,7 @@ import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.ModalBottomSheet
 import android.widget.Toast
 import androidx.compose.foundation.LocalOverscrollFactory
@@ -1050,148 +1051,177 @@ fun FullPlayerContent(
             songInfoViewModel.loadDownloadState(song)
         }
 
+        val sheetShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
         ModalBottomSheet(
             onDismissRequest = { showSongInfoBottomSheet = false },
-            dragHandle = null
+            dragHandle = null,
+            containerColor = Color.Transparent,
+            shape = sheetShape
         ) {
-            CompositionLocalProvider(LocalOverscrollFactory provides null) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .navigationBarsPadding()
-                        .padding(bottom = 16.dp)
-                ) {
-                    // Custom Drag Handle inside the Column
-                    Box(
+            MaterialTheme(
+                colorScheme = LocalMaterialTheme.current,
+                typography = MaterialTheme.typography,
+                shapes = MaterialTheme.shapes
+            ) {
+                CompositionLocalProvider(LocalOverscrollFactory provides null) {
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = 12.dp, bottom = 4.dp),
-                        contentAlignment = Alignment.Center
+                            .clip(sheetShape)
+                            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                            .navigationBarsPadding()
+                            .padding(bottom = 16.dp)
                     ) {
+                        // Custom Drag Handle inside the Column
                         Box(
                             modifier = Modifier
-                                .width(40.dp)
-                                .height(4.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f))
-                        )
-                    }
-                    // Header: Cover + Metadata
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 20.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        SmartImage(
-                            model = song.albumArtUriString,
-                            contentDescription = null,
-                            contentScale = ContentScale.Crop,
+                                .fillMaxWidth()
+                                .padding(top = 12.dp, bottom = 4.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .width(40.dp)
+                                    .height(4.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f))
+                            )
+                        }
+                        // Header: Cover + Metadata
+                        Row(
                             modifier = Modifier
-                                .size(64.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                        )
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = song.title,
-                                fontFamily = GoogleSansRounded,
-                                fontWeight = FontWeight.Bold,
-                                style = MaterialTheme.typography.titleMedium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = song.displayArtist,
-                                fontFamily = GoogleSansRounded,
-                                fontWeight = FontWeight.Medium,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    // Option 1: Add to Playlist
-                    ListItem(
-                        modifier = Modifier.clickable {
-                            showSongInfoBottomSheet = false
-                            showPlaylistBottomSheet = true
-                        },
-                        headlineContent = {
-                            Text(
-                                text = "Add to playlist",
-                                fontFamily = GoogleSansRounded,
-                                fontWeight = FontWeight.Medium
-                            )
-                        },
-                        leadingContent = {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Rounded.PlaylistAdd,
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            SmartImage(
+                                model = song.albumArtUriString,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .size(64.dp)
+                                    .clip(RoundedCornerShape(12.dp))
                             )
-                        }
-                    )
-
-                    // Option 2: Download Song
-                    val downloadText = when {
-                        isDownloaded -> "Downloaded"
-                        isDownloading -> "Downloading..."
-                        else -> "Download Song"
-                    }
-                    val downloadIcon = if (isDownloaded) Icons.Rounded.CheckCircle else Icons.Rounded.Download
-                    val downloadTint = if (isDownloaded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-
-                    ListItem(
-                        modifier = Modifier.clickable {
-                            if (!isDownloaded && !isDownloading) {
-                                songInfoViewModel.downloadYoutubeSong(song)
-                                Toast.makeText(context, "Starting download...", Toast.LENGTH_SHORT).show()
-                            } else if (isDownloaded) {
-                                Toast.makeText(context, "Song already downloaded", Toast.LENGTH_SHORT).show()
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = song.title,
+                                    fontFamily = GoogleSansRounded,
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = song.displayArtist,
+                                    fontFamily = GoogleSansRounded,
+                                    fontWeight = FontWeight.Medium,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                             }
-                        },
-                        headlineContent = {
-                            Text(
-                                text = downloadText,
-                                fontFamily = GoogleSansRounded,
-                                fontWeight = FontWeight.Medium
-                            )
-                        },
-                        leadingContent = {
-                            Icon(
-                                imageVector = downloadIcon,
-                                contentDescription = null,
-                                tint = downloadTint
-                            )
                         }
-                    )
 
-                    // Option 3: Share Card
-                    ListItem(
-                        modifier = Modifier.clickable {
-                            showSongInfoBottomSheet = false
-                            showShareSheet = true
-                        },
-                        headlineContent = {
-                            Text(
-                                text = "Share to Stories",
-                                fontFamily = GoogleSansRounded,
-                                fontWeight = FontWeight.Medium
-                            )
-                        },
-                        leadingContent = {
-                            Icon(
-                                imageVector = Icons.Rounded.Share,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // Option 1: Add to Playlist
+                        ListItem(
+                            modifier = Modifier
+                                .padding(horizontal = 16.dp, vertical = 4.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .clickable {
+                                    showSongInfoBottomSheet = false
+                                    showPlaylistBottomSheet = true
+                                },
+                            colors = ListItemDefaults.colors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f)
+                            ),
+                            headlineContent = {
+                                Text(
+                                    text = "Add to playlist",
+                                    fontFamily = GoogleSansRounded,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            },
+                            leadingContent = {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Rounded.PlaylistAdd,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        )
+
+                        // Option 2: Download Song
+                        val downloadText = when {
+                            isDownloaded -> "Downloaded"
+                            isDownloading -> "Downloading..."
+                            else -> "Download Song"
                         }
-                    )
+                        val downloadIcon = if (isDownloaded) Icons.Rounded.CheckCircle else Icons.Rounded.Download
+                        val downloadTint = if (isDownloaded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+
+                        ListItem(
+                            modifier = Modifier
+                                .padding(horizontal = 16.dp, vertical = 4.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .clickable {
+                                    if (!isDownloaded && !isDownloading) {
+                                        songInfoViewModel.downloadYoutubeSong(song)
+                                        Toast.makeText(context, "Starting download...", Toast.LENGTH_SHORT).show()
+                                    } else if (isDownloaded) {
+                                        Toast.makeText(context, "Song already downloaded", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                            colors = ListItemDefaults.colors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f)
+                            ),
+                            headlineContent = {
+                                Text(
+                                    text = downloadText,
+                                    fontFamily = GoogleSansRounded,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            },
+                            leadingContent = {
+                                Icon(
+                                    imageVector = downloadIcon,
+                                    contentDescription = null,
+                                    tint = downloadTint
+                                )
+                            }
+                        )
+
+                        // Option 3: Share Card
+                        ListItem(
+                            modifier = Modifier
+                                .padding(horizontal = 16.dp, vertical = 4.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .clickable {
+                                    showSongInfoBottomSheet = false
+                                    showShareSheet = true
+                                },
+                            colors = ListItemDefaults.colors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f)
+                            ),
+                            headlineContent = {
+                                Text(
+                                    text = "Share to Stories",
+                                    fontFamily = GoogleSansRounded,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            },
+                            leadingContent = {
+                                Icon(
+                                    imageVector = Icons.Rounded.Share,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        )
+                    }
                 }
             }
         }
