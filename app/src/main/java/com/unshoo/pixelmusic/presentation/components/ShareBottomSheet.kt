@@ -31,8 +31,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
-import androidx.compose.ui.draw.blur
-import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -730,32 +728,28 @@ private fun ShareableCard(
         // ── 1. Dynamic Background Render ─────────────────────────────────────
         when (themeStyle) {
             ShareThemeStyle.DYNAMIC_PALETTE -> {
-                Box(modifier = Modifier.fillMaxSize()) {
-                    // Underneath: Deep Blurred Artwork
-                    SmartImage(
-                        model = song.albumArtUriString,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .blur(60.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
-                    )
-                    // Semi-dark tint overlay
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color.Black.copy(alpha = 0.5f))
-                    )
-                    // Custom theme palette gradient wash
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            brush = Brush.verticalGradient(
+                                colors = listOf(
+                                    surfaceContainerLow,
+                                    surfaceContainerLowest
+                                )
+                            )
+                        )
+                ) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
                             .background(
-                                brush = Brush.verticalGradient(
+                                brush = Brush.radialGradient(
                                     colors = listOf(
-                                        surfaceContainerLow.copy(alpha = 0.45f),
-                                        surfaceContainerLowest.copy(alpha = 0.7f)
-                                    )
+                                        primaryColor.copy(alpha = 0.25f),
+                                        Color.Transparent
+                                    ),
+                                    radius = 600f
                                 )
                             )
                     )
@@ -791,20 +785,28 @@ private fun ShareableCard(
             }
             ShareThemeStyle.BLURRED_ARTWORK -> {
                 Box(modifier = Modifier.fillMaxSize()) {
-                    // Underneath: Deep Blurred Artwork
                     SmartImage(
                         model = song.albumArtUriString,
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .blur(60.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
+                        modifier = Modifier.fillMaxSize()
                     )
-                    // Semi-dark overlay
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(Color.Black.copy(alpha = 0.55f))
+                            .background(Color.Black.copy(alpha = 0.35f))
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                brush = Brush.verticalGradient(
+                                    colors = listOf(
+                                        surfaceContainerLow.copy(alpha = 0.82f),
+                                        surfaceContainerLowest.copy(alpha = 0.92f)
+                                    )
+                                )
+                            )
                     )
                 }
             }
@@ -879,24 +881,17 @@ private fun ShareableCard(
         ) {
             Spacer(Modifier.height(8.dp))
 
+            // Centerpiece Floating Card (Player Styled & Frost Blended)
             Card(
                 modifier = Modifier
                     .fillMaxWidth(0.86f)
                     .weight(1f, fill = false)
-                    .shadow(24.dp, shape = RoundedCornerShape(32.dp)),
-                shape = RoundedCornerShape(32.dp),
+                    .shadow(16.dp, shape = RoundedCornerShape(20.dp)),
+                shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(
-                    containerColor = darkScheme.surfaceContainerLow.copy(alpha = 0.45f)
+                    containerColor = lightScheme.primaryContainer
                 ),
-                border = BorderStroke(
-                    1.dp,
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            Color.White.copy(alpha = 0.15f),
-                            Color.White.copy(alpha = 0.02f)
-                        )
-                    )
-                )
+                border = BorderStroke(1.dp, lightScheme.onPrimaryContainer.copy(alpha = 0.15f))
             ) {
                 if (!isLyricsMode) {
                     // SONG SHARE CARD (MINI PLAYER WIDGET DESIGN)
@@ -915,16 +910,16 @@ private fun ShareableCard(
                     }
 
                     Column(
-                        modifier = Modifier.padding(18.dp),
+                        modifier = Modifier.padding(top = 6.dp, bottom = 10.dp, start = 18.dp, end = 18.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        // 1. Square Album Art with rounded corners
+                        // 1. Square Album Art with soft glow
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .aspectRatio(1f)
-                                .shadow(8.dp, shape = RoundedCornerShape(24.dp), clip = true)
-                                .clip(RoundedCornerShape(24.dp))
+                                .shadow(8.dp, shape = RoundedCornerShape(12.dp), clip = true)
+                                .clip(RoundedCornerShape(12.dp))
                         ) {
                             SmartImage(
                                 model = song.albumArtUriString,
@@ -934,220 +929,146 @@ private fun ShareableCard(
                             )
                         }
 
-                        Spacer(Modifier.height(14.dp))
+                        Spacer(Modifier.height(4.dp))
 
-                        // 2. Song Details (Custom Title Pill + Favorite button)
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 4.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                        // 2. Song Details (Left-aligned for a modern player layout)
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(0.dp),
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)
                         ) {
-                            // Title Pill
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(CircleShape)
-                                    .background(Color.Black.copy(alpha = 0.25f))
-                                    .padding(horizontal = 20.dp, vertical = 10.dp)
-                            ) {
-                                Text(
-                                    text = song.title,
-                                    fontFamily = GoogleSansRounded,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 18.sp,
-                                    color = Color.White,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-
-                            Spacer(Modifier.width(12.dp))
-
-                            // Heart Button
-                            Box(
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(CircleShape)
-                                    .background(Color.Black.copy(alpha = 0.25f))
-                                    .clickable { },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Favorite,
-                                    contentDescription = null,
-                                    tint = Color(0xFFFF5252), // Vibrant red matching screenshot
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
+                            Text(
+                                text = song.title,
+                                fontFamily = GoogleSansRounded,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                lineHeight = 14.sp,
+                                color = lightScheme.onPrimaryContainer,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = song.displayArtist,
+                                fontFamily = GoogleSansRounded,
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 9.sp,
+                                lineHeight = 11.sp,
+                                color = lightScheme.onPrimaryContainer.copy(alpha = 0.65f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
 
                         Spacer(Modifier.height(6.dp))
 
-                        // Artist Name
-                        Text(
-                            text = song.displayArtist,
-                            fontFamily = GoogleSansRounded,
-                            fontWeight = FontWeight.Medium,
-                            fontSize = 14.sp,
-                            color = Color.White.copy(alpha = 0.65f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp)
-                        )
-
-                        Spacer(Modifier.height(14.dp))
-
-                        // 3. Progress Bar & Timestamps
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp)
+                        // 3. Sleek Wavy Progress / Seek Bar with Thumb
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
+                            Text(
+                                text = formattedProgress,
+                                color = lightScheme.onPrimaryContainer.copy(alpha = 0.6f),
+                                fontSize = 9.sp,
+                                fontFamily = GoogleSansRounded,
+                                fontWeight = FontWeight.Bold
+                            )
                             Box(
                                 modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(16.dp),
+                                    .weight(1f)
+                                    .height(24.dp),
                                 contentAlignment = Alignment.CenterStart
                             ) {
-                                // Track background
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(4.dp)
-                                        .clip(CircleShape)
-                                        .background(Color.White.copy(alpha = 0.15f))
+                                LinearWavyProgressIndicator(
+                                    progress = { 0.4f },
+                                    modifier = Modifier.fillMaxWidth().height(8.dp),
+                                    color = lightScheme.onPrimaryContainer,
+                                    trackColor = lightScheme.onPrimaryContainer.copy(alpha = 0.2f)
                                 )
-                                // Active progress track
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth(0.4f)
-                                        .height(4.dp)
-                                        .clip(CircleShape)
-                                        .background(darkScheme.primary)
-                                )
-                                // Progress thumb
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth(0.4f),
+                                        .height(24.dp),
                                     contentAlignment = Alignment.CenterEnd
                                 ) {
                                     Box(
                                         modifier = Modifier
-                                            .offset(x = 4.dp)
-                                            .size(8.dp)
+                                            .offset(x = 3.5.dp)
+                                            .size(7.dp)
                                             .clip(CircleShape)
-                                            .background(darkScheme.primary)
+                                            .background(lightScheme.onPrimaryContainer)
                                     )
                                 }
                             }
-
-                            Spacer(Modifier.height(2.dp))
-
-                            // Timestamps
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = formattedProgress,
-                                    color = Color.White.copy(alpha = 0.5f),
-                                    fontSize = 11.sp,
-                                    fontFamily = GoogleSansRounded,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = formattedDuration,
-                                    color = Color.White.copy(alpha = 0.5f),
-                                    fontSize = 10.sp,
-                                    fontFamily = GoogleSansRounded,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
+                            Text(
+                                text = formattedDuration,
+                                color = lightScheme.onPrimaryContainer.copy(alpha = 0.6f),
+                                fontSize = 9.sp,
+                                fontFamily = GoogleSansRounded,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
 
-                        Spacer(Modifier.height(14.dp))
+                        Spacer(Modifier.height(8.dp))
 
-                        // 4. Playback Controls Row
+                        // 4. Playback Controls Row (Dynamic Capsule Shape)
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 4.dp),
-                            horizontalArrangement = Arrangement.SpaceEvenly,
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Center,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Shuffle
-                            IconButton(onClick = {}) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Shuffle,
-                                    contentDescription = null,
-                                    tint = Color.White.copy(alpha = 0.6f),
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-
-                            // Skip Previous
                             Box(
                                 modifier = Modifier
-                                    .size(46.dp)
-                                    .clip(CircleShape)
-                                    .background(Color.Black.copy(alpha = 0.25f))
+                                    .width(60.dp)
+                                    .height(38.dp)
+                                    .clip(RoundedCornerShape(19.dp))
+                                    .background(lightScheme.primary)
                                     .clickable { },
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     imageVector = Icons.Rounded.SkipPrevious,
                                     contentDescription = null,
-                                    tint = Color.White,
+                                    tint = lightScheme.onPrimary,
                                     modifier = Modifier.size(22.dp)
                                 )
                             }
+                            
+                            Spacer(modifier = Modifier.width(10.dp))
 
-                            // Play/Pause (Large Amber Circle)
                             Box(
                                 modifier = Modifier
-                                    .size(60.dp)
-                                    .clip(CircleShape)
-                                    .background(darkScheme.primary)
+                                    .width(76.dp)
+                                    .height(38.dp)
+                                    .clip(RoundedCornerShape(19.dp))
+                                    .background(lightScheme.tertiaryContainer)
                                     .clickable { },
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     imageVector = Icons.Rounded.PlayArrow,
                                     contentDescription = null,
-                                    tint = darkScheme.onPrimary,
-                                    modifier = Modifier.size(28.dp).offset(x = 1.dp)
+                                    tint = lightScheme.onTertiaryContainer,
+                                    modifier = Modifier.size(24.dp)
                                 )
                             }
 
-                            // Skip Next
+                            Spacer(modifier = Modifier.width(10.dp))
+
                             Box(
                                 modifier = Modifier
-                                    .size(46.dp)
-                                    .clip(CircleShape)
-                                    .background(Color.Black.copy(alpha = 0.25f))
+                                    .width(60.dp)
+                                    .height(38.dp)
+                                    .clip(RoundedCornerShape(19.dp))
+                                    .background(lightScheme.primary)
                                     .clickable { },
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     imageVector = Icons.Rounded.SkipNext,
                                     contentDescription = null,
-                                    tint = Color.White,
+                                    tint = lightScheme.onPrimary,
                                     modifier = Modifier.size(22.dp)
-                                )
-                            }
-
-                            // Repeat
-                            IconButton(onClick = {}) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Repeat,
-                                    contentDescription = null,
-                                    tint = Color.White.copy(alpha = 0.6f),
-                                    modifier = Modifier.size(20.dp)
                                 )
                             }
                         }
@@ -1177,8 +1098,9 @@ private fun ShareableCard(
                                     text = song.title,
                                     fontFamily = GoogleSansRounded,
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 14.sp,
-                                    color = Color.White,
+                                    fontSize = 12.sp,
+                                    lineHeight = 14.sp,
+                                    color = lightScheme.onPrimaryContainer,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -1186,8 +1108,9 @@ private fun ShareableCard(
                                     text = song.displayArtist,
                                     fontFamily = GoogleSansRounded,
                                     fontWeight = FontWeight.Medium,
-                                    fontSize = 12.sp,
-                                    color = Color.White.copy(alpha = 0.65f),
+                                    fontSize = 10.sp,
+                                    lineHeight = 12.sp,
+                                    color = lightScheme.onPrimaryContainer.copy(alpha = 0.65f),
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -1195,7 +1118,7 @@ private fun ShareableCard(
                         }
 
                         Spacer(Modifier.height(8.dp))
-                        HorizontalDivider(color = Color.White.copy(alpha = 0.12f), thickness = 1.dp)
+                        HorizontalDivider(color = lightScheme.onPrimaryContainer.copy(alpha = 0.12f), thickness = 1.dp)
                         Spacer(Modifier.height(8.dp))
 
                         // 2. Verses Quote Block
@@ -1209,7 +1132,7 @@ private fun ShareableCard(
                                     fontFamily = GoogleSansRounded,
                                     fontStyle = FontStyle.Italic,
                                     fontSize = 14.sp,
-                                    color = Color.White.copy(alpha = 0.4f),
+                                    color = lightScheme.onPrimaryContainer.copy(alpha = 0.4f),
                                     textAlign = TextAlign.Center,
                                     modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp)
                                 )
@@ -1233,7 +1156,7 @@ private fun ShareableCard(
                                         Icon(
                                             imageVector = Icons.Rounded.FormatQuote,
                                             contentDescription = null,
-                                            tint = darkScheme.primary.copy(alpha = 0.7f),
+                                            tint = lightScheme.primary.copy(alpha = 0.7f),
                                             modifier = Modifier.size(16.dp).offset(y = 2.dp)
                                         )
                                         Text(
@@ -1242,7 +1165,7 @@ private fun ShareableCard(
                                             fontWeight = FontWeight.Bold,
                                             fontSize = fontSize,
                                             lineHeight = lineHeight,
-                                            color = Color.White,
+                                            color = lightScheme.onPrimaryContainer,
                                             textAlign = TextAlign.Start,
                                             modifier = Modifier.weight(1f)
                                         )
@@ -1261,14 +1184,14 @@ private fun ShareableCard(
                                 .fillMaxWidth()
                                 .height(3.dp)
                                 .clip(CircleShape)
-                                .background(Color.White.copy(alpha = 0.15f))
+                                .background(lightScheme.onPrimaryContainer.copy(alpha = 0.15f))
                         ) {
                             Box(
                                 modifier = Modifier
                                     .fillMaxHeight()
                                     .fillMaxWidth(0.55f)
                                     .clip(CircleShape)
-                                    .background(darkScheme.primary)
+                                    .background(lightScheme.primary)
                             )
                         }
 
@@ -1288,13 +1211,13 @@ private fun ShareableCard(
                                     modifier = Modifier
                                         .size(16.dp)
                                         .clip(RoundedCornerShape(4.dp))
-                                        .background(darkScheme.primary),
+                                        .background(lightScheme.primary),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
                                         painter = painterResource(R.drawable.pixelmusic_base_monochrome),
                                         contentDescription = null,
-                                        tint = darkScheme.onPrimary,
+                                        tint = lightScheme.onPrimary,
                                         modifier = Modifier
                                             .padding(2.5.dp)
                                             .fillMaxSize()
@@ -1305,7 +1228,7 @@ private fun ShareableCard(
                                     fontFamily = GoogleSansRounded,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 11.sp,
-                                    color = Color.White
+                                    color = lightScheme.onPrimaryContainer
                                 )
                             }
                             
@@ -1314,7 +1237,7 @@ private fun ShareableCard(
                                 fontFamily = GoogleSansRounded,
                                 fontWeight = FontWeight.SemiBold,
                                 fontSize = 9.sp,
-                                color = Color.White.copy(alpha = 0.4f),
+                                color = lightScheme.onPrimaryContainer.copy(alpha = 0.4f),
                                 letterSpacing = 1.sp
                             )
                         }
