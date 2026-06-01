@@ -541,16 +541,21 @@ fun PlaylistItem(
                 val syncingPlaylists by playlistViewModel.syncingPlaylists.collectAsStateWithLifecycle()
                 val isSyncing = syncingPlaylists.contains(playlist.id)
 
-                val transition = rememberInfiniteTransition(label = "syncRotation")
-                val rotationAngle by transition.animateFloat(
-                    initialValue = 0f,
-                    targetValue = if (isSyncing) 360f else 0f,
-                    animationSpec = infiniteRepeatable(
-                        animation = tween(1500, easing = LinearEasing),
-                        repeatMode = RepeatMode.Restart
-                    ),
-                    label = "rotationAngle"
-                )
+                val rotationAngle: Float = if (isSyncing) {
+                    val transition = rememberInfiniteTransition(label = "syncRotation")
+                    val angle by transition.animateFloat(
+                        initialValue = 0f,
+                        targetValue = 360f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(1500, easing = LinearEasing),
+                            repeatMode = RepeatMode.Restart
+                        ),
+                        label = "rotationAngle"
+                    )
+                    angle
+                } else {
+                    0f
+                }
 
                 IconButton(
                     onClick = {

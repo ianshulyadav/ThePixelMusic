@@ -340,14 +340,99 @@ object AutoQueueManager {
         return null
     }
 
-    private suspend fun isSameSong(id1: String, id2: String): Boolean {
-        if (id1 == id2) return true
-        val yt1 = getYoutubeVideoId(id1)
-        val yt2 = getYoutubeVideoId(id2)
-        if (yt1 != null && yt2 != null) {
-            return yt1 == yt2
+    private val commonWords = setOf(
+        "the", "and", "you", "for", "with", "from", "this", "that", "feat", "ft",
+        "remix", "version", "original", "mix", "audio", "video", "official", "music",
+        "song", "lyric", "lyrics", "acoustic", "live", "cover", "remastered", "remaster"
+    )
+
+    private fun getTitleSimilarityScore(title1: String, title2: String): Double {
+        val t1 = title1.lowercase().replace(Regex("[^a-zA-Z0-9 ]"), " ")
+        val t2 = title2.lowercase().replace(Regex("[^a-zA-Z0-9 ]"), " ")
+        val words1 = t1.split(" ").filter { it.length > 2 && it !in commonWords }
+        val words2 = t2.split(" ").filter { it.length > 2 && it !in commonWords }
+        if (words1.isEmpty() || words2.isEmpty()) return 0.0
+        val intersection = words1.toSet().intersect(words2.toSet())
+        return intersection.size * 3.0
+    }
+
+    private fun getSongSimilarityScore(
+        s1Title: String, s1Artist: String, s1Genre: String?,
+        s2Title: String, s2Artist: String, s2Genre: String?
+    ): Double {
+        var score = 0.0
+        
+        // Artist similarity
+        val a1 = s1Artist.lowercase().trim()
+        val a2 = s2Artist.lowercase().trim()
+        if (a1 == a2) {
+            score += 10.0
+        } else if (a1.contains(a2) || a2.contains(a1)) {
+            score += 6.0
         }
+        
+        // Title keyword similarity
+        score += getTitleSimilarityScore(s1Title, s2Title)
+        
+        // Genre similarity (exclude generic YouTube genre placeholders)
+        val g1 = s1Genre?.lowercase()?.trim().orEmpty()
+        val g2 = s2Genre?.lowercase()?.trim().orEmpty()
+        if (g1.isNotEmpty() && g2.isNotEmpty() && 
+            g1 != "youtube" && g1 != "youtube music" && 
+            g2 != "youtube" && g2 != "youtube music") {
+            if (g1 == g2) {
+                score += 4.0
+            } else if (g1.contains(g2) || g2.contains(g1)) {
+                score += 2.0
+            }
+        }
+        
+        return score
+    }
+
+    private fun isSameSong(id1: String, id2: String): Boolean {
+        if (id1 == id2) return true
+        val clean1 = normalizeSongId(id1)
+        val clean2 = normalizeSongId(id2)
+        if (clean1 == clean2) return true
+
+        val long1 = clean1.toLongOrNull()
+        val long2 = clean2.toLongOrNull()
+
+        // 1. YouTube DB mapping comparison
+        if (long1 != null && long1 < 0) {
+            val raw2 = clean2.removePrefix("youtube_").removePrefix("youtube://")
+            if (raw2.length == 11 && getDatabaseIdForYoutubeId(raw2) == long1) {
+                return true
+            }
+        }
+        if (long2 != null && long2 < 0) {
+            val raw1 = clean1.removePrefix("youtube_").removePrefix("youtube://")
+            if (raw1.length == 11 && getDatabaseIdForYoutubeId(raw1) == long2) {
+                return true
+            }
+        }
+
+        // 2. Resolve cached YouTube IDs if mapped
+        val ytId1 = localToYoutubeIdMap[id1] ?: localToYoutubeIdMap[clean1]
+        val ytId2 = localToYoutubeIdMap[id2] ?: localToYoutubeIdMap[clean2]
+        if (ytId1 != null && ytId2 != null && ytId1 == ytId2) return true
+        
+        // If one is already a YouTube ID, check against resolved YT ID of the other
+        val raw1 = clean1.removePrefix("youtube_").removePrefix("youtube://")
+        val raw2 = clean2.removePrefix("youtube_").removePrefix("youtube://")
+        if (raw1.length == 11 && raw1 == ytId2) return true
+        if (raw2.length == 11 && raw2 == ytId1) return true
+
         return false
+    }
+
+    private fun normalizeSongId(id: String): String {
+        return when {
+            id.startsWith("youtube_") -> id.substringAfter("youtube_")
+            id.startsWith("youtube://") -> id.substringAfter("youtube://")
+            else -> id
+        }
     }
 
     private suspend fun addToAddedVideoIds(songId: String) {
@@ -365,9 +450,9 @@ object AutoQueueManager {
         if (id.startsWith("youtube://")) return id.substringAfter("youtube://")
         val longVal = id.toLongOrNull()
         if (longVal != null) {
-            return null // positive/negative database IDs match directly or through duplicate copies in avoid sets
+            return null
         }
-        return id // Raw 11-char YouTube video ID
+        return id
     }
 
     private suspend fun getContextualFamiliarSongs(
@@ -377,7 +462,7 @@ object AutoQueueManager {
     ): List<Song> {
         val dao = musicDaoRef ?: return emptyList()
         val engagementDao = engagementDaoRef
-        
+
         val favoriteSongs = try {
             dao.getFavoriteSongsList(emptyList(), false, 0).map { it.toSong() }
         } catch (e: Exception) {
@@ -405,7 +490,6 @@ object AutoQueueManager {
 
         val combined = (favoriteSongs + playedMultipleTimesSongs).distinctBy { it.id }
 
-        // Calculate dynamic temporal decay affinity scores
         val now = System.currentTimeMillis()
         fun calculateAffinityScore(song: Song): Double {
             val songIdStr = song.id
@@ -421,7 +505,6 @@ object AutoQueueManager {
             return score
         }
 
-        // Sort candidates by affinity score
         val sortedCandidates = combined.sortedByDescending { calculateAffinityScore(it) }
 
         val currentGenre = currentSong?.genre
@@ -432,25 +515,307 @@ object AutoQueueManager {
             val songIdStr = song.id
             val isAlreadyInQueue = currentQueueIds.any { isSameSong(it, songIdStr) }
             val isAvoid = avoidIds.any { isSameSong(it, songIdStr) }
-            val matchesGenre = currentGenre != null && song.genre != null && song.genre.equals(currentGenre, ignoreCase = true)
+
+            val matchesGenre = currentGenre != null && song.genre != null && 
+                               song.genre.equals(currentGenre, ignoreCase = true) && 
+                               !song.genre.equals("YouTube", ignoreCase = true) &&
+                               !song.genre.equals("YouTube Music", ignoreCase = true)
             val matchesArtist = (currentArtist != null && song.artist.equals(currentArtist, ignoreCase = true)) || 
                                 (currentArtistId != null && currentArtistId != -1L && song.artistId == currentArtistId)
-            
+
             !isAlreadyInQueue && !isAvoid && (matchesGenre || matchesArtist)
         }
 
-        if (contextualMatches.size >= 4) {
-            return contextualMatches.take(15) // Keep top contextual affinity matches
+        return contextualMatches.take(15)
+    }
+
+    suspend fun buildMixQueue(seedSong: Song, onlineRelated: List<Song>): List<Song> {
+        val dao = musicDaoRef ?: return (listOf(seedSong) + onlineRelated).distinctBy { it.id }
+        val engagementDao = engagementDaoRef
+        
+        val highlyRotatedIds = mutableSetOf<String>()
+        val engagements = try {
+            engagementDao?.getAllEngagements()
+        } catch (e: Exception) {
+            null
+        }
+        if (engagements != null) {
+            for (eng in engagements) {
+                if (eng.playCount > 40) {
+                    highlyRotatedIds.add(eng.songId)
+                }
+            }
         }
 
-        val nonContextualFiltered = sortedCandidates.filter { song ->
+        val recentlyPlayedIds = mutableSetOf<String>()
+        val recents = try {
+            engagementDao?.getRecentlyPlayedSongs(100)
+        } catch (e: Exception) {
+            null
+        }
+        if (recents != null) {
+            for (eng in recents) {
+                recentlyPlayedIds.add(eng.songId)
+            }
+        }
+
+        val settings = datastoreRepository?.settings?.first() ?: return (listOf(seedSong) + onlineRelated).distinctBy { it.id }
+        val activeSkips = getActiveSkippedSongIds()
+        val avoidIds = if (settings.avoidRepetitiveSongs) {
+            highlyRotatedIds + recentlyPlayedIds + activeSkips
+        } else {
+            highlyRotatedIds + activeSkips
+        }
+
+        // Batch resolve title & artist keys for all avoid IDs to ensure strict title/artist deduplication!
+        val avoidLongIds = avoidIds.mapNotNull { id ->
+            id.toLongOrNull() ?: getDatabaseIdForYoutubeId(normalizeSongId(id))
+        }
+        val avoidSongs = if (avoidLongIds.isNotEmpty()) {
+            dao.getSongsByIdsListSimple(avoidLongIds)
+        } else {
+            emptyList()
+        }
+        val avoidKeys = avoidSongs.mapNotNull { s ->
+            val title = s.title.lowercase().trim()
+            val artist = s.artistName.lowercase().trim()
+            if (title.isNotEmpty() && artist.isNotEmpty()) "$title|$artist" else null
+        }.toSet()
+
+        val seedTitleKey = seedSong.title.lowercase().trim()
+        val seedArtistKey = seedSong.artist.lowercase().trim()
+        val currentQueueKeys = if (seedTitleKey.isNotEmpty() && seedArtistKey.isNotEmpty()) {
+            setOf("$seedTitleKey|$seedArtistKey")
+        } else {
+            emptySet()
+        }
+        val currentQueueIds = setOf(seedSong.id)
+
+        // 1. Resolve current playing song information
+        val seedLongId = seedSong.id.toLongOrNull()
+        val currentSongEntity = if (seedLongId != null) dao.getSongByIdOnce(seedLongId) else null
+        
+        var resolvedGenre = currentSongEntity?.genre ?: seedSong.genre
+        if (resolvedGenre.isNullOrBlank() && seedSong.title.isNotBlank() && seedSong.artist.isNotBlank()) {
+            val dbMatch = dao.getSongsByArtistName(seedSong.artist, 1).firstOrNull()
+            if (dbMatch != null) {
+                resolvedGenre = dbMatch.genre
+            }
+        }
+
+        // 2. Related candidates from online/offline
+        val resolvedVideoId = seedSong.youtubeId ?: seedSong.id.substringAfter("youtube_")
+        
+        val discovered = if (onlineRelated.isNotEmpty()) {
+            onlineRelated
+        } else {
+            fetchLocalRelated(seedSong.id, currentQueueIds)
+        }
+
+        // 3. Extract same-artist and same-genre local pools
+        val sameArtistSongs = if (currentSongEntity?.artistName != null || seedSong.artist.isNotBlank()) {
+            val artistToQuery = currentSongEntity?.artistName ?: seedSong.artist
+            dao.getSongsByArtistName(artistToQuery, 20).map { it.toSong() }
+        } else {
+            emptyList()
+        }
+
+        val sameGenreSongs = if (!resolvedGenre.isNullOrBlank() && !resolvedGenre.equals("YouTube", ignoreCase = true)) {
+            dao.getSongsByGenre(resolvedGenre, seedLongId ?: 0L, 50).map { it.toSong() }
+        } else {
+            emptyList()
+        }
+
+        // 4. Extract familiar contextual songs (favorites or playCount >= 2 matching genre/artist)
+        val familiarSongs = getContextualFamiliarSongs(currentSongEntity, currentQueueIds, avoidIds)
+
+        // 5. Interleave pools with strict capping (max 2 per artist)
+        val finalSongsToAdd = mutableListOf<Song>()
+        finalSongsToAdd.add(seedSong) // seed song is first!
+
+        val addedArtists = mutableMapOf<String, Int>()
+        addedArtists[seedSong.artist.lowercase().trim()] = 1
+
+        val addedKeys = mutableSetOf<String>()
+        if (seedTitleKey.isNotEmpty() && seedArtistKey.isNotEmpty()) {
+            addedKeys.add("$seedTitleKey|$seedArtistKey")
+        }
+
+        // Helper to check artist limits and session mood to ensure acoustic consistency & diversity
+        val activeMood = getActiveSessionMood()
+        fun canAddSong(song: Song): Boolean {
             val songIdStr = song.id
-            val isAlreadyInQueue = currentQueueIds.any { isSameSong(it, songIdStr) }
+            val isInQueue = currentQueueIds.any { isSameSong(it, songIdStr) }
             val isAvoid = avoidIds.any { isSameSong(it, songIdStr) }
-            !isAlreadyInQueue && !isAvoid
+            val isAlreadyAdded = finalSongsToAdd.any { isSameSong(it.id, songIdStr) }
+            if (isInQueue || isAvoid || isAlreadyAdded) return false
+
+            // Deduplicate by Title + Artist to prevent duplicates (e.g. local copy vs youtube copy)
+            val cleanTitle = song.title.lowercase().trim()
+            val cleanArtist = song.artist.lowercase().trim()
+            if (cleanTitle.isNotEmpty() && cleanArtist.isNotEmpty()) {
+                val key = "$cleanTitle|$cleanArtist"
+                if (currentQueueKeys.contains(key) || avoidKeys.contains(key) || addedKeys.contains(key)) {
+                    return false
+                }
+            }
+
+            // Active Mood Protection
+            val songGenre = song.genre?.lowercase()?.trim().orEmpty()
+            if (activeMood == Mood.CHILL) {
+                if (UPBEAT_GENRES.any { songGenre.contains(it) }) return false
+            } else if (activeMood == Mood.UPBEAT) {
+                if (CHILL_GENRES.any { songGenre.contains(it) }) return false
+            }
+
+            val artistKey = song.artist.lowercase().trim()
+            val artistCount = addedArtists[artistKey] ?: 0
+            return artistCount < 2 // Max 2 songs per artist in the added batch
         }
 
-        return (contextualMatches + nonContextualFiltered.take(15)).distinctBy { it.id }
+        // Separate same-genre into popular and discovery (playCount = 0)
+        val discoveryCandidates = sameGenreSongs.filter { song ->
+            val playCount = engagementDao?.getPlayCount(song.id) ?: 0
+            playCount == 0 && !song.isFavorite
+        }.filter { canAddSong(it) }.shuffled().toMutableList()
+
+        val popularGenreCandidates = sameGenreSongs.filter { song ->
+            val playCount = engagementDao?.getPlayCount(song.id) ?: 0
+            playCount > 0 || song.isFavorite
+        }.filter { canAddSong(it) }.shuffled().toMutableList()
+
+        val sameArtistCandidates = sameArtistSongs.filter { canAddSong(it) }.shuffled().toMutableList()
+        val relatedCandidates = discovered.filter { canAddSong(it) }.toMutableList()
+        val familiarCandidates = familiarSongs.filter { canAddSong(it) }.toMutableList()
+
+        var addedCount = 1 // we added the seed song
+        val targetBatchSize = 50 // Mix of 50 songs
+
+        while (addedCount < targetBatchSize) {
+            var addedInThisRound = false
+
+            // 1. YouTube / Local Related gets HIGHEST PRIORITY (First Priority - Vibe Match)
+            // We pull up to 2 related songs to anchor the vibe
+            for (i in 0 until 2) {
+                if (relatedCandidates.isNotEmpty()) {
+                    val s = relatedCandidates.removeAt(0)
+                    if (canAddSong(s)) {
+                        finalSongsToAdd.add(s)
+                        addedArtists[s.artist.lowercase().trim()] = (addedArtists[s.artist.lowercase().trim()] ?: 0) + 1
+                        val cleanTitle = s.title.lowercase().trim()
+                        val cleanArtist = s.artist.lowercase().trim()
+                        if (cleanTitle.isNotEmpty() && cleanArtist.isNotEmpty()) {
+                            addedKeys.add("$cleanTitle|$cleanArtist")
+                        }
+                        addedCount++
+                        addedInThisRound = true
+                    }
+                }
+            }
+
+            if (addedCount >= targetBatchSize) break
+
+            // 2. Discovery Candidates (Never played before - New Discoveries)
+            for (i in 0 until 2) {
+                if (discoveryCandidates.isNotEmpty()) {
+                    val s = discoveryCandidates.removeAt(0)
+                    if (canAddSong(s)) {
+                        finalSongsToAdd.add(s)
+                        addedArtists[s.artist.lowercase().trim()] = (addedArtists[s.artist.lowercase().trim()] ?: 0) + 1
+                        val cleanTitle = s.title.lowercase().trim()
+                        val cleanArtist = s.artist.lowercase().trim()
+                        if (cleanTitle.isNotEmpty() && cleanArtist.isNotEmpty()) {
+                            addedKeys.add("$cleanTitle|$cleanArtist")
+                        }
+                        addedCount++
+                        addedInThisRound = true
+                    }
+                }
+            }
+
+            if (addedCount >= targetBatchSize) break
+
+            // 3. Same Artist / Vibe Exploration
+            if (sameArtistCandidates.isNotEmpty()) {
+                val s = sameArtistCandidates.removeAt(0)
+                if (canAddSong(s)) {
+                    finalSongsToAdd.add(s)
+                    addedArtists[s.artist.lowercase().trim()] = (addedArtists[s.artist.lowercase().trim()] ?: 0) + 1
+                    val cleanTitle = s.title.lowercase().trim()
+                    val cleanArtist = s.artist.lowercase().trim()
+                    if (cleanTitle.isNotEmpty() && cleanArtist.isNotEmpty()) {
+                        addedKeys.add("$cleanTitle|$cleanArtist")
+                    }
+                    addedCount++
+                    addedInThisRound = true
+                }
+            }
+
+            if (addedCount >= targetBatchSize) break
+
+            // 4. Same Genre Popular Exploration
+            if (popularGenreCandidates.isNotEmpty()) {
+                val s = popularGenreCandidates.removeAt(0)
+                if (canAddSong(s)) {
+                    finalSongsToAdd.add(s)
+                    addedArtists[s.artist.lowercase().trim()] = (addedArtists[s.artist.lowercase().trim()] ?: 0) + 1
+                    val cleanTitle = s.title.lowercase().trim()
+                    val cleanArtist = s.artist.lowercase().trim()
+                    if (cleanTitle.isNotEmpty() && cleanArtist.isNotEmpty()) {
+                        addedKeys.add("$cleanTitle|$cleanArtist")
+                    }
+                    addedCount++
+                    addedInThisRound = true
+                }
+            }
+
+            if (addedCount >= targetBatchSize) break
+
+            // 5. Familiar Contextual (Favorites/Popular matching context - lower priority)
+            if (familiarCandidates.isNotEmpty()) {
+                val s = familiarCandidates.removeAt(0)
+                if (canAddSong(s)) {
+                    finalSongsToAdd.add(s)
+                    addedArtists[s.artist.lowercase().trim()] = (addedArtists[s.artist.lowercase().trim()] ?: 0) + 1
+                    val cleanTitle = s.title.lowercase().trim()
+                    val cleanArtist = s.artist.lowercase().trim()
+                    if (cleanTitle.isNotEmpty() && cleanArtist.isNotEmpty()) {
+                        addedKeys.add("$cleanTitle|$cleanArtist")
+                    }
+                    addedCount++
+                    addedInThisRound = true
+                }
+            }
+
+            if (!addedInThisRound) break
+        }
+
+        // Fallback: If we couldn't build at least targetBatchSize songs, relax constraints
+        if (finalSongsToAdd.size < targetBatchSize) {
+            val remainingCandidates = (discovered + sameGenreSongs + familiarSongs).distinctBy { it.id }
+            for (s in remainingCandidates) {
+                val songIdStr = s.id
+                val isInQueue = currentQueueIds.any { isSameSong(it, songIdStr) }
+                val isAlreadyAdded = finalSongsToAdd.any { isSameSong(it.id, songIdStr) }
+                val isAvoid = avoidIds.any { isSameSong(it, songIdStr) }
+                if (!isInQueue && !isAlreadyAdded && !isAvoid) {
+                    val cleanTitle = s.title.lowercase().trim()
+                    val cleanArtist = s.artist.lowercase().trim()
+                    val isDuplicateTitleArtist = cleanTitle.isNotEmpty() && cleanArtist.isNotEmpty() && 
+                        (currentQueueKeys.contains("$cleanTitle|$cleanArtist") || avoidKeys.contains("$cleanTitle|$cleanArtist") || addedKeys.contains("$cleanTitle|$cleanArtist"))
+                    
+                    if (!isDuplicateTitleArtist) {
+                        finalSongsToAdd.add(s)
+                        if (cleanTitle.isNotEmpty() && cleanArtist.isNotEmpty()) {
+                            addedKeys.add("$cleanTitle|$cleanArtist")
+                        }
+                        if (finalSongsToAdd.size >= targetBatchSize) break
+                    }
+                }
+            }
+        }
+
+        return finalSongsToAdd
     }
 
     private suspend fun refillQueueLoop(currentId: String, forceRefresh: Boolean) {
@@ -549,38 +914,21 @@ object AutoQueueManager {
             }
             if (engagements != null) {
                 for (eng in engagements) {
-                    if (eng.playCount > 8) {
+                    if (eng.playCount > 40) {
                         highlyRotatedIds.add(eng.songId)
-                        val ytId = getYoutubeVideoId(eng.songId)
-                        if (ytId != null) {
-                            highlyRotatedIds.add(ytId)
-                            highlyRotatedIds.add("youtube_$ytId")
-                            highlyRotatedIds.add(getDatabaseIdForYoutubeId(ytId).toString())
-                        }
                     }
                 }
             }
 
-            val recentlyPlayedSongs = mutableListOf<Song>()
             val recentlyPlayedIds = mutableSetOf<String>()
             val recents = try {
-                engagementDao?.getRecentlyPlayedSongs(30)
+                engagementDao?.getRecentlyPlayedSongs(100)
             } catch (e: Exception) {
                 null
             }
             if (recents != null) {
                 for (eng in recents) {
                     recentlyPlayedIds.add(eng.songId)
-                    val ytId = getYoutubeVideoId(eng.songId)
-                    if (ytId != null) {
-                        recentlyPlayedIds.add(ytId)
-                        recentlyPlayedIds.add("youtube_$ytId")
-                        recentlyPlayedIds.add(getDatabaseIdForYoutubeId(ytId).toString())
-                    }
-                    val song = getDbSongByIdString(eng.songId)
-                    if (song != null) {
-                        recentlyPlayedSongs.add(song)
-                    }
                 }
             }
 
@@ -590,6 +938,31 @@ object AutoQueueManager {
                 highlyRotatedIds + recentlyPlayedIds + activeSkips
             } else {
                 highlyRotatedIds + activeSkips
+            }
+
+            // Batch resolve title & artist keys for all avoid IDs to ensure strict title/artist deduplication!
+            val avoidLongIds = avoidIds.mapNotNull { id ->
+                id.toLongOrNull() ?: getDatabaseIdForYoutubeId(normalizeSongId(id))
+            }
+            val avoidSongs = if (avoidLongIds.isNotEmpty()) {
+                dao.getSongsByIdsListSimple(avoidLongIds)
+            } else {
+                emptyList()
+            }
+            val avoidKeys = avoidSongs.mapNotNull { s ->
+                val title = s.title.lowercase().trim()
+                val artist = s.artistName.lowercase().trim()
+                if (title.isNotEmpty() && artist.isNotEmpty()) "$title|$artist" else null
+            }.toSet()
+
+            val currentQueueKeys = withContext(Dispatchers.Main) {
+                if (playerRef == null) emptySet()
+                else (0 until player.mediaItemCount).mapNotNull { index ->
+                    val item = player.getMediaItemAt(index)
+                    val title = item.mediaMetadata.title?.toString()?.lowercase()?.trim() ?: ""
+                    val artist = item.mediaMetadata.artist?.toString()?.lowercase()?.trim() ?: ""
+                    if (title.isNotEmpty() && artist.isNotEmpty()) "$title|$artist" else null
+                }.toSet()
             }
 
             val songsToAdd = mutableListOf<Song>()
@@ -646,16 +1019,27 @@ object AutoQueueManager {
             // 5. Interleave pools with strict capping (max 2 per artist)
             val finalSongsToAdd = mutableListOf<Song>()
             val addedArtists = mutableMapOf<String, Int>()
+            val addedKeys = mutableSetOf<String>()
 
             // Helper to check artist limits and session mood to ensure acoustic consistency & diversity
             val activeMood = getActiveSessionMood()
-            suspend fun canAddSong(song: Song): Boolean {
+            fun canAddSong(song: Song): Boolean {
                 val songIdStr = song.id
                 val isInQueue = currentQueueIds.any { isSameSong(it, songIdStr) }
                 val isAvoid = avoidIds.any { isSameSong(it, songIdStr) }
                 val isAlreadyAdded = finalSongsToAdd.any { isSameSong(it.id, songIdStr) }
                 val isAlreadyInAddedVideoIds = addedVideoIds.any { isSameSong(it, songIdStr) }
                 if (isInQueue || isAvoid || isAlreadyAdded || isAlreadyInAddedVideoIds) return false
+
+                // Deduplicate by Title + Artist to prevent duplicates (e.g. local copy vs youtube copy)
+                val cleanTitle = song.title.lowercase().trim()
+                val cleanArtist = song.artist.lowercase().trim()
+                if (cleanTitle.isNotEmpty() && cleanArtist.isNotEmpty()) {
+                    val key = "$cleanTitle|$cleanArtist"
+                    if (currentQueueKeys.contains(key) || avoidKeys.contains(key) || addedKeys.contains(key)) {
+                        return false
+                    }
+                }
 
                 // Active Mood Protection
                 val songGenre = song.genre?.lowercase()?.trim().orEmpty()
@@ -691,8 +1075,8 @@ object AutoQueueManager {
             while (addedCount < targetBatchSize) {
                 var addedInThisRound = false
 
-                // 1. YouTube Related / Automix gets HIGHEST PRIORITY (first priority)
-                // We add up to 2 related songs per round if available
+                // 1. YouTube / Local Related gets HIGHEST PRIORITY (First Priority - Vibe Match)
+                // We pull up to 2 related songs to anchor the vibe
                 for (i in 0 until 2) {
                     if (relatedCandidates.isNotEmpty()) {
                         val s = relatedCandidates.removeAt(0)
@@ -700,6 +1084,11 @@ object AutoQueueManager {
                             finalSongsToAdd.add(s)
                             addToAddedVideoIds(s.id)
                             addedArtists[s.artist.lowercase().trim()] = (addedArtists[s.artist.lowercase().trim()] ?: 0) + 1
+                            val cleanTitle = s.title.lowercase().trim()
+                            val cleanArtist = s.artist.lowercase().trim()
+                            if (cleanTitle.isNotEmpty() && cleanArtist.isNotEmpty()) {
+                                addedKeys.add("$cleanTitle|$cleanArtist")
+                            }
                             addedCount++
                             addedInThisRound = true
                         }
@@ -708,13 +1097,40 @@ object AutoQueueManager {
 
                 if (addedCount >= targetBatchSize) break
 
-                // 2. Same Artist Exploration
+                // 2. Discovery Candidates (Never played before - New Discoveries)
+                // We pull up to 2 songs to encourage exploration of new music
+                for (i in 0 until 2) {
+                    if (discoveryCandidates.isNotEmpty()) {
+                        val s = discoveryCandidates.removeAt(0)
+                        if (canAddSong(s)) {
+                            finalSongsToAdd.add(s)
+                            addToAddedVideoIds(s.id)
+                            addedArtists[s.artist.lowercase().trim()] = (addedArtists[s.artist.lowercase().trim()] ?: 0) + 1
+                            val cleanTitle = s.title.lowercase().trim()
+                            val cleanArtist = s.artist.lowercase().trim()
+                            if (cleanTitle.isNotEmpty() && cleanArtist.isNotEmpty()) {
+                                addedKeys.add("$cleanTitle|$cleanArtist")
+                            }
+                            addedCount++
+                            addedInThisRound = true
+                        }
+                    }
+                }
+
+                if (addedCount >= targetBatchSize) break
+
+                // 3. Same Artist / Vibe Exploration
                 if (sameArtistCandidates.isNotEmpty()) {
                     val s = sameArtistCandidates.removeAt(0)
                     if (canAddSong(s)) {
                         finalSongsToAdd.add(s)
                         addToAddedVideoIds(s.id)
                         addedArtists[s.artist.lowercase().trim()] = (addedArtists[s.artist.lowercase().trim()] ?: 0) + 1
+                        val cleanTitle = s.title.lowercase().trim()
+                        val cleanArtist = s.artist.lowercase().trim()
+                        if (cleanTitle.isNotEmpty() && cleanArtist.isNotEmpty()) {
+                            addedKeys.add("$cleanTitle|$cleanArtist")
+                        }
                         addedCount++
                         addedInThisRound = true
                     }
@@ -722,41 +1138,37 @@ object AutoQueueManager {
 
                 if (addedCount >= targetBatchSize) break
 
-                // 3. Same Genre Discovery (Never played before)
-                if (discoveryCandidates.isNotEmpty()) {
-                    val s = discoveryCandidates.removeAt(0)
-                    if (canAddSong(s)) {
-                        finalSongsToAdd.add(s)
-                        addToAddedVideoIds(s.id)
-                        addedArtists[s.artist.lowercase().trim()] = (addedArtists[s.artist.lowercase().trim()] ?: 0) + 1
-                        addedCount++
-                        addedInThisRound = true
-                    }
-                }
-
-                if (addedCount >= targetBatchSize) break
-
-                // 4. Familiar Contextual
-                if (familiarCandidates.isNotEmpty()) {
-                    val s = familiarCandidates.removeAt(0)
-                    if (canAddSong(s)) {
-                        finalSongsToAdd.add(s)
-                        addToAddedVideoIds(s.id)
-                        addedArtists[s.artist.lowercase().trim()] = (addedArtists[s.artist.lowercase().trim()] ?: 0) + 1
-                        addedCount++
-                        addedInThisRound = true
-                    }
-                }
-
-                if (addedCount >= targetBatchSize) break
-
-                // 5. Same Genre Popular Exploration
+                // 4. Same Genre Popular Exploration
                 if (popularGenreCandidates.isNotEmpty()) {
                     val s = popularGenreCandidates.removeAt(0)
                     if (canAddSong(s)) {
                         finalSongsToAdd.add(s)
                         addToAddedVideoIds(s.id)
                         addedArtists[s.artist.lowercase().trim()] = (addedArtists[s.artist.lowercase().trim()] ?: 0) + 1
+                        val cleanTitle = s.title.lowercase().trim()
+                        val cleanArtist = s.artist.lowercase().trim()
+                        if (cleanTitle.isNotEmpty() && cleanArtist.isNotEmpty()) {
+                            addedKeys.add("$cleanTitle|$cleanArtist")
+                        }
+                        addedCount++
+                        addedInThisRound = true
+                    }
+                }
+
+                if (addedCount >= targetBatchSize) break
+
+                // 5. Familiar Contextual (Favorites/Popular matching context - lower priority)
+                if (familiarCandidates.isNotEmpty()) {
+                    val s = familiarCandidates.removeAt(0)
+                    if (canAddSong(s)) {
+                        finalSongsToAdd.add(s)
+                        addToAddedVideoIds(s.id)
+                        addedArtists[s.artist.lowercase().trim()] = (addedArtists[s.artist.lowercase().trim()] ?: 0) + 1
+                        val cleanTitle = s.title.lowercase().trim()
+                        val cleanArtist = s.artist.lowercase().trim()
+                        if (cleanTitle.isNotEmpty() && cleanArtist.isNotEmpty()) {
+                            addedKeys.add("$cleanTitle|$cleanArtist")
+                        }
                         addedCount++
                         addedInThisRound = true
                     }
@@ -765,7 +1177,7 @@ object AutoQueueManager {
                 if (!addedInThisRound) break
             }
 
-            // Fallback: If we couldn't build at least 6 songs due to strict limits, relax constraints but STILL enforce avoidIds and queue checks!
+            // Fallback: If we couldn't build at least 6 songs due to strict limits, relax constraints but STILL enforce avoidIds, Title/Artist duplicates, and queue checks!
             if (finalSongsToAdd.size < 6) {
                 val remainingCandidates = (discovered + sameGenreSongs + familiarSongs).distinctBy { it.id }
                 for (s in remainingCandidates) {
@@ -775,9 +1187,19 @@ object AutoQueueManager {
                     val isAvoid = avoidIds.any { isSameSong(it, songIdStr) }
                     val isAlreadyInAddedVideoIds = addedVideoIds.any { isSameSong(it, songIdStr) }
                     if (!isInQueue && !isAlreadyAdded && !isAvoid && !isAlreadyInAddedVideoIds) {
-                        finalSongsToAdd.add(s)
-                        addToAddedVideoIds(s.id)
-                        if (finalSongsToAdd.size >= 8) break
+                        val cleanTitle = s.title.lowercase().trim()
+                        val cleanArtist = s.artist.lowercase().trim()
+                        val isDuplicateTitleArtist = cleanTitle.isNotEmpty() && cleanArtist.isNotEmpty() && 
+                            (currentQueueKeys.contains("$cleanTitle|$cleanArtist") || avoidKeys.contains("$cleanTitle|$cleanArtist") || addedKeys.contains("$cleanTitle|$cleanArtist"))
+                        
+                        if (!isDuplicateTitleArtist) {
+                            finalSongsToAdd.add(s)
+                            addToAddedVideoIds(s.id)
+                            if (cleanTitle.isNotEmpty() && cleanArtist.isNotEmpty()) {
+                                addedKeys.add("$cleanTitle|$cleanArtist")
+                            }
+                            if (finalSongsToAdd.size >= 8) break
+                        }
                     }
                 }
             }
@@ -841,7 +1263,6 @@ object AutoQueueManager {
             
             var filtered = emptyList<SongEntity>()
 
-            // Get engagements map for temporal-decay scoring
             val engagementsMap = if (engagementDao != null) {
                 try {
                     engagementDao.getAllEngagements().associateBy { it.songId }
@@ -853,32 +1274,45 @@ object AutoQueueManager {
             }
             val now = System.currentTimeMillis()
 
-            fun calculateLocalDecayedScore(entity: SongEntity): Double {
-                val songIdStr = entity.id.toString()
-                val rawId = extractYtId(songIdStr) ?: songIdStr
-                val eng = engagementsMap[songIdStr] ?: engagementsMap[rawId]
-                var score = 0.0
-                if (entity.isFavorite) score += 5.0
-                if (eng != null) {
-                    val timeDiffMs = (now - eng.lastPlayedTimestamp).coerceAtLeast(0L)
-                    val decay = kotlin.math.exp(-DECAY_LAMBDA * timeDiffMs)
-                    score += eng.playCount * decay
-                }
-                return score
-            }
-
             if (currentSong != null) {
                 val relatedEntities = dao.getLocalRelatedSongs(
                     songId = currentSong.id,
                     artistId = currentSong.artistId,
                     albumId = currentSong.albumId,
                     genre = currentSong.genre,
-                    limit = 25
+                    limit = 60
                 )
-                
-                // Prioritize favorites and dynamically decay-scored popular ones
-                val sortedRelated = relatedEntities.sortedByDescending { calculateLocalDecayedScore(it) }
-                
+
+                val mappedRelatedIds = try {
+                    dao.getRelatedSongs(currentSong.id, 100).map { it.id }.toSet()
+                } catch (e: Exception) {
+                    emptySet()
+                }
+
+                fun calculateRelevanceAndDecayScore(entity: SongEntity): Double {
+                    var relevance = getSongSimilarityScore(
+                        currentSong.title, currentSong.artistName, currentSong.genre,
+                        entity.title, entity.artistName, entity.genre
+                    )
+                    if (entity.albumId == currentSong.albumId) relevance += 5.0
+                    if (mappedRelatedIds.contains(entity.id)) relevance += 20.0
+
+                    val songIdStr = entity.id.toString()
+                    val rawId = extractYtId(songIdStr) ?: songIdStr
+                    val eng = engagementsMap[songIdStr] ?: engagementsMap[rawId]
+                    
+                    var popularityScore = 0.0
+                    if (entity.isFavorite) popularityScore += 2.0
+                    if (eng != null) {
+                        val timeDiffMs = (now - eng.lastPlayedTimestamp).coerceAtLeast(0L)
+                        val decay = kotlin.math.exp(-DECAY_LAMBDA * timeDiffMs)
+                        popularityScore += (eng.playCount.coerceAtMost(10) * 0.5) * decay
+                    }
+                    return relevance + popularityScore
+                }
+
+                val sortedRelated = relatedEntities.sortedByDescending { calculateRelevanceAndDecayScore(it) }
+
                 filtered = sortedRelated.filter { entity ->
                     val entityIdStr = entity.id.toString()
                     val isInQueue = currentQueueIds.any { isSameSong(it, entityIdStr) }
@@ -887,16 +1321,47 @@ object AutoQueueManager {
                 }
             }
             
-            if (filtered.size < 10) {
+            // Scarce local related songs fallback improvement!
+            if (filtered.size < 12 && currentSong != null) {
+                val artistSongs = dao.getSongsByArtistName(currentSong.artistName, 30)
+                val genreSongs = if (!currentSong.genre.isNullOrBlank() && !currentSong.genre.equals("YouTube", ignoreCase = true)) {
+                    dao.getSongsByGenre(currentSong.genre, currentSong.id, 30)
+                } else {
+                    emptyList()
+                }
+                
                 val allLocalSongs = dao.getAllSongsList()
-                val extraLocal = allLocalSongs.filter { entity ->
+                val fallbackCandidates = (artistSongs + genreSongs + allLocalSongs).distinctBy { it.id }
+                
+                fun calculateFallbackScore(entity: SongEntity): Double {
+                    var relevance = getSongSimilarityScore(
+                        currentSong.title, currentSong.artistName, currentSong.genre,
+                        entity.title, entity.artistName, entity.genre
+                    )
+                    
+                    val songIdStr = entity.id.toString()
+                    val rawId = extractYtId(songIdStr) ?: songIdStr
+                    val eng = engagementsMap[songIdStr] ?: engagementsMap[rawId]
+                    
+                    var popularityScore = 0.0
+                    if (entity.isFavorite) popularityScore += 2.0
+                    if (eng != null) {
+                        val timeDiffMs = (now - eng.lastPlayedTimestamp).coerceAtLeast(0L)
+                        val decay = kotlin.math.exp(-DECAY_LAMBDA * timeDiffMs)
+                        popularityScore += (eng.playCount.coerceAtMost(10) * 0.5) * decay
+                    }
+                    return relevance + popularityScore
+                }
+                
+                val extraLocal = fallbackCandidates.filter { entity ->
                     val entityIdStr = entity.id.toString()
                     val isInQueue = currentQueueIds.any { isSameSong(it, entityIdStr) }
                     val isAlreadyAdded = addedVideoIds.any { isSameSong(it, entityIdStr) }
-                    val isCurrent = currentSong != null && entity.id == currentSong.id
+                    val isCurrent = entity.id == currentSong.id
                     !isInQueue && !isAlreadyAdded && !isCurrent
-                }.sortedByDescending { calculateLocalDecayedScore(it) }
-                 .take(20)
+                }.sortedByDescending { calculateFallbackScore(it) }
+                 .take(30)
+                 
                 filtered = (filtered + extraLocal).distinctBy { it.id }
             }
             
