@@ -125,8 +125,21 @@ class TelegramClientManager @Inject constructor(
                 
                 // Let's assume the error message `constructor(p0: Boolean, p1: String!, ...)` matches the fields.
                 
-                val apiId = if (BuildConfig.TELEGRAM_API_ID != 0) BuildConfig.TELEGRAM_API_ID else 2040
-                val apiHash = if (BuildConfig.TELEGRAM_API_HASH.isNotEmpty()) BuildConfig.TELEGRAM_API_HASH else "b18441a1ff760113157c375cd7630d4c"
+                // Validate API ID and Hash. A valid Telegram API Hash is exactly 32 hex characters.
+                // If a leading zero was stripped during gradle/build config generation (making it 31 chars), auto-pad it.
+                val rawHash = BuildConfig.TELEGRAM_API_HASH
+                val paddedHash = if (rawHash.length == 31) "0$rawHash" else rawHash
+                
+                val isCustomConfigValid = BuildConfig.TELEGRAM_API_ID != 0 && 
+                        paddedHash.length == 32 && 
+                        paddedHash.all { it.isDigit() || it.lowercaseChar() in 'a'..'f' }
+                
+                if (!isCustomConfigValid && (BuildConfig.TELEGRAM_API_ID != 0 || rawHash.isNotEmpty())) {
+                    Timber.w("Custom Telegram API config is invalid. Falling back to official credentials.")
+                }
+
+                val apiId = if (isCustomConfigValid) BuildConfig.TELEGRAM_API_ID else 2040
+                val apiHash = if (isCustomConfigValid) paddedHash else "b18441a1ff760113157c375cd7630d4c"
 
                 client?.send(TdApi.SetTdlibParameters(
                     false, // useTestDc
