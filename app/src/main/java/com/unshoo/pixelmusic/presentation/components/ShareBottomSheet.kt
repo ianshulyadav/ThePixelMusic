@@ -202,7 +202,7 @@ fun ShareBottomSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = Color.White,
+        containerColor = colorScheme.surfaceContainer,
         shape = sheetShape,
         dragHandle = null,
         contentWindowInsets = { WindowInsets(0, 0, 0, 0) }
@@ -217,7 +217,7 @@ fun ShareBottomSheet(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(sheetShape)
-                    .background(Color.White)
+                    .background(colorScheme.surfaceContainer)
                     .verticalScroll(rememberScrollState())
                     .padding(bottom = 16.dp)
             ) {
