@@ -2360,34 +2360,40 @@ class PlayerViewModel @Inject constructor(
             }
             return
         }    // Local playback logic
-        val controller = mediaController
-        val currentQueue = _playerUiState.value.currentPlaybackQueue
-        val songIndexInQueue = currentQueue.indexOfFirst { it.id == song.id }
-        val queueMatchesContext = currentQueue.matchesSongOrder(playbackContext)
-        val reusableTargetIndex = if (
-            controller != null &&
-            controller.isConnected &&
-            !dualPlayerEngine.isTransitionRunning() &&
-            songIndexInQueue != -1 &&
-            queueMatchesContext
-        ) {
-            controller.resolveReusablePlaybackTargetIndex(songIndexInQueue, song.id)
-        } else {
-            null
-        }
-
-        if (controller != null && reusableTargetIndex != null) {
-            cancelPendingDirectPlaybackBuild()
-            playLoadedControllerItem(controller, reusableTargetIndex)
-            if (isVoluntaryPlay) {
-                incrementSongScore(song)
-                if (playlistId != null && queueName != "None") {
-                    appShortcutManager.updateLastPlaylistShortcut(playlistId, queueName)
-                }
-            }
-        } else {
+        // Local playback logic
+        if (playbackContext.size <= 1) {
             if (isVoluntaryPlay) incrementSongScore(song)
-            playSongs(playbackContext, song, queueName, playlistId)
+            playWithArchiveTuneQueueBuilder(song, queueName, playlistId)
+        } else {
+            val controller = mediaController
+            val currentQueue = _playerUiState.value.currentPlaybackQueue
+            val songIndexInQueue = currentQueue.indexOfFirst { it.id == song.id }
+            val queueMatchesContext = currentQueue.matchesSongOrder(playbackContext)
+            val reusableTargetIndex = if (
+                controller != null &&
+                controller.isConnected &&
+                !dualPlayerEngine.isTransitionRunning() &&
+                songIndexInQueue != -1 &&
+                queueMatchesContext
+            ) {
+                controller.resolveReusablePlaybackTargetIndex(songIndexInQueue, song.id)
+            } else {
+                null
+            }
+
+            if (controller != null && reusableTargetIndex != null) {
+                cancelPendingDirectPlaybackBuild()
+                playLoadedControllerItem(controller, reusableTargetIndex)
+                if (isVoluntaryPlay) {
+                    incrementSongScore(song)
+                    if (playlistId != null && queueName != "None") {
+                        appShortcutManager.updateLastPlaylistShortcut(playlistId, queueName)
+                    }
+                }
+            } else {
+                if (isVoluntaryPlay) incrementSongScore(song)
+                playSongs(playbackContext, song, queueName, playlistId)
+            }
         }
         resetPredictiveBackState()
     }
@@ -2650,7 +2656,90 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
-
+    fun playWithArchiveTuneQueueBuilder(
+        song: Song,
+        queueName: String = "Current Context",
+        playlistId: String? = null
+    ) {
+        Log.i("ArchiveTuneBuilder", "playWithArchiveTuneQueueBuilder: starting for song '${song.title}' (${song.id})")
+        
+        // 1. Play the seed song immediately so there is zero delay!
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                saveYoutubeSongsToDb(listOf(song))
+            }
+            playSongs(listOf(song), song, queueName, playlistId)
+        }
+        
+        // 2. Fetch related recommendations in the background and update the player's queue
+        viewModelScope.launch {
+            val videoId = resolveQuickPicksVideoId(song)
+            if (videoId.isNullOrBlank()) {
+                Timber.w("ArchiveTune Queue Builder: Could not resolve videoId for seed song '${song.title}'")
+                return@launch
+            }
+            val endpoint = unshoo.ianshulyadav.pixelmusic.innertube.models.WatchEndpoint(videoId = videoId)
+            
+            _playerUiState.update { it.copy(isLoadingInitialSongs = true) }
+            val result = withContext(Dispatchers.IO) {
+                unshoo.ianshulyadav.pixelmusic.innertube.YouTube.next(endpoint)
+            }
+            result.onSuccess { nextResult ->
+                val relatedSongs = nextResult.items.map { it.toNativeSong() }
+                if (relatedSongs.isNotEmpty()) {
+                    val fullQueue = withContext(Dispatchers.IO) {
+                        com.unshoo.pixelmusic.data.remote.youtube.AutoQueueManager.buildMixQueue(song, relatedSongs)
+                    }
+                    
+                    saveYoutubeSongsToDb(fullQueue)
+                    
+                    // Delay/wait until the player starts playing the first song to avoid race conditions
+                    var retries = 0
+                    while (stablePlayerState.value.currentSong?.id != song.id && retries < 50) {
+                        delay(100)
+                        retries++
+                    }
+                    
+                    if (stablePlayerState.value.currentSong?.id == song.id) {
+                        withContext(Dispatchers.Main) {
+                            try {
+                                val player = dualPlayerEngine.masterPlayer
+                                val newSongs = fullQueue.drop(1)
+                                val mediaItems = newSongs.map { MediaItemBuilder.build(it) }
+                                
+                                val totalCount = player.mediaItemCount
+                                if (totalCount > 1) {
+                                    player.removeMediaItems(1, totalCount)
+                                }
+                                player.addMediaItems(mediaItems)
+                                
+                                _playerUiState.update { 
+                                    it.copy(
+                                        currentPlaybackQueue = fullQueue.toPlaybackQueue(),
+                                        currentQueueSourceName = queueName
+                                    )
+                                }
+                            } catch (e: Exception) {
+                                Timber.e(e, "ArchiveTune Queue Builder: Error dynamically updating ExoPlayer queue")
+                            }
+                        }
+                    }
+                    
+                    val lastSong = fullQueue.last()
+                    val lastVideoId = lastSong.youtubeId ?: lastSong.id.substringAfter("youtube_")
+                    com.unshoo.pixelmusic.data.remote.youtube.AutoQueueManager.seed(
+                        endpoint = nextResult.endpoint,
+                        continuation = nextResult.continuation,
+                        videoId = lastVideoId
+                    )
+                }
+                _playerUiState.update { it.copy(isLoadingInitialSongs = false) }
+            }.onFailure { e ->
+                Timber.e(e, "ArchiveTune Queue Builder: Failed to fetch related queue")
+                _playerUiState.update { it.copy(isLoadingInitialSongs = false) }
+            }
+        }
+    }
 
     private fun List<Song>.matchesSongOrder(contextSongs: List<Song>): Boolean {
         if (size != contextSongs.size) return false

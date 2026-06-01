@@ -628,7 +628,54 @@ object YouTube {
         ).body<BrowseResponse>()
         val base = response.contents?.twoColumnBrowseResultsRenderer?.tabs?.firstOrNull()?.tabRenderer?.content?.sectionListRenderer?.contents?.firstOrNull()
         val header = base?.musicResponsiveHeaderRenderer ?: base?.musicEditablePlaylistDetailHeaderRenderer?.header?.musicResponsiveHeaderRenderer
-        if (header == null) throw IllegalStateException("PLAYLIST_PRIVATE")
+
+        // Fallback for special playlists like "Liked Music" (ID: "LM") that use
+        // a musicDetailHeaderRenderer at the top-level response header instead of
+        // the twoColumnBrowseResultsRenderer layout. Without this, syncing these
+        // playlists always fails with "Failed to sync playlist from YouTube".
+        if (header == null) {
+            val detailHeader = response.header?.musicDetailHeaderRenderer
+                ?: response.header?.musicEditablePlaylistDetailHeaderRenderer?.header?.musicDetailHeaderRenderer
+                ?: throw IllegalStateException("PLAYLIST_PRIVATE")
+
+            val title = detailHeader.title.runs?.firstOrNull()?.text
+                ?: throw IllegalStateException("PLAYLIST_PRIVATE")
+            val thumbnail = detailHeader.thumbnail.musicThumbnailRenderer?.getThumbnailUrl() ?: ""
+
+            // Songs live in singleColumnBrowseResultsRenderer for this layout
+            val singleColContents = response.contents?.singleColumnBrowseResultsRenderer?.tabs
+                ?.firstOrNull()?.tabRenderer?.content?.sectionListRenderer?.contents
+            val shelfContents = singleColContents
+                ?.firstNotNullOfOrNull { it.musicPlaylistShelfRenderer?.contents }
+                ?: singleColContents?.firstNotNullOfOrNull { it.musicShelfRenderer?.contents }
+                ?: emptyList()
+
+            val songs = shelfContents
+                .mapNotNull { it.musicResponsiveListItemRenderer }
+                .mapNotNull { PlaylistPage.fromMusicResponsiveListItemRenderer(it) }
+
+            val continuation = singleColContents
+                ?.firstNotNullOfOrNull { it.musicPlaylistShelfRenderer?.continuations?.getContinuation() }
+                ?: singleColContents?.firstNotNullOfOrNull { it.musicShelfRenderer?.continuations?.getContinuation() }
+
+            return@runCatching PlaylistPage(
+                playlist = PlaylistItem(
+                    id = playlistId,
+                    title = title,
+                    author = null,
+                    songCountText = detailHeader.secondSubtitle.runs?.firstOrNull()?.text,
+                    thumbnail = thumbnail,
+                    description = detailHeader.description?.runs?.joinToString("") { it.text },
+                    playEndpoint = null,
+                    shuffleEndpoint = null,
+                    radioEndpoint = null,
+                    isEditable = false
+                ),
+                songs = songs,
+                songsContinuation = null,
+                continuation = continuation
+            )
+        }
 
         val title = header.title.runs?.firstOrNull()?.text ?: throw IllegalStateException("PLAYLIST_PRIVATE")
         val thumbnail = header.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails?.lastOrNull()?.normalizedUrl
