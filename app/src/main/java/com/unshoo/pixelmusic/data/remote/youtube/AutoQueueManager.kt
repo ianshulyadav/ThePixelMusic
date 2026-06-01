@@ -340,14 +340,24 @@ object AutoQueueManager {
         return null
     }
 
-    private fun isSameSong(id1: String, id2: String): Boolean {
+    private suspend fun isSameSong(id1: String, id2: String): Boolean {
         if (id1 == id2) return true
-        val yt1 = extractYtId(id1)
-        val yt2 = extractYtId(id2)
+        val yt1 = getYoutubeVideoId(id1)
+        val yt2 = getYoutubeVideoId(id2)
         if (yt1 != null && yt2 != null) {
             return yt1 == yt2
         }
         return false
+    }
+
+    private suspend fun addToAddedVideoIds(songId: String) {
+        val cleanId = getYoutubeVideoId(songId) ?: songId
+        addedVideoIds.add(cleanId)
+        if (addedVideoIds.size > MAX_HISTORY) {
+            val excess = addedVideoIds.size - MAX_HISTORY
+            val toRemove = addedVideoIds.take(excess)
+            addedVideoIds.removeAll(toRemove.toSet())
+        }
     }
 
     private fun extractYtId(id: String): String? {
@@ -639,12 +649,13 @@ object AutoQueueManager {
 
             // Helper to check artist limits and session mood to ensure acoustic consistency & diversity
             val activeMood = getActiveSessionMood()
-            fun canAddSong(song: Song): Boolean {
+            suspend fun canAddSong(song: Song): Boolean {
                 val songIdStr = song.id
                 val isInQueue = currentQueueIds.any { isSameSong(it, songIdStr) }
                 val isAvoid = avoidIds.any { isSameSong(it, songIdStr) }
                 val isAlreadyAdded = finalSongsToAdd.any { isSameSong(it.id, songIdStr) }
-                if (isInQueue || isAvoid || isAlreadyAdded) return false
+                val isAlreadyInAddedVideoIds = addedVideoIds.any { isSameSong(it, songIdStr) }
+                if (isInQueue || isAvoid || isAlreadyAdded || isAlreadyInAddedVideoIds) return false
 
                 // Active Mood Protection
                 val songGenre = song.genre?.lowercase()?.trim().orEmpty()
@@ -687,6 +698,7 @@ object AutoQueueManager {
                         val s = relatedCandidates.removeAt(0)
                         if (canAddSong(s)) {
                             finalSongsToAdd.add(s)
+                            addToAddedVideoIds(s.id)
                             addedArtists[s.artist.lowercase().trim()] = (addedArtists[s.artist.lowercase().trim()] ?: 0) + 1
                             addedCount++
                             addedInThisRound = true
@@ -701,6 +713,7 @@ object AutoQueueManager {
                     val s = sameArtistCandidates.removeAt(0)
                     if (canAddSong(s)) {
                         finalSongsToAdd.add(s)
+                        addToAddedVideoIds(s.id)
                         addedArtists[s.artist.lowercase().trim()] = (addedArtists[s.artist.lowercase().trim()] ?: 0) + 1
                         addedCount++
                         addedInThisRound = true
@@ -714,6 +727,7 @@ object AutoQueueManager {
                     val s = discoveryCandidates.removeAt(0)
                     if (canAddSong(s)) {
                         finalSongsToAdd.add(s)
+                        addToAddedVideoIds(s.id)
                         addedArtists[s.artist.lowercase().trim()] = (addedArtists[s.artist.lowercase().trim()] ?: 0) + 1
                         addedCount++
                         addedInThisRound = true
@@ -727,6 +741,7 @@ object AutoQueueManager {
                     val s = familiarCandidates.removeAt(0)
                     if (canAddSong(s)) {
                         finalSongsToAdd.add(s)
+                        addToAddedVideoIds(s.id)
                         addedArtists[s.artist.lowercase().trim()] = (addedArtists[s.artist.lowercase().trim()] ?: 0) + 1
                         addedCount++
                         addedInThisRound = true
@@ -740,6 +755,7 @@ object AutoQueueManager {
                     val s = popularGenreCandidates.removeAt(0)
                     if (canAddSong(s)) {
                         finalSongsToAdd.add(s)
+                        addToAddedVideoIds(s.id)
                         addedArtists[s.artist.lowercase().trim()] = (addedArtists[s.artist.lowercase().trim()] ?: 0) + 1
                         addedCount++
                         addedInThisRound = true
@@ -757,8 +773,10 @@ object AutoQueueManager {
                     val isInQueue = currentQueueIds.any { isSameSong(it, songIdStr) }
                     val isAlreadyAdded = finalSongsToAdd.any { isSameSong(it.id, songIdStr) }
                     val isAvoid = avoidIds.any { isSameSong(it, songIdStr) }
-                    if (!isInQueue && !isAlreadyAdded && !isAvoid) {
+                    val isAlreadyInAddedVideoIds = addedVideoIds.any { isSameSong(it, songIdStr) }
+                    if (!isInQueue && !isAlreadyAdded && !isAvoid && !isAlreadyInAddedVideoIds) {
                         finalSongsToAdd.add(s)
+                        addToAddedVideoIds(s.id)
                         if (finalSongsToAdd.size >= 8) break
                     }
                 }
@@ -801,12 +819,7 @@ object AutoQueueManager {
                     return@onSuccess
                 }
 
-                filteredItems.forEach { addedVideoIds.add(it.id) }
-                if (addedVideoIds.size > MAX_HISTORY) {
-                    val excess = addedVideoIds.size - MAX_HISTORY
-                    val toRemove = addedVideoIds.take(excess)
-                    addedVideoIds.removeAll(toRemove.toSet())
-                }
+                filteredItems.forEach { addToAddedVideoIds(it.id) }
 
                 fetchedSongs = filteredItems.map { it.toNativeSong() }
             }.onFailure { e ->
@@ -866,26 +879,28 @@ object AutoQueueManager {
                 // Prioritize favorites and dynamically decay-scored popular ones
                 val sortedRelated = relatedEntities.sortedByDescending { calculateLocalDecayedScore(it) }
                 
-                filtered = sortedRelated.filter { 
-                    it.id.toString() !in addedVideoIds && it.id.toString() !in currentQueueIds
+                filtered = sortedRelated.filter { entity ->
+                    val entityIdStr = entity.id.toString()
+                    val isInQueue = currentQueueIds.any { isSameSong(it, entityIdStr) }
+                    val isAlreadyAdded = addedVideoIds.any { isSameSong(it, entityIdStr) }
+                    !isInQueue && !isAlreadyAdded
                 }
             }
             
             if (filtered.size < 10) {
                 val allLocalSongs = dao.getAllSongsList()
-                val extraLocal = allLocalSongs.filter {
-                    it.id.toString() !in addedVideoIds && it.id.toString() !in currentQueueIds && (currentSong == null || it.id != currentSong.id)
+                val extraLocal = allLocalSongs.filter { entity ->
+                    val entityIdStr = entity.id.toString()
+                    val isInQueue = currentQueueIds.any { isSameSong(it, entityIdStr) }
+                    val isAlreadyAdded = addedVideoIds.any { isSameSong(it, entityIdStr) }
+                    val isCurrent = currentSong != null && entity.id == currentSong.id
+                    !isInQueue && !isAlreadyAdded && !isCurrent
                 }.sortedByDescending { calculateLocalDecayedScore(it) }
                  .take(20)
                 filtered = (filtered + extraLocal).distinctBy { it.id }
             }
             
-            filtered.forEach { addedVideoIds.add(it.id.toString()) }
-            if (addedVideoIds.size > MAX_HISTORY) {
-                val excess = addedVideoIds.size - MAX_HISTORY
-                val toRemove = addedVideoIds.take(excess)
-                addedVideoIds.removeAll(toRemove.toSet())
-            }
+            filtered.forEach { addToAddedVideoIds(it.id.toString()) }
             
             return filtered.map { it.toSong() }
         } catch (e: Exception) {
