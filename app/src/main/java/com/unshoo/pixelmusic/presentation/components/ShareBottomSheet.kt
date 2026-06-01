@@ -671,26 +671,7 @@ fun ShareBottomSheet(
                     }
                 }
 
-                // ── Secondary Actions ────────────────────────────────────────
-                if (song.youtubeId.isNullOrEmpty()) {
-                    Spacer(Modifier.height(16.dp))
-                    HorizontalDivider(
-                        modifier = Modifier.padding(horizontal = 20.dp),
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-                    )
-                    Spacer(Modifier.height(4.dp))
 
-                    ShareListItem(
-                        icon = Icons.Rounded.ContentCopy,
-                        title = stringResource(R.string.share_action_copy_github_link),
-                        subtitle = GITHUB_LINK,
-                        onClick = {
-                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            clipboard.setPrimaryClip(ClipData.newPlainText("GitHub", GITHUB_LINK))
-                            Toast.makeText(context, context.getString(R.string.share_link_copied), Toast.LENGTH_SHORT).show()
-                        }
-                    )
-                }
                 Spacer(modifier = Modifier.navigationBarsPadding())
             }
         }
