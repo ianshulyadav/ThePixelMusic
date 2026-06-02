@@ -159,7 +159,9 @@ object AutoQueueManager {
         lastFetchedVideoId = null
         continuationToken = null
         currentWatchEndpoint = null
-        addedVideoIds.clear()
+        synchronized(addedVideoIds) {
+            addedVideoIds.clear()
+        }
         synchronized(sessionPlayHistory) {
             sessionPlayHistory.clear()
         }
@@ -170,8 +172,10 @@ object AutoQueueManager {
         lastFetchedVideoId = videoId
         continuationToken = continuation
         currentWatchEndpoint = endpoint
-        addedVideoIds.clear()
-        addedVideoIds.add(videoId)
+        synchronized(addedVideoIds) {
+            addedVideoIds.clear()
+            addedVideoIds.add(videoId)
+        }
     }
 
     fun registerSkip(songId: String) {
@@ -311,7 +315,9 @@ object AutoQueueManager {
         if (songId.startsWith("youtube://")) {
             return songId.substringAfter("youtube://")
         }
-        val cached = localToYoutubeIdMap[songId]
+        val cached = synchronized(localToYoutubeIdMap) {
+            localToYoutubeIdMap[songId]
+        }
         if (cached != null) return cached
 
         val longId = songId.toLongOrNull()
@@ -319,7 +325,9 @@ object AutoQueueManager {
             val songEntity = musicDaoRef?.getSongByIdOnce(longId)
             if (songEntity?.contentUriString?.startsWith("youtube://") == true) {
                 val vidId = songEntity.contentUriString.removePrefix("youtube://")
-                localToYoutubeIdMap[songId] = vidId
+                synchronized(localToYoutubeIdMap) {
+                    localToYoutubeIdMap[songId] = vidId
+                }
                 return vidId
             }
         }
@@ -414,8 +422,12 @@ object AutoQueueManager {
         }
 
         // 2. Resolve cached YouTube IDs if mapped
-        val ytId1 = localToYoutubeIdMap[id1] ?: localToYoutubeIdMap[clean1]
-        val ytId2 = localToYoutubeIdMap[id2] ?: localToYoutubeIdMap[clean2]
+        val (ytId1, ytId2) = synchronized(localToYoutubeIdMap) {
+            Pair(
+                localToYoutubeIdMap[id1] ?: localToYoutubeIdMap[clean1],
+                localToYoutubeIdMap[id2] ?: localToYoutubeIdMap[clean2]
+            )
+        }
         if (ytId1 != null && ytId2 != null && ytId1 == ytId2) return true
         
         // If one is already a YouTube ID, check against resolved YT ID of the other
@@ -437,11 +449,13 @@ object AutoQueueManager {
 
     private suspend fun addToAddedVideoIds(songId: String) {
         val cleanId = getYoutubeVideoId(songId) ?: songId
-        addedVideoIds.add(cleanId)
-        if (addedVideoIds.size > MAX_HISTORY) {
-            val excess = addedVideoIds.size - MAX_HISTORY
-            val toRemove = addedVideoIds.take(excess)
-            addedVideoIds.removeAll(toRemove.toSet())
+        synchronized(addedVideoIds) {
+            addedVideoIds.add(cleanId)
+            if (addedVideoIds.size > MAX_HISTORY) {
+                val excess = addedVideoIds.size - MAX_HISTORY
+                val toRemove = addedVideoIds.take(excess)
+                addedVideoIds.removeAll(toRemove.toSet())
+            }
         }
     }
 
@@ -865,13 +879,17 @@ object AutoQueueManager {
             lastFetchedVideoId = if (isLocal) currentId else resolvedVideoId
             continuationToken = null
             currentWatchEndpoint = null
-            addedVideoIds.clear()
-            addedVideoIds.add(lastFetchedVideoId!!)
+            synchronized(addedVideoIds) {
+                addedVideoIds.clear()
+                addedVideoIds.add(lastFetchedVideoId!!)
+            }
         } else {
             val activeId = if (isLocal) currentId else resolvedVideoId
             if (lastFetchedVideoId == null) {
                 lastFetchedVideoId = activeId
-                addedVideoIds.add(activeId)
+                synchronized(addedVideoIds) {
+                    addedVideoIds.add(activeId)
+                }
             }
         }
 
@@ -1028,7 +1046,9 @@ object AutoQueueManager {
                 val isInQueue = currentQueueIds.any { isSameSong(it, songIdStr) }
                 val isAvoid = avoidIds.any { isSameSong(it, songIdStr) }
                 val isAlreadyAdded = finalSongsToAdd.any { isSameSong(it.id, songIdStr) }
-                val isAlreadyInAddedVideoIds = addedVideoIds.any { isSameSong(it, songIdStr) }
+                val isAlreadyInAddedVideoIds = synchronized(addedVideoIds) {
+                    addedVideoIds.any { isSameSong(it, songIdStr) }
+                }
                 if (isInQueue || isAvoid || isAlreadyAdded || isAlreadyInAddedVideoIds) return false
 
                 // Deduplicate by Title + Artist to prevent duplicates (e.g. local copy vs youtube copy)
@@ -1185,7 +1205,9 @@ object AutoQueueManager {
                     val isInQueue = currentQueueIds.any { isSameSong(it, songIdStr) }
                     val isAlreadyAdded = finalSongsToAdd.any { isSameSong(it.id, songIdStr) }
                     val isAvoid = avoidIds.any { isSameSong(it, songIdStr) }
-                    val isAlreadyInAddedVideoIds = addedVideoIds.any { isSameSong(it, songIdStr) }
+                    val isAlreadyInAddedVideoIds = synchronized(addedVideoIds) {
+                        addedVideoIds.any { isSameSong(it, songIdStr) }
+                    }
                     if (!isInQueue && !isAlreadyAdded && !isAvoid && !isAlreadyInAddedVideoIds) {
                         val cleanTitle = s.title.lowercase().trim()
                         val cleanArtist = s.artist.lowercase().trim()
@@ -1233,7 +1255,9 @@ object AutoQueueManager {
                 continuationToken = nextResult.continuation
                 currentWatchEndpoint = nextResult.endpoint
                 
-                val addedVideoIdsLocal = addedVideoIds
+                val addedVideoIdsLocal = synchronized(addedVideoIds) {
+                    addedVideoIds.toSet()
+                }
                 val filteredItems = nextResult.items
                     .filter { it.id !in addedVideoIdsLocal }
 
@@ -1316,7 +1340,9 @@ object AutoQueueManager {
                 filtered = sortedRelated.filter { entity ->
                     val entityIdStr = entity.id.toString()
                     val isInQueue = currentQueueIds.any { isSameSong(it, entityIdStr) }
-                    val isAlreadyAdded = addedVideoIds.any { isSameSong(it, entityIdStr) }
+                    val isAlreadyAdded = synchronized(addedVideoIds) {
+                        addedVideoIds.any { isSameSong(it, entityIdStr) }
+                    }
                     !isInQueue && !isAlreadyAdded
                 }
             }
@@ -1356,7 +1382,9 @@ object AutoQueueManager {
                 val extraLocal = fallbackCandidates.filter { entity ->
                     val entityIdStr = entity.id.toString()
                     val isInQueue = currentQueueIds.any { isSameSong(it, entityIdStr) }
-                    val isAlreadyAdded = addedVideoIds.any { isSameSong(it, entityIdStr) }
+                    val isAlreadyAdded = synchronized(addedVideoIds) {
+                        addedVideoIds.any { isSameSong(it, entityIdStr) }
+                    }
                     val isCurrent = entity.id == currentSong.id
                     !isInQueue && !isAlreadyAdded && !isCurrent
                 }.sortedByDescending { calculateFallbackScore(it) }
