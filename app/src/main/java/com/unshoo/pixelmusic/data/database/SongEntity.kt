@@ -174,7 +174,7 @@ private fun parseArtistsJson(json: String?): List<ArtistRef> {
                 id = obj.getLong("id"),
                 name = obj.getString("name"),
                 isPrimary = obj.optBoolean("primary", false),
-                channelId = if (obj.has("channelId") && !obj.isNull("channelId")) obj.optString("channelId", null) else null
+                channelId = if (obj.has("channelId") && !obj.isNull("channelId")) obj.optString("channelId") else null
             )
         }
     } catch (_: Exception) {

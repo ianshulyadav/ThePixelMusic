@@ -67,7 +67,8 @@ private const val SONG_DETAIL_PROJECTION = """
     songs.telegram_chat_id AS telegram_chat_id,
     songs.telegram_file_id AS telegram_file_id,
     songs.artists_json AS artists_json,
-    songs.source_type AS source_type
+    songs.source_type AS source_type,
+    songs.album_browse_id AS album_browse_id
 """
 
 // Projection for list queries: excludes lyrics to prevent CursorWindow overflow (2MB limit)
@@ -77,7 +78,7 @@ private const val SONG_LIST_PROJECTION = """
     content_uri_string, album_art_uri_string, duration, genre, file_path,
     parent_directory_path, is_favorite, NULL AS lyrics, track_number, disc_number,
     year, date_added, mime_type, bitrate, sample_rate, telegram_chat_id,
-    telegram_file_id, artists_json, source_type
+    telegram_file_id, artists_json, source_type, album_browse_id
 """
 
 data class DeviceCapabilitySongRow(
@@ -1394,7 +1395,7 @@ interface MusicDao {
 
     @Query("""
         SELECT artists.id, artists.name, artists.image_url, artists.custom_image_uri,
-               COUNT(DISTINCT songs.id) AS track_count
+               artists.channel_id, COUNT(DISTINCT songs.id) AS track_count
         FROM songs
         INNER JOIN song_artist_cross_ref ON song_artist_cross_ref.song_id = songs.id
         INNER JOIN artists ON artists.id = song_artist_cross_ref.artist_id
@@ -1456,7 +1457,7 @@ interface MusicDao {
 
     @Query("""
         SELECT artists.id, artists.name, artists.image_url, artists.custom_image_uri,
-               COUNT(DISTINCT songs.id) AS track_count
+               artists.channel_id, COUNT(DISTINCT songs.id) AS track_count
         FROM songs
         INNER JOIN song_artist_cross_ref ON song_artist_cross_ref.song_id = songs.id
         INNER JOIN artists ON artists.id = song_artist_cross_ref.artist_id
@@ -1530,7 +1531,7 @@ interface MusicDao {
 
     @Query("""
         SELECT artists.id, artists.name, artists.image_url, artists.custom_image_uri,
-               COUNT(DISTINCT songs.id) AS track_count
+               artists.channel_id, COUNT(DISTINCT songs.id) AS track_count
         FROM songs
         INNER JOIN song_artist_cross_ref ON song_artist_cross_ref.song_id = songs.id
         INNER JOIN artists ON artists.id = song_artist_cross_ref.artist_id
@@ -1844,7 +1845,7 @@ interface MusicDao {
      */
     @Query("""
         SELECT artists.id, artists.name, artists.image_url, artists.custom_image_uri,
-               COUNT(DISTINCT song_artist_cross_ref.song_id) AS track_count
+               artists.channel_id, COUNT(DISTINCT song_artist_cross_ref.song_id) AS track_count
         FROM artists
         LEFT JOIN song_artist_cross_ref ON artists.id = song_artist_cross_ref.artist_id
         GROUP BY artists.id
@@ -1857,7 +1858,7 @@ interface MusicDao {
      */
     @Query("""
         SELECT artists.id, artists.name, artists.image_url, artists.custom_image_uri,
-               COUNT(DISTINCT songs.id) AS track_count
+               artists.channel_id, COUNT(DISTINCT songs.id) AS track_count
         FROM songs
         INNER JOIN song_artist_cross_ref ON song_artist_cross_ref.song_id = songs.id
         INNER JOIN artists ON artists.id = song_artist_cross_ref.artist_id
