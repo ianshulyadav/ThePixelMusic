@@ -33,7 +33,7 @@ jobs:
         run: gradle :wear:assembleDebug
 
       - name: Upload Wear OS APK artifact
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7
         with:
           name: PixelMusic-wear-only-debug
           path: wear/build/outputs/apk/debug/*.apk
