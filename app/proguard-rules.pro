@@ -217,3 +217,9 @@
 # Missing classes for JSoup Re2j regex delegate and Mozilla Rhino JSON converter bean introspection
 -dontwarn com.google.re2j.**
 -dontwarn java.beans.**
+
+# Gson serialization keep rules for Explore cache and InnerTube API models
+-keep class com.unshoo.pixelmusic.presentation.viewmodel.ExploreCacheModel { *; }
+-keep class unshoo.ianshulyadav.pixelmusic.innertube.models.** { *; }
+-keep class unshoo.ianshulyadav.pixelmusic.innertube.pages.** { *; }
+
