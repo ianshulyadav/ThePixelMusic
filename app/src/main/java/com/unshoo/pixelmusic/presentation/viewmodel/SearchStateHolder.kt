@@ -53,7 +53,7 @@ class SearchStateHolder @Inject constructor(
     private val musicRepository: MusicRepository
 ) {
     companion object {
-        const val SEARCH_DEBOUNCE_MS = 150L
+        const val SEARCH_DEBOUNCE_MS = 80L
         const val SEARCH_CACHE_SIZE = 100
         val albumIdMap = java.util.concurrent.ConcurrentHashMap<Long, String>()
     }
@@ -123,10 +123,9 @@ class SearchStateHolder @Inject constructor(
                     val source = userPreferencesRepository.searchSourceFlow.first()
                     if (source == SearchSource.LOCAL) {
                         try {
-                            musicRepository.searchAll(query, _selectedSearchFilter.value).collectLatest { results ->
-                                if (request.requestId == latestSearchRequestId.get()) {
-                                    _searchResults.value = results.toImmutableList()
-                                }
+                            val results = musicRepository.searchAllOnce(query, _selectedSearchFilter.value)
+                            if (request.requestId == latestSearchRequestId.get()) {
+                                _searchResults.value = results.toImmutableList()
                             }
                         } catch (_: CancellationException) {
                         } catch (e: Exception) {

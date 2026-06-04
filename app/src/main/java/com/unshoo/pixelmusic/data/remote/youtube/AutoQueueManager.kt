@@ -39,7 +39,7 @@ import com.unshoo.pixelmusic.presentation.viewmodel.ConnectivityStateHolder
 object AutoQueueManager {
 
     private const val TARGET_QUEUE_SIZE = 45 // Targets exactly 45 upcoming songs
-    private const val MAX_HISTORY = 150
+    private const val MAX_HISTORY = 60  // Reduced: avoid over-filtering all candidates
     private const val DECAY_LAMBDA = 1.15e-9 // 7-day half-life decay parameter
 
     private var fetchJob: Job? = null
@@ -166,6 +166,61 @@ object AutoQueueManager {
             sessionPlayHistory.clear()
         }
         fetchJob?.cancel()
+        fetchJob = null
+    }
+
+    /**
+     * Called when auto-queue is re-enabled (toggle OFF→ON).
+     * Fully resets state and re-seeds from the currently playing song so that
+     * a fresh related-songs queue is built from scratch.
+     */
+    fun resetAndReseedFromCurrentSong() {
+        reset()
+        val player = playerRef ?: return
+        val currentScope = scope ?: return
+        currentScope.launch(Dispatchers.IO) {
+            val settings = datastoreRepository?.settings?.first() ?: return@launch
+            if (!settings.autoQueueEnabled) return@launch
+            val (currentId, videoId) = withContext(Dispatchers.Main) {
+                val item = player.currentMediaItem ?: return@withContext null
+                val mediaId = item.mediaId
+                val playbackUri = item.localConfiguration?.uri?.toString()
+                val metaUri = item.mediaMetadata?.extras?.getString("com.unshoo.pixelmusic.external.CONTENT_URI")
+                val contentUri = metaUri ?: playbackUri
+                val vid = when {
+                    mediaId.startsWith("youtube_") -> mediaId.substringAfter("youtube_")
+                    contentUri?.startsWith("youtube://") == true -> contentUri.removePrefix("youtube://")
+                    else -> null
+                }
+                Pair(mediaId, vid)
+            } ?: return@launch
+
+            // Resolve YouTube ID for local songs via DB
+            val resolvedVideoId = videoId ?: run {
+                val longId = currentId.toLongOrNull()
+                if (longId != null) {
+                    val dbSong = musicDaoRef?.getSongByIdOnce(longId)
+                    dbSong?.contentUriString?.removePrefix("youtube://")?.takeIf {
+                        dbSong.contentUriString.startsWith("youtube://")
+                    }
+                } else null
+            }
+
+            val seedId = resolvedVideoId ?: currentId
+            synchronized(addedVideoIds) { addedVideoIds.add(seedId) }
+            lastFetchedVideoId = seedId
+
+            if (resolvedVideoId != null) {
+                // Online song — create a fresh endpoint and pre-fetch first batch
+                val endpoint = WatchEndpoint(videoId = resolvedVideoId, playlistId = "RDAMVM$resolvedVideoId")
+                currentWatchEndpoint = endpoint
+                continuationToken = null
+            }
+            // Trigger immediate refill
+            fetchJob = currentScope.launch(Dispatchers.IO) {
+                refillQueueLoop(currentId, forceRefresh = false)
+            }
+        }
     }
 
     fun seed(endpoint: WatchEndpoint, continuation: String?, videoId: String) {
@@ -195,7 +250,7 @@ object AutoQueueManager {
         }
     }
 
-    private fun getActiveSkippedSongIds(): Set<String> {
+    private suspend fun getActiveSkippedSongIds(): Set<String> {
         val ctx = contextRef ?: return emptySet()
         val activeIds = mutableSetOf<String>()
         try {
@@ -215,21 +270,19 @@ object AutoQueueManager {
                 val lastSkipTime = sharedPrefs.getLong(songId + "_last_skip_time", 0L)
                 if (now - lastSkipTime < FOUR_HOURS_MS) {
                     val skipCount = sharedPrefs.getInt(songId + "_skip_count", 0)
-                    
-                    // Retrieve database playCount safely in a blocking coroutine flow style
-                    val playCount = runBlocking {
-                        try {
-                            val dbSongId = if (songId.toLongOrNull() == null && !songId.startsWith("youtube_")) {
-                                getDatabaseIdForYoutubeId(songId).toString()
-                            } else {
-                                songId
-                            }
-                            val p1 = engagementDaoRef?.getPlayCount(songId) ?: 0
-                            val p2 = engagementDaoRef?.getPlayCount(dbSongId) ?: 0
-                            kotlin.math.max(p1, p2)
-                        } catch (e: Exception) {
-                            0
+
+                    // Retrieve database playCount without runBlocking (we are already in a suspend context)
+                    val playCount = try {
+                        val dbSongId = if (songId.toLongOrNull() == null && !songId.startsWith("youtube_")) {
+                            getDatabaseIdForYoutubeId(songId).toString()
+                        } else {
+                            songId
                         }
+                        val p1 = engagementDaoRef?.getPlayCount(songId) ?: 0
+                        val p2 = engagementDaoRef?.getPlayCount(dbSongId) ?: 0
+                        kotlin.math.max(p1, p2)
+                    } catch (e: Exception) {
+                        0
                     }
 
                     if (playCount > 3 && skipCount < 2) {
@@ -298,6 +351,15 @@ object AutoQueueManager {
 
             if (forceRefresh) {
                 fetchJob?.cancel()
+                // When force-refreshing, partially prune addedVideoIds to keep
+                // only the current song — this prevents the set from blocking
+                // all future recommendations after a toggle or manual refill.
+                synchronized(addedVideoIds) {
+                    val currentClean = normalizeSongId(currentId)
+                    addedVideoIds.retainAll { isSameSong(it, currentClean) }
+                    addedVideoIds.add(currentClean)
+                }
+                continuationToken = null
             } else {
                 if (fetchJob?.isActive == true) return@launch
             }
@@ -875,16 +937,21 @@ object AutoQueueManager {
         val isLocal = rawVideoId == null
         val resolvedVideoId = rawVideoId ?: ""
 
+        // NOTE: On forceRefresh, forceRefill() already pruned addedVideoIds and cleared
+        // continuationToken. We just update lastFetchedVideoId and set currentWatchEndpoint
+        // only if it was not already set by resetAndReseedFromCurrentSong().
+        val activeId = if (isLocal) currentId else resolvedVideoId
         if (forceRefresh) {
-            lastFetchedVideoId = if (isLocal) currentId else resolvedVideoId
-            continuationToken = null
-            currentWatchEndpoint = null
+            lastFetchedVideoId = activeId
+            // Only reset endpoint if not already seeded by resetAndReseedFromCurrentSong()
+            if (currentWatchEndpoint == null && !isLocal && resolvedVideoId.isNotBlank()) {
+                currentWatchEndpoint = WatchEndpoint(videoId = resolvedVideoId, playlistId = "RDAMVM$resolvedVideoId")
+            }
             synchronized(addedVideoIds) {
-                addedVideoIds.clear()
-                addedVideoIds.add(lastFetchedVideoId!!)
+                // Add current song — forceRefill() already pruned the set
+                addedVideoIds.add(activeId)
             }
         } else {
-            val activeId = if (isLocal) currentId else resolvedVideoId
             if (lastFetchedVideoId == null) {
                 lastFetchedVideoId = activeId
                 synchronized(addedVideoIds) {
@@ -894,6 +961,7 @@ object AutoQueueManager {
         }
 
         var loopCount = 0
+        var emptyFetchCount = 0 // Count of consecutive loop iterations that added 0 songs
         while (true) {
             val playerState = withContext(Dispatchers.Main) {
                 if (playerRef == null) null
@@ -911,8 +979,9 @@ object AutoQueueManager {
                 break
             }
 
-            if (loopCount >= 8) {
-                printd("AutoQueueManager: Max loop count reached. Breaking.")
+            // Hard cap on total iterations; also break after 3 consecutive empty fetches
+            if (loopCount >= 15 || emptyFetchCount >= 3) {
+                printd("AutoQueueManager: Breaking — loopCount=$loopCount, emptyFetchCount=$emptyFetchCount")
                 break
             }
             loopCount++
@@ -1227,18 +1296,16 @@ object AutoQueueManager {
             }
 
             if (finalSongsToAdd.isEmpty()) {
-                printd("AutoQueueManager: No songs to add, breaking.")
-                break
+                printd("AutoQueueManager: No songs to add this loop — emptyFetchCount=$emptyFetchCount")
+                emptyFetchCount++
+                continue // Count empty loops; break handled at loop top
             }
+            emptyFetchCount = 0 // Reset on successful add
 
             val mediaItems = finalSongsToAdd.map { MediaItemBuilder.build(it) }
             withContext(Dispatchers.Main) {
                 player.addMediaItems(mediaItems)
-                // BUG 5 FIX: Notify the engine to refresh its queue snapshot now.
-                // Without this, queueSnapshot stays stale during an active crossfade
-                // because onTimelineChanged was previously gated behind transitionRunning.
-                // Even with that guard removed, a fresh snapshot call here is a cheap
-                // insurance to keep navigation correct immediately after the add.
+                // Notify the engine to refresh its queue snapshot immediately.
                 onQueueItemsAddedCallback?.invoke()
             }
             printd("AutoQueueManager: Appended ${mediaItems.size} songs to queue")
@@ -1262,18 +1329,46 @@ object AutoQueueManager {
                     .filter { it.id !in addedVideoIdsLocal }
 
                 if (filteredItems.isEmpty()) {
+                    // All items in this continuation batch are already added.
+                    // If we also have no continuation left, reset addedVideoIds
+                    // (keeping only current song) and try a fresh endpoint so we
+                    // don't get permanently stuck returning 0 songs.
+                    if (nextResult.continuation == null) {
+                        printd("AutoQueueManager: Continuation exhausted and all items filtered — resetting addedVideoIds for fresh fetch")
+                        // Compute retained set without holding the lock during isSameSong evaluation
+                        val retainedSet = synchronized(addedVideoIds) {
+                            addedVideoIds.filter { isSameSong(it, videoId) }.toMutableSet()
+                        }
+                        retainedSet.add(videoId)
+                        synchronized(addedVideoIds) {
+                            addedVideoIds.clear()
+                            addedVideoIds.addAll(retainedSet)
+                        }
+                        continuationToken = null
+                        currentWatchEndpoint = WatchEndpoint(videoId = videoId, playlistId = "RDAMVM$videoId")
+                    } else {
+                        // More continuation available — just return empty to try next page
+                        printd("AutoQueueManager: All fetched items already added, will try next continuation")
+                    }
                     return@onSuccess
                 }
 
-                filteredItems.forEach { addToAddedVideoIds(it.id) }
-
+                // Add each to tracking set — must use loop, not forEach, because addToAddedVideoIds is suspend
+                for (item in filteredItems) {
+                    addToAddedVideoIds(item.id)
+                }
                 fetchedSongs = filteredItems.map { it.toNativeSong() }
             }.onFailure { e ->
                 printe("AutoQueueManager: Failed to fetch related online: ${e.message}")
+                // On network failure, reset endpoint to allow retry next time
+                continuationToken = null
+                currentWatchEndpoint = null
             }
             return fetchedSongs
         } catch (e: Exception) {
             printe("AutoQueueManager: Exception fetching online related songs: ${e.message}")
+            continuationToken = null
+            currentWatchEndpoint = null
             return emptyList()
         }
     }
@@ -1393,8 +1488,10 @@ object AutoQueueManager {
                 filtered = (filtered + extraLocal).distinctBy { it.id }
             }
             
-            filtered.forEach { addToAddedVideoIds(it.id.toString()) }
-            
+            // NOTE: Do NOT add all local candidates to addedVideoIds here.
+            // Only the songs actually selected by refillQueueLoop's interleave logic
+            // (via addToAddedVideoIds in the batch loop) should be tracked.
+            // Adding ALL fetched local songs here causes premature exhaustion of candidates.
             return filtered.map { it.toSong() }
         } catch (e: Exception) {
             printe("AutoQueueManager: Exception fetching local related songs: ${e.message}")

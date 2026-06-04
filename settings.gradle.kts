@@ -20,6 +20,11 @@ dependencyResolutionManagement {
         google()
         mavenCentral()
         maven("https://jitpack.io") {
+            metadataSources {
+                mavenPom()
+                artifact()
+                ignoreGradleMetadataRedirection()
+            }
             content {
                 includeGroup("com.github.FaceOnLive")
                 includeGroup("com.github.philburk")
@@ -28,7 +33,6 @@ dependencyResolutionManagement {
                 includeGroup("com.github.TeamNewPipe")
             }
         }
-        maven("https://central.sonatype.com/repository/maven-snapshots/")
         maven("https://storage.googleapis.com/snap-kit-build/maven")
     }
 }

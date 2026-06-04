@@ -30,9 +30,46 @@ class ModuleSchemaValidatorTest {
     @Test
     fun `non-array module fails validation`() {
         val payload = """{"key": "value"}"""
-        val result = validator.validate(BackupSection.FAVORITES, payload)
+        val result = validator.validate(BackupSection.LYRICS, payload)
         assertTrue(result is BackupValidationResult.Invalid)
         assertTrue((result as BackupValidationResult.Invalid).fatalErrors.any { it.code == "NOT_ARRAY" })
+    }
+
+    @Test
+    fun `favorites in object format passes validation`() {
+        val payload = """{
+            "favorites": [{"songId": 123, "addedAt": 1700000000000}],
+            "songMetadata": {
+                "123": {
+                    "title": "Song Title",
+                    "artist": "Artist Name",
+                    "album": "Album Name",
+                    "duration": 240000,
+                    "sourceType": 4
+                }
+            }
+        }"""
+        val result = validator.validate(BackupSection.FAVORITES, payload)
+        assertTrue(result.isValid())
+    }
+
+    @Test
+    fun `favorites in object format with missing favorites array fails validation`() {
+        val payload = """{
+            "songMetadata": {
+                "123": {
+                    "title": "Song Title",
+                    "artist": "Artist Name",
+                    "album": "Album Name",
+                    "duration": 240000,
+                    "sourceType": 4
+                }
+            }
+        }"""
+        val result = validator.validate(BackupSection.FAVORITES, payload)
+        assertTrue(result is BackupValidationResult.Invalid)
+        val errors = (result as BackupValidationResult.Invalid).fatalErrors
+        assertTrue(errors.any { it.code == "MISSING_FAVORITES_ARRAY" })
     }
 
     @Test

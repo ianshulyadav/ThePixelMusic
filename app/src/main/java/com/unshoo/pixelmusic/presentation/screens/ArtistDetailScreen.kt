@@ -379,9 +379,15 @@ fun ArtistDetailScreen(
                         // ─── Albums Section (Online Artists only) ───
                         if (isOnlineArtist && albumSections.isNotEmpty()) {
                             item(key = "albums_header", contentType = "section_header") {
-                                ArtistSectionHeader(
+                                ArtistSectionHeaderWithSeeAll(
                                     title = "Albums",
-                                    icon = Icons.Rounded.Album
+                                    icon = Icons.Rounded.Album,
+                                    showSeeAll = albumSections.size > 5,
+                                    onSeeAllClick = {
+                                        navController.navigateSafely(
+                                            Screen.ArtistAlbumsAll.createRoute(artistId, "albums")
+                                        )
+                                    }
                                 )
                             }
                             item(key = "albums_row", contentType = "albums_row") {
@@ -391,7 +397,7 @@ fun ArtistDetailScreen(
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     items(
-                                        items = albumSections,
+                                        items = albumSections.take(5),
                                         key = { section -> "album_card_${section.albumId}" }
                                     ) { section ->
                                         ArtistAlbumCard(
@@ -417,9 +423,15 @@ fun ArtistDetailScreen(
                         // ─── Singles & EPs Section (Online Artists only) ───
                         if (isOnlineArtist && singlesAndEPs.isNotEmpty()) {
                             item(key = "singles_header", contentType = "section_header") {
-                                ArtistSectionHeader(
+                                ArtistSectionHeaderWithSeeAll(
                                     title = "Singles & EPs",
-                                    icon = Icons.Rounded.Album
+                                    icon = Icons.Rounded.Album,
+                                    showSeeAll = singlesAndEPs.size > 5,
+                                    onSeeAllClick = {
+                                        navController.navigateSafely(
+                                            Screen.ArtistAlbumsAll.createRoute(artistId, "singles")
+                                        )
+                                    }
                                 )
                             }
                             item(key = "singles_row", contentType = "singles_row") {
@@ -429,7 +441,7 @@ fun ArtistDetailScreen(
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     items(
-                                        items = singlesAndEPs,
+                                        items = singlesAndEPs.take(5),
                                         key = { section -> "single_card_${section.albumId}" }
                                     ) { section ->
                                         ArtistAlbumCard(
@@ -563,11 +575,20 @@ fun ArtistDetailScreen(
                             onSubscribeClick = { viewModel.toggleSubscription() },
                             onBackPressed = { navController.popBackStack() },
                             onPlayClick = {
-                                if (uiState.isOnlineArtist && uiState.browseId != null) {
-                                    playerViewModel.playRadio(
-                                        unshoo.ianshulyadav.pixelmusic.innertube.models.WatchEndpoint(playlistId = "RD" + uiState.browseId),
-                                        artist.name
-                                    )
+                                if (uiState.isOnlineArtist) {
+                                    // Seed radio from first popular song's YouTube ID (RDAMVM<videoId>)
+                                    val seedVideoId = popularSongs.firstOrNull()?.youtubeId
+                                    if (seedVideoId != null) {
+                                        playerViewModel.playRadio(
+                                            unshoo.ianshulyadav.pixelmusic.innertube.models.WatchEndpoint(
+                                                playlistId = "RDAMVM$seedVideoId",
+                                                videoId = seedVideoId
+                                            ),
+                                            artist.name
+                                        )
+                                    } else if (songs.isNotEmpty()) {
+                                        playerViewModel.playSongsShuffled(songs, artist.name)
+                                    }
                                 } else if (songs.isNotEmpty()) {
                                     playerViewModel.playSongsShuffled(songs, artist.name)
                                 }
@@ -588,11 +609,19 @@ fun ArtistDetailScreen(
                             headerImageRequestSize = headerImageRequestSize,
                             onBackPressed = { navController.popBackStack() },
                             onPlayClick = {
-                                if (uiState.isOnlineArtist && uiState.browseId != null) {
-                                    playerViewModel.playRadio(
-                                        unshoo.ianshulyadav.pixelmusic.innertube.models.WatchEndpoint(playlistId = "RD" + uiState.browseId),
-                                        artist.name
-                                    )
+                                if (uiState.isOnlineArtist) {
+                                    val seedVideoId = popularSongs.firstOrNull()?.youtubeId
+                                    if (seedVideoId != null) {
+                                        playerViewModel.playRadio(
+                                            unshoo.ianshulyadav.pixelmusic.innertube.models.WatchEndpoint(
+                                                playlistId = "RDAMVM$seedVideoId",
+                                                videoId = seedVideoId
+                                            ),
+                                            artist.name
+                                        )
+                                    } else if (songs.isNotEmpty()) {
+                                        playerViewModel.playSongsShuffled(songs, artist.name)
+                                    }
                                 } else if (songs.isNotEmpty()) {
                                     playerViewModel.playSongsShuffled(songs, artist.name)
                                 }
@@ -732,6 +761,54 @@ private fun ArtistSectionHeader(
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onSurface
         )
+    }
+}
+
+@Composable
+private fun ArtistSectionHeaderWithSeeAll(
+    title: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    showSeeAll: Boolean,
+    onSeeAllClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp)
+            )
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+        if (showSeeAll) {
+            androidx.compose.material3.TextButton(
+                onClick = onSeeAllClick,
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+            ) {
+                Text(
+                    text = "See all",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
     }
 }
 

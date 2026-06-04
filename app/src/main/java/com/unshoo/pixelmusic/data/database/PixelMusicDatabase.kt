@@ -666,6 +666,84 @@ abstract class PixelMusicDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_44_45 = object : Migration(44, 45) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("DROP TABLE IF EXISTS songs_new")
+                db.execSQL("""
+                    CREATE TABLE songs_new (
+                        id INTEGER NOT NULL,
+                        title TEXT NOT NULL,
+                        artist_name TEXT NOT NULL,
+                        artist_id INTEGER NOT NULL,
+                        album_artist TEXT,
+                        album_name TEXT NOT NULL,
+                        album_id INTEGER NOT NULL,
+                        content_uri_string TEXT NOT NULL,
+                        album_art_uri_string TEXT,
+                        duration INTEGER NOT NULL,
+                        genre TEXT,
+                        file_path TEXT NOT NULL,
+                        parent_directory_path TEXT NOT NULL,
+                        is_favorite INTEGER NOT NULL DEFAULT 0,
+                        lyrics TEXT DEFAULT null,
+                        track_number INTEGER NOT NULL DEFAULT 0,
+                        disc_number INTEGER DEFAULT null,
+                        year INTEGER NOT NULL DEFAULT 0,
+                        date_added INTEGER NOT NULL DEFAULT 0,
+                        mime_type TEXT,
+                        bitrate INTEGER,
+                        sample_rate INTEGER,
+                        telegram_chat_id INTEGER,
+                        telegram_file_id INTEGER,
+                        artists_json TEXT,
+                        source_type INTEGER NOT NULL DEFAULT 0,
+                        album_browse_id TEXT,
+                        PRIMARY KEY(id),
+                        FOREIGN KEY(album_id) REFERENCES albums(id) ON UPDATE NO ACTION ON DELETE CASCADE,
+                        FOREIGN KEY(artist_id) REFERENCES artists(id) ON UPDATE NO ACTION ON DELETE NO ACTION
+                    )
+                """.trimIndent())
+
+                db.execSQL("""
+                    INSERT OR REPLACE INTO songs_new (
+                        id, title, artist_name, artist_id, album_artist, album_name, album_id,
+                        content_uri_string, album_art_uri_string, duration, genre, file_path,
+                        parent_directory_path, is_favorite, lyrics, track_number, disc_number,
+                        year, date_added, mime_type, bitrate, sample_rate, telegram_chat_id,
+                        telegram_file_id, artists_json, source_type, album_browse_id
+                    )
+                    SELECT
+                        id, title, artist_name, artist_id, album_artist, album_name, album_id,
+                        content_uri_string, album_art_uri_string, duration, genre, file_path,
+                        parent_directory_path, is_favorite, lyrics, track_number, disc_number,
+                        year, date_added, mime_type, bitrate, sample_rate, telegram_chat_id,
+                        telegram_file_id, artists_json, source_type, album_browse_id
+                    FROM songs
+                """.trimIndent())
+
+                db.execSQL("DROP TABLE songs")
+                db.execSQL("ALTER TABLE songs_new RENAME TO songs")
+
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_songs_title ON songs(title)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_songs_album_id ON songs(album_id)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_songs_artist_id ON songs(artist_id)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_songs_artist_name ON songs(artist_name)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_songs_genre ON songs(genre)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_songs_parent_directory_path ON songs(parent_directory_path)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_songs_file_path ON songs(file_path)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_songs_content_uri_string ON songs(content_uri_string)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_songs_date_added ON songs(date_added)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_songs_duration ON songs(duration)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_songs_source_type ON songs(source_type)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_songs_parent_directory_path_source_type_album_id ON songs(parent_directory_path, source_type, album_id)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_songs_parent_directory_path_source_type_id ON songs(parent_directory_path, source_type, id)")
+
+                installFavoriteSyncTriggers(db)
+                installSongsSearchSyncTriggers(db)
+                rebuildSongsSearchIndex(db)
+            }
+        }
+
         private fun ensureSongsTableHasDateAdded(db: SupportSQLiteDatabase) {
             if (!tableExists(db, "songs")) {
                 recreateSongsTable(db)

@@ -2657,12 +2657,17 @@ class PlayerViewModel @Inject constructor(
                     }
                     
                     val lastSong = fullQueue.last()
-                    val lastVideoId = lastSong.youtubeId ?: lastSong.id.substringAfter("youtube_")
-                    com.unshoo.pixelmusic.data.remote.youtube.AutoQueueManager.seed(
-                        endpoint = nextResult.endpoint ?: endpoint,
-                        continuation = nextResult.continuation,
-                        videoId = lastVideoId
-                    )
+                    // Only seed from a valid YouTube video ID; fall back to the original
+                    // videoId when the last song in the queue is a local-only track.
+                    val lastVideoId = lastSong.youtubeId
+                        ?: if (lastSong.id.startsWith("youtube_")) lastSong.id.substringAfter("youtube_") else videoId
+                    if (!lastVideoId.isNullOrBlank()) {
+                        com.unshoo.pixelmusic.data.remote.youtube.AutoQueueManager.seed(
+                            endpoint = nextResult.endpoint ?: endpoint,
+                            continuation = nextResult.continuation,
+                            videoId = lastVideoId
+                        )
+                    }
                 }
                 _playerUiState.update { it.copy(isLoadingInitialSongs = false) }
             }.onFailure { e ->
@@ -2742,12 +2747,17 @@ class PlayerViewModel @Inject constructor(
                     }
                     
                     val lastSong = fullQueue.last()
-                    val lastVideoId = lastSong.youtubeId ?: lastSong.id.substringAfter("youtube_")
-                    com.unshoo.pixelmusic.data.remote.youtube.AutoQueueManager.seed(
-                        endpoint = nextResult.endpoint,
-                        continuation = nextResult.continuation,
-                        videoId = lastVideoId
-                    )
+                    // Only seed from a valid YouTube video ID; fall back to the original
+                    // videoId when the last song in the queue is a local-only track.
+                    val lastVideoId = lastSong.youtubeId
+                        ?: if (lastSong.id.startsWith("youtube_")) lastSong.id.substringAfter("youtube_") else videoId
+                    if (!lastVideoId.isNullOrBlank()) {
+                        com.unshoo.pixelmusic.data.remote.youtube.AutoQueueManager.seed(
+                            endpoint = nextResult.endpoint ?: endpoint,
+                            continuation = nextResult.continuation,
+                            videoId = lastVideoId
+                        )
+                    }
                 }
                 _playerUiState.update { it.copy(isLoadingInitialSongs = false) }
             }.onFailure { e ->
@@ -4216,19 +4226,6 @@ class PlayerViewModel @Inject constructor(
                 com.unshoo.pixelmusic.data.remote.youtube.DatastoreRepository.PreferenceKeys.AUTO_QUEUE_ENABLED,
                 target
             )
-            if (target) {
-                withContext(Dispatchers.Main) {
-                    val player = dualPlayerEngine.masterPlayer
-                    if (player.mediaItemCount > 0) {
-                        val currentIndex = player.currentMediaItemIndex
-                        val totalCount = player.mediaItemCount
-                        if (totalCount > currentIndex + 1) {
-                            player.removeMediaItems(currentIndex + 1, totalCount)
-                        }
-                    }
-                }
-                com.unshoo.pixelmusic.data.remote.youtube.AutoQueueManager.forceRefill(forceRefresh = true)
-            }
         }
     }
 
