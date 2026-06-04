@@ -2610,7 +2610,10 @@ class PlayerViewModel @Inject constructor(
                 Timber.w("Could not resolve videoId for Quick Picks Radio seed song")
                 return@launch
             }
-            val endpoint = unshoo.ianshulyadav.pixelmusic.innertube.models.WatchEndpoint(videoId = videoId)
+            val endpoint = unshoo.ianshulyadav.pixelmusic.innertube.models.WatchEndpoint(
+                videoId = videoId,
+                playlistId = "RDAMVM$videoId"
+            )
             
             _playerUiState.update { it.copy(isLoadingInitialSongs = true) }
             val result = withContext(Dispatchers.IO) {
@@ -2699,7 +2702,10 @@ class PlayerViewModel @Inject constructor(
                 Timber.w("ArchiveTune Queue Builder: Could not resolve videoId for seed song '${song.title}'")
                 return@launch
             }
-            val endpoint = unshoo.ianshulyadav.pixelmusic.innertube.models.WatchEndpoint(videoId = videoId)
+            val endpoint = unshoo.ianshulyadav.pixelmusic.innertube.models.WatchEndpoint(
+                videoId = videoId,
+                playlistId = "RDAMVM$videoId"
+            )
             
             _playerUiState.update { it.copy(isLoadingInitialSongs = true) }
             val result = withContext(Dispatchers.IO) {

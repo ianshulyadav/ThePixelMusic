@@ -606,6 +606,9 @@ object AutoQueueManager {
     }
 
     suspend fun buildMixQueue(seedSong: Song, onlineRelated: List<Song>): List<Song> {
+        if (onlineRelated.isNotEmpty()) {
+            return (listOf(seedSong) + onlineRelated).distinctBy { it.youtubeId ?: it.id }
+        }
         val dao = musicDaoRef ?: return (listOf(seedSong) + onlineRelated).distinctBy { it.id }
         val engagementDao = engagementDaoRef
         
@@ -1079,6 +1082,13 @@ object AutoQueueManager {
                 if (related.isNotEmpty()) {
                     saveRelatedSongsToDb(resolvedVideoId, related, player)
                     discovered = related
+                    val mediaItems = related.map { MediaItemBuilder.build(it) }
+                    withContext(Dispatchers.Main) {
+                        player.addMediaItems(mediaItems)
+                        onQueueItemsAddedCallback?.invoke()
+                    }
+                    printd("AutoQueueManager: Appended ${mediaItems.size} online mix radio songs directly.")
+                    continue
                 } else {
                     discovered = fetchLocalRelated(currentId, currentQueueIds)
                 }

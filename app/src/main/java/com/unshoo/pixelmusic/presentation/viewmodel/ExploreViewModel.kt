@@ -397,7 +397,8 @@ class ExploreViewModel @Inject constructor(
     }
 }
 
-private data class ExploreCacheModel(
+@androidx.annotation.Keep
+data class ExploreCacheModel(
     val sections: List<HomePage.Section>,
     val albums: List<AlbumItem>,
     val charts: ChartsPage?,

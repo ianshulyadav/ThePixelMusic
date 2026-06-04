@@ -28,6 +28,8 @@ import unshoo.ianshulyadav.pixelmusic.innertube.models.SongItem
 import unshoo.ianshulyadav.pixelmusic.innertube.models.AlbumItem
 import unshoo.ianshulyadav.pixelmusic.innertube.models.WatchEndpoint
 import javax.inject.Inject
+import com.unshoo.pixelmusic.data.stats.PlaybackStatsRepository
+import unshoo.ianshulyadav.pixelmusic.innertube.models.ArtistItem
 
 private const val PREFS_NAME = "quick_picks_cache"
 private const val KEY_SONGS = "songs_json"
@@ -41,7 +43,8 @@ class QuickPicksViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val userPreferencesRepository: UserPreferencesRepository,
     private val musicRepository: MusicRepository,
-    private val engagementDao: com.unshoo.pixelmusic.data.database.EngagementDao
+    private val engagementDao: com.unshoo.pixelmusic.data.database.EngagementDao,
+    private val playbackStatsRepository: PlaybackStatsRepository
 ) : ViewModel() {
 
     private val _quickPicks = MutableStateFlow<List<Song>>(emptyList())
@@ -231,153 +234,268 @@ class QuickPicksViewModel @Inject constructor(
     private suspend fun loadEnhancedQuickPicks(): List<Song> = coroutineScope {
         val pureYtMusicOnly = userPreferencesRepository.pureYtMusicOnlyFlow.first()
 
-        // Bucket 1: New Releases — latest album songs from YouTube (4 songs)
-        val newReleasesDeferred = async(Dispatchers.IO) {
-            try {
-                val albums = YouTube.newReleaseAlbums().getOrNull() ?: emptyList()
-                val songsPool = mutableListOf<Song>()
-                for (album in albums.take(6)) {
-                    if (songsPool.size >= 4) break
-                    val albumPage = YouTube.album(album.browseId).getOrNull() ?: continue
-                    val songs = albumPage.songs
-                        .filter { item ->
-                            if (pureYtMusicOnly) {
-                                val mvType = item.endpoint?.watchEndpointMusicSupportedConfigs
-                                    ?.watchEndpointMusicConfig?.musicVideoType
-                                mvType == "MUSIC_VIDEO_TYPE_ATV" || mvType == null
-                            } else true
+        // 1. Gather historical seeds from user's local/online history and favorites
+        val localHistoryList = try {
+            playbackStatsRepository.loadPlaybackHistory(limit = 40)
+        } catch (e: Exception) {
+            emptyList()
+        }
+
+        val localFavoritesList = try {
+            musicRepository.getFavoriteSongsOnce(com.unshoo.pixelmusic.data.model.StorageFilter.ALL)
+        } catch (e: Exception) {
+            emptyList()
+        }
+
+        val ytHistoryList = try {
+            YouTube.musicHistory().getOrNull()?.sections?.flatMap { it.songs } ?: emptyList()
+        } catch (e: Exception) {
+            emptyList()
+        }
+
+        val subscribedIds = userPreferencesRepository.subscribedArtistIdsFlow.first().toList()
+
+        // Extract seed songs
+        val seedSongs = mutableListOf<Pair<String, String>>()
+        
+        // Add from online YT Music history
+        ytHistoryList.forEach { songItem ->
+            if (!songItem.id.isNullOrBlank()) {
+                seedSongs.add(songItem.id to (songItem.artists.firstOrNull()?.name ?: ""))
+            }
+        }
+        
+        // Add from local playback history
+        localHistoryList.forEach { historyEntry ->
+            if (!historyEntry.songId.isNullOrBlank() && (historyEntry.songId.startsWith("youtube:") || historyEntry.songId.length == 11)) {
+                val cleanId = historyEntry.songId.removePrefix("youtube:")
+                if (cleanId.isNotBlank()) {
+                    seedSongs.add(cleanId to (historyEntry.artist ?: ""))
+                }
+            }
+        }
+        
+        // Add from local favorites
+        localFavoritesList.forEach { favoriteSong ->
+            val yId = favoriteSong.youtubeId
+            if (!yId.isNullOrBlank()) {
+                seedSongs.add(yId to favoriteSong.artist)
+            }
+        }
+
+        // Deduplicate seeds and select randomly for freshness on every load/refresh
+        val uniqueSeedSongs = seedSongs.distinctBy { it.first }.shuffled()
+
+        // Extract seed artists
+        val seedArtistNames = mutableListOf<String>()
+        val seedArtistIds = mutableListOf<String>()
+
+        subscribedIds.forEach { seedArtistIds.add(it) }
+        localHistoryList.mapNotNull { it.artist }.filter { it.isNotBlank() }.forEach { seedArtistNames.add(it) }
+        localFavoritesList.map { it.artist }.filter { it.isNotBlank() }.forEach { seedArtistNames.add(it) }
+        ytHistoryList.flatMap { it.artists }.forEach {
+            if (!it.id.isNullOrBlank()) seedArtistIds.add(it.id)
+            if (it.name.isNotBlank()) seedArtistNames.add(it.name)
+        }
+
+        val uniqueSeedArtistNames = seedArtistNames.distinct().shuffled()
+        val uniqueSeedArtistIds = seedArtistIds.distinct().shuffled()
+
+        // 2. Query different recommendation endpoints concurrently
+        // Bucket A: Song Mix Radios (fetch related radio mix for up to 3 distinct seed songs)
+        val songMixesDeferred = uniqueSeedSongs.take(3).map { (videoId, _) ->
+            async(Dispatchers.IO) {
+                try {
+                    val radioResult = YouTube.next(
+                        WatchEndpoint(playlistId = "RDAMVM$videoId", videoId = videoId)
+                    ).getOrNull()
+                    radioResult?.items?.filterIsInstance<SongItem>()?.filterVideo(pureYtMusicOnly) ?: emptyList()
+                } catch (e: Exception) {
+                    Timber.tag("QuickPicks").w(e, "Song mix radio fetch failed for videoId: $videoId")
+                    emptyList()
+                }
+            }
+        }
+
+        // Bucket B: Similar Artist Radios (fetch similar artist radio for up to 2 subscribed/frequent artists)
+        val artistRadiosDeferred = uniqueSeedArtistIds.take(2).map { artistId ->
+            async(Dispatchers.IO) {
+                try {
+                    val artistPage = YouTube.artist(artistId).getOrNull()
+                    val radioEndpoint = artistPage?.artist?.radioEndpoint
+                    if (radioEndpoint != null) {
+                        YouTube.next(radioEndpoint).getOrNull()?.items?.filterIsInstance<SongItem>()?.filterVideo(pureYtMusicOnly) ?: emptyList()
+                    } else {
+                        // Fallback to top song's mix radio
+                        val songsSection = artistPage?.sections?.find {
+                            it.title.contains("songs", ignoreCase = true) ||
+                            it.title.contains("popular", ignoreCase = true)
                         }
-                        .take(2)
-                        .map { it.toNativeSong() }
-                    songsPool.addAll(songs)
+                        val firstSong = songsSection?.items?.filterIsInstance<SongItem>()?.firstOrNull()
+                        if (firstSong != null) {
+                            YouTube.next(
+                                WatchEndpoint(playlistId = "RDAMVM${firstSong.id}", videoId = firstSong.id)
+                            ).getOrNull()?.items?.filterIsInstance<SongItem>()?.filterVideo(pureYtMusicOnly) ?: emptyList()
+                        } else emptyList()
+                    }
+                } catch (e: Exception) {
+                    Timber.tag("QuickPicks").w(e, "Artist radio fetch failed for artistId: $artistId")
+                    emptyList()
                 }
-                songsPool.distinctBy { it.youtubeId ?: it.id }.take(4)
-            } catch (e: Exception) {
-                Timber.tag("QuickPicks").w(e, "New releases bucket failed")
-                emptyList()
             }
         }
 
-        // Bucket 2: Similar Artist Songs — radio from subscribed/favourite artist (5 songs)
-        val similarArtistDeferred = async(Dispatchers.IO) {
-            try {
-                val subscribedIds = userPreferencesRepository.subscribedArtistIdsFlow.first()
-                val artistBrowseId = subscribedIds.firstOrNull() ?: return@async emptyList<Song>()
-                val artistPage = YouTube.artist(artistBrowseId).getOrNull() ?: return@async emptyList<Song>()
-
-                // Get first song from the artist's Songs section and fetch its radio
-                val songsSection = artistPage.sections.find {
-                    it.title.contains("songs", ignoreCase = true) ||
-                    it.title.contains("popular", ignoreCase = true)
+        // If artist IDs are not available but we have artist names, search and fetch their radio
+        val artistNameRadiosDeferred = if (uniqueSeedArtistIds.isEmpty() && uniqueSeedArtistNames.isNotEmpty()) {
+            uniqueSeedArtistNames.take(2).map { artistName ->
+                async(Dispatchers.IO) {
+                    try {
+                        val searchResult = YouTube.search(artistName, YouTube.SearchFilter.FILTER_ARTIST).getOrNull()
+                        val artistItem = searchResult?.items?.find { it is ArtistItem } as? ArtistItem
+                        val artistId = artistItem?.id
+                        if (artistId != null) {
+                            val artistPage = YouTube.artist(artistId).getOrNull()
+                            val radioEndpoint = artistPage?.artist?.radioEndpoint
+                            if (radioEndpoint != null) {
+                                YouTube.next(radioEndpoint).getOrNull()?.items?.filterIsInstance<SongItem>()?.filterVideo(pureYtMusicOnly) ?: emptyList()
+                            } else {
+                                val songsSection = artistPage?.sections?.find {
+                                    it.title.contains("songs", ignoreCase = true) ||
+                                    it.title.contains("popular", ignoreCase = true)
+                                }
+                                val firstSong = songsSection?.items?.filterIsInstance<SongItem>()?.firstOrNull()
+                                if (firstSong != null) {
+                                    YouTube.next(
+                                        WatchEndpoint(playlistId = "RDAMVM${firstSong.id}", videoId = firstSong.id)
+                                    ).getOrNull()?.items?.filterIsInstance<SongItem>()?.filterVideo(pureYtMusicOnly) ?: emptyList()
+                                } else emptyList()
+                            }
+                        } else emptyList()
+                    } catch (e: Exception) {
+                        Timber.tag("QuickPicks").w(e, "Artist name search/radio failed for: $artistName")
+                        emptyList()
+                    }
                 }
-                val seedSong = songsSection?.items?.filterIsInstance<SongItem>()?.firstOrNull()
-                    ?: return@async emptyList<Song>()
-
-                val radioResult = YouTube.next(
-                    WatchEndpoint(playlistId = "RDAMVM${seedSong.id}", videoId = seedSong.id)
-                ).getOrNull()
-
-                val songs = radioResult?.items
-                    ?.filterIsInstance<SongItem>()
-                    ?.filterVideo(pureYtMusicOnly)
-                    ?.drop(1) // Skip the seed song itself
-                    ?.take(5)
-                    ?.map { it.toNativeSong() }
-                    ?: emptyList()
-                songs
-            } catch (e: Exception) {
-                Timber.tag("QuickPicks").w(e, "Similar artist bucket failed")
-                emptyList()
             }
-        }
+        } else emptyList()
 
-        // Bucket 3: YouTube Quick Picks — home page Quick Picks section (6 songs)
-        val ytQuickPicksDeferred = async(Dispatchers.IO) {
+        // Bucket C: YouTube Music personalized Home page sections
+        val ytHomeRecommendationsDeferred = async(Dispatchers.IO) {
             try {
-                val defaultHome = YouTube.home().getOrNull() ?: return@async emptyList<Song>()
-                // Update categories from home chips
-                val chipTitles = defaultHome.chips?.map { it.title } ?: emptyList()
+                val homePage = YouTube.home().getOrNull() ?: return@async emptyList<SongItem>()
+                val chipTitles = homePage.chips?.map { it.title } ?: emptyList()
                 if (chipTitles.isNotEmpty()) {
                     _categories.value = listOf("All") + chipTitles
                 }
-                val quickPicksSection = defaultHome.sections.firstOrNull {
-                    it.title.contains("quick picks", ignoreCase = true) ||
-                    it.title.contains("quick", ignoreCase = true)
-                } ?: defaultHome.sections.firstOrNull {
-                    !it.title.contains("listen again", ignoreCase = true) &&
-                    !it.title.contains("recently played", ignoreCase = true)
-                }
-                quickPicksSection?.items
-                    ?.filterIsInstance<SongItem>()
-                    ?.filterVideo(pureYtMusicOnly)
-                    ?.take(6)
-                    ?.map { it.toNativeSong() }
-                    ?: emptyList()
+                homePage.sections
+                    .flatMap { section -> section.items.filterIsInstance<SongItem>() }
+                    .filterVideo(pureYtMusicOnly)
             } catch (e: Exception) {
-                Timber.tag("QuickPicks").w(e, "YT Quick Picks bucket failed")
+                Timber.tag("QuickPicks").w(e, "Personalized home section fetch failed")
                 emptyList()
             }
         }
 
-        // Bucket 4: Local Popular Songs — top played from local DB (3 songs)
+        // Bucket D: User's online YT Music History
+        val ytHistoryDeferred = async(Dispatchers.IO) {
+            try {
+                YouTube.musicHistory().getOrNull()?.sections?.flatMap { it.songs }?.filterVideo(pureYtMusicOnly) ?: emptyList()
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+
+        // Bucket E: Local Top Played/Popular Songs
         val localPopularDeferred = async(Dispatchers.IO) {
             try {
-                val topEngagements = engagementDao.getTopPlayedSongs(10)
+                val topEngagements = engagementDao.getTopPlayedSongs(15)
                 if (topEngagements.isNotEmpty()) {
                     val songIds = topEngagements.map { it.songId }
-                    val songs = musicRepository.getSongsByIds(songIds).first()
-                    val songIdToPlayCount = topEngagements.associate { it.songId to it.playCount }
-                    songs.sortedByDescending { songIdToPlayCount[it.id] ?: 0 }.take(3)
+                    musicRepository.getSongsByIds(songIds).first()
                 } else {
-                    musicRepository.getRandomSongs(3)
+                    musicRepository.getRandomSongs(10)
                 }
             } catch (e: Exception) {
-                Timber.tag("QuickPicks").w(e, "Local popular bucket failed")
                 emptyList()
             }
         }
 
-        // Bucket 5: Trending Charts — top chart songs (2 songs)
-        val trendingDeferred = async(Dispatchers.IO) {
-            try {
-                val charts = YouTube.getChartsPage().getOrNull() ?: return@async emptyList<Song>()
-                val topSongs = charts.sections
-                    .flatMap { it.items }
-                    .filterIsInstance<SongItem>()
-                    .filterVideo(pureYtMusicOnly)
-                    .take(2)
-                    .map { it.toNativeSong() }
-                topSongs
-            } catch (e: Exception) {
-                Timber.tag("QuickPicks").w(e, "Trending charts bucket failed")
-                emptyList()
-            }
-        }
+        // Await all async requests
+        val songMixSongs = songMixesDeferred.flatMap { it.await() }
+        val artistRadioSongs = artistRadiosDeferred.flatMap { it.await() }
+        val artistNameRadioSongs = artistNameRadiosDeferred.flatMap { it.await() }
+        val homeRecSongs = ytHomeRecommendationsDeferred.await()
+        val onlineHistorySongs = ytHistoryDeferred.await()
+        val localPopularSongs = localPopularDeferred.await()
 
-        // Await all 5 buckets concurrently
-        val newReleases = newReleasesDeferred.await()
-        val similarArtist = similarArtistDeferred.await()
-        val ytQuickPicks = ytQuickPicksDeferred.await()
-        val localPopular = localPopularDeferred.await()
-        val trending = trendingDeferred.await()
+        // 3. Blend, map, and de-duplicate
+        val combinedCandidates = mutableListOf<Song>()
+        (songMixSongs + artistRadioSongs + artistNameRadioSongs + homeRecSongs + onlineHistorySongs)
+            .map { it.toNativeSong() }
+            .let { combinedCandidates.addAll(it) }
+        combinedCandidates.addAll(localPopularSongs)
 
-        // Interleave buckets: new releases first (freshness), then mix the rest
-        val combined = mutableListOf<Song>()
-        combined.addAll(newReleases)
-        combined.addAll(similarArtist)
-        combined.addAll(ytQuickPicks)
-        combined.addAll(trending)
-        combined.addAll(localPopular)
-
-        // De-duplicate by YouTube ID or song title+artist combo
-        val deduplicated = combined.distinctBy { song ->
+        var deduplicated = combinedCandidates.distinctBy { song ->
             song.youtubeId?.takeIf { it.isNotBlank() } ?: "${song.title.lowercase()}|${song.artist.lowercase()}"
         }
 
-        // Shuffle within each half to keep new releases near the top but randomise order
-        val topHalf = deduplicated.take(deduplicated.size / 2).shuffled()
-        val bottomHalf = deduplicated.drop(deduplicated.size / 2).shuffled()
-        (topHalf + bottomHalf).take(20)
+        // 4. Fallback: If not enough personalized items (e.g. fresh install/no history), fetch location-based trending charts/releases
+        if (deduplicated.size < 20) {
+            val countryCode = userPreferencesRepository.contentCountryFlow.first().uppercase()
+            
+            val chartsDeferred = async(Dispatchers.IO) {
+                try {
+                    val charts = YouTube.getChartsPage(countryCode).getOrNull()
+                        ?: YouTube.getChartsPage().getOrNull()
+                    charts?.sections
+                        ?.flatMap { it.items }
+                        ?.filterIsInstance<SongItem>()
+                        ?.filterVideo(pureYtMusicOnly)
+                        ?.map { it.toNativeSong() } ?: emptyList()
+                } catch (e: Exception) {
+                    emptyList()
+                }
+            }
+
+            val newReleasesDeferred = async(Dispatchers.IO) {
+                try {
+                    val albums = YouTube.newReleaseAlbums().getOrNull() ?: emptyList()
+                    val selectedAlbums = albums.shuffled().take(8)
+                    val songsPool = coroutineScope {
+                        selectedAlbums.map { album ->
+                            async {
+                                try {
+                                    YouTube.album(album.browseId).getOrNull()?.songs ?: emptyList()
+                                } catch (e: Exception) {
+                                    emptyList()
+                                }
+                            }
+                        }.flatMap { it.await() }
+                    }
+                    songsPool.filter { item ->
+                        if (pureYtMusicOnly) {
+                            val mvType = item.endpoint?.watchEndpointMusicSupportedConfigs
+                                ?.watchEndpointMusicConfig?.musicVideoType
+                            mvType == "MUSIC_VIDEO_TYPE_ATV" || mvType == null
+                        } else true
+                    }
+                    .map { it.toNativeSong() }
+                } catch (e: Exception) {
+                    emptyList()
+                }
+            }
+
+            val fallbackCharts = chartsDeferred.await()
+            val fallbackNewReleases = newReleasesDeferred.await()
+
+            deduplicated = (deduplicated + fallbackCharts + fallbackNewReleases)
+                .distinctBy { song ->
+                    song.youtubeId?.takeIf { it.isNotBlank() } ?: "${song.title.lowercase()}|${song.artist.lowercase()}"
+                }
+        }
+
+        // Shuffle completely to make it dynamic on every view/refresh
+        deduplicated.shuffled().take(20)
     }
 
     // ─────────────────────────────────────────────────────────────────────────

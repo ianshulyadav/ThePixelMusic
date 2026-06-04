@@ -2,8 +2,10 @@ package com.unshoo.pixelmusic.presentation.screens
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.rounded.Album
@@ -38,9 +40,26 @@ fun ArtistAlbumsAllScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
-    val items = remember(uiState.albumSections, uiState.singlesAndEPs, type) {
-        if (type == "singles") uiState.singlesAndEPs else uiState.albumSections
+    LaunchedEffect(artistId, type) {
+        viewModel.loadAllItems(type)
     }
+
+    val gridState = rememberLazyGridState()
+    val shouldLoadMore = remember {
+        derivedStateOf {
+            val layoutInfo = gridState.layoutInfo
+            val totalItems = layoutInfo.totalItemsCount
+            val lastVisibleItemIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            totalItems > 0 && lastVisibleItemIndex >= totalItems - 4
+        }
+    }
+
+    LaunchedEffect(shouldLoadMore.value) {
+        if (shouldLoadMore.value) {
+            viewModel.loadMoreAllItems(type)
+        }
+    }
+
     val title = if (type == "singles") "Singles & EPs" else "Albums"
 
     Scaffold(
@@ -62,13 +81,13 @@ fun ArtistAlbumsAllScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
+                     containerColor = MaterialTheme.colorScheme.surface
                 )
             )
         }
     ) { innerPadding ->
         when {
-            uiState.isLoading -> {
+            uiState.isAllItemsLoading && uiState.allItems.isEmpty() -> {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -78,7 +97,7 @@ fun ArtistAlbumsAllScreen(
                     CircularProgressIndicator()
                 }
             }
-            items.isEmpty() -> {
+            uiState.allItems.isEmpty() -> {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -105,6 +124,7 @@ fun ArtistAlbumsAllScreen(
             }
             else -> {
                 LazyVerticalGrid(
+                    state = gridState,
                     columns = GridCells.Adaptive(minSize = 160.dp),
                     contentPadding = PaddingValues(
                         start = 16.dp,
@@ -118,7 +138,7 @@ fun ArtistAlbumsAllScreen(
                     modifier = Modifier.fillMaxSize()
                 ) {
                     items(
-                        items = items,
+                        items = uiState.allItems,
                         key = { it.albumId }
                     ) { section ->
                         AlbumGridCard(
@@ -131,6 +151,20 @@ fun ArtistAlbumsAllScreen(
                                 }
                             }
                         )
+                    }
+                    if (uiState.isAllItemsLoading) {
+                        item(
+                            span = { GridItemSpan(maxLineSpan) }
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                            }
+                        }
                     }
                 }
             }
