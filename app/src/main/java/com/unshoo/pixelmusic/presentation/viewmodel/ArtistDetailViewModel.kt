@@ -30,6 +30,7 @@ import unshoo.ianshulyadav.pixelmusic.innertube.YouTube as InnerTubeYouTube
 import unshoo.ianshulyadav.pixelmusic.innertube.models.SongItem
 import unshoo.ianshulyadav.pixelmusic.innertube.models.AlbumItem
 import unshoo.ianshulyadav.pixelmusic.innertube.models.ArtistItem
+import unshoo.ianshulyadav.pixelmusic.innertube.models.BrowseEndpoint
 import unshoo.ianshulyadav.pixelmusic.innertube.pages.ArtistPage
 import unshoo.ianshulyadav.pixelmusic.innertube.pages.SearchResult
 import kotlinx.coroutines.flow.first
@@ -56,7 +57,13 @@ data class ArtistDetailUiState(
     val isOnlineArtist: Boolean = false,
     val artistDescription: String? = null,
     val subscriberCount: String? = null,
-    val browseId: String? = null
+    val browseId: String? = null,
+    val albumsMoreEndpoint: BrowseEndpoint? = null,
+    val singlesMoreEndpoint: BrowseEndpoint? = null,
+    val allItems: List<ArtistAlbumSection> = emptyList(),
+    val isAllItemsLoading: Boolean = false,
+    val allItemsContinuation: String? = null,
+    val allItemsError: String? = null
 )
 
 enum class ArtistSectionType { ALBUM, SINGLE_EP, SONGS }
@@ -214,38 +221,36 @@ class ArtistDetailViewModel @Inject constructor(
                             )
                         }
 
-                        val albumSections = artistPage.sections.filter { section ->
+                        val albumsSection = artistPage.sections.firstOrNull { section ->
                             section.title.contains("Albums", ignoreCase = true) ||
                             section.title.contains("Releases", ignoreCase = true)
-                        }.flatMap { section ->
-                            section.items.mapNotNull { item ->
-                                when (item) {
-                                    is AlbumItem -> item.toAlbumSection(artistItem.title, browseId.hashCode().toLong())
-                                    else -> null
-                                }
-                            }
                         }
+                        val albumSections = albumsSection?.items?.mapNotNull { item ->
+                            when (item) {
+                                is AlbumItem -> item.toAlbumSection(artistItem.title, browseId.hashCode().toLong())
+                                else -> null
+                            }
+                        }.orEmpty()
 
                         // ── Singles & EPs: sections titled "Singles", "EP", or "EPs" ──
-                        val singlesAndEPs = artistPage.sections.filter { section ->
+                        val singlesSection = artistPage.sections.firstOrNull { section ->
                             section.title.contains("Single", ignoreCase = true) ||
                             section.title.contains("EP", ignoreCase = true)
-                        }.flatMap { section ->
-                            section.items.mapNotNull { item ->
-                                when (item) {
-                                    is AlbumItem -> ArtistAlbumSection(
-                                        albumId = item.browseId.hashCode().toLong(),
-                                        title = item.title,
-                                        year = item.year,
-                                        albumArtUriString = item.thumbnail,
-                                        browseId = item.browseId,
-                                        songs = emptyList(),
-                                        sectionType = ArtistSectionType.SINGLE_EP
-                                    )
-                                    else -> null
-                                }
-                            }
                         }
+                        val singlesAndEPs = singlesSection?.items?.mapNotNull { item ->
+                            when (item) {
+                                is AlbumItem -> ArtistAlbumSection(
+                                    albumId = item.browseId.hashCode().toLong(),
+                                    title = item.title,
+                                    year = item.year,
+                                    albumArtUriString = item.thumbnail,
+                                    browseId = item.browseId,
+                                    songs = emptyList(),
+                                    sectionType = ArtistSectionType.SINGLE_EP
+                                )
+                                else -> null
+                            }
+                        }.orEmpty()
 
                         val effectiveImageUrl = artistItem.thumbnail
                         val newScheme = if (!effectiveImageUrl.isNullOrBlank()) {
@@ -268,7 +273,9 @@ class ArtistDetailViewModel @Inject constructor(
                             isOnlineArtist = true,
                             artistDescription = artistPage.description,
                             subscriberCount = artistItem.subscriberCountText,
-                            browseId = browseId
+                            browseId = browseId,
+                            albumsMoreEndpoint = albumsSection?.moreEndpoint,
+                            singlesMoreEndpoint = singlesSection?.moreEndpoint
                         )
                     }.onFailure { e ->
                         _uiState.update {
@@ -445,6 +452,124 @@ class ArtistDetailViewModel @Inject constructor(
                 popularSongs = currentState.popularSongs.filterNot { it.id == songId },
                 songs = currentState.songs.filterNot { it.id == songId }
             )
+        }
+    }
+
+    private var allItemsJob: Job? = null
+
+    fun loadAllItems(type: String) {
+        val endpoint = if (type == "singles") {
+            _uiState.value.singlesMoreEndpoint
+        } else {
+            _uiState.value.albumsMoreEndpoint
+        }
+
+        if (endpoint == null) {
+            val initialItems = if (type == "singles") {
+                _uiState.value.singlesAndEPs
+            } else {
+                _uiState.value.albumSections
+            }
+            _uiState.update { it.copy(allItems = initialItems, allItemsContinuation = null, isAllItemsLoading = false) }
+            return
+        }
+
+        allItemsJob?.cancel()
+        allItemsJob = viewModelScope.launch {
+            _uiState.update { it.copy(isAllItemsLoading = true, allItems = emptyList(), allItemsContinuation = null, allItemsError = null) }
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    InnerTubeYouTube.artistItems(endpoint)
+                }
+                result.onSuccess { page ->
+                    val mappedItems = page.items.mapNotNull { item ->
+                        when (item) {
+                            is AlbumItem -> ArtistAlbumSection(
+                                albumId = item.browseId.hashCode().toLong(),
+                                title = item.title,
+                                year = item.year,
+                                albumArtUriString = item.thumbnail,
+                                browseId = item.browseId,
+                                songs = emptyList(),
+                                sectionType = if (type == "singles") ArtistSectionType.SINGLE_EP else ArtistSectionType.ALBUM
+                            )
+                            else -> null
+                        }
+                    }
+                    _uiState.update {
+                        it.copy(
+                            allItems = mappedItems,
+                            allItemsContinuation = page.continuation,
+                            isAllItemsLoading = false
+                        )
+                    }
+                }.onFailure { e ->
+                    _uiState.update {
+                        it.copy(
+                            allItemsError = e.localizedMessage,
+                            isAllItemsLoading = false
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        allItemsError = e.localizedMessage,
+                        isAllItemsLoading = false
+                    )
+                }
+            }
+        }
+    }
+
+    fun loadMoreAllItems(type: String) {
+        val continuation = _uiState.value.allItemsContinuation ?: return
+        if (_uiState.value.isAllItemsLoading) return
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isAllItemsLoading = true) }
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    InnerTubeYouTube.artistItemsContinuation(continuation)
+                }
+                result.onSuccess { page ->
+                    val mappedItems = page.items.mapNotNull { item ->
+                        when (item) {
+                            is AlbumItem -> ArtistAlbumSection(
+                                albumId = item.browseId.hashCode().toLong(),
+                                title = item.title,
+                                year = item.year,
+                                albumArtUriString = item.thumbnail,
+                                browseId = item.browseId,
+                                songs = emptyList(),
+                                sectionType = if (type == "singles") ArtistSectionType.SINGLE_EP else ArtistSectionType.ALBUM
+                            )
+                            else -> null
+                        }
+                    }
+                    _uiState.update {
+                        it.copy(
+                            allItems = it.allItems + mappedItems,
+                            allItemsContinuation = page.continuation,
+                            isAllItemsLoading = false
+                        )
+                    }
+                }.onFailure { e ->
+                    _uiState.update {
+                        it.copy(
+                            allItemsError = e.localizedMessage,
+                            isAllItemsLoading = false
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        allItemsError = e.localizedMessage,
+                        isAllItemsLoading = false
+                    )
+                }
+            }
         }
     }
 }
