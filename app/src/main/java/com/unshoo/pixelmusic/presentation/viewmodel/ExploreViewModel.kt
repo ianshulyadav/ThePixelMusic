@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.coroutineScope
 import timber.log.Timber
 import unshoo.ianshulyadav.pixelmusic.innertube.YouTube
 import unshoo.ianshulyadav.pixelmusic.innertube.models.YTItem
@@ -48,10 +49,15 @@ class ExploreViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(ExploreUiState())
     val uiState: StateFlow<ExploreUiState> = _uiState.asStateFlow()
 
+    private val explorePrefs by lazy { context.getSharedPreferences("explore_guest_cache", Context.MODE_PRIVATE) }
+
     init {
-        // Restore from in-process cache immediately so the UI doesn't flash empty
-        restoreFromCache()
-        loadData()
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                restoreFromCache()
+            }
+            loadDataInternal(forceRefresh = false)
+        }
     }
 
     private val gson by lazy {
@@ -69,17 +75,14 @@ class ExploreViewModel @Inject constructor(
             if (cacheFile.exists()) {
                 val json = cacheFile.readText()
                 val cache = gson.fromJson(json, ExploreCacheModel::class.java)
-                // Validity period: 24 hours
-                if (System.currentTimeMillis() - cache.timestamp < 86400000L) {
-                    _uiState.update {
-                        it.copy(
-                            isLoading = true, // still loading fresh data
-                            homePageSections = cache.sections,
-                            homePageContinuation = cache.continuation,
-                            newReleaseAlbums = cache.albums,
-                            chartsPage = cache.charts
-                        )
-                    }
+                _uiState.update {
+                    it.copy(
+                        isLoading = true, // still loading fresh data
+                        homePageSections = cache.sections,
+                        homePageContinuation = cache.continuation,
+                        newReleaseAlbums = cache.albums,
+                        chartsPage = cache.charts
+                    )
                 }
             }
         } catch (e: Exception) {
@@ -107,211 +110,253 @@ class ExploreViewModel @Inject constructor(
 
     fun loadData(forceRefresh: Boolean = false) {
         viewModelScope.launch {
-            if (forceRefresh) {
-                _uiState.update { it.copy(isRefreshing = true, error = null) }
+            loadDataInternal(forceRefresh)
+        }
+    }
+
+    private suspend fun loadDataInternal(forceRefresh: Boolean) = coroutineScope {
+        if (forceRefresh) {
+            _uiState.update { it.copy(isRefreshing = true, error = null) }
+        } else {
+            // Only show loading spinner if we have no cached data at all
+            val hasCachedData = _uiState.value.homePageSections.isNotEmpty() ||
+                    _uiState.value.newReleaseAlbums.isNotEmpty() ||
+                    _uiState.value.chartsPage != null
+            _uiState.update { it.copy(isLoading = !hasCachedData, error = null) }
+        }
+        try {
+            // 1. Get history and candidateArtistId immediately (fast database/prefs calls)
+            val history = withContext(Dispatchers.IO) {
+                playbackStatsRepository.loadPlaybackHistory(limit = 15)
+            }
+            val candidateArtistId = withContext(Dispatchers.IO) {
+                userPreferencesRepository.subscribedArtistIdsFlow.first().firstOrNull()
+            }
+
+            val userActivityQuery = if (history.isNotEmpty()) {
+                val artistCounts = history.mapNotNull { it.artist }.groupingBy { it }.eachCount()
+                artistCounts.maxByOrNull { it.value }?.key ?: "Bollywood"
             } else {
-                // Only show loading spinner if we have no cached data at all
+                "Bollywood"
+            }
+
+            val hasLogin = YouTube.hasLoginCookie()
+
+            // 2. Fetch Explore sections parallelly
+            val homeDeferred = async(Dispatchers.IO) { YouTube.home().getOrNull() }
+            val exploreDeferred = async(Dispatchers.IO) { YouTube.explore().getOrNull() }
+            val chartsDeferred = async(Dispatchers.IO) { YouTube.getChartsPage().getOrNull() }
+            val newReleasesDeferred = async(Dispatchers.IO) { YouTube.newReleaseAlbums().getOrNull() }
+
+            // Library / account-based parallel requests (only if logged in)
+            val likedAlbumsDeferred: kotlinx.coroutines.Deferred<List<AlbumItem>>? = if (hasLogin) {
+                async(Dispatchers.IO) {
+                    YouTube.library("FEmusic_liked_albums").getOrNull()?.items?.filterIsInstance<AlbumItem>() ?: emptyList()
+                }
+            } else null
+
+            val likedArtistsDeferred: kotlinx.coroutines.Deferred<List<ArtistItem>>? = if (hasLogin) {
+                async(Dispatchers.IO) {
+                    YouTube.library("FEmusic_liked_artists").getOrNull()?.items?.filterIsInstance<ArtistItem>() ?: emptyList()
+                }
+            } else null
+
+            val recentActivityDeferred: kotlinx.coroutines.Deferred<List<YTItem>>? = if (hasLogin) {
+                async(Dispatchers.IO) {
+                    YouTube.libraryRecentActivity().getOrNull()?.items ?: emptyList()
+                }
+            } else null
+
+            val personalPlaylistsDeferred: kotlinx.coroutines.Deferred<List<PlaylistItem>>? = if (hasLogin) {
+                async(Dispatchers.IO) {
+                    YouTube.library("FEmusic_liked_playlists").getOrNull()?.items?.filterIsInstance<PlaylistItem>() ?: emptyList()
+                }
+            } else null
+
+            // Search community playlists in parallel
+            val communityPlaylistsDeferred = async(Dispatchers.IO) {
+                YouTube.search(
+                    query = "$userActivityQuery playlist",
+                    filter = YouTube.SearchFilter.FILTER_COMMUNITY_PLAYLIST
+                ).getOrNull()
+            }
+
+            val cachedArtistBrowseId = explorePrefs.getString("artist_id_${userActivityQuery}", null)
+            val resolvedArtistId = candidateArtistId ?: cachedArtistBrowseId
+
+            // Fetch similar artists in parallel if candidate ID exists or we have a cached ID
+            val similarArtistPageDeferred: kotlinx.coroutines.Deferred<unshoo.ianshulyadav.pixelmusic.innertube.pages.ArtistPage?>? = if (resolvedArtistId != null) {
+                async(Dispatchers.IO) { YouTube.artist(resolvedArtistId).getOrNull() }
+            } else null
+
+            // Search artist in parallel if guest search is needed and we don't have a cached ID
+            val searchArtistPageDeferred: kotlinx.coroutines.Deferred<Pair<String, unshoo.ianshulyadav.pixelmusic.innertube.pages.ArtistPage?>?>? = if (resolvedArtistId == null && userActivityQuery != "Bollywood") {
+                async(Dispatchers.IO) {
+                    val searchResult = YouTube.search(userActivityQuery, YouTube.SearchFilter.FILTER_ARTIST).getOrNull()
+                    val artistItem = searchResult?.items?.find { it is ArtistItem } as? ArtistItem
+                    val id = artistItem?.id
+                    if (id != null) {
+                        explorePrefs.edit().putString("artist_id_${userActivityQuery}", id).apply()
+                        val artistPage = YouTube.artist(id).getOrNull()
+                        Pair(artistItem.title, artistPage)
+                    } else null
+                }
+            } else null
+
+            // 3. Await all results
+            val home = homeDeferred.await()
+            val explore = exploreDeferred.await()
+            val charts = chartsDeferred.await()
+            val newReleasesResult = newReleasesDeferred.await()
+            val likedAlbums = likedAlbumsDeferred?.await() ?: emptyList()
+            val likedArtists = likedArtistsDeferred?.await() ?: emptyList()
+            val recentActivityItems = recentActivityDeferred?.await() ?: emptyList()
+            val personalPlaylists = personalPlaylistsDeferred?.await() ?: emptyList()
+            val communityPlaylistsResult = communityPlaylistsDeferred.await()
+
+            if (home == null && explore == null && charts == null) {
+                // Only show error if we also have no cached data
                 val hasCachedData = _uiState.value.homePageSections.isNotEmpty() ||
                         _uiState.value.newReleaseAlbums.isNotEmpty() ||
                         _uiState.value.chartsPage != null
-                _uiState.update { it.copy(isLoading = !hasCachedData, error = null) }
-            }
-            try {
-                // Fetch Explore sections parallelly
-                val homeDeferred = async(Dispatchers.IO) { YouTube.home().getOrNull() }
-                val exploreDeferred = async(Dispatchers.IO) { YouTube.explore().getOrNull() }
-                val chartsDeferred = async(Dispatchers.IO) { YouTube.getChartsPage().getOrNull() }
-                val historyDeferred = async(Dispatchers.IO) { playbackStatsRepository.loadPlaybackHistory(limit = 15) }
-                val newReleasesDeferred = async(Dispatchers.IO) { YouTube.newReleaseAlbums().getOrNull() }
-
-                val home = homeDeferred.await()
-                val explore = exploreDeferred.await()
-                val charts = chartsDeferred.await()
-                val history = historyDeferred.await()
-                val newReleasesResult = newReleasesDeferred.await()
-
-                if (home == null && explore == null && charts == null) {
-                    // Only show error if we also have no cached data
-                    val hasCachedData = _uiState.value.homePageSections.isNotEmpty() ||
-                            _uiState.value.newReleaseAlbums.isNotEmpty() ||
-                            _uiState.value.chartsPage != null
-                    _uiState.update {
-                        it.copy(
-                            isLoading = false,
-                            isRefreshing = false,
-                            error = if (!hasCachedData) "Failed to fetch explore data from YouTube Music. Please check your connection." else null
-                        )
-                    }
-                } else {
-                    val userActivityQuery = if (history.isNotEmpty()) {
-                        val artistCounts = history.mapNotNull { it.artist }.groupingBy { it }.eachCount()
-                        artistCounts.maxByOrNull { it.value }?.key ?: "Bollywood"
-                    } else {
-                        "Bollywood"
-                    }
-
-                    // Fetch similar artists
-                    var similarSection: HomePage.Section? = null
-                    val candidateArtistId = userPreferencesRepository.subscribedArtistIdsFlow.first().firstOrNull()
-                    var artistNameForSection = ""
-                    var artistBrowseIdForSearch = candidateArtistId
-
-                    if (artistBrowseIdForSearch == null && userActivityQuery != "Bollywood") {
-                        val searchResult = withContext(Dispatchers.IO) {
-                            YouTube.search(userActivityQuery, YouTube.SearchFilter.FILTER_ARTIST).getOrNull()
-                        }
-                        val artistItem = searchResult?.items?.find { it is ArtistItem } as? ArtistItem
-                        artistBrowseIdForSearch = artistItem?.id
-                        artistNameForSection = artistItem?.title ?: userActivityQuery
-                    }
-
-                    if (artistBrowseIdForSearch != null) {
-                        try {
-                            val artistPage = withContext(Dispatchers.IO) {
-                                YouTube.artist(artistBrowseIdForSearch).getOrNull()
-                            }
-                            if (artistPage != null) {
-                                if (artistNameForSection.isBlank()) {
-                                    artistNameForSection = artistPage.artist.title
-                                }
-                                val rawSimilarSection = artistPage.sections.find {
-                                    it.title.contains("fans", ignoreCase = true) ||
-                                    it.title.contains("similar", ignoreCase = true) ||
-                                    it.title.contains("like", ignoreCase = true)
-                                }
-                                if (rawSimilarSection != null && rawSimilarSection.items.isNotEmpty()) {
-                                    similarSection = HomePage.Section(
-                                        title = "Similar to $artistNameForSection",
-                                        label = "Based on your activity",
-                                        thumbnail = null,
-                                        endpoint = null,
-                                        items = rawSimilarSection.items.filterIsInstance<ArtistItem>()
-                                    )
-                                }
-                            }
-                        } catch (e: Exception) {
-                            Timber.e(e, "Failed to load similar artists for $artistBrowseIdForSearch")
-                        }
-                    }
-
-                    // Fetch liked albums, liked artists, and recent activity from YouTube Music
-                    val likedAlbums = if (YouTube.hasLoginCookie()) {
-                        withContext(Dispatchers.IO) {
-                            YouTube.library("FEmusic_liked_albums").getOrNull()?.items?.filterIsInstance<AlbumItem>() ?: emptyList()
-                        }
-                    } else emptyList()
-
-                    val likedArtists = if (YouTube.hasLoginCookie()) {
-                        withContext(Dispatchers.IO) {
-                            YouTube.library("FEmusic_liked_artists").getOrNull()?.items?.filterIsInstance<ArtistItem>() ?: emptyList()
-                        }
-                    } else emptyList()
-
-                    val recentActivityItems = if (YouTube.hasLoginCookie()) {
-                        withContext(Dispatchers.IO) {
-                            YouTube.libraryRecentActivity().getOrNull()?.items ?: emptyList()
-                        }
-                    } else emptyList()
-
-                    // Load community playlists for user's favorite artist as guest fallback
-                    val communityPlaylistsResult = withContext(Dispatchers.IO) {
-                        YouTube.search(
-                            query = "$userActivityQuery playlist",
-                            filter = YouTube.SearchFilter.FILTER_COMMUNITY_PLAYLIST
-                        ).getOrNull()
-                    }
-
-                    val communityPlaylists = communityPlaylistsResult?.items?.filterIsInstance<PlaylistItem>() ?: emptyList()
-
-                    val rawSections = home?.sections ?: emptyList()
-                    val updatedSections = rawSections.toMutableList()
-
-                    // Check if logged in to fetch user account playlists
-                    val personalPlaylists = if (YouTube.hasLoginCookie()) {
-                        YouTube.library("FEmusic_liked_playlists").getOrNull()?.items?.filterIsInstance<PlaylistItem>() ?: emptyList()
-                    } else {
-                        emptyList()
-                    }
-
-                    if (personalPlaylists.isNotEmpty()) {
-                        updatedSections.removeAll { it.title.contains("trending", ignoreCase = true) }
-                        updatedSections.add(0, HomePage.Section(
-                            title = "Your Playlists",
-                            label = "From your YouTube Music Account",
-                            thumbnail = null,
-                            endpoint = null,
-                            items = personalPlaylists
-                        ))
-                    } else {
-                        if (communityPlaylists.isNotEmpty()) {
-                            updatedSections.removeAll { it.title.contains("trending", ignoreCase = true) }
-                            updatedSections.add(HomePage.Section(
-                                title = "Community Playlists",
-                                label = "Based on your activity for $userActivityQuery",
-                                thumbnail = null,
-                                endpoint = null,
-                                items = communityPlaylists
-                            ))
-                        }
-                    }
-
-                    if (recentActivityItems.isNotEmpty()) {
-                        updatedSections.add(0, HomePage.Section(
-                            title = "Recently Played (YouTube)",
-                            label = "From your YouTube Music Account",
-                            thumbnail = null,
-                            endpoint = null,
-                            items = recentActivityItems
-                        ))
-                    }
-
-                    if (similarSection != null) {
-                        updatedSections.add(0, similarSection)
-                    }
-
-                    if (likedAlbums.isNotEmpty()) {
-                        updatedSections.add(HomePage.Section(
-                            title = "Your Liked Albums",
-                            label = "From your YouTube Music Account",
-                            thumbnail = null,
-                            endpoint = null,
-                            items = likedAlbums
-                        ))
-                    }
-
-                    if (likedArtists.isNotEmpty()) {
-                        updatedSections.add(HomePage.Section(
-                            title = "Your Favorite Artists",
-                            label = "From your YouTube Music Account",
-                            thumbnail = null,
-                            endpoint = null,
-                            items = likedArtists
-                        ))
-                    }
-
-                    val finalNewReleases = if (!newReleasesResult.isNullOrEmpty()) newReleasesResult else explore?.newReleaseAlbums ?: emptyList()
-
-                    val newState = ExploreUiState(
-                        isLoading = false,
-                        isRefreshing = false,
-                        homePageSections = updatedSections,
-                        homePageContinuation = home?.continuation,
-                        newReleaseAlbums = finalNewReleases,
-                        chartsPage = charts,
-                        selectedFilter = _uiState.value.selectedFilter
-                    )
-                    _uiState.value = newState
-                    persistToCache(newState)
-                }
-            } catch (e: Exception) {
-                Timber.e(e, "Error loading Explore screen data")
                 _uiState.update {
                     it.copy(
                         isLoading = false,
                         isRefreshing = false,
-                        error = e.localizedMessage ?: "Unknown error occurred"
+                        error = if (!hasCachedData) "Failed to fetch explore data from YouTube Music. Please check your connection." else null
                     )
                 }
+            } else {
+                // 4. Resolve similar artist section
+                var similarSection: HomePage.Section? = null
+                var artistNameForSection = ""
+
+                if (similarArtistPageDeferred != null) {
+                    val artistPage = similarArtistPageDeferred.await()
+                    if (artistPage != null) {
+                        artistNameForSection = artistPage.artist.title
+                        val rawSimilarSection = artistPage.sections.find {
+                            it.title.contains("fans", ignoreCase = true) ||
+                            it.title.contains("similar", ignoreCase = true) ||
+                            it.title.contains("like", ignoreCase = true)
+                        }
+                        if (rawSimilarSection != null && rawSimilarSection.items.isNotEmpty()) {
+                            similarSection = HomePage.Section(
+                                title = "Similar to $artistNameForSection",
+                                label = "Based on your activity",
+                                thumbnail = null,
+                                endpoint = null,
+                                items = rawSimilarSection.items.filterIsInstance<ArtistItem>()
+                            )
+                        }
+                    }
+                } else if (searchArtistPageDeferred != null) {
+                    val pair = searchArtistPageDeferred.await()
+                    if (pair != null) {
+                        artistNameForSection = pair.first
+                        val artistPage = pair.second
+                        if (artistPage != null) {
+                            val rawSimilarSection = artistPage.sections.find {
+                                it.title.contains("fans", ignoreCase = true) ||
+                                it.title.contains("similar", ignoreCase = true) ||
+                                it.title.contains("like", ignoreCase = true)
+                            }
+                            if (rawSimilarSection != null && rawSimilarSection.items.isNotEmpty()) {
+                                similarSection = HomePage.Section(
+                                    title = "Similar to $artistNameForSection",
+                                    label = "Based on your activity",
+                                    thumbnail = null,
+                                    endpoint = null,
+                                    items = rawSimilarSection.items.filterIsInstance<ArtistItem>()
+                                )
+                            }
+                        }
+                    }
+                }
+
+                val communityPlaylists = communityPlaylistsResult?.items?.filterIsInstance<PlaylistItem>() ?: emptyList()
+
+                val rawSections = home?.sections ?: emptyList()
+                val updatedSections = rawSections.toMutableList()
+
+                if (personalPlaylists.isNotEmpty()) {
+                    updatedSections.removeAll { it.title.contains("trending", ignoreCase = true) }
+                    updatedSections.add(0, HomePage.Section(
+                        title = "Your Playlists",
+                        label = "From your YouTube Music Account",
+                        thumbnail = null,
+                        endpoint = null,
+                        items = personalPlaylists
+                    ))
+                } else {
+                    if (communityPlaylists.isNotEmpty()) {
+                        updatedSections.removeAll { it.title.contains("trending", ignoreCase = true) }
+                        updatedSections.add(HomePage.Section(
+                            title = "Community Playlists",
+                            label = "Based on your activity for $userActivityQuery",
+                            thumbnail = null,
+                            endpoint = null,
+                            items = communityPlaylists
+                        ))
+                    }
+                }
+
+                if (recentActivityItems.isNotEmpty()) {
+                    updatedSections.add(0, HomePage.Section(
+                        title = "Recently Played (YouTube)",
+                        label = "From your YouTube Music Account",
+                        thumbnail = null,
+                        endpoint = null,
+                        items = recentActivityItems
+                    ))
+                }
+
+                if (similarSection != null) {
+                    updatedSections.add(0, similarSection)
+                }
+
+                if (likedAlbums.isNotEmpty()) {
+                    updatedSections.add(HomePage.Section(
+                        title = "Your Liked Albums",
+                        label = "From your YouTube Music Account",
+                        thumbnail = null,
+                        endpoint = null,
+                        items = likedAlbums
+                    ))
+                }
+
+                if (likedArtists.isNotEmpty()) {
+                    updatedSections.add(HomePage.Section(
+                        title = "Your Favorite Artists",
+                        label = "From your YouTube Music Account",
+                        thumbnail = null,
+                        endpoint = null,
+                        items = likedArtists
+                    ))
+                }
+
+                val finalNewReleases = if (!newReleasesResult.isNullOrEmpty()) newReleasesResult else explore?.newReleaseAlbums ?: emptyList()
+
+                val newState = ExploreUiState(
+                    isLoading = false,
+                    isRefreshing = false,
+                    homePageSections = updatedSections,
+                    homePageContinuation = home?.continuation,
+                    newReleaseAlbums = finalNewReleases,
+                    chartsPage = charts,
+                    selectedFilter = _uiState.value.selectedFilter
+                )
+                _uiState.value = newState
+                persistToCache(newState)
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Error loading Explore screen data")
+            _uiState.update {
+                it.copy(
+                    isLoading = false,
+                    isRefreshing = false,
+                    error = e.localizedMessage ?: "Unknown error occurred"
+                )
             }
         }
     }

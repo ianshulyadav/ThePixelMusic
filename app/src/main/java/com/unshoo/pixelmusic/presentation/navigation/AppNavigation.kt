@@ -52,6 +52,7 @@ import com.unshoo.pixelmusic.presentation.screens.RecentlyPlayedScreen
 import com.unshoo.pixelmusic.presentation.screens.QuickPicksAllScreen
 
 import com.unshoo.pixelmusic.presentation.screens.AboutScreen
+import com.unshoo.pixelmusic.presentation.screens.ArtistAlbumsAllScreen
 import com.unshoo.pixelmusic.presentation.screens.SearchScreen
 import com.unshoo.pixelmusic.presentation.screens.StatsScreen
 import com.unshoo.pixelmusic.presentation.screens.SettingsScreen
@@ -449,6 +450,27 @@ fun AppNavigation(
                             playerViewModel = playerViewModel
                         )
                     }
+                }
+            }
+            composable(
+                route = Screen.ArtistAlbumsAll.route,
+                arguments = listOf(
+                    navArgument("artistId") { type = NavType.StringType },
+                    navArgument("type") { type = NavType.StringType }
+                ),
+                enterTransition = { enterTransition() },
+                exitTransition = { exitTransition() },
+                popEnterTransition = { popEnterTransition() },
+                popExitTransition = { popExitTransition() },
+            ) { backStackEntry ->
+                val artistId = backStackEntry.arguments?.getString("artistId") ?: return@composable
+                val albumType = backStackEntry.arguments?.getString("type") ?: "albums"
+                ScreenWrapper(navController = navController, playerViewModel = playerViewModel) {
+                    ArtistAlbumsAllScreen(
+                        artistId = artistId,
+                        type = albumType,
+                        navController = navController
+                    )
                 }
             }
             composable(

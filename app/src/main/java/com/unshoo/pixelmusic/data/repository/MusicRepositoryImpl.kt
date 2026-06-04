@@ -750,6 +750,10 @@ class MusicRepositoryImpl @Inject constructor(
         }.flowOn(Dispatchers.Default)
     }
 
+    override suspend fun searchAllOnce(query: String, filterType: SearchFilterType): List<SearchResultItem> = withContext(Dispatchers.IO) {
+        searchAll(query, filterType).first()
+    }
+
     override suspend fun addSearchHistoryItem(query: String) {
         withContext(Dispatchers.IO) {
             searchHistoryDao.deleteByQuery(query)

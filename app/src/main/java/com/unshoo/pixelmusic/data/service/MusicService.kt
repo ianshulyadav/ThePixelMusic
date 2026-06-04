@@ -71,6 +71,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -841,6 +843,32 @@ class MusicService : MediaLibraryService() {
             .setSessionActivity(getOpenAppPendingIntent())
             .setBitmapLoader(CoilBitmapLoader(this, serviceScope))
             .build()
+
+        var lastAutoQueueEnabled: Boolean? = null
+        serviceScope.launch {
+            youtubeDatastoreRepository.settings
+                .map { it.autoQueueEnabled }
+                .distinctUntilChanged()
+                .collect { enabled ->
+                    val wasDisabled = lastAutoQueueEnabled == false
+                    lastAutoQueueEnabled = enabled
+                    if (enabled && wasDisabled) {
+                        withContext(Dispatchers.Main) {
+                            val player = mediaSession?.player
+                            if (player != null && player.mediaItemCount > 0) {
+                                val currentIndex = player.currentMediaItemIndex
+                                val totalCount = player.mediaItemCount
+                                if (totalCount > currentIndex + 1) {
+                                    player.removeMediaItems(currentIndex + 1, totalCount)
+                                }
+                            }
+                        }
+                        // resetAndReseedFromCurrentSong clears addedVideoIds fully,
+                        // then seeds a fresh related-songs queue from the current song.
+                        AutoQueueManager.resetAndReseedFromCurrentSong()
+                    }
+                }
+        }
 
         val localOnlyProvider = LocalOnlyMediaNotificationProvider(this).also {
             it.setSmallIcon(R.drawable.monochrome_player)

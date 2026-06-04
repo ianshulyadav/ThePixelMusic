@@ -45,6 +45,17 @@ class ModuleSchemaValidator @Inject constructor(
             }
         }
 
+        if (section == BackupSection.FAVORITES) {
+            validateFavoritesModule(jsonElement, errors)
+            return if (errors.any { it.severity == Severity.ERROR }) {
+                BackupValidationResult.Invalid(errors)
+            } else if (errors.isNotEmpty()) {
+                BackupValidationResult.Invalid(errors)
+            } else {
+                BackupValidationResult.Valid
+            }
+        }
+
         // Most modules are JSON arrays
         if (section != BackupSection.QUICK_FILL && section != BackupSection.EQUALIZER) {
             if (!jsonElement.isJsonArray) {
@@ -63,7 +74,9 @@ class ModuleSchemaValidator @Inject constructor(
             BackupSection.PLAYLISTS -> {
                 // Already handled above for object/legacy compatibility.
             }
-            BackupSection.FAVORITES -> validateFavorites(jsonElement.asJsonArray, errors)
+            BackupSection.FAVORITES -> {
+                // Handled early
+            }
             BackupSection.LYRICS -> validateLyrics(jsonElement.asJsonArray, errors)
             BackupSection.SEARCH_HISTORY -> validateSearchHistory(jsonElement.asJsonArray, errors)
             BackupSection.ENGAGEMENT_STATS -> validateEngagementStats(jsonElement.asJsonArray, errors)
@@ -173,6 +186,51 @@ class ModuleSchemaValidator @Inject constructor(
                 )
             )
         }
+    }
+
+    private fun validateFavoritesModule(
+        jsonElement: com.google.gson.JsonElement,
+        errors: MutableList<ValidationError>
+    ) {
+        val array = if (jsonElement.isJsonArray) {
+            jsonElement.asJsonArray
+        } else if (jsonElement.isJsonObject) {
+            val obj = jsonElement.asJsonObject
+            val favs = obj.getAsJsonArray("favorites")
+            if (favs == null) {
+                errors.add(
+                    ValidationError(
+                        "MISSING_FAVORITES_ARRAY",
+                        "Module 'favorites' is missing the 'favorites' array.",
+                        module = "favorites"
+                    )
+                )
+                return
+            }
+            favs
+        } else {
+            errors.add(
+                ValidationError(
+                    "INVALID_FAVORITES_PAYLOAD",
+                    "Module 'favorites' should be a JSON array or a JSON object.",
+                    module = "favorites"
+                )
+            )
+            return
+        }
+
+        if (array.size() > MAX_ENTRIES_PER_MODULE) {
+            errors.add(
+                ValidationError(
+                    "TOO_MANY_ENTRIES",
+                    "Module 'favorites' has ${array.size()} entries (max $MAX_ENTRIES_PER_MODULE).",
+                    module = "favorites"
+                )
+            )
+            return
+        }
+
+        validateFavorites(array, errors)
     }
 
     private fun validateFavorites(array: com.google.gson.JsonArray, errors: MutableList<ValidationError>) {
