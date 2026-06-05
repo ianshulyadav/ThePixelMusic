@@ -223,3 +223,8 @@
 -keep class unshoo.ianshulyadav.pixelmusic.innertube.models.** { *; }
 -keep class unshoo.ianshulyadav.pixelmusic.innertube.pages.** { *; }
 
+# Mozilla Rhino JS engine references missing javax.script API
+-dontwarn javax.script.**
+-dontwarn org.mozilla.javascript.engine.**
+
+
