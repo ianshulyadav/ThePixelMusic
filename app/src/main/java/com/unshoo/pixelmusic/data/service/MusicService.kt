@@ -157,6 +157,8 @@ class MusicService : MediaLibraryService() {
     @Inject
     lateinit var engagementDao: com.unshoo.pixelmusic.data.database.EngagementDao
 
+    private var scrobbleManager: com.unshoo.pixelmusic.data.lastfm.ScrobbleManager? = null
+
     private var replayGainEnabled = false
     private var replayGainUseAlbumGain = false
     private var replayGainJob: Job? = null
@@ -406,6 +408,7 @@ class MusicService : MediaLibraryService() {
 
         super.onCreate()
         listeningStatsTracker.initialize(appScope)
+        scrobbleManager = com.unshoo.pixelmusic.data.lastfm.ScrobbleManager(scope = serviceScope)
         
         // Ensure engine is ready (re-initialize if service was restarted)
         engine.initialize()
@@ -475,6 +478,36 @@ class MusicService : MediaLibraryService() {
         serviceScope.launch {
             userPreferencesRepository.keepPlayingInBackgroundFlow.collect { enabled ->
                 keepPlayingInBackground = enabled
+            }
+        }
+
+        serviceScope.launch {
+            userPreferencesRepository.lastfmScrobblingEnabledFlow.collect { enabled ->
+                scrobbleManager?.scrobblingEnabled = enabled
+            }
+        }
+
+        serviceScope.launch {
+            userPreferencesRepository.lastfmUseNowPlayingFlow.collect { enabled ->
+                scrobbleManager?.useNowPlaying = enabled
+            }
+        }
+
+        serviceScope.launch {
+            userPreferencesRepository.scrobbleMinSongDurationFlow.collect { duration ->
+                scrobbleManager?.minSongDuration = duration
+            }
+        }
+
+        serviceScope.launch {
+            userPreferencesRepository.scrobbleDelayPercentFlow.collect { percent ->
+                scrobbleManager?.scrobbleDelayPercent = percent
+            }
+        }
+
+        serviceScope.launch {
+            userPreferencesRepository.scrobbleDelaySecondsFlow.collect { seconds ->
+                scrobbleManager?.scrobbleDelaySeconds = seconds
             }
         }
 
@@ -1181,6 +1214,13 @@ class MusicService : MediaLibraryService() {
             Timber.tag(TAG).d("onIsPlayingChanged: $isPlaying. Duration: ${player.duration}, Seekable: ${player.isCurrentMediaItemSeekable}")
             syncLocalListeningStatsFromPlayer(player)
             
+            val durationMs = if (player.duration != androidx.media3.common.C.TIME_UNSET && player.duration > 0) {
+                player.duration
+            } else {
+                player.currentMediaItem?.mediaMetadata?.extras?.getLong(MediaItemBuilder.EXTERNAL_EXTRA_DURATION, 0L) ?: 0L
+            }
+            scrobbleManager?.onPlayerStateChanged(isPlaying, player.currentMediaItem, durationMs)
+            
             if (isPlaying) {
                 reportNavidromePlayback("playing")
                 startNavidromePlaybackReporting()
@@ -1227,15 +1267,25 @@ class MusicService : MediaLibraryService() {
 
         override fun onPlaybackStateChanged(playbackState: Int) {
             Timber.tag(TAG).d("Playback state changed: $playbackState")
+            val player = mediaSession?.player ?: engine.masterPlayer
             if (playbackState == Player.STATE_ENDED) {
                 listeningStatsTracker.finalizeCurrentSession()
-                val mediaItem = (mediaSession?.player ?: engine.masterPlayer).currentMediaItem
+                val mediaItem = player.currentMediaItem
 
                 endOfTrackTimerSongId = null
                 reportNavidromePlayback("stopped")
                 stopNavidromePlaybackReporting()
+                
+                scrobbleManager?.onPlayerStateChanged(false, mediaItem, 0)
             } else {
-                syncLocalListeningStatsFromPlayer(mediaSession?.player ?: engine.masterPlayer)
+                syncLocalListeningStatsFromPlayer(player)
+                
+                val durationMs = if (player.duration != androidx.media3.common.C.TIME_UNSET && player.duration > 0) {
+                    player.duration
+                } else {
+                    player.currentMediaItem?.mediaMetadata?.extras?.getLong(MediaItemBuilder.EXTERNAL_EXTRA_DURATION, 0L) ?: 0L
+                }
+                scrobbleManager?.onPlayerStateChanged(player.isPlaying, player.currentMediaItem, durationMs)
             }
             mediaSession?.let { refreshMediaSessionUi(it) }
             schedulePlaybackSnapshotPersist(immediate = playbackState == Player.STATE_IDLE)
@@ -1293,7 +1343,16 @@ class MusicService : MediaLibraryService() {
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-            syncLocalListeningStatsFromPlayer(mediaSession?.player ?: engine.masterPlayer, forceNewSession = true)
+            val player = mediaSession?.player ?: engine.masterPlayer
+            syncLocalListeningStatsFromPlayer(player, forceNewSession = true)
+            
+            val durationMs = if (player.duration != androidx.media3.common.C.TIME_UNSET && player.duration > 0) {
+                player.duration
+            } else {
+                mediaItem?.mediaMetadata?.extras?.getLong(MediaItemBuilder.EXTERNAL_EXTRA_DURATION, 0L) ?: 0L
+            }
+            scrobbleManager?.onPlayerStateChanged(player.isPlaying, mediaItem, durationMs)
+            
             if (isNavidromeMediaItem(mediaItem)) {
                 reportNavidromePlayback("starting")
                 if (engine.masterPlayer.isPlaying) {
@@ -1326,10 +1385,9 @@ class MusicService : MediaLibraryService() {
             }
             applyReplayGain(mediaSession?.player?.currentMediaItem)
             // Pre-fetch RG for the track after this one so it's cached when needed
-            val player = engine.masterPlayer
-            val nextIndex = player.nextMediaItemIndex
+            val nextIndex = engine.masterPlayer.nextMediaItemIndex
             if (nextIndex != androidx.media3.common.C.INDEX_UNSET) {
-                runCatching { prefetchReplayGain(player.getMediaItemAt(nextIndex)) }
+                runCatching { prefetchReplayGain(engine.masterPlayer.getMediaItemAt(nextIndex)) }
             }
             // BUG 3 FIX: Force an immediate widget update (not debounced) on track transition
             // so album art and song info appear without the 300-800ms blank period.
@@ -1669,6 +1727,8 @@ class MusicService : MediaLibraryService() {
         unregisterHeadsetReconnectMonitor()
         wearStatePublisher.clearState()
         replayGainJob?.cancel()
+        scrobbleManager?.destroy()
+        scrobbleManager = null
 
         // Detach YouTube radio-mode auto-queue and stream-URL preloader
         AutoQueueManager.detach(engine.masterPlayer)

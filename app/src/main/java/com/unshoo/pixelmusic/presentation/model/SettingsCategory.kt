@@ -85,6 +85,12 @@ enum class SettingsCategory(
         titleRes = R.string.settings_category_about_title,
         subtitleRes = R.string.settings_category_about_subtitle,
         icon = Icons.Rounded.Info
+    ),
+    LASTFM(
+        id = "lastfm",
+        titleRes = R.string.lastfm_integration,
+        subtitleRes = R.string.lastfm_integration_desc,
+        icon = Icons.Rounded.MusicNote
     );
 
     companion object {

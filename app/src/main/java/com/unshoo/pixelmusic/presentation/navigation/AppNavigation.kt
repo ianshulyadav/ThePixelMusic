@@ -270,6 +270,9 @@ fun AppNavigation(
                         onBackClick = { navController.popBackStack() },
                         onOpenYoutubeAuth = {
                             navController.navigateSafely(Screen.YoutubeAuth.route)
+                        },
+                        onOpenLastfmSettings = {
+                            navController.navigateSafely(Screen.SettingsCategory.createRoute("lastfm"))
                         }
                     )
                 }

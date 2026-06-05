@@ -81,6 +81,11 @@ android {
         val telegramApiHash = localProperties.getProperty("TELEGRAM_API_HASH") ?: ""
         buildConfigField("int", "TELEGRAM_API_ID", telegramApiId.ifEmpty { "0" })
         buildConfigField("String", "TELEGRAM_API_HASH", "\"$telegramApiHash\"")
+
+        val lastfmApiKey = localProperties.getProperty("LASTFM_API_KEY") ?: ""
+        val lastfmSecret = localProperties.getProperty("LASTFM_SECRET") ?: ""
+        buildConfigField("String", "LASTFM_API_KEY", "\"$lastfmApiKey\"")
+        buildConfigField("String", "LASTFM_SECRET", "\"$lastfmSecret\"")
     }
 
     val keystoreExists = rootProject.file("keystore.properties").exists() && rootProject.file("vz-pixelmusic.jks").exists()
