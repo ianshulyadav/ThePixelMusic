@@ -917,6 +917,11 @@ fun LibraryScreen(
                                 }
                             }
                         }
+                        AnimatedSparklesIconButton(
+                            onClick = {
+                                navController.navigateSafely(Screen.SmartMix.route)
+                            }
+                        )
                         FilledIconButton(
                             modifier = Modifier.padding(end = 14.dp),
                             colors = IconButtonDefaults.filledIconButtonColors(
