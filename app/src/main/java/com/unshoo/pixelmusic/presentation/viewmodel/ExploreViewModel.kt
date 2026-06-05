@@ -26,6 +26,8 @@ import unshoo.ianshulyadav.pixelmusic.innertube.pages.HomePage
 import unshoo.ianshulyadav.pixelmusic.innertube.pages.ChartsPage
 import javax.inject.Inject
 import kotlinx.coroutines.async
+import com.unshoo.pixelmusic.data.model.Playlist
+import com.unshoo.pixelmusic.data.preferences.PlaylistPreferencesRepository
 
 data class ExploreUiState(
     val isLoading: Boolean = true,
@@ -36,13 +38,15 @@ data class ExploreUiState(
     val newReleaseAlbums: List<AlbumItem> = emptyList(),
     val chartsPage: ChartsPage? = null,
     val error: String? = null,
-    val selectedFilter: String = "All"
+    val selectedFilter: String = "All",
+    val recentMixes: List<Playlist> = emptyList()
 )
 
 @HiltViewModel
 class ExploreViewModel @Inject constructor(
     private val playbackStatsRepository: com.unshoo.pixelmusic.data.stats.PlaybackStatsRepository,
     private val userPreferencesRepository: com.unshoo.pixelmusic.data.preferences.UserPreferencesRepository,
+    private val playlistPreferencesRepository: PlaylistPreferencesRepository,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -57,6 +61,13 @@ class ExploreViewModel @Inject constructor(
                 restoreFromCache()
             }
             loadDataInternal(forceRefresh = false)
+        }
+        viewModelScope.launch {
+            playlistPreferencesRepository.userPlaylistsFlow.collect { playlists ->
+                val mixes = playlists.filter { it.source == "LASTFM_MIX" }
+                    .sortedByDescending { it.lastModified }
+                _uiState.update { it.copy(recentMixes = mixes) }
+            }
         }
     }
 

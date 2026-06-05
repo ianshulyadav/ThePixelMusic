@@ -157,6 +157,20 @@ object LastFM {
         }
     }
 
+    suspend fun get(method: String, params: Map<String, String>) = runCatching {
+        client.get {
+            userAgent("PixelMusic (https://github.com/ianshulyadav/PixelMusic)")
+            url {
+                parameters.append("method", method)
+                parameters.append("api_key", API_KEY)
+                parameters.append("format", "json")
+                params.forEach { (k, v) ->
+                    parameters.append(k, v)
+                }
+            }
+        }.bodyAsText()
+    }
+
     private var API_KEY = ""
     private var SECRET = ""
 

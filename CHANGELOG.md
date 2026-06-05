@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.06] - Unreleased
+
+### Added
+- **Smart Mix Playlist Generator (Last.fm Creator)**:
+  - Replicated and adapted the creation and discovery features of LastWave into a native, high-fidelity Kotlin and Jetpack Compose implementation.
+  - Created a dedicated "Smart Mix" config screen supporting 8 distinct generation modes (Top Tracks, Recent Tracks, Similar Tracks, Similar Artists, By Tag/Genre, My Mix, My Recommendations, My Library) and a track count selector (5-35 songs).
+  - Implemented parallel YouTube Music ID resolution pipeline with concurrency throttling (using Semaphores) and native Room database ingestion.
+  - Added an animated Sparkles (`AutoAwesome`) icon button with a pulsing scale/rotation effect and a custom "HOT" badge on the Explore Screen top bar, positioned to the left of the Settings icon.
+  - Added the "Recent Mixes (last.fm)" horizontal carousel to the Explore Screen with custom preview cards mapping mixes natively.
+
 ## [1.4.06] - 2026-06-06
 
 ### Added
