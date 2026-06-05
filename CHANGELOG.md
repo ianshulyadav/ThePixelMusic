@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.06] - 2026-06-06
+
+### Added
+- **Last.fm Scrobbler Integration**:
+  - Implemented background playback scrobbling engine that calculates progress in real-time.
+  - Added live "Now Playing" updates synced automatically during playback.
+  - Added dedicated Last.fm settings UI containing threshold configuration sliders (Minimum Track Duration, Delay Percentage, and Max Delay Duration).
+  - Added connection management card inside the Accounts screen supporting active username labels and dynamic logouts.
+  - Integrated customizable inputs for **API Key** and **API Secret** during linking, and enforced them as **compulsory fields** to prevent rate-limiting bottlenecks and enhance security.
+- **YouTube Music Playlist Export & Import**:
+  - Integrated support for playlist exports and imports using standard M3U and CSV formats.
+  - Implemented URL-decoding for paths, extensionless filename matching, and automated lookup via YouTube Music search to resolve missing local/remote tracks.
+  - Optimized lookup speeds using concurrent network requests, bulk database insertions, and duplicate merge confirmation flows.
+  - Enhanced import pipelines to retrieve and persist rich metadata alongside high-quality album art.
+- **Audio Streaming Improvements**:
+  - Prioritized Opus audio format streaming to optimize and accelerate initial playback load latency.
+
+### Changed
+- Removed default built-in Last.fm API credential fallbacks in the UI, requiring each user to register their own developer credentials.
+
+### Fixed
+- **CI/CD & Nightly Releases**: Integrated Pyrogram MTProto inside nightly Telegram publishers to bypass the 50MB Bot API file size upload limit, added fallbacks for GitHub release redirect links, and added rate-limiting delay retries.
+- **R8 / ProGuard Optimization**:
+  - Added ProGuard keep rules for Explore caching data models to prevent Gson ClassCastExceptions.
+  - Added dontwarn rules for `javax.script` and `org.mozilla.javascript.engine` to resolve release R8 build compilation failures.
+- **UI & Stability**: Resolved Quick Picks personalization errors, auto-queue online mix radio transition bugs, and Artist See All list pagination regressions.
+
+
+
+
 ## [0.6.0-beta] - 2026-03-05
 
 ### Added
