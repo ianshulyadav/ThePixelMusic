@@ -959,9 +959,16 @@ object YoutubeHelper {
             .orEmpty()
         if (formats.isEmpty()) return emptyList()
 
-        val webmFormats = formats.filter { it.mimeType.contains("webm", ignoreCase = true) }
-        val m4aFormats = formats.filter { it.mimeType.contains("mp4", ignoreCase = true) || it.mimeType.contains("m4a", ignoreCase = true) || it.mimeType.contains("mp4a", ignoreCase = true) }
-        val opusFormats = formats.filter { it.mimeType.contains("opus", ignoreCase = true) && !it.mimeType.contains("webm", ignoreCase = true) }
+        val opusFormats = formats.filter { it.mimeType.contains("opus", ignoreCase = true) }
+        val m4aFormats = formats.filter { (it.mimeType.contains("mp4", ignoreCase = true) || it.mimeType.contains("m4a", ignoreCase = true) || it.mimeType.contains("mp4a", ignoreCase = true)) && !it.mimeType.contains("opus", ignoreCase = true) }
+        val webmFormats = formats.filter { it.mimeType.contains("webm", ignoreCase = true) && !it.mimeType.contains("opus", ignoreCase = true) }
+        val otherFormats = formats.filter {
+            !it.mimeType.contains("opus", ignoreCase = true) &&
+            !it.mimeType.contains("mp4", ignoreCase = true) &&
+            !it.mimeType.contains("m4a", ignoreCase = true) &&
+            !it.mimeType.contains("mp4a", ignoreCase = true) &&
+            !it.mimeType.contains("webm", ignoreCase = true)
+        }
 
         fun sortGroup(group: List<PlayerResponse.StreamingData.Format>): List<PlayerResponse.StreamingData.Format> {
             if (group.isEmpty()) return emptyList()
@@ -980,7 +987,7 @@ object YoutubeHelper {
             }
         }
 
-        return sortGroup(webmFormats) + sortGroup(m4aFormats) + sortGroup(opusFormats)
+        return sortGroup(opusFormats) + sortGroup(m4aFormats) + sortGroup(webmFormats) + sortGroup(otherFormats)
     }
 
     /**
@@ -1113,20 +1120,28 @@ object YoutubeHelper {
                         !suffix.contains("mp3") && !suffix.contains("mpeg") && !suffix.contains("mpga") &&
                         !name.contains("mp3") && !name.contains("mpeg") && !name.contains("mpga")
                     }
-                    val webmStreams = streams.filter { stream ->
+                    val opusStreams = streams.filter { stream ->
                         val suffix = stream.format?.suffix?.lowercase().orEmpty()
                         val name = stream.format?.name?.lowercase().orEmpty()
-                        suffix.contains("webm") || name.contains("webm")
+                        suffix.contains("opus") || name.contains("opus")
                     }
                     val m4aStreams = streams.filter { stream ->
                         val suffix = stream.format?.suffix?.lowercase().orEmpty()
                         val name = stream.format?.name?.lowercase().orEmpty()
-                        suffix.contains("m4a") || name.contains("m4a") || suffix.contains("mp4") || name.contains("mp4")
+                        (suffix.contains("m4a") || name.contains("m4a") || suffix.contains("mp4") || name.contains("mp4")) &&
+                        !(suffix.contains("opus") || name.contains("opus"))
+                    }
+                    val webmStreams = streams.filter { stream ->
+                        val suffix = stream.format?.suffix?.lowercase().orEmpty()
+                        val name = stream.format?.name?.lowercase().orEmpty()
+                        (suffix.contains("webm") || name.contains("webm")) &&
+                        !(suffix.contains("opus") || name.contains("opus"))
                     }
                     val otherStreams = streams.filter { stream ->
                         val suffix = stream.format?.suffix?.lowercase().orEmpty()
                         val name = stream.format?.name?.lowercase().orEmpty()
-                        (suffix.contains("opus") || name.contains("opus")) &&
+                        !(suffix.contains("opus") || name.contains("opus")) &&
+                        !(suffix.contains("m4a") || name.contains("m4a") || suffix.contains("mp4") || name.contains("mp4")) &&
                         !(suffix.contains("webm") || name.contains("webm"))
                     }
 
@@ -1147,7 +1162,7 @@ object YoutubeHelper {
                         }
                     }
 
-                    val orderedStreams = sortNewPipeGroup(webmStreams) + sortNewPipeGroup(m4aStreams) + sortNewPipeGroup(otherStreams)
+                    val orderedStreams = sortNewPipeGroup(opusStreams) + sortNewPipeGroup(m4aStreams) + sortNewPipeGroup(webmStreams) + sortNewPipeGroup(otherStreams)
                     val selectedStream = orderedStreams.firstOrNull() ?: streams.firstOrNull() ?: throw Exception("No audio streams found after filtering")
                     selectedStream.content
                 }
