@@ -126,6 +126,9 @@ jobs:
       - name: Build Phone nightly release APKs
         run: gradle :app:assembleRelease -Ppixelmusic.enableAbiSplits=true
 
+      - name: Build Wear OS nightly release APK
+        run: gradle :wear:assembleRelease
+
       - name: Verify Phone nightly split APKs
         run: |
           BUILD_TOOLS_VERSION="$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n 1)"
@@ -196,7 +199,6 @@ jobs:
           echo "version_name=${VERSION_NAME}" >> "$GITHUB_OUTPUT"
 
       - name: Publish Nightly to Telegram Channel
-        if: false
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: "@PixelMusicApp"
