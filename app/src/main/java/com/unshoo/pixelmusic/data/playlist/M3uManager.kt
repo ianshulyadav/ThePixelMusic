@@ -12,6 +12,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import unshoo.ianshulyadav.pixelmusic.innertube.YouTube
 import unshoo.ianshulyadav.pixelmusic.innertube.models.SongItem
+import unshoo.ianshulyadav.pixelmusic.innertube.models.filterVideo
 import com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper
 import com.unshoo.pixelmusic.data.remote.youtube.YoutubeRequestHelper
 import com.unshoo.pixelmusic.data.remote.youtube.toNativeSong
@@ -67,6 +68,26 @@ class M3uManager @Inject constructor(
         fallbackDuration: Long = 0L,
         fallbackAlbum: String = "YouTube Music"
     ): Song {
+        // 1. Try Next API to get full metadata (album, art, artists)
+        try {
+            val nextResult = YouTube.next(
+                unshoo.ianshulyadav.pixelmusic.innertube.models.WatchEndpoint(videoId = youtubeId)
+            ).getOrNull()
+            val songItem = nextResult?.items?.firstOrNull { it.id == youtubeId }
+            if (songItem != null) {
+                val ySong = songItem.toNativeSong()
+                return ySong.copy(
+                    title = if (fallbackTitle != "YouTube Song" && fallbackTitle.isNotBlank()) fallbackTitle else ySong.title,
+                    artist = if (fallbackArtist != "Unknown Artist" && fallbackArtist.isNotBlank()) fallbackArtist else ySong.artist,
+                    duration = if (fallbackDuration > 0) fallbackDuration else ySong.duration,
+                    album = if (fallbackAlbum != "YouTube Music" && fallbackAlbum.isNotBlank()) fallbackAlbum else ySong.album
+                )
+            }
+        } catch (e: Exception) {
+            // ignore and fallback
+        }
+
+        // 2. Try Player API
         return try {
             val jsonString = YoutubeRequestHelper.getPlayerInfo(youtubeId)
             val ySong = YoutubeHelper.extractSongInfo(jsonString).toNativeSong()
@@ -89,7 +110,7 @@ class M3uManager @Inject constructor(
                 albumId = albumId,
                 path = "",
                 contentUriString = "youtube://$youtubeId",
-                albumArtUriString = null,
+                albumArtUriString = "https://i.ytimg.com/vi/$youtubeId/hqdefault.jpg",
                 duration = fallbackDuration,
                 genre = "YouTube",
                 mimeType = "audio/webm",
@@ -109,7 +130,12 @@ class M3uManager @Inject constructor(
         val songItem = try {
             val query = "$title $artist"
             val result = YouTube.search(query, YouTube.SearchFilter.FILTER_SONG).getOrNull()
-            result?.items?.firstOrNull { it is SongItem } as? SongItem
+            val songsList = result?.items?.filterIsInstance<SongItem>()?.filterVideo(true).orEmpty()
+            // Prefer ATV (official audio tracks)
+            songsList.firstOrNull {
+                val musicVideoType = it.endpoint?.watchEndpointMusicSupportedConfigs?.watchEndpointMusicConfig?.musicVideoType
+                musicVideoType == "MUSIC_VIDEO_TYPE_ATV"
+            } ?: songsList.firstOrNull()
         } catch (e: Exception) {
             null
         } ?: return null

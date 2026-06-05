@@ -987,7 +987,8 @@ class MusicRepositoryImpl @Inject constructor(
         artist: String,
         thumbnailUrl: String?,
         duration: Long,
-        genre: String?
+        genre: String?,
+        album: String? = null
     ) {
         val songId = toUnifiedYoutubeSongId(youtubeId)
         val artistNames = parseYoutubeArtistNames(artist)
@@ -1012,8 +1013,8 @@ class MusicRepositoryImpl @Inject constructor(
             )
         }
 
-        val albumId = toUnifiedYoutubeAlbumId("YouTube Music")
-        val albumName = "YouTube Music"
+        val albumName = album?.takeIf { it.isNotBlank() } ?: "YouTube Music"
+        val albumId = toUnifiedYoutubeAlbumId(albumName)
         val albumToInsert = AlbumEntity(
             id = albumId,
             title = albumName,
@@ -1183,7 +1184,8 @@ class MusicRepositoryImpl @Inject constructor(
                         artist = song.artist,
                         thumbnailUrl = song.albumArtUriString,
                         duration = song.duration,
-                        genre = song.genre ?: "YouTube Music"
+                        genre = song.genre ?: "YouTube Music",
+                        album = song.album
                     )
                 }
             }
@@ -1626,7 +1628,8 @@ class MusicRepositoryImpl @Inject constructor(
                     artist = song.artist,
                     thumbnailUrl = song.albumArtUriString,
                     duration = song.duration,
-                    genre = song.genre ?: "YouTube Music"
+                    genre = song.genre ?: "YouTube Music",
+                    album = song.album
                 )
                 ytSongs.add(
                     com.unshoo.pixelmusic.data.model.youtube.Song(
