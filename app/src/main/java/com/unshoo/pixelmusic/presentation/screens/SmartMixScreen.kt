@@ -8,6 +8,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -27,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
@@ -40,6 +42,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.navigation.NavController
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.unshoo.pixelmusic.presentation.components.MiniPlayerHeight
 import com.unshoo.pixelmusic.presentation.navigation.Screen
 import com.unshoo.pixelmusic.presentation.navigation.navigateSafelyReplacing
 import com.unshoo.pixelmusic.presentation.viewmodel.SmartMixViewModel
@@ -206,16 +209,40 @@ private fun SmartMixConfigurator(
     viewModel: SmartMixViewModel
 ) {
     val keyboardController = LocalSoftwareKeyboardController.current
+    val navBarPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val fabAreaHeight = 56.dp + 20.dp + MiniPlayerHeight + navBarPadding
+    val isDark = androidx.compose.foundation.isSystemInDarkTheme()
+
+    // Unique per-mode colors matching app's Expressive Settings design language
+    val modeColors: Map<String, Pair<Color, Color>> = if (isDark) mapOf(
+        "top"             to (Color(0xFF4A3F00) to Color(0xFFFFE082)),
+        "recent"          to (Color(0xFF004A77) to Color(0xFFC2E7FF)),
+        "similar-tracks"  to (Color(0xFF005049) to Color(0xFF88FFD9)),
+        "similar-artists" to (Color(0xFF7D5260) to Color(0xFFFFD8E4)),
+        "tag"             to (Color(0xFF3E4C63) to Color(0xFFD7E3FF)),
+        "mix"             to (Color(0xFF004F58) to Color(0xFF88FAFF)),
+        "recommendations" to (Color(0xFF6E1B1B) to Color(0xFFFFDAD9)),
+        "library"         to (Color(0xFF324F34) to Color(0xFFCBEFD0))
+    ) else mapOf(
+        "top"             to (Color(0xFFFFF8E1) to Color(0xFFE65100)),
+        "recent"          to (Color(0xFFD7E3FF) to Color(0xFF005AC1)),
+        "similar-tracks"  to (Color(0xFF88FFD9) to Color(0xFF005049)),
+        "similar-artists" to (Color(0xFFFFD8E4) to Color(0xFF631835)),
+        "tag"             to (Color(0xFFD7E3FF) to Color(0xFF253347)),
+        "mix"             to (Color(0xFFCCE8EA) to Color(0xFF004F58)),
+        "recommendations" to (Color(0xFFFFDAD9) to Color(0xFF6E1B1B)),
+        "library"         to (Color(0xFFCBEFD0) to Color(0xFF042106))
+    )
 
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 16.dp),
-            contentPadding = PaddingValues(top = 8.dp, bottom = 100.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            contentPadding = PaddingValues(top = 8.dp, bottom = fabAreaHeight + 8.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
-            // 1. Slider Card at the top
+            // 1. Slider Card
             item {
                 TrackCountSliderCard(
                     count = uiState.trackCount,
@@ -223,157 +250,171 @@ private fun SmartMixConfigurator(
                 )
             }
 
-            // Heading
+            // Section heading
             item {
                 Text(
-                    text = "CHOOSE A MODE",
-                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(start = 4.dp, top = 8.dp)
+                    text = "Generation Mode",
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontWeight = FontWeight.Medium,
+                        letterSpacing = 0.8.sp
+                    ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 4.dp, top = 12.dp, bottom = 4.dp)
                 )
             }
 
-            // 2. Mode Items
+            // 2. Mode items — same expressive list style as Settings
             val modes = listOf(
-                ModeItemData("top", "Top Tracks", "Your most played tracks of all time", Icons.Rounded.Leaderboard),
-                ModeItemData("recent", "Recent Tracks", "What you've been listening to lately", Icons.Rounded.History),
-                ModeItemData("similar-tracks", "Similar Tracks", "Tracks similar to one you love", Icons.Rounded.MusicNote),
-                ModeItemData("similar-artists", "Similar Artists", "Discover artists like your favourites", Icons.Rounded.People),
-                ModeItemData("tag", "By Tag / Genre", "Browse by genre like rock, lofi, jazz", Icons.Rounded.Sell),
-                ModeItemData("mix", "My Mix", "Smart blend of top, recent & similar", Icons.Rounded.Shuffle),
-                ModeItemData("recommendations", "My Recommendations", "30 fresh tracks for you to listen to next", Icons.Rounded.AutoAwesome),
-                ModeItemData("library", "My Library", "Re-discover the sounds of your past", Icons.Rounded.LibraryMusic)
+                ModeItemData("top",             "Top Tracks",       "Your most played tracks of all time",      Icons.Rounded.Leaderboard),
+                ModeItemData("recent",          "Recent Tracks",    "What you've been listening to lately",     Icons.Rounded.History),
+                ModeItemData("similar-tracks",  "Similar Tracks",   "Tracks similar to one you love",           Icons.Rounded.MusicNote),
+                ModeItemData("similar-artists", "Similar Artists",  "Discover artists like your favourites",    Icons.Rounded.People),
+                ModeItemData("tag",             "By Tag / Genre",   "Browse by genre like rock, lofi, jazz",    Icons.Rounded.Sell),
+                ModeItemData("mix",             "My Mix",           "Smart blend of top, recent & similar",     Icons.Rounded.Shuffle),
+                ModeItemData("recommendations", "My Recommendations","30 fresh tracks tailored for you",       Icons.Rounded.AutoAwesome),
+                ModeItemData("library",         "My Library",       "Re-discover the sounds of your past",      Icons.Rounded.LibraryMusic)
             )
 
-            items(modes) { mode ->
-                val isSelected = uiState.selectedMode == mode.id
-                val shape = remember { AbsoluteSmoothCornerShape(16.dp, 60) }
-                
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(shape)
-                        .clickable {
-                            if (isSelected) {
-                                viewModel.setSelectedMode(null)
-                            } else {
-                                viewModel.setSelectedMode(mode.id)
-                            }
-                        },
-                    shape = shape,
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (isSelected) {
-                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
-                        } else {
-                            MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f)
-                        }
-                    ),
-                    border = if (isSelected) {
-                        BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary)
-                    } else null
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .background(
-                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest,
-                                        shape = CircleShape
-                                    ),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = mode.icon,
-                                    contentDescription = null,
-                                    tint = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(16.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = mode.title,
-                                    style = MaterialTheme.typography.titleMedium.copy(
-                                        fontFamily = GoogleSansRounded,
-                                        fontWeight = FontWeight.Bold
-                                    ),
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = mode.desc,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            Icon(
-                                imageVector = if (isSelected) Icons.Rounded.ExpandLess else Icons.Rounded.ChevronRight,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+            val total = modes.size
+            modes.forEachIndexed { idx, mode ->
+                item(key = mode.id) {
+                    val isSelected = uiState.selectedMode == mode.id
+                    val colors = modeColors[mode.id]!!
 
-                        // Inline Expansion Options
-                        AnimatedVisibility(
-                            visible = isSelected,
-                            enter = expandVertically() + fadeIn(),
-                            exit = shrinkVertically() + fadeOut()
-                        ) {
-                            Column(
+                    // Settings-style grouped shape: large radius top/bottom, small radius middle
+                    val itemShape = when {
+                        total == 1 -> RoundedCornerShape(24.dp)
+                        idx == 0 -> RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 6.dp, bottomEnd = 6.dp)
+                        idx == total - 1 -> RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp, bottomStart = 24.dp, bottomEnd = 24.dp)
+                        else -> RoundedCornerShape(6.dp)
+                    }
+
+                    Surface(
+                        onClick = {
+                            if (isSelected) viewModel.setSelectedMode(null)
+                            else viewModel.setSelectedMode(mode.id)
+                        },
+                        shape = itemShape,
+                        color = if (isSelected) MaterialTheme.colorScheme.primaryContainer
+                                else MaterialTheme.colorScheme.surfaceContainer,
+                        border = if (isSelected)
+                            BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary)
+                        else null,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(top = 16.dp)
+                                    .padding(16.dp)
                             ) {
-                                Divider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                                Spacer(modifier = Modifier.height(12.dp))
+                                // Solid colored circle icon — same as ExpressiveCategoryItem
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier
+                                        .size(52.dp)
+                                        .clip(CircleShape)
+                                        .background(
+                                            if (isSelected) MaterialTheme.colorScheme.primary
+                                            else colors.first
+                                        )
+                                ) {
+                                    Icon(
+                                        imageVector = mode.icon,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(24.dp),
+                                        tint = if (isSelected) MaterialTheme.colorScheme.onPrimary
+                                               else colors.second
+                                    )
+                                }
 
-                                when (mode.id) {
-                                    "top", "library" -> {
-                                        PeriodSelectionSection(
+                                Spacer(modifier = Modifier.width(16.dp))
+
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = mode.title,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontFamily = GoogleSansRounded,
+                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
+                                                else MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = mode.desc,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = (if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
+                                                 else MaterialTheme.colorScheme.onSurface).copy(alpha = 0.65f),
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.width(8.dp))
+
+                                // Animated chevron / collapse icon
+                                val iconRotation by animateFloatAsState(
+                                    targetValue = if (isSelected) 90f else 0f,
+                                    animationSpec = tween(200),
+                                    label = "chevron_rotation"
+                                )
+                                Icon(
+                                    imageVector = Icons.Rounded.ChevronRight,
+                                    contentDescription = null,
+                                    modifier = Modifier
+                                        .size(22.dp)
+                                        .graphicsLayer { rotationZ = iconRotation },
+                                    tint = if (isSelected) MaterialTheme.colorScheme.primary
+                                           else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+
+                            // Inline expanded options
+                            AnimatedVisibility(
+                                visible = isSelected,
+                                enter = expandVertically(tween(220)) + fadeIn(tween(220)),
+                                exit  = shrinkVertically(tween(180)) + fadeOut(tween(180))
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(start = 84.dp, end = 16.dp, bottom = 16.dp)
+                                ) {
+                                    HorizontalDivider(
+                                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                                        modifier = Modifier.padding(bottom = 12.dp)
+                                    )
+                                    when (mode.id) {
+                                        "top", "library" -> PeriodSelectionSection(
                                             selectedPeriod = uiState.timePeriod,
                                             onPeriodSelect = { viewModel.setTimePeriod(it) }
                                         )
-                                    }
-                                    "recent" -> {
-                                        Text(
+                                        "recent" -> Text(
                                             text = "Fetches what you have scrobbled recently on Last.fm.",
                                             style = MaterialTheme.typography.bodyMedium,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
-                                    }
-                                    "similar-tracks" -> {
-                                        SimilarTracksInputs(
-                                            uiState = uiState,
-                                            viewModel = viewModel,
+                                        "similar-tracks" -> SimilarTracksInputs(
+                                            uiState = uiState, viewModel = viewModel,
                                             keyboardController = keyboardController
                                         )
-                                    }
-                                    "similar-artists" -> {
-                                        SimilarArtistsInputs(
-                                            uiState = uiState,
-                                            viewModel = viewModel,
+                                        "similar-artists" -> SimilarArtistsInputs(
+                                            uiState = uiState, viewModel = viewModel,
                                             keyboardController = keyboardController
                                         )
-                                    }
-                                    "tag" -> {
-                                        TagInputs(
-                                            uiState = uiState,
-                                            viewModel = viewModel,
+                                        "tag" -> TagInputs(
+                                            uiState = uiState, viewModel = viewModel,
                                             keyboardController = keyboardController
                                         )
-                                    }
-                                    "mix" -> {
-                                        Text(
+                                        "mix" -> Text(
                                             text = "A smart blend of your top tracks, recent plays, and tracks similar to your favorite artists.",
                                             style = MaterialTheme.typography.bodyMedium,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
-                                    }
-                                    "recommendations" -> {
-                                        Text(
-                                            text = "Uses your Last.fm music profile to score, filter, and balance familiar sounds with new discoveries.",
+                                        "recommendations" -> Text(
+                                            text = "Uses your Last.fm profile to score, filter, and balance familiar sounds with new discoveries.",
                                             style = MaterialTheme.typography.bodyMedium,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
@@ -382,31 +423,39 @@ private fun SmartMixConfigurator(
                             }
                         }
                     }
+
+                    // Gap between non-adjacent items
+                    if (idx < total - 1) Spacer(Modifier.height(2.dp))
                 }
             }
         }
 
-        // Floating Generation Action Button
+        // FAB — always above mini player + nav bar
         val isGenerateEnabled = uiState.selectedMode != null && when (uiState.selectedMode) {
-            "similar-tracks" -> uiState.seedTrackName.isNotBlank() && uiState.seedArtistName.isNotBlank()
+            "similar-tracks"  -> uiState.seedTrackName.isNotBlank() && uiState.seedArtistName.isNotBlank()
             "similar-artists" -> uiState.seedArtistInput.isNotBlank()
-            "tag" -> uiState.tagInput.isNotBlank()
-            else -> true
+            "tag"             -> uiState.tagInput.isNotBlank()
+            else              -> true
         }
 
         ExtendedFloatingActionButton(
-            onClick = {
-                keyboardController?.hide()
-                viewModel.generatePlaylist()
-            },
+            onClick = { keyboardController?.hide(); viewModel.generatePlaylist() },
             expanded = isGenerateEnabled,
-            icon = { Icon(Icons.Rounded.PlayArrow, contentDescription = null) },
-            text = { Text("Generate Mix", fontWeight = FontWeight.Bold) },
-            containerColor = if (isGenerateEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-            contentColor = if (isGenerateEnabled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+            icon = { Icon(Icons.Rounded.AutoAwesome, contentDescription = null) },
+            text = {
+                Text(
+                    text = "Generate Mix",
+                    fontWeight = FontWeight.SemiBold,
+                    fontFamily = GoogleSansRounded
+                )
+            },
+            containerColor = if (isGenerateEnabled) MaterialTheme.colorScheme.primary
+                             else MaterialTheme.colorScheme.surfaceVariant,
+            contentColor = if (isGenerateEnabled) MaterialTheme.colorScheme.onPrimary
+                           else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 24.dp)
+                .padding(bottom = MiniPlayerHeight + navBarPadding + 12.dp)
         )
     }
 }
@@ -416,37 +465,43 @@ private fun TrackCountSliderCard(
     count: Int,
     onCountChange: (Int) -> Unit
 ) {
-    val shape = remember { AbsoluteSmoothCornerShape(16.dp, 60) }
-    Card(
+    Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = shape,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f)
-        )
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 18.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "Track Count",
-                    style = MaterialTheme.typography.titleMedium.copy(
+                Column {
+                    Text(
+                        text = "Track Count",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
                         fontFamily = GoogleSansRounded,
-                        fontWeight = FontWeight.Bold
-                    ),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Box(
-                    modifier = Modifier
-                        .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(12.dp))
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "How many songs to generate",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
+                    )
+                }
+                // Pill badge matching app's chip style
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    modifier = Modifier.padding(start = 8.dp)
                 ) {
                     Text(
-                        text = "$count tracks",
-                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                        text = "$count",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
                     )
                 }
             }
@@ -459,17 +514,20 @@ private fun TrackCountSliderCard(
                 colors = SliderDefaults.colors(
                     thumbColor = MaterialTheme.colorScheme.primary,
                     activeTrackColor = MaterialTheme.colorScheme.primary,
-                    inactiveTrackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+                    inactiveTrackColor = MaterialTheme.colorScheme.outlineVariant
                 )
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text("5", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("15", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("25", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("35", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                listOf("5", "15", "25", "35").forEach { label ->
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
     }
