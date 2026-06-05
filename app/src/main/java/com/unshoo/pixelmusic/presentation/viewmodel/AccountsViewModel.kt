@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.unshoo.pixelmusic.data.gdrive.GDriveRepository
 import com.unshoo.pixelmusic.data.repository.MusicRepository
 import com.unshoo.pixelmusic.data.telegram.TelegramRepository
+import com.unshoo.pixelmusic.data.preferences.UserPreferencesRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,7 +25,8 @@ import org.drinkless.tdlib.TdApi
 enum class ExternalServiceAccount {
     TELEGRAM,
     GOOGLE_DRIVE,
-    YOUTUBE
+    YOUTUBE,
+    LASTFM
 }
 
 data class ExternalAccountUiModel(
@@ -48,6 +50,7 @@ class AccountsViewModel @Inject constructor(
     private val gDriveRepository: GDriveRepository,
     private val datastoreRepository: com.unshoo.pixelmusic.data.remote.youtube.DatastoreRepository,
     private val syncManager: com.unshoo.pixelmusic.data.worker.SyncManager,
+    private val userPreferencesRepository: UserPreferencesRepository,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -84,6 +87,14 @@ class AccountsViewModel @Inject constructor(
         connected to playlistCount
     }
 
+    private val lastfmStateFlow = combine(
+        userPreferencesRepository.lastfmSessionFlow,
+        userPreferencesRepository.lastfmUsernameFlow,
+        userPreferencesRepository.lastfmScrobblingEnabledFlow
+    ) { session, username, enabled ->
+        Triple(session.isNotEmpty(), username, enabled)
+    }
+
     private val telegramUsernameFlow = telegramRepository.authorizationState
         .map { state ->
             if (state is TdApi.AuthorizationStateReady) {
@@ -106,7 +117,8 @@ class AccountsViewModel @Inject constructor(
             listOf(
                 telegramStateFlow,
                 gDriveStateFlow,
-                youtubeStateFlow
+                youtubeStateFlow,
+                lastfmStateFlow
             )
         ) { it.toList() },
         loggingOutServices,
@@ -116,6 +128,7 @@ class AccountsViewModel @Inject constructor(
         val (telegramConnected, telegramChannelCount) = states[0] as Pair<Boolean, Int>
         val (gDriveConnected, gDriveFolderCount) = states[1] as Pair<Boolean, Int>
         val (youtubeConnected, youtubePlaylistCount) = states[2] as Pair<Boolean, Int>
+        val (lastfmConnected, lastfmUsername, lastfmScrobbleEnabled) = states[3] as Triple<Boolean, String, Boolean>
 
         val calculatedUserName = when {
             gDriveConnected && !gDriveRepository.userDisplayName.isNullOrBlank() -> gDriveRepository.userDisplayName
@@ -174,12 +187,24 @@ class AccountsViewModel @Inject constructor(
                     )
                 )
             }
+            if (lastfmConnected) {
+                add(
+                    ExternalAccountUiModel(
+                        service = ExternalServiceAccount.LASTFM,
+                        title = "Last.fm",
+                        accountLabel = if (lastfmUsername.isNotBlank()) lastfmUsername else "Last.fm session connected",
+                        syncedContentLabel = if (lastfmScrobbleEnabled) "Scrobbling enabled" else "Scrobbling disabled",
+                        isLoggingOut = ExternalServiceAccount.LASTFM in activeLogouts
+                    )
+                )
+            }
         }
 
         val disconnectedServices = buildList {
             if (!telegramConnected) add(ExternalServiceAccount.TELEGRAM)
             if (!gDriveConnected) add(ExternalServiceAccount.GOOGLE_DRIVE)
             if (!youtubeConnected) add(ExternalServiceAccount.YOUTUBE)
+            if (!lastfmConnected) add(ExternalServiceAccount.LASTFM)
         }
 
         AccountsUiState(
@@ -207,6 +232,11 @@ class AccountsViewModel @Inject constructor(
                             datastoreRepository.saveCookies(com.unshoo.pixelmusic.data.model.youtube.Cookies(""))
                             datastoreRepository.saveDataSyncId("")
                             com.unshoo.pixelmusic.data.database.youtube.AppDatabase.clearDownloads(context)
+                        }
+                        ExternalServiceAccount.LASTFM -> {
+                            userPreferencesRepository.setLastfmSession("")
+                            userPreferencesRepository.setLastfmUsername("")
+                            com.unshoo.pixelmusic.data.lastfm.LastFM.sessionKey = null
                         }
                     }
                 }

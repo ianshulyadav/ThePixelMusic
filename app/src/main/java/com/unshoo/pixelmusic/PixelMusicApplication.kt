@@ -84,6 +84,18 @@ class PixelMusicApplication : Application(), ImageLoaderFactory, Configuration.P
     override fun onCreate() {
         super.onCreate()
 
+        // Initialize Last.fm client
+        com.unshoo.pixelmusic.data.lastfm.LastFM.initialize(
+            apiKey = BuildConfig.LASTFM_API_KEY,
+            secret = BuildConfig.LASTFM_SECRET
+        )
+        startupScope.launch {
+            val sessionKey = userPreferencesRepository.get().lastfmSessionFlow.first()
+            if (sessionKey.isNotEmpty()) {
+                com.unshoo.pixelmusic.data.lastfm.LastFM.sessionKey = sessionKey
+            }
+        }
+
         // Initialize NewPipe YouTube Extractor
         org.schabi.newpipe.extractor.NewPipe.init(
             com.unshoo.pixelmusic.data.remote.youtube.YoutubeExtractor(

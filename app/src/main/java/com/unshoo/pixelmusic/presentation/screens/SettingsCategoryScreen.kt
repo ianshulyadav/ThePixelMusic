@@ -1536,9 +1536,203 @@ fun SettingsCategoryScreen(
                         SettingsCategory.DEVICE_CAPABILITIES -> {
                              // Device Capabilities has its own screen
                         }
+                        SettingsCategory.LASTFM -> {
+                            var showLoginDialog by remember { mutableStateOf(false) }
 
+                            SettingsSubsection(title = stringResource(R.string.settings_accounts_row_title)) {
+                                val isLoggedIn = uiState.lastfmSession.isNotEmpty()
+                                SettingsItem(
+                                    title = if (isLoggedIn) {
+                                        stringResource(R.string.lastfm_logged_in_as, uiState.lastfmUsername)
+                                    } else {
+                                        stringResource(R.string.lastfm_not_logged_in)
+                                    },
+                                    subtitle = if (isLoggedIn) "Click to Log Out" else "Click to Log In and authorize scrobbling",
+                                    leadingIcon = { 
+                                        Icon(
+                                            imageVector = Icons.Outlined.Person, 
+                                            contentDescription = null, 
+                                            tint = MaterialTheme.colorScheme.secondary
+                                        ) 
+                                    },
+                                    trailingIcon = { 
+                                        Icon(
+                                            imageVector = Icons.Rounded.ChevronRight, 
+                                            contentDescription = null, 
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        ) 
+                                    },
+                                    onClick = {
+                                        if (isLoggedIn) {
+                                            settingsViewModel.setLastfmSession("")
+                                            settingsViewModel.setLastfmUsername("")
+                                            com.unshoo.pixelmusic.data.lastfm.LastFM.sessionKey = null
+                                            Toast.makeText(context, "Logged out from Last.fm", Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            showLoginDialog = true
+                                        }
+                                    }
+                                )
+                            }
+
+                            SettingsSubsection(title = "Options") {
+                                SwitchSettingItem(
+                                    title = stringResource(R.string.lastfm_enable_scrobbling),
+                                    subtitle = stringResource(R.string.lastfm_enable_scrobbling_desc),
+                                    checked = uiState.lastfmScrobblingEnabled,
+                                    onCheckedChange = { settingsViewModel.setLastfmScrobblingEnabled(it) },
+                                    leadingIcon = { 
+                                        Icon(
+                                            imageVector = Icons.Rounded.MusicNote, 
+                                            contentDescription = null, 
+                                            tint = MaterialTheme.colorScheme.secondary
+                                        ) 
+                                    }
+                                )
+                                SwitchSettingItem(
+                                    title = stringResource(R.string.lastfm_now_playing),
+                                    subtitle = stringResource(R.string.lastfm_now_playing_desc),
+                                    checked = uiState.lastfmUseNowPlaying,
+                                    onCheckedChange = { settingsViewModel.setLastfmUseNowPlaying(it) },
+                                    leadingIcon = { 
+                                        Icon(
+                                            painter = painterResource(R.drawable.rounded_touch_app_24), 
+                                            contentDescription = null, 
+                                            tint = MaterialTheme.colorScheme.secondary
+                                        ) 
+                                    }
+                                )
+                            }
+
+                            SettingsSubsection(title = stringResource(R.string.lastfm_scrobbling_configuration)) {
+                                SliderSettingsItem(
+                                    label = stringResource(R.string.lastfm_scrobble_min_track_duration, uiState.scrobbleMinSongDuration),
+                                    value = uiState.scrobbleMinSongDuration.toFloat(),
+                                    valueRange = 10f..120f,
+                                    steps = 11,
+                                    onValueChange = { settingsViewModel.setScrobbleMinSongDuration(it.toInt()) },
+                                    valueText = { "${it.toInt()}s" }
+                                )
+                                SliderSettingsItem(
+                                    label = stringResource(R.string.lastfm_scrobble_delay_percent, (uiState.scrobbleDelayPercent * 100).toInt()),
+                                    value = uiState.scrobbleDelayPercent,
+                                    valueRange = 0.3f..0.95f,
+                                    steps = 13,
+                                    onValueChange = { settingsViewModel.setScrobbleDelayPercent(it) },
+                                    valueText = { "${(it * 100).toInt()}%" }
+                                )
+                                SliderSettingsItem(
+                                    label = stringResource(R.string.lastfm_scrobble_delay_seconds, uiState.scrobbleDelaySeconds),
+                                    value = uiState.scrobbleDelaySeconds.toFloat(),
+                                    valueRange = 30f..360f,
+                                    steps = 11,
+                                    onValueChange = { settingsViewModel.setScrobbleDelaySeconds(it.toInt()) },
+                                    valueText = { "${it.toInt()}s" }
+                                )
+                            }
+
+                            if (showLoginDialog) {
+                                var username by remember { mutableStateOf("") }
+                                var password by remember { mutableStateOf("") }
+                                var isLoggingIn by remember { mutableStateOf(false) }
+                                var loginError by remember { mutableStateOf<String?>(null) }
+                                val coroutineScope = rememberCoroutineScope()
+
+                                AlertDialog(
+                                    onDismissRequest = { if (!isLoggingIn) showLoginDialog = false },
+                                    title = { Text(text = stringResource(R.string.lastfm_login_dialog_title)) },
+                                    text = {
+                                        Column(
+                                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Text(
+                                                text = stringResource(R.string.lastfm_login_dialog_desc),
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            OutlinedTextField(
+                                                value = username,
+                                                onValueChange = { username = it },
+                                                label = { Text(stringResource(R.string.lastfm_username)) },
+                                                singleLine = true,
+                                                modifier = Modifier.fillMaxWidth(),
+                                                enabled = !isLoggingIn
+                                            )
+                                            OutlinedTextField(
+                                                value = password,
+                                                onValueChange = { password = it },
+                                                label = { Text(stringResource(R.string.lastfm_password)) },
+                                                singleLine = true,
+                                                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                                                modifier = Modifier.fillMaxWidth(),
+                                                enabled = !isLoggingIn
+                                            )
+                                            if (loginError != null) {
+                                                Text(
+                                                    text = loginError!!,
+                                                    color = MaterialTheme.colorScheme.error,
+                                                    style = MaterialTheme.typography.bodySmall
+                                                )
+                                            }
+                                        }
+                                    },
+                                    confirmButton = {
+                                        TextButton(
+                                            onClick = {
+                                                if (username.isBlank() || password.isBlank()) {
+                                                    loginError = "Username and password cannot be empty"
+                                                    return@TextButton
+                                                }
+                                                isLoggingIn = true
+                                                loginError = null
+                                                coroutineScope.launch {
+                                                    val result = com.unshoo.pixelmusic.data.lastfm.LastFM.getMobileSession(username, password)
+                                                    result.fold(
+                                                        onSuccess = { authSession ->
+                                                            val sk = authSession.session.key
+                                                            val name = authSession.session.name
+                                                            settingsViewModel.setLastfmSession(sk)
+                                                            settingsViewModel.setLastfmUsername(name)
+                                                            com.unshoo.pixelmusic.data.lastfm.LastFM.sessionKey = sk
+                                                            isLoggingIn = false
+                                                            showLoginDialog = false
+                                                            Toast.makeText(context, context.getString(R.string.lastfm_login_success), Toast.LENGTH_SHORT).show()
+                                                        },
+                                                        onFailure = { throwable ->
+                                                            isLoggingIn = false
+                                                            loginError = throwable.localizedMessage ?: "Unknown authentication error"
+                                                        }
+                                                    )
+                                                }
+                                            },
+                                            enabled = !isLoggingIn
+                                        ) {
+                                            if (isLoggingIn) {
+                                                CircularProgressIndicator(
+                                                    modifier = Modifier.size(16.dp),
+                                                    strokeWidth = 2.dp
+                                                )
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Text(stringResource(R.string.lastfm_logging_in))
+                                            } else {
+                                                Text(stringResource(R.string.lastfm_action_login))
+                                            }
+                                        }
+                                    },
+                                    dismissButton = {
+                                        TextButton(
+                                            onClick = { showLoginDialog = false },
+                                            enabled = !isLoggingIn
+                                        ) {
+                                            Text("Cancel")
+                                        }
+                                    }
+                                )
+                            }
+                        }
                     }
-               }
+                }
             }
 
             item {

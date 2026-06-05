@@ -143,7 +143,14 @@ data class SettingsUiState(
     val ytAvatarUrl: String = "",
     val performanceModeEnabled: Boolean = false,
     val audioOffloadEnabled: Boolean = false,
-    val preferTelegramAlternative: Boolean = false
+    val preferTelegramAlternative: Boolean = false,
+    val lastfmSession: String = "",
+    val lastfmUsername: String = "",
+    val lastfmScrobblingEnabled: Boolean = false,
+    val lastfmUseNowPlaying: Boolean = false,
+    val scrobbleDelayPercent: Float = 0.5f,
+    val scrobbleMinSongDuration: Int = 30,
+    val scrobbleDelaySeconds: Int = 180
 )
 
 data class FailedSongInfo(
@@ -205,7 +212,14 @@ private sealed interface SettingsUiUpdate {
         val animatedLyricsBlurStrength: Float,
         val performanceModeEnabled: Boolean,
         val audioOffloadEnabled: Boolean,
-        val preferTelegramAlternative: Boolean
+        val preferTelegramAlternative: Boolean,
+        val lastfmSession: String,
+        val lastfmUsername: String,
+        val lastfmScrobblingEnabled: Boolean,
+        val lastfmUseNowPlaying: Boolean,
+        val scrobbleDelayPercent: Float,
+        val scrobbleMinSongDuration: Int,
+        val scrobbleDelaySeconds: Int
     ) : SettingsUiUpdate
 }
 
@@ -617,7 +631,14 @@ class SettingsViewModel @Inject constructor(
                 userPreferencesRepository.animatedLyricsBlurStrengthFlow,
                 userPreferencesRepository.performanceModeEnabledFlow,
                 userPreferencesRepository.audioOffloadEnabledFlow,
-                userPreferencesRepository.preferTelegramAlternativeFlow
+                userPreferencesRepository.preferTelegramAlternativeFlow,
+                userPreferencesRepository.lastfmSessionFlow,
+                userPreferencesRepository.lastfmUsernameFlow,
+                userPreferencesRepository.lastfmScrobblingEnabledFlow,
+                userPreferencesRepository.lastfmUseNowPlayingFlow,
+                userPreferencesRepository.scrobbleDelayPercentFlow,
+                userPreferencesRepository.scrobbleMinSongDurationFlow,
+                userPreferencesRepository.scrobbleDelaySecondsFlow
             ) { values ->
                 SettingsUiUpdate.Group2(
                     keepPlayingInBackground = values[0] as Boolean,
@@ -639,7 +660,14 @@ class SettingsViewModel @Inject constructor(
                     animatedLyricsBlurStrength = values[16] as Float,
                     performanceModeEnabled = values[17] as Boolean,
                     audioOffloadEnabled = values[18] as Boolean,
-                    preferTelegramAlternative = values[19] as Boolean
+                    preferTelegramAlternative = values[19] as Boolean,
+                    lastfmSession = values[20] as String,
+                    lastfmUsername = values[21] as String,
+                    lastfmScrobblingEnabled = values[22] as Boolean,
+                    lastfmUseNowPlaying = values[23] as Boolean,
+                    scrobbleDelayPercent = values[24] as Float,
+                    scrobbleMinSongDuration = values[25] as Int,
+                    scrobbleDelaySeconds = values[26] as Int
                 )
             }.collect { update ->
                 _uiState.update { state ->
@@ -663,11 +691,17 @@ class SettingsViewModel @Inject constructor(
                         animatedLyricsBlurStrength = update.animatedLyricsBlurStrength,
                         performanceModeEnabled = update.performanceModeEnabled,
                         audioOffloadEnabled = update.audioOffloadEnabled,
-                        preferTelegramAlternative = update.preferTelegramAlternative
+                        preferTelegramAlternative = update.preferTelegramAlternative,
+                        lastfmSession = update.lastfmSession,
+                        lastfmUsername = update.lastfmUsername,
+                        lastfmScrobblingEnabled = update.lastfmScrobblingEnabled,
+                        lastfmUseNowPlaying = update.lastfmUseNowPlaying,
+                        scrobbleDelayPercent = update.scrobbleDelayPercent,
+                        scrobbleMinSongDuration = update.scrobbleMinSongDuration,
+                        scrobbleDelaySeconds = update.scrobbleDelaySeconds
                     )
                 }
             }
-
         }
         
         // Group 3: Remaining individual collectors (loading state, tweaks)
@@ -1669,6 +1703,48 @@ class SettingsViewModel @Inject constructor(
     fun setAvoidRepetitiveSongs(enabled: Boolean) {
         viewModelScope.launch {
             datastoreRepository.save(DatastoreRepository.PreferenceKeys.AVOID_REPETITIVE_SONGS, enabled)
+        }
+    }
+
+    fun setLastfmSession(session: String) {
+        viewModelScope.launch {
+            userPreferencesRepository.setLastfmSession(session)
+        }
+    }
+
+    fun setLastfmUsername(username: String) {
+        viewModelScope.launch {
+            userPreferencesRepository.setLastfmUsername(username)
+        }
+    }
+
+    fun setLastfmScrobblingEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            userPreferencesRepository.setLastfmScrobblingEnabled(enabled)
+        }
+    }
+
+    fun setLastfmUseNowPlaying(enabled: Boolean) {
+        viewModelScope.launch {
+            userPreferencesRepository.setLastfmUseNowPlaying(enabled)
+        }
+    }
+
+    fun setScrobbleDelayPercent(percent: Float) {
+        viewModelScope.launch {
+            userPreferencesRepository.setScrobbleDelayPercent(percent)
+        }
+    }
+
+    fun setScrobbleMinSongDuration(duration: Int) {
+        viewModelScope.launch {
+            userPreferencesRepository.setScrobbleMinSongDuration(duration)
+        }
+    }
+
+    fun setScrobbleDelaySeconds(seconds: Int) {
+        viewModelScope.launch {
+            userPreferencesRepository.setScrobbleDelaySeconds(seconds)
         }
     }
 }

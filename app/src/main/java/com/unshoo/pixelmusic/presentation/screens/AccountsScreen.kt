@@ -93,6 +93,7 @@ import racra.compose.smooth_corner_rect_library.AbsoluteSmoothCornerShape
 fun AccountsScreen(
     onBackClick: () -> Unit,
     onOpenYoutubeAuth: () -> Unit = {},
+    onOpenLastfmSettings: () -> Unit = {},
     viewModel: AccountsViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
@@ -236,7 +237,8 @@ fun AccountsScreen(
                             openService(
                                 context = context,
                                 service = account.service,
-                                onOpenYoutubeAuth = onOpenYoutubeAuth
+                                onOpenYoutubeAuth = onOpenYoutubeAuth,
+                                onOpenLastfmSettings = onOpenLastfmSettings
                             )
                         },
                         onLogout = { viewModel.logout(account.service) },
@@ -265,7 +267,8 @@ fun AccountsScreen(
                             openService(
                                 context = context,
                                 service = service,
-                                onOpenYoutubeAuth = onOpenYoutubeAuth
+                                onOpenYoutubeAuth = onOpenYoutubeAuth,
+                                onOpenLastfmSettings = onOpenLastfmSettings
                             )
                         },
                         title = if (nonYoutubeConnected.isNotEmpty()) "Connect More Services" else stringResource(R.string.presentation_batch_b_accounts_no_linked_title),
@@ -575,6 +578,7 @@ private fun EmptyAccountsCard(
                     ExternalServiceAccount.TELEGRAM -> painterResource(R.drawable.telegram)
                     ExternalServiceAccount.GOOGLE_DRIVE -> painterResource(R.drawable.rounded_drive_export_24)
                     ExternalServiceAccount.YOUTUBE -> null
+                    ExternalServiceAccount.LASTFM -> null
                 }
                 FilledTonalButton(
                     onClick = { if (!isComingSoon) onConnect(service) },
@@ -649,6 +653,14 @@ private fun servicePalette(service: ExternalServiceAccount): ServicePalette {
             primaryActionContainer = MaterialTheme.colorScheme.errorContainer,
             primaryActionTint = MaterialTheme.colorScheme.onErrorContainer
         )
+        ExternalServiceAccount.LASTFM -> ServicePalette(
+            iconContainer = Color(0xFFFFDAD9),
+            iconTint = Color(0xFF6E1B1B),
+            statusContainer = Color(0xFFFFDAD9),
+            statusTint = Color(0xFF6E1B1B),
+            primaryActionContainer = Color(0xFF6E1B1B),
+            primaryActionTint = Color(0xFFFFDAD9)
+        )
     }
 }
 
@@ -657,6 +669,7 @@ private fun accountIcon(service: ExternalServiceAccount): ImageVector {
         ExternalServiceAccount.TELEGRAM -> Icons.AutoMirrored.Rounded.Send
         ExternalServiceAccount.GOOGLE_DRIVE -> Icons.Rounded.CloudQueue
         ExternalServiceAccount.YOUTUBE -> Icons.Rounded.MusicNote
+        ExternalServiceAccount.LASTFM -> Icons.Rounded.MusicNote
     }
 }
 
@@ -676,13 +689,15 @@ private fun serviceDisplayName(service: ExternalServiceAccount): String {
         ExternalServiceAccount.TELEGRAM -> stringResource(R.string.presentation_batch_b_service_telegram)
         ExternalServiceAccount.GOOGLE_DRIVE -> stringResource(R.string.auth_gdrive_title)
         ExternalServiceAccount.YOUTUBE -> "YouTube Client"
+        ExternalServiceAccount.LASTFM -> "Last.fm"
     }
 }
 
 private fun openService(
     context: Context,
     service: ExternalServiceAccount,
-    onOpenYoutubeAuth: () -> Unit
+    onOpenYoutubeAuth: () -> Unit,
+    onOpenLastfmSettings: () -> Unit = {}
 ) {
     when (service) {
         ExternalServiceAccount.TELEGRAM -> {
@@ -696,6 +711,9 @@ private fun openService(
         }
         ExternalServiceAccount.YOUTUBE -> {
             onOpenYoutubeAuth()
+        }
+        ExternalServiceAccount.LASTFM -> {
+            onOpenLastfmSettings()
         }
     }
 }

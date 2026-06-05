@@ -352,4 +352,27 @@
     <string name="setcat_avoid_repetitive_songs_desc">Filter out recently played or highly rotated tracks from the dynamic queue.</string>
     <string name="setcat_prefer_telegram_alternative_title">Prefer Telegram Alternatives</string>
     <string name="setcat_prefer_telegram_alternative_desc">When playing a song from YouTube, automatically try to stream or play the matching Telegram alternative (matched by exact title and artist) if available in highest quality.</string>
+
+    <!-- Last.fm Integration -->
+    <string name="lastfm_integration">Last.fm Integration</string>
+    <string name="lastfm_integration_desc">Configure Last.fm scrobbling, now playing updates, and threshold parameters</string>
+    <string name="lastfm_not_logged_in">Not logged in</string>
+    <string name="lastfm_action_login">Log In</string>
+    <string name="lastfm_action_logout">Log Out</string>
+    <string name="lastfm_enable_scrobbling">Enable Scrobbling</string>
+    <string name="lastfm_enable_scrobbling_desc">Scrobble played songs to your Last.fm profile</string>
+    <string name="lastfm_now_playing">Update Now Playing</string>
+    <string name="lastfm_now_playing_desc">Update your Last.fm status with the current track</string>
+    <string name="lastfm_scrobbling_configuration">Scrobbling Configuration</string>
+    <string name="lastfm_scrobble_min_track_duration">Minimum Track Duration: %1$ds</string>
+    <string name="lastfm_scrobble_delay_percent">Scrobble Threshold Percentage: %1$d%%</string>
+    <string name="lastfm_scrobble_delay_seconds">Max Scrobble Threshold Duration: %1$ds</string>
+    <string name="lastfm_username">Username</string>
+    <string name="lastfm_password">Password</string>
+    <string name="lastfm_logging_in">Logging in…</string>
+    <string name="lastfm_login_failed">Login failed: %1$s</string>
+    <string name="lastfm_login_success">Logged in successfully!</string>
+    <string name="lastfm_logged_in_as">Logged in as %1$s</string>
+    <string name="lastfm_login_dialog_title">Link Last.fm Account</string>
+    <string name="lastfm_login_dialog_desc">Enter your Last.fm account credentials to authorize scrobbling.</string>
 </resources>

@@ -313,6 +313,13 @@ constructor(
         val PERFORMANCE_MODE_ENABLED = booleanPreferencesKey("performance_mode_enabled")
         val AUDIO_OFFLOAD_ENABLED = booleanPreferencesKey("audio_offload_enabled")
         val PREFER_TELEGRAM_ALTERNATIVE = booleanPreferencesKey("prefer_telegram_alternative")
+        val LASTFM_SESSION = stringPreferencesKey("lastfm_session")
+        val LASTFM_USERNAME = stringPreferencesKey("lastfm_username")
+        val LASTFM_SCROBBLING_ENABLED = booleanPreferencesKey("lastfm_scrobbling_enabled")
+        val LASTFM_USE_NOW_PLAYING = booleanPreferencesKey("lastfm_use_now_playing")
+        val SCROBBLE_DELAY_PERCENT = androidx.datastore.preferences.core.floatPreferencesKey("scrobble_delay_percent")
+        val SCROBBLE_MIN_SONG_DURATION = intPreferencesKey("scrobble_min_song_duration")
+        val SCROBBLE_DELAY_SECONDS = intPreferencesKey("scrobble_delay_seconds")
     }
 
     val preferTelegramAlternativeFlow: Flow<Boolean> =
@@ -2155,6 +2162,83 @@ constructor(
     suspend fun setSearchSource(source: SearchSource) {
         dataStore.edit { preferences ->
             preferences[PreferencesKeys.SEARCH_SOURCE] = source.name
+        }
+    }
+
+    val lastfmSessionFlow: Flow<String> =
+        dataStore.data.map { preferences ->
+            preferences[PreferencesKeys.LASTFM_SESSION] ?: ""
+        }.distinctUntilChanged()
+
+    suspend fun setLastfmSession(session: String) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.LASTFM_SESSION] = session
+        }
+    }
+
+    val lastfmUsernameFlow: Flow<String> =
+        dataStore.data.map { preferences ->
+            preferences[PreferencesKeys.LASTFM_USERNAME] ?: ""
+        }.distinctUntilChanged()
+
+    suspend fun setLastfmUsername(username: String) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.LASTFM_USERNAME] = username
+        }
+    }
+
+    val lastfmScrobblingEnabledFlow: Flow<Boolean> =
+        dataStore.data.map { preferences ->
+            preferences[PreferencesKeys.LASTFM_SCROBBLING_ENABLED] ?: false
+        }.distinctUntilChanged()
+
+    suspend fun setLastfmScrobblingEnabled(enabled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.LASTFM_SCROBBLING_ENABLED] = enabled
+        }
+    }
+
+    val lastfmUseNowPlayingFlow: Flow<Boolean> =
+        dataStore.data.map { preferences ->
+            preferences[PreferencesKeys.LASTFM_USE_NOW_PLAYING] ?: false
+        }.distinctUntilChanged()
+
+    suspend fun setLastfmUseNowPlaying(enabled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.LASTFM_USE_NOW_PLAYING] = enabled
+        }
+    }
+
+    val scrobbleDelayPercentFlow: Flow<Float> =
+        dataStore.data.map { preferences ->
+            preferences[PreferencesKeys.SCROBBLE_DELAY_PERCENT] ?: 0.5f
+        }.distinctUntilChanged()
+
+    suspend fun setScrobbleDelayPercent(percent: Float) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.SCROBBLE_DELAY_PERCENT] = percent
+        }
+    }
+
+    val scrobbleMinSongDurationFlow: Flow<Int> =
+        dataStore.data.map { preferences ->
+            preferences[PreferencesKeys.SCROBBLE_MIN_SONG_DURATION] ?: 30
+        }.distinctUntilChanged()
+
+    suspend fun setScrobbleMinSongDuration(duration: Int) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.SCROBBLE_MIN_SONG_DURATION] = duration
+        }
+    }
+
+    val scrobbleDelaySecondsFlow: Flow<Int> =
+        dataStore.data.map { preferences ->
+            preferences[PreferencesKeys.SCROBBLE_DELAY_SECONDS] ?: 180
+        }.distinctUntilChanged()
+
+    suspend fun setScrobbleDelaySeconds(seconds: Int) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.SCROBBLE_DELAY_SECONDS] = seconds
         }
     }
 }
