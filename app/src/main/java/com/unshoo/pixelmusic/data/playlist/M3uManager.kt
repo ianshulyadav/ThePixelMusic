@@ -10,6 +10,8 @@ import java.io.BufferedReader
 import java.io.InputStreamReader
 import javax.inject.Inject
 import javax.inject.Singleton
+import unshoo.ianshulyadav.pixelmusic.innertube.YouTube
+import unshoo.ianshulyadav.pixelmusic.innertube.models.SongItem
 
 @Singleton
 class M3uManager @Inject constructor(
@@ -49,6 +51,20 @@ class M3uManager @Inject constructor(
         return regex.find(trimmed)?.groupValues?.getOrNull(1)
     }
 
+    private suspend fun searchYoutubeId(title: String, artist: String): String? {
+        return try {
+            val query = "$title $artist"
+            val result = YouTube.search(
+                query, 
+                YouTube.SearchFilter.FILTER_SONG
+            ).getOrNull()
+            val songItem = result?.items?.firstOrNull { it is SongItem } as? SongItem
+            songItem?.id
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     suspend fun parseM3u(uri: Uri): Pair<String, List<String>> {
         val songIds = mutableListOf<String>()
         var playlistName = "Imported Playlist"
@@ -58,9 +74,11 @@ class M3uManager @Inject constructor(
         
         // Build lookup maps for fast matching
         val songsByPath = allSongs.associateBy { it.path }
-        val songsByFileName = allSongs.groupBy { it.path.substringAfterLast("/") }
+        val songsByFileName = allSongs.groupBy { it.path.substringAfterLast("/").substringBeforeLast(".") }
         val songsByContentUriFileName = allSongs.groupBy { it.contentUriString.substringAfterLast("/") }
         val songsByYoutubeId = allSongs.filter { it.youtubeId != null }.associateBy { it.youtubeId!! }
+        val songsByTitleAndArtist = allSongs.groupBy { "${it.title.lowercase().trim()} - ${it.artist.lowercase().trim()}" }
+        val songsByTitle = allSongs.groupBy { it.title.lowercase().trim() }
 
         context.contentResolver.openInputStream(uri)?.use { inputStream ->
             BufferedReader(InputStreamReader(inputStream)).use { reader ->
@@ -79,7 +97,13 @@ class M3uManager @Inject constructor(
                         continue
                     }
                     
-                    val youtubeId = parseYoutubeId(trimmedLine)
+                    val decodedLine = try {
+                        java.net.URLDecoder.decode(trimmedLine, "UTF-8")
+                    } catch (e: Exception) {
+                        trimmedLine
+                    }
+
+                    val youtubeId = parseYoutubeId(decodedLine)
                     if (youtubeId != null) {
                         val songId = "youtube_$youtubeId"
                         val existingSong = songsByYoutubeId[youtubeId] ?: allSongs.find { it.id == songId || it.contentUriString == "youtube://$youtubeId" }
@@ -96,9 +120,10 @@ class M3uManager @Inject constructor(
                                 durationMs = secs * 1000L
                                 
                                 val metaPart = extInf.substringAfter(",", "")
-                                if (metaPart.contains(" - ")) {
-                                    artist = metaPart.substringBefore(" - ").trim()
-                                    title = metaPart.substringAfter(" - ").trim()
+                                val parts = metaPart.split(Regex(" - |-"))
+                                if (parts.size >= 2) {
+                                    artist = parts[0].trim()
+                                    title = parts.subList(1, parts.size).joinToString("-").trim()
                                 } else if (metaPart.isNotBlank()) {
                                     title = metaPart.trim()
                                 }
@@ -127,15 +152,78 @@ class M3uManager @Inject constructor(
                         continue
                     }
                     
-                    val songByPath = songsByPath[trimmedLine]
+                    // 1) Try exact path match
+                    val songByPath = songsByPath[decodedLine] ?: songsByPath[trimmedLine]
                     if (songByPath != null) {
                         songIds.add(songByPath.id)
-                    } else {
-                        val fileName = trimmedLine.substringAfterLast("/")
-                        val matchedSong = songsByFileName[fileName]?.firstOrNull()
-                            ?: songsByContentUriFileName[fileName]?.firstOrNull()
-                        if (matchedSong != null) {
-                            songIds.add(matchedSong.id)
+                        continue
+                    }
+                    
+                    // 2) Try filename match from path column
+                    val fileName = decodedLine.substringAfterLast("/").substringBeforeLast(".")
+                    val matchedSong = songsByFileName[fileName]?.firstOrNull()
+                        ?: songsByContentUriFileName[fileName]?.firstOrNull()
+                    if (matchedSong != null) {
+                        songIds.add(matchedSong.id)
+                        continue
+                    }
+
+                    // 3) Try Title & Artist fallback from lastExtInf
+                    var extTitle = ""
+                    var extArtist = ""
+                    var extDurationMs = 0L
+                    lastExtInf?.let { extInf ->
+                        val durationPart = extInf.substringAfter(":", "").substringBefore(",", "")
+                        val secs = durationPart.toLongOrNull() ?: 0L
+                        extDurationMs = secs * 1000L
+                        
+                        val metaPart = extInf.substringAfter(",", "")
+                        val parts = metaPart.split(Regex(" - |-"))
+                        if (parts.size >= 2) {
+                            extArtist = parts[0].trim()
+                            extTitle = parts.subList(1, parts.size).joinToString("-").trim()
+                        } else if (metaPart.isNotBlank()) {
+                            extTitle = metaPart.trim()
+                        }
+                    }
+
+                    if (extTitle.isNotBlank()) {
+                        val key = "${extTitle.lowercase().trim()} - ${extArtist.lowercase().trim()}"
+                        val matchByTitleAndArtist = songsByTitleAndArtist[key]?.firstOrNull()
+                        if (matchByTitleAndArtist != null) {
+                            songIds.add(matchByTitleAndArtist.id)
+                            continue
+                        }
+                        
+                        val matchByTitle = songsByTitle[extTitle.lowercase().trim()]?.firstOrNull()
+                        if (matchByTitle != null) {
+                            songIds.add(matchByTitle.id)
+                            continue
+                        }
+
+                        // 4) On-the-fly YouTube lookup
+                        val resolvedYtId = searchYoutubeId(extTitle, extArtist)
+                        if (resolvedYtId != null) {
+                            val songId = "youtube_$resolvedYtId"
+                            val newSong = Song(
+                                id = songId,
+                                title = extTitle,
+                                artist = extArtist.ifBlank { "Unknown Artist" },
+                                artistId = 0L,
+                                album = "YouTube Music",
+                                albumId = 0L,
+                                path = "",
+                                contentUriString = "youtube://$resolvedYtId",
+                                albumArtUriString = null,
+                                duration = extDurationMs,
+                                genre = "YouTube",
+                                mimeType = "audio/webm",
+                                bitrate = 128,
+                                sampleRate = 44100,
+                                youtubeId = resolvedYtId
+                            )
+                            musicRepository.insertYoutubeSongs(listOf(newSong))
+                            songIds.add(songId)
                         }
                     }
                 }
@@ -192,29 +280,60 @@ class M3uManager @Inject constructor(
 
         val allSongs = musicRepository.getAllSongsOnce()
         val songsByPath = allSongs.associateBy { it.path }
-        val songsByTitle = allSongs.groupBy { it.title.lowercase() }
-        val songsByFileName = allSongs.groupBy { it.path.substringAfterLast("/") }
+        val songsByTitle = allSongs.groupBy { it.title.lowercase().trim() }
+        val songsByFileName = allSongs.groupBy { it.path.substringAfterLast("/").substringBeforeLast(".") }
         val songsByYoutubeId = allSongs.filter { it.youtubeId != null }.associateBy { it.youtubeId!! }
+        val songsByTitleAndArtist = allSongs.groupBy { "${it.title.lowercase().trim()} - ${it.artist.lowercase().trim()}" }
 
         context.contentResolver.openInputStream(uri)?.use { inputStream ->
             BufferedReader(InputStreamReader(inputStream)).use { reader ->
                 var isFirstLine = true
                 var line: String?
+                
+                var titleIdx = 0
+                var artistIdx = 1
+                var albumIdx = 2
+                var durationIdx = 3
+                var pathIdx = 4
+
                 while (reader.readLine().also { line = it } != null) {
                     val trimmedLine = line?.trim() ?: continue
                     if (trimmedLine.isEmpty()) continue
-                    // Skip CSV header
+                    
+                    // Parse CSV row
+                    val cols = splitCsvRow(trimmedLine)
+                    
                     if (isFirstLine) {
                         isFirstLine = false
-                        continue
+                        val lowercaseCols = cols.map { it.lowercase().trim() }
+                        val t = lowercaseCols.indexOfFirst { it in listOf("title", "track", "track name", "name", "song", "song name", "trackname") }
+                        val a = lowercaseCols.indexOfFirst { it in listOf("artist", "artist name", "artists", "artistname") }
+                        val al = lowercaseCols.indexOfFirst { it in listOf("album", "album name", "album title", "albumname") }
+                        val d = lowercaseCols.indexOfFirst { it in listOf("duration", "duration (ms)", "length", "time", "durationms") }
+                        val p = lowercaseCols.indexOfFirst { it in listOf("path", "file", "filepath", "uri", "url", "location") }
+
+                        if (t != -1 || a != -1) {
+                            if (t != -1) titleIdx = t
+                            if (a != -1) artistIdx = a
+                            if (al != -1) albumIdx = al
+                            if (d != -1) durationIdx = d
+                            if (p != -1) pathIdx = p
+                            continue
+                        }
                     }
-                    // Parse CSV row – columns: Title,Artist,Album,Duration,Path
-                    val cols = splitCsvRow(trimmedLine)
-                    val path = cols.getOrNull(4)?.trim() ?: ""
-                    val title = cols.getOrNull(0)?.trim() ?: ""
-                    val artist = cols.getOrNull(1)?.trim() ?: ""
-                    val album = cols.getOrNull(2)?.trim() ?: ""
-                    val durationStr = cols.getOrNull(3)?.trim() ?: ""
+                    
+                    val title = cols.getOrNull(titleIdx)?.trim() ?: ""
+                    val artist = cols.getOrNull(artistIdx)?.trim() ?: ""
+                    val album = cols.getOrNull(albumIdx)?.trim() ?: ""
+                    val durationStr = if (durationIdx != -1) cols.getOrNull(durationIdx)?.trim() ?: "" else ""
+                    val rawPath = if (pathIdx != -1) cols.getOrNull(pathIdx)?.trim() ?: "" else ""
+                    val path = try {
+                        java.net.URLDecoder.decode(rawPath, "UTF-8")
+                    } catch (e: Exception) {
+                        rawPath
+                    }
+
+                    if (title.isBlank() && path.isBlank()) continue
 
                     // Check if path is a YouTube song
                     val youtubeId = if (path.isNotBlank()) parseYoutubeId(path) else null
@@ -249,25 +368,62 @@ class M3uManager @Inject constructor(
                     }
 
                     // 1) Try exact path match
-                    val byPath = if (path.isNotBlank()) songsByPath[path] else null
-                    if (byPath != null) {
-                        songIds.add(byPath.id)
-                        continue
-                    }
-                    // 2) Try filename match from path column
                     if (path.isNotBlank()) {
-                        val fileName = path.substringAfterLast("/")
+                        val byPath = songsByPath[path]
+                        if (byPath != null) {
+                            songIds.add(byPath.id)
+                            continue
+                        }
+                        
+                        // Try filename match from path column
+                        val fileName = path.substringAfterLast("/").substringBeforeLast(".")
                         val byFile = songsByFileName[fileName]?.firstOrNull()
                         if (byFile != null) {
                             songIds.add(byFile.id)
                             continue
                         }
                     }
-                    // 3) Fall back to title match
+
+                    // 2) Try Title & Artist match
                     if (title.isNotBlank()) {
-                        val byTitle = songsByTitle[title.lowercase()]?.firstOrNull()
-                        if (byTitle != null) {
-                            songIds.add(byTitle.id)
+                        val key = "${title.lowercase().trim()} - ${artist.lowercase().trim()}"
+                        val matchByTitleAndArtist = songsByTitleAndArtist[key]?.firstOrNull()
+                        if (matchByTitleAndArtist != null) {
+                            songIds.add(matchByTitleAndArtist.id)
+                            continue
+                        }
+                        
+                        // Try Title fallback
+                        val matchByTitle = songsByTitle[title.lowercase().trim()]?.firstOrNull()
+                        if (matchByTitle != null) {
+                            songIds.add(matchByTitle.id)
+                            continue
+                        }
+
+                        // 3) Try YouTube search on-the-fly
+                        val resolvedYtId = searchYoutubeId(title, artist)
+                        if (resolvedYtId != null) {
+                            val songId = "youtube_$resolvedYtId"
+                            val durationMs = durationStr.toLongOrNull() ?: 0L
+                            val newSong = Song(
+                                id = songId,
+                                title = title,
+                                artist = artist.ifBlank { "Unknown Artist" },
+                                artistId = 0L,
+                                album = album.ifBlank { "YouTube Music" },
+                                albumId = 0L,
+                                path = "",
+                                contentUriString = "youtube://$resolvedYtId",
+                                albumArtUriString = null,
+                                duration = durationMs,
+                                genre = "YouTube",
+                                mimeType = "audio/webm",
+                                bitrate = 128,
+                                sampleRate = 44100,
+                                youtubeId = resolvedYtId
+                            )
+                            musicRepository.insertYoutubeSongs(listOf(newSong))
+                            songIds.add(songId)
                         }
                     }
                 }
