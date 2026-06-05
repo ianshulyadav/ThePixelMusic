@@ -51,6 +51,7 @@ import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -85,6 +86,18 @@ import com.unshoo.pixelmusic.presentation.viewmodel.ExploreViewModel
 import com.unshoo.pixelmusic.presentation.viewmodel.PlayerViewModel
 import com.unshoo.pixelmusic.ui.theme.GoogleSansRounded
 import racra.compose.smooth_corner_rect_library.AbsoluteSmoothCornerShape
+import com.unshoo.pixelmusic.data.model.Playlist
+import com.unshoo.pixelmusic.presentation.components.PlaylistCover
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.layout.offset
+import androidx.compose.material.icons.rounded.AutoAwesome
 import unshoo.ianshulyadav.pixelmusic.innertube.models.AlbumItem
 import unshoo.ianshulyadav.pixelmusic.innertube.models.ArtistItem
 import unshoo.ianshulyadav.pixelmusic.innertube.models.PlaylistItem
@@ -128,6 +141,9 @@ fun ExploreScreen(
             ExploreTopBar(
                 onSettingsClick = {
                     navController.navigateSafely(Screen.Settings.route)
+                },
+                onCreateClick = {
+                    navController.navigateSafely(Screen.SmartMix.route)
                 }
             )
         }
@@ -341,6 +357,31 @@ fun ExploreScreen(
                             }
                         }
 
+                        // 3.5) Recent Mixes (last.fm) Section
+                        if ((uiState.selectedFilter == "All" || uiState.selectedFilter == "For You") &&
+                            uiState.recentMixes.isNotEmpty()
+                        ) {
+                            item(key = "recent_mixes_header") {
+                                SectionHeader(title = "Recent Mixes (last.fm)")
+                            }
+                            item(key = "recent_mixes_carousel") {
+                                LazyRow(
+                                    contentPadding = PaddingValues(horizontal = 16.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                ) {
+                                    items(uiState.recentMixes) { playlist ->
+                                        RecentMixCardItem(
+                                            playlist = playlist,
+                                            playerViewModel = playerViewModel,
+                                            onClick = {
+                                                navController.navigateSafely(Screen.PlaylistDetail.createRoute(playlist.id))
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
                          // 4) Homepage "For You" sections (includes personal playlists like "Your Playlists" or "Community Playlists" as index 0)
                         if (uiState.selectedFilter == "All" || uiState.selectedFilter == "For You") {
 
@@ -504,8 +545,133 @@ fun SongCardItem(
 }
 
 @Composable
+fun AnimatedSparklesIconButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "sparkle_animation")
+    val scale by infiniteTransition.animateFloat(
+        initialValue = 0.9f,
+        targetValue = 1.1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "sparkle_scale"
+    )
+    val rotation by infiniteTransition.animateFloat(
+        initialValue = -10f,
+        targetValue = 10f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1800, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "sparkle_rotation"
+    )
+
+    Box(
+        modifier = modifier.size(48.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        FilledIconButton(
+            onClick = onClick,
+            modifier = Modifier.size(40.dp),
+            shape = CircleShape,
+            colors = IconButtonDefaults.filledIconButtonColors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.AutoAwesome,
+                contentDescription = "Smart Mix",
+                modifier = Modifier
+                    .size(20.dp)
+                    .graphicsLayer {
+                        scaleX = scale
+                        scaleY = scale
+                        rotationZ = rotation
+                    }
+            )
+        }
+
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .offset(x = 2.dp, y = (-2).dp)
+                .background(Color(0xFFE53935), RoundedCornerShape(6.dp))
+                .padding(horizontal = 4.dp, vertical = 1.5.dp)
+        ) {
+            Text(
+                text = "HOT",
+                fontSize = 7.5.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = Color.White,
+                fontFamily = GoogleSansRounded,
+                letterSpacing = 0.5.sp
+            )
+        }
+    }
+}
+
+@Composable
+fun RecentMixCardItem(
+    playlist: Playlist,
+    playerViewModel: PlayerViewModel,
+    onClick: () -> Unit
+) {
+    val shape = remember { AbsoluteSmoothCornerShape(20.dp, 60) }
+    val previewSongIds = remember(playlist.songIds) {
+        playlist.songIds.take(4)
+    }
+    var playlistSongs by remember(previewSongIds) {
+        mutableStateOf<List<Song>?>(if (previewSongIds.isEmpty()) emptyList() else null)
+    }
+    LaunchedEffect(previewSongIds) {
+        if (previewSongIds.isNotEmpty()) {
+            playlistSongs = playerViewModel.getSongs(previewSongIds)
+        }
+    }
+
+    Card(
+        modifier = Modifier
+            .width(140.dp)
+            .clickable(onClick = onClick),
+        shape = shape,
+        colors = CardDefaults.cardColors(containerColor = Color.Transparent)
+    ) {
+        Column {
+            PlaylistCover(
+                playlist = playlist,
+                playlistSongs = playlistSongs ?: emptyList(),
+                modifier = Modifier
+                    .size(140.dp)
+                    .clip(shape),
+                size = 140.dp
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = playlist.name,
+                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = "Smart Mix",
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
 fun ExploreTopBar(
-    onSettingsClick: () -> Unit
+    onSettingsClick: () -> Unit,
+    onCreateClick: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -525,20 +691,27 @@ fun ExploreTopBar(
             letterSpacing = 1.sp
         )
 
-        FilledIconButton(
-            onClick = onSettingsClick,
-            modifier = Modifier.size(40.dp),
-            shape = CircleShape,
-            colors = IconButtonDefaults.filledIconButtonColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-            )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                painter = painterResource(R.drawable.rounded_settings_24),
-                contentDescription = stringResource(R.string.settings_top_bar_title),
-                modifier = Modifier.size(20.dp)
-            )
+            AnimatedSparklesIconButton(onClick = onCreateClick)
+
+            FilledIconButton(
+                onClick = onSettingsClick,
+                modifier = Modifier.size(40.dp),
+                shape = CircleShape,
+                colors = IconButtonDefaults.filledIconButtonColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.rounded_settings_24),
+                    contentDescription = stringResource(R.string.settings_top_bar_title),
+                    modifier = Modifier.size(20.dp)
+                )
+            }
         }
     }
 }

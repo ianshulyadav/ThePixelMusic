@@ -50,6 +50,7 @@ import com.unshoo.pixelmusic.presentation.screens.PaletteStyleSettingsScreen
 import com.unshoo.pixelmusic.presentation.screens.PlaylistDetailScreen
 import com.unshoo.pixelmusic.presentation.screens.RecentlyPlayedScreen
 import com.unshoo.pixelmusic.presentation.screens.QuickPicksAllScreen
+import com.unshoo.pixelmusic.presentation.screens.SmartMixScreen
 
 import com.unshoo.pixelmusic.presentation.screens.AboutScreen
 import com.unshoo.pixelmusic.presentation.screens.ArtistAlbumsAllScreen
@@ -337,6 +338,20 @@ fun AppNavigation(
                     DailyMixScreen(
                         playerViewModel = playerViewModel,
                         navController = navController
+                    )
+                }
+            }
+            composable(
+                Screen.SmartMix.route,
+                enterTransition = { enterTransition() },
+                exitTransition = { exitTransition() },
+                popEnterTransition = { popEnterTransition() },
+                popExitTransition = { popExitTransition() },
+            ) {
+                ScreenWrapper(navController = navController, playerViewModel = playerViewModel) {
+                    SmartMixScreen(
+                        navController = navController,
+                        playerViewModel = playerViewModel
                     )
                 }
             }
