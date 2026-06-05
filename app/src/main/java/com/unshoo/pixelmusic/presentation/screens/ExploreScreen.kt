@@ -598,13 +598,13 @@ fun AnimatedSparklesIconButton(
         Box(
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .offset(x = 2.dp, y = (-2).dp)
-                .background(Color(0xFFE53935), RoundedCornerShape(6.dp))
-                .padding(horizontal = 4.dp, vertical = 1.5.dp)
+                .offset(x = 8.dp, y = (-6).dp)
+                .background(Color(0xFFE53935), RoundedCornerShape(5.dp))
+                .padding(horizontal = 3.5.dp, vertical = 1.dp)
         ) {
             Text(
                 text = "HOT",
-                fontSize = 7.5.sp,
+                fontSize = 7.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = Color.White,
                 fontFamily = GoogleSansRounded,
