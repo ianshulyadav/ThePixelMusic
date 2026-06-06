@@ -537,44 +537,7 @@ fun PlaylistItem(
                 )
             }
 
-            if (playlist.source == "YOUTUBE") {
-                val syncingPlaylists by playlistViewModel.syncingPlaylists.collectAsStateWithLifecycle()
-                val isSyncing = syncingPlaylists.contains(playlist.id)
 
-                val rotationAngle: Float = if (isSyncing) {
-                    val transition = rememberInfiniteTransition(label = "syncRotation")
-                    val angle by transition.animateFloat(
-                        initialValue = 0f,
-                        targetValue = 360f,
-                        animationSpec = infiniteRepeatable(
-                            animation = tween(1500, easing = LinearEasing),
-                            repeatMode = RepeatMode.Restart
-                        ),
-                        label = "rotationAngle"
-                    )
-                    angle
-                } else {
-                    0f
-                }
-
-                IconButton(
-                    onClick = {
-                        playlistViewModel.syncYouTubePlaylist(playlist.id)
-                    },
-                    modifier = Modifier.padding(end = 4.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Sync,
-                        contentDescription = "Sync YouTube Playlist",
-                        modifier = Modifier
-                            .size(22.dp)
-                            .graphicsLayer {
-                                rotationZ = rotationAngle
-                            },
-                        tint = if (isSyncing) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
 
             if (isSelected && isSelectionMode) {
                 Spacer(modifier = Modifier.width(10.dp))
