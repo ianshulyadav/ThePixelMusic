@@ -15,6 +15,14 @@ import androidx.compose.ui.unit.sp
 import com.unshoo.pixelmusic.R
 
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+
+object FontSettings {
+    var useSystemFont by mutableStateOf(false)
+}
+
 private val montserrat = GoogleFont("Montserrat")
 private val provider = GoogleFont.Provider(
     providerAuthority = "com.google.android.gms.fonts",
@@ -66,7 +74,7 @@ val ExpTitleTypography = Typography(
 private const val GoogleSansFlexRond = 100f
 
 @OptIn(ExperimentalTextApi::class)
-val GoogleSansRounded = FontFamily(
+val ActualGoogleSansRounded = FontFamily(
     androidx.compose.ui.text.font.Font(
         resId = R.font.gflex_variable,
         weight = FontWeight.Light,
@@ -109,112 +117,119 @@ val GoogleSansRounded = FontFamily(
     ),
 )
 
-// Tipografía - Usar fuentes amigables y modernas.
-// Considerar añadir fuentes personalizadas en res/font para un look más único.
-val Typography = Typography(
+val GoogleSansRounded: FontFamily
+    get() = if (FontSettings.useSystemFont) FontFamily.Default else ActualGoogleSansRounded
+
+private fun createBaseTypography(family: FontFamily): Typography = Typography(
     displayLarge = TextStyle(
-        fontFamily = GoogleSansRounded,
+        fontFamily = family,
         fontWeight = FontWeight.Bold,
         fontSize = 48.sp,
         lineHeight = 56.sp,
         letterSpacing = 0.sp
     ),
     displayMedium = TextStyle(
-        fontFamily = GoogleSansRounded,
+        fontFamily = family,
         fontWeight = FontWeight.Bold,
         fontSize = 36.sp,
         lineHeight = 44.sp,
         letterSpacing = 0.sp
     ),
     displaySmall = TextStyle(
-        fontFamily = GoogleSansRounded,
+        fontFamily = family,
         fontWeight = FontWeight.Normal,
         fontSize = 30.sp,
         lineHeight = 38.sp,
         letterSpacing = 0.sp
     ),
     headlineLarge = TextStyle(
-        fontFamily = GoogleSansRounded,
+        fontFamily = family,
         fontWeight = FontWeight.SemiBold,
         fontSize = 32.sp,
         lineHeight = 40.sp,
         letterSpacing = 0.sp
     ),
     headlineMedium = TextStyle(
-        fontFamily = GoogleSansRounded,
+        fontFamily = family,
         fontWeight = FontWeight.SemiBold,
         fontSize = 28.sp,
         lineHeight = 36.sp,
         letterSpacing = 0.sp
     ),
     headlineSmall = TextStyle(
-        fontFamily = GoogleSansRounded,
+        fontFamily = family,
         fontWeight = FontWeight.SemiBold,
         fontSize = 24.sp,
         lineHeight = 32.sp,
         letterSpacing = 0.sp
     ),
     titleLarge = TextStyle(
-        fontFamily = GoogleSansRounded,
+        fontFamily = family,
         fontWeight = FontWeight.Normal,
         fontSize = 22.sp,
         lineHeight = 28.sp,
         letterSpacing = 0.sp
     ),
     titleMedium = TextStyle(
-        fontFamily = GoogleSansRounded,
+        fontFamily = family,
         fontWeight = FontWeight.Medium,
         fontSize = 18.sp,
         lineHeight = 24.sp,
         letterSpacing = 0.15.sp
     ),
     titleSmall = TextStyle(
-        fontFamily = GoogleSansRounded,
+        fontFamily = family,
         fontWeight = FontWeight.Medium,
         fontSize = 14.sp,
         lineHeight = 20.sp,
         letterSpacing = 0.1.sp
     ),
     bodyLarge = TextStyle(
-        fontFamily = GoogleSansRounded,
+        fontFamily = family,
         fontWeight = FontWeight.Normal,
         fontSize = 16.sp,
         lineHeight = 24.sp,
         letterSpacing = 0.5.sp
     ),
     bodyMedium = TextStyle(
-        fontFamily = GoogleSansRounded,
+        fontFamily = family,
         fontWeight = FontWeight.Normal,
         fontSize = 14.sp,
         lineHeight = 20.sp,
         letterSpacing = 0.25.sp
     ),
     bodySmall = TextStyle(
-        fontFamily = GoogleSansRounded,
+        fontFamily = family,
         fontWeight = FontWeight.Normal,
         fontSize = 12.sp,
         lineHeight = 16.sp,
         letterSpacing = 0.4.sp
     ),
     labelLarge = TextStyle(
-        fontFamily = GoogleSansRounded,
+        fontFamily = family,
         fontWeight = FontWeight.Medium,
         fontSize = 16.sp,
         lineHeight = 20.sp,
         letterSpacing = 0.1.sp
     ),
     labelMedium = TextStyle(
-        fontFamily = GoogleSansRounded,
+        fontFamily = family,
         fontWeight = FontWeight.Medium,
         fontSize = 14.sp,
         lineHeight = 16.sp,
         letterSpacing = 0.5.sp
     ),
     labelSmall = TextStyle(
-        fontFamily = GoogleSansRounded,
+        fontFamily = family,
         fontWeight = FontWeight.Medium,
         fontSize = 11.sp,
         lineHeight = 16.sp,
         letterSpacing = 0.5.sp
     )
 )
+
+private val DefaultAppTypography = createBaseTypography(ActualGoogleSansRounded)
+private val SystemFontTypography = createBaseTypography(FontFamily.Default)
+
+val Typography: Typography
+    get() = if (FontSettings.useSystemFont) SystemFontTypography else DefaultAppTypography

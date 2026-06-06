@@ -20,10 +20,15 @@ class ThemePreferencesRepository @Inject constructor(
         val ALBUM_ART_COLOR_ACCURACY = intPreferencesKey("album_art_color_accuracy_v1")
         val APP_THEME_MODE = stringPreferencesKey("app_theme_mode")
         val COLOR_PALETTE_PREFERENCE = stringPreferencesKey("color_palette_preference")
+        val APP_FONT_PREFERENCE = stringPreferencesKey("app_font_preference")
     }
 
     val appThemeModeFlow: Flow<String> = dataStore.data.map { preferences ->
         preferences[Keys.APP_THEME_MODE] ?: AppThemeMode.FOLLOW_SYSTEM
+    }
+
+    val appFontModeFlow: Flow<String> = dataStore.data.map { preferences ->
+        preferences[Keys.APP_FONT_PREFERENCE] ?: AppFontMode.APP_DEFAULT
     }
 
     val playerThemePreferenceFlow: Flow<String> = dataStore.data.map { preferences ->
@@ -41,6 +46,11 @@ class ThemePreferencesRepository @Inject constructor(
     val albumArtColorAccuracyFlow: Flow<Int> = dataStore.data.map { preferences ->
         AlbumArtColorAccuracy.clamp(preferences[Keys.ALBUM_ART_COLOR_ACCURACY] ?: AlbumArtColorAccuracy.DEFAULT)
     }
+
+    suspend fun setAppFontMode(fontMode: String) =
+        dataStore.edit { preferences ->
+            preferences[Keys.APP_FONT_PREFERENCE] = fontMode
+        }
 
     suspend fun setPlayerThemePreference(themeMode: String) =
         dataStore.edit { preferences ->

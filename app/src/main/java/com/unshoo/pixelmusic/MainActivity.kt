@@ -100,6 +100,7 @@ import com.google.common.util.concurrent.MoreExecutors
 import com.unshoo.pixelmusic.data.github.GitHubAnnouncementPropertiesService
 import com.unshoo.pixelmusic.data.github.PlayStoreAnnouncementRemoteConfig
 import com.unshoo.pixelmusic.data.preferences.AppThemeMode
+import com.unshoo.pixelmusic.data.preferences.AppFontMode
 import com.unshoo.pixelmusic.data.preferences.NavBarStyle
 import com.unshoo.pixelmusic.data.preferences.sanitizeNavBarCornerRadius
 import com.unshoo.pixelmusic.data.preferences.ThemePreferencesRepository
@@ -240,6 +241,7 @@ class MainActivity : ComponentActivity() {
             }
             val playerThemePreference by themePreferencesRepository.playerThemePreferenceFlow.collectAsStateWithLifecycle(initialValue = ThemePreference.ALBUM_ART)
             val colorPalette by themePreferencesRepository.colorPalettePreferenceFlow.collectAsStateWithLifecycle(initialValue = "SAGE")
+            val appFontMode by themePreferencesRepository.appFontModeFlow.collectAsStateWithLifecycle(initialValue = AppFontMode.APP_DEFAULT)
             val dynamicColorEnabled = playerThemePreference == ThemePreference.DYNAMIC
             val isSetupComplete by mainViewModel.isSetupComplete.collectAsStateWithLifecycle()
             
@@ -284,7 +286,8 @@ class MainActivity : ComponentActivity() {
             PixelMusicTheme(
                 darkTheme = useDarkTheme,
                 dynamicColor = dynamicColorEnabled,
-                colorPalette = colorPalette
+                colorPalette = colorPalette,
+                useSystemFont = (appFontMode == AppFontMode.SYSTEM)
             ) {
                 var contentVisible by remember { mutableStateOf(false) }
                 val contentAlpha by animateFloatAsState(

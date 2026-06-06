@@ -40,6 +40,9 @@ import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.unshoo.pixelmusic.data.gdrive.GDriveConstants
 import com.unshoo.pixelmusic.ui.theme.GoogleSansRounded
 import com.unshoo.pixelmusic.ui.theme.PixelMusicTheme
+import com.unshoo.pixelmusic.data.preferences.ThemePreferencesRepository
+import com.unshoo.pixelmusic.data.preferences.AppFontMode
+import javax.inject.Inject
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
 import racra.compose.smooth_corner_rect_library.AbsoluteSmoothCornerShape
@@ -49,11 +52,15 @@ import com.unshoo.pixelmusic.R
 
 @AndroidEntryPoint
 class GDriveLoginActivity : ComponentActivity() {
+    @Inject
+    lateinit var themePreferencesRepository: ThemePreferencesRepository
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            PixelMusicTheme {
+            val appFontMode by themePreferencesRepository.appFontModeFlow.collectAsStateWithLifecycle(initialValue = AppFontMode.APP_DEFAULT)
+            PixelMusicTheme(useSystemFont = (appFontMode == AppFontMode.SYSTEM)) {
                 GDriveLoginScreen(onClose = { finish() })
             }
         }

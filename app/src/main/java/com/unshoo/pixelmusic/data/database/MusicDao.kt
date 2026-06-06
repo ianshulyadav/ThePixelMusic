@@ -463,6 +463,18 @@ interface MusicDao {
         SELECT songs.* FROM songs
         INNER JOIN songs_fts ON songs_fts.rowid = songs.id
         WHERE (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
+        AND (
+            songs.source_type = 0
+            OR songs.is_favorite = 1
+            OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs)
+            OR songs.artist_id IN (
+                SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != ''
+                UNION
+                SELECT artist_id FROM songs WHERE source_type = 0 OR is_favorite = 1
+                UNION
+                SELECT artist_id FROM songs WHERE CAST(id AS TEXT) IN (SELECT song_id FROM playlist_songs) GROUP BY artist_id HAVING COUNT(id) > 3
+            )
+        )
         AND songs_fts MATCH :matchQuery
         ORDER BY songs.title ASC
     """)
@@ -475,6 +487,18 @@ interface MusicDao {
     @Query("""
         SELECT * FROM songs
         WHERE (:applyDirectoryFilter = 0 OR id < 0 OR parent_directory_path IN (:allowedParentDirs))
+        AND (
+            source_type = 0
+            OR is_favorite = 1
+            OR CAST(id AS TEXT) IN (SELECT song_id FROM playlist_songs)
+            OR artist_id IN (
+                SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != ''
+                UNION
+                SELECT artist_id FROM songs WHERE source_type = 0 OR is_favorite = 1
+                UNION
+                SELECT artist_id FROM songs WHERE CAST(id AS TEXT) IN (SELECT song_id FROM playlist_songs) GROUP BY artist_id HAVING COUNT(id) > 3
+            )
+        )
         AND (title LIKE '%' || :query || '%' OR artist_name LIKE '%' || :query || '%')
         ORDER BY title ASC
     """)
@@ -710,6 +734,18 @@ interface MusicDao {
         SELECT * FROM songs
         WHERE (:applyDirectoryFilter = 0 OR id < 0 OR parent_directory_path IN (:allowedParentDirs))
         AND (
+            source_type = 0 
+            OR is_favorite = 1 
+            OR CAST(id AS TEXT) IN (SELECT song_id FROM playlist_songs)
+            OR artist_id IN (
+                SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != ''
+                UNION
+                SELECT artist_id FROM songs WHERE source_type = 0 OR is_favorite = 1
+                UNION
+                SELECT artist_id FROM songs WHERE CAST(id AS TEXT) IN (SELECT song_id FROM playlist_songs) GROUP BY artist_id HAVING COUNT(id) > 3
+            )
+        )
+        AND (
             :filterMode = 0
             OR (
                 :filterMode = 1
@@ -752,6 +788,18 @@ interface MusicDao {
         SELECT """ + SONG_LIST_PROJECTION + """
         FROM songs
         WHERE (:applyDirectoryFilter = 0 OR id < 0 OR parent_directory_path IN (:allowedParentDirs))
+        AND (
+            source_type = 0 
+            OR is_favorite = 1 
+            OR CAST(id AS TEXT) IN (SELECT song_id FROM playlist_songs)
+            OR artist_id IN (
+                SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != ''
+                UNION
+                SELECT artist_id FROM songs WHERE source_type = 0 OR is_favorite = 1
+                UNION
+                SELECT artist_id FROM songs WHERE CAST(id AS TEXT) IN (SELECT song_id FROM playlist_songs) GROUP BY artist_id HAVING COUNT(id) > 3
+            )
+        )
         AND (
             :filterMode = 0
             OR (
@@ -943,7 +991,19 @@ interface MusicDao {
     @Query("""
         SELECT songs.* FROM songs
         INNER JOIN songs_fts ON songs_fts.rowid = songs.id
-        WHERE (:applyDirectoryFilter = 0 OR songs.parent_directory_path IN (:allowedParentDirs))
+        WHERE (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
+        AND (
+            songs.source_type = 0
+            OR songs.is_favorite = 1
+            OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs)
+            OR songs.artist_id IN (
+                SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != ''
+                UNION
+                SELECT artist_id FROM songs WHERE source_type = 0 OR is_favorite = 1
+                UNION
+                SELECT artist_id FROM songs WHERE CAST(id AS TEXT) IN (SELECT song_id FROM playlist_songs) GROUP BY artist_id HAVING COUNT(id) > 3
+            )
+        )
         AND songs_fts MATCH :matchQuery
         ORDER BY songs.title ASC
     """)
@@ -970,6 +1030,18 @@ interface MusicDao {
         SELECT songs.* FROM songs
         INNER JOIN songs_fts ON songs_fts.rowid = songs.id
         WHERE (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
+        AND (
+            songs.source_type = 0
+            OR songs.is_favorite = 1
+            OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs)
+            OR songs.artist_id IN (
+                SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != ''
+                UNION
+                SELECT artist_id FROM songs WHERE source_type = 0 OR is_favorite = 1
+                UNION
+                SELECT artist_id FROM songs WHERE CAST(id AS TEXT) IN (SELECT song_id FROM playlist_songs) GROUP BY artist_id HAVING COUNT(id) > 3
+            )
+        )
         AND songs_fts MATCH :matchQuery
         ORDER BY songs.title ASC
         LIMIT :limit
@@ -987,6 +1059,18 @@ interface MusicDao {
     @Query("""
         SELECT * FROM songs
         WHERE (:applyDirectoryFilter = 0 OR id < 0 OR parent_directory_path IN (:allowedParentDirs))
+        AND (
+            source_type = 0
+            OR is_favorite = 1
+            OR CAST(id AS TEXT) IN (SELECT song_id FROM playlist_songs)
+            OR artist_id IN (
+                SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != ''
+                UNION
+                SELECT artist_id FROM songs WHERE source_type = 0 OR is_favorite = 1
+                UNION
+                SELECT artist_id FROM songs WHERE CAST(id AS TEXT) IN (SELECT song_id FROM playlist_songs) GROUP BY artist_id HAVING COUNT(id) > 3
+            )
+        )
         AND title LIKE '%' || :query || '%'
         ORDER BY title ASC
         LIMIT :limit
@@ -1004,6 +1088,18 @@ interface MusicDao {
     @Query("""
         SELECT * FROM songs
         WHERE (:applyDirectoryFilter = 0 OR id < 0 OR parent_directory_path IN (:allowedParentDirs))
+        AND (
+            source_type = 0
+            OR is_favorite = 1
+            OR CAST(id AS TEXT) IN (SELECT song_id FROM playlist_songs)
+            OR artist_id IN (
+                SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != ''
+                UNION
+                SELECT artist_id FROM songs WHERE source_type = 0 OR is_favorite = 1
+                UNION
+                SELECT artist_id FROM songs WHERE CAST(id AS TEXT) IN (SELECT song_id FROM playlist_songs) GROUP BY artist_id HAVING COUNT(id) > 3
+            )
+        )
         AND (title LIKE '%' || :query || '%' OR artist_name LIKE '%' || :query || '%')
         ORDER BY title ASC
         LIMIT :limit
@@ -1083,6 +1179,18 @@ interface MusicDao {
         INNER JOIN albums ON albums.id = songs.album_id
         WHERE (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
         AND (
+            songs.source_type = 0 
+            OR songs.is_favorite = 1 
+            OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs)
+            OR songs.artist_id IN (
+                SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != ''
+                UNION
+                SELECT artist_id FROM songs WHERE source_type = 0 OR is_favorite = 1
+                UNION
+                SELECT artist_id FROM songs WHERE CAST(id AS TEXT) IN (SELECT song_id FROM playlist_songs) GROUP BY artist_id HAVING COUNT(id) > 3
+            )
+        )
+        AND (
             :filterMode = 0
             OR (
                 :filterMode = 1
@@ -1130,6 +1238,18 @@ interface MusicDao {
         FROM songs
         INNER JOIN albums ON albums.id = songs.album_id
         WHERE (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
+        AND (
+            songs.source_type = 0 
+            OR songs.is_favorite = 1 
+            OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs)
+            OR songs.artist_id IN (
+                SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != ''
+                UNION
+                SELECT artist_id FROM songs WHERE source_type = 0 OR is_favorite = 1
+                UNION
+                SELECT artist_id FROM songs WHERE CAST(id AS TEXT) IN (SELECT song_id FROM playlist_songs) GROUP BY artist_id HAVING COUNT(id) > 3
+            )
+        )
         AND (
             :filterMode = 0
             OR (
@@ -1191,6 +1311,18 @@ interface MusicDao {
         FROM songs
         INNER JOIN albums ON albums.id = songs.album_id
         WHERE (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
+        AND (
+            songs.source_type = 0 
+            OR songs.is_favorite = 1 
+            OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs)
+            OR songs.artist_id IN (
+                SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != ''
+                UNION
+                SELECT artist_id FROM songs WHERE source_type = 0 OR is_favorite = 1
+                UNION
+                SELECT artist_id FROM songs WHERE CAST(id AS TEXT) IN (SELECT song_id FROM playlist_songs) GROUP BY artist_id HAVING COUNT(id) > 3
+            )
+        )
         AND (
             :filterMode = 0
             OR (
@@ -1302,6 +1434,18 @@ interface MusicDao {
         FROM songs
         INNER JOIN albums ON albums.id = songs.album_id
         WHERE (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
+        AND (
+            songs.source_type = 0 
+            OR songs.is_favorite = 1 
+            OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs)
+            OR songs.artist_id IN (
+                SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != ''
+                UNION
+                SELECT artist_id FROM songs WHERE source_type = 0 OR is_favorite = 1
+                UNION
+                SELECT artist_id FROM songs WHERE CAST(id AS TEXT) IN (SELECT song_id FROM playlist_songs) GROUP BY artist_id HAVING COUNT(id) > 3
+            )
+        )
         GROUP BY
             albums.id,
             albums.title,
@@ -1384,8 +1528,20 @@ interface MusicDao {
     // --- Artist Queries ---
     @Query("""
         SELECT DISTINCT artists.* FROM artists
-        INNER JOIN songs ON artists.id = songs.artist_id
-        WHERE (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
+        LEFT JOIN songs ON artists.id = songs.artist_id AND (
+            songs.source_type = 0 
+            OR songs.is_favorite = 1 
+            OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs)
+            OR songs.artist_id IN (
+                SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != ''
+                UNION
+                SELECT artist_id FROM songs WHERE source_type = 0 OR is_favorite = 1
+                UNION
+                SELECT artist_id FROM songs WHERE CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs) GROUP BY artist_id HAVING COUNT(id) > 3
+            )
+        )
+        WHERE (artists.channel_id IS NOT NULL AND artists.channel_id != '')
+           OR (songs.id IS NOT NULL AND (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs)))
         ORDER BY artists.name ASC
     """)
     fun getArtists(
@@ -1396,25 +1552,40 @@ interface MusicDao {
     @Query("""
         SELECT artists.id, artists.name, artists.image_url, artists.custom_image_uri,
                artists.channel_id, COUNT(DISTINCT songs.id) AS track_count
-        FROM songs
-        INNER JOIN song_artist_cross_ref ON song_artist_cross_ref.song_id = songs.id
-        INNER JOIN artists ON artists.id = song_artist_cross_ref.artist_id
-        WHERE (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
-        AND (
-            :filterMode = 0
-            OR (
-                :filterMode = 1
-                AND (songs.source_type = 0 OR (songs.file_path IS NOT NULL AND songs.file_path != ''))
-            )
-            OR (
-                :filterMode = 2
-                AND songs.source_type != 0
-            )
-            OR (
-                :filterMode = 3
-                AND (songs.file_path IS NOT NULL AND songs.file_path != '')
+        FROM artists
+        LEFT JOIN song_artist_cross_ref ON song_artist_cross_ref.artist_id = artists.id
+        LEFT JOIN songs ON song_artist_cross_ref.song_id = songs.id AND (
+            songs.source_type = 0 
+            OR songs.is_favorite = 1 
+            OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs)
+            OR songs.artist_id IN (
+                SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != ''
+                UNION
+                SELECT artist_id FROM songs WHERE source_type = 0 OR is_favorite = 1
+                UNION
+                SELECT artist_id FROM songs WHERE CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs) GROUP BY artist_id HAVING COUNT(id) > 3
             )
         )
+        WHERE (artists.channel_id IS NOT NULL AND artists.channel_id != '')
+           OR (
+               songs.id IS NOT NULL 
+               AND (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
+               AND (
+                   :filterMode = 0
+                   OR (
+                       :filterMode = 1
+                       AND (songs.source_type = 0 OR (songs.file_path IS NOT NULL AND songs.file_path != ''))
+                   )
+                   OR (
+                       :filterMode = 2
+                       AND songs.source_type != 0
+                   )
+                   OR (
+                       :filterMode = 3
+                       AND (songs.file_path IS NOT NULL AND songs.file_path != '')
+                   )
+               )
+           )
         GROUP BY artists.id
         ORDER BY
             CASE WHEN :sortOrder = 'artist_name_az' THEN artists.name END COLLATE NOCASE ASC,
@@ -1438,10 +1609,22 @@ interface MusicDao {
     @Query("""
         SELECT artists.id, artists.name, artists.image_url, artists.custom_image_uri,
                artists.channel_id, COUNT(DISTINCT songs.id) AS track_count
-        FROM songs
-        INNER JOIN song_artist_cross_ref ON song_artist_cross_ref.song_id = songs.id
-        INNER JOIN artists ON artists.id = song_artist_cross_ref.artist_id
+        FROM artists
+        LEFT JOIN song_artist_cross_ref ON song_artist_cross_ref.artist_id = artists.id
+        LEFT JOIN songs ON song_artist_cross_ref.song_id = songs.id AND (
+            songs.source_type = 0 
+            OR songs.is_favorite = 1 
+            OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs)
+            OR songs.artist_id IN (
+                SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != ''
+                UNION
+                SELECT artist_id FROM songs WHERE source_type = 0 OR is_favorite = 1
+                UNION
+                SELECT artist_id FROM songs WHERE CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs) GROUP BY artist_id HAVING COUNT(id) > 3
+            )
+        )
         WHERE artists.id < 0
+          AND ((artists.channel_id IS NOT NULL AND artists.channel_id != '') OR songs.id IS NOT NULL)
         GROUP BY artists.id
         ORDER BY
             CASE WHEN :sortOrder = 'artist_name_az' THEN artists.name END COLLATE NOCASE ASC,
@@ -1458,25 +1641,40 @@ interface MusicDao {
     @Query("""
         SELECT artists.id, artists.name, artists.image_url, artists.custom_image_uri,
                artists.channel_id, COUNT(DISTINCT songs.id) AS track_count
-        FROM songs
-        INNER JOIN song_artist_cross_ref ON song_artist_cross_ref.song_id = songs.id
-        INNER JOIN artists ON artists.id = song_artist_cross_ref.artist_id
-        WHERE (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
-        AND (
-            :filterMode = 0
-            OR (
-                :filterMode = 1
-                AND (songs.source_type = 0 OR (songs.file_path IS NOT NULL AND songs.file_path != ''))
-            )
-            OR (
-                :filterMode = 2
-                AND songs.source_type != 0
-            )
-            OR (
-                :filterMode = 3
-                AND (songs.file_path IS NOT NULL AND songs.file_path != '')
+        FROM artists
+        LEFT JOIN song_artist_cross_ref ON song_artist_cross_ref.artist_id = artists.id
+        LEFT JOIN songs ON song_artist_cross_ref.song_id = songs.id AND (
+            songs.source_type = 0 
+            OR songs.is_favorite = 1 
+            OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs)
+            OR songs.artist_id IN (
+                SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != ''
+                UNION
+                SELECT artist_id FROM songs WHERE source_type = 0 OR is_favorite = 1
+                UNION
+                SELECT artist_id FROM songs WHERE CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs) GROUP BY artist_id HAVING COUNT(id) > 3
             )
         )
+        WHERE (artists.channel_id IS NOT NULL AND artists.channel_id != '')
+           OR (
+               songs.id IS NOT NULL 
+               AND (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
+               AND (
+                   :filterMode = 0
+                   OR (
+                       :filterMode = 1
+                       AND (songs.source_type = 0 OR (songs.file_path IS NOT NULL AND songs.file_path != ''))
+                   )
+                   OR (
+                       :filterMode = 2
+                       AND songs.source_type != 0
+                   )
+                   OR (
+                       :filterMode = 3
+                       AND (songs.file_path IS NOT NULL AND songs.file_path != '')
+                   )
+               )
+           )
         GROUP BY artists.id
         ORDER BY
             CASE WHEN :sortOrder = 'artist_name_az' THEN artists.name END COLLATE NOCASE ASC,
@@ -1505,7 +1703,24 @@ interface MusicDao {
     @Query("SELECT * FROM artists WHERE id = :artistId")
     fun getArtistById(artistId: Long): Flow<ArtistEntity?>
 
-    @Query("SELECT * FROM artists WHERE name LIKE '%' || :query || '%' ORDER BY name ASC")
+    @Query("""
+        SELECT DISTINCT artists.* FROM artists
+        LEFT JOIN songs ON artists.id = songs.artist_id AND (
+            songs.source_type = 0
+            OR songs.is_favorite = 1
+            OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs)
+            OR songs.artist_id IN (
+                SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != ''
+                UNION
+                SELECT artist_id FROM songs WHERE source_type = 0 OR is_favorite = 1
+                UNION
+                SELECT artist_id FROM songs WHERE CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs) GROUP BY artist_id HAVING COUNT(id) > 3
+            )
+        )
+        WHERE ((artists.channel_id IS NOT NULL AND artists.channel_id != '') OR songs.id IS NOT NULL)
+        AND artists.name LIKE '%' || :query || '%'
+        ORDER BY artists.name ASC
+    """)
     fun searchArtists(query: String): Flow<List<ArtistEntity>>
 
     @Query("SELECT COUNT(*) FROM artists")
@@ -1514,8 +1729,20 @@ interface MusicDao {
     // Version of getArtists that returns a List for one-shot reads
     @Query("""
         SELECT DISTINCT artists.* FROM artists
-        INNER JOIN songs ON artists.id = songs.artist_id
-        WHERE (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
+        LEFT JOIN songs ON artists.id = songs.artist_id AND (
+            songs.source_type = 0 
+            OR songs.is_favorite = 1 
+            OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs)
+            OR songs.artist_id IN (
+                SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != ''
+                UNION
+                SELECT artist_id FROM songs WHERE source_type = 0 OR is_favorite = 1
+                UNION
+                SELECT artist_id FROM songs WHERE CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs) GROUP BY artist_id HAVING COUNT(id) > 3
+            )
+        )
+        WHERE (artists.channel_id IS NOT NULL AND artists.channel_id != '')
+           OR (songs.id IS NOT NULL AND (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs)))
         ORDER BY artists.name ASC
     """)
     suspend fun getAllArtistsList(
@@ -1532,10 +1759,22 @@ interface MusicDao {
     @Query("""
         SELECT artists.id, artists.name, artists.image_url, artists.custom_image_uri,
                artists.channel_id, COUNT(DISTINCT songs.id) AS track_count
-        FROM songs
-        INNER JOIN song_artist_cross_ref ON song_artist_cross_ref.song_id = songs.id
-        INNER JOIN artists ON artists.id = song_artist_cross_ref.artist_id
-        WHERE (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
+        FROM artists
+        LEFT JOIN song_artist_cross_ref ON song_artist_cross_ref.artist_id = artists.id
+        LEFT JOIN songs ON song_artist_cross_ref.song_id = songs.id AND (
+            songs.source_type = 0 
+            OR songs.is_favorite = 1 
+            OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs)
+            OR songs.artist_id IN (
+                SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != ''
+                UNION
+                SELECT artist_id FROM songs WHERE source_type = 0 OR is_favorite = 1
+                UNION
+                SELECT artist_id FROM songs WHERE CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs) GROUP BY artist_id HAVING COUNT(id) > 3
+            )
+        )
+        WHERE ((artists.channel_id IS NOT NULL AND artists.channel_id != '')
+           OR (songs.id IS NOT NULL AND (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))))
         AND artists.name LIKE '%' || :query || '%'
         GROUP BY artists.id
         ORDER BY artists.name ASC
@@ -2128,6 +2367,13 @@ interface MusicDao {
         )
     """)
     suspend fun getLastPlayedSong(): SongEntity?
+
+    @Query("""
+        SELECT COUNT(DISTINCT song_id) FROM song_artist_cross_ref
+        INNER JOIN artists ON artists.id = song_artist_cross_ref.artist_id
+        WHERE artists.name = :artistName
+    """)
+    suspend fun getLocalSongCountByArtistName(artistName: String): Int
 
 
     companion object {

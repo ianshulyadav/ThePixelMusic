@@ -2614,15 +2614,18 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
-    fun playRadio(endpoint: unshoo.ianshulyadav.pixelmusic.innertube.models.WatchEndpoint, title: String) {
+    fun playRadio(endpoint: unshoo.ianshulyadav.pixelmusic.innertube.models.WatchEndpoint, title: String, shuffle: Boolean = false) {
         viewModelScope.launch {
             _playerUiState.update { it.copy(isLoadingInitialSongs = true) }
             val result = withContext(Dispatchers.IO) {
                 unshoo.ianshulyadav.pixelmusic.innertube.YouTube.next(endpoint)
             }
             result.onSuccess { nextResult ->
-                val songs = nextResult.items.map { it.toNativeSong() }
+                var songs = nextResult.items.map { it.toNativeSong() }
                 if (songs.isNotEmpty()) {
+                    if (shuffle) {
+                        songs = songs.shuffled()
+                    }
                     com.unshoo.pixelmusic.data.remote.youtube.AutoQueueManager.reset()
 
                     // CRITICAL FIX: Save songs to DB BEFORE starting playback.

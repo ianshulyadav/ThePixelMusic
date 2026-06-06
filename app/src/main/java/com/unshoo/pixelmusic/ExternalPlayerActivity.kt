@@ -19,6 +19,7 @@ import com.unshoo.pixelmusic.ui.theme.PixelMusicTheme
 import android.content.Intent.EXTRA_STREAM
 import androidx.media3.common.util.UnstableApi
 import com.unshoo.pixelmusic.data.preferences.AppThemeMode
+import com.unshoo.pixelmusic.data.preferences.AppFontMode
 import com.unshoo.pixelmusic.data.preferences.ThemePreferencesRepository
 import com.unshoo.pixelmusic.data.preferences.ThemePreference
 import javax.inject.Inject
@@ -54,11 +55,13 @@ class ExternalPlayerActivity : ComponentActivity() {
             }
             val playerThemePreference by themePreferencesRepository.playerThemePreferenceFlow.collectAsStateWithLifecycle(initialValue = ThemePreference.ALBUM_ART)
             val colorPalette by themePreferencesRepository.colorPalettePreferenceFlow.collectAsStateWithLifecycle(initialValue = "SAGE")
+            val appFontMode by themePreferencesRepository.appFontModeFlow.collectAsStateWithLifecycle(initialValue = AppFontMode.APP_DEFAULT)
             val dynamicColorEnabled = playerThemePreference == ThemePreference.DYNAMIC
             PixelMusicTheme(
                 darkTheme = useDarkTheme,
                 dynamicColor = dynamicColorEnabled,
-                colorPalette = colorPalette
+                colorPalette = colorPalette,
+                useSystemFont = (appFontMode == AppFontMode.SYSTEM)
             ) {
                 ExternalPlayerOverlay(
                     playerViewModel = playerViewModel,

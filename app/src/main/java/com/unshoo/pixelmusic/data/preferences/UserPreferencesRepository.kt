@@ -47,6 +47,11 @@ object AppThemeMode {
     const val DARK = "dark"
 }
 
+object AppFontMode {
+    const val APP_DEFAULT = "app_default"
+    const val SYSTEM = "system"
+}
+
 const val MIN_NAV_BAR_CORNER_RADIUS = 0
 const val MAX_NAV_BAR_CORNER_RADIUS = 60
 

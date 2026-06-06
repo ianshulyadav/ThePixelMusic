@@ -40,8 +40,10 @@ fun ArtistAlbumsAllScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
-    LaunchedEffect(artistId, type) {
-        viewModel.loadAllItems(type)
+    LaunchedEffect(artistId, type, uiState.isLoading) {
+        if (!uiState.isLoading) {
+            viewModel.loadAllItems(type)
+        }
     }
 
     val gridState = rememberLazyGridState()
@@ -58,6 +60,22 @@ fun ArtistAlbumsAllScreen(
         if (shouldLoadMore.value) {
             viewModel.loadMoreAllItems(type)
         }
+    }
+
+    val groupedItems = remember(uiState.allItems) {
+        uiState.allItems
+            .groupBy { it.year }
+            .toList()
+            .sortedWith { o1, o2 ->
+                val y1 = o1.first
+                val y2 = o2.first
+                when {
+                    y1 == y2 -> 0
+                    y1 == null -> 1
+                    y2 == null -> -1
+                    else -> y2.compareTo(y1)
+                }
+            }
     }
 
     val title = if (type == "singles") "Singles & EPs" else "Albums"
@@ -137,20 +155,34 @@ fun ArtistAlbumsAllScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    items(
-                        items = uiState.allItems,
-                        key = { it.albumId }
-                    ) { section ->
-                        AlbumGridCard(
-                            section = section,
-                            onClick = {
-                                section.browseId?.let { browseId ->
-                                    navController.navigateSafely(
-                                        Screen.AlbumDetail.createRoute(browseId)
-                                    )
+                    groupedItems.forEach { (year, sections) ->
+                        item(
+                            span = { GridItemSpan(maxLineSpan) },
+                            key = "header_${year ?: "unknown"}"
+                        ) {
+                            Text(
+                                text = year?.toString() ?: "Unknown Year",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(top = 12.dp, bottom = 4.dp)
+                            )
+                        }
+                        items(
+                            items = sections,
+                            key = { it.albumId }
+                        ) { section ->
+                            AlbumGridCard(
+                                section = section,
+                                onClick = {
+                                    section.browseId?.let { browseId ->
+                                        navController.navigateSafely(
+                                            Screen.AlbumDetail.createRoute(browseId)
+                                        )
+                                    }
                                 }
-                            }
-                        )
+                            )
+                        }
                     }
                     if (uiState.isAllItemsLoading) {
                         item(
