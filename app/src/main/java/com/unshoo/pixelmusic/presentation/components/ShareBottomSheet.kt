@@ -864,18 +864,28 @@ private fun ShareableCard(
 
             if (!isLyricsMode) {
                 // ── SONG MINI CARD ───────────────────────────────────────────
-                // Inner card: album-art extracted dynamic color (lightScheme) with glass outline and reduced roundedness
-                Card(
+                // Inner card: darkScheme gradient + colored glow for saturated, blended look
+                Box(
                     modifier = Modifier
                         .fillMaxWidth(0.88f)
-                        .shadow(20.dp, shape = RoundedCornerShape(12.dp)),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = lightScheme.primaryContainer.copy(alpha = 0.7f)
-                    ),
-                    border = BorderStroke(1.2.dp, Color.White.copy(alpha = 0.45f))
+                        .shadow(
+                            elevation = 28.dp,
+                            shape = RoundedCornerShape(12.dp),
+                            ambientColor = primaryColor.copy(alpha = 0.55f),
+                            spotColor = primaryColor.copy(alpha = 0.75f)
+                        )
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(
+                            brush = Brush.verticalGradient(
+                                colors = listOf(
+                                    darkScheme.primaryContainer,
+                                    darkScheme.surfaceContainerLow
+                                )
+                            )
+                        )
+                        .border(1.dp, primaryColor.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
                 ) {
-                    SongMiniCard(song = song, lightScheme = lightScheme)
+                    SongMiniCard(song = song, darkScheme = darkScheme)
                 }
             } else {
                 // ── LYRICS GLASS PANEL ───────────────────────────────────────
@@ -957,7 +967,7 @@ private fun ShareableCard(
 @Composable
 private fun SongMiniCard(
     song: Song,
-    lightScheme: ColorScheme
+    darkScheme: ColorScheme
 ) {
     val formattedDuration = remember(song.duration) {
         val totalSecs = song.duration / 1000
@@ -1014,7 +1024,7 @@ private fun SongMiniCard(
                 fontWeight = FontWeight.Bold,
                 fontSize = 15.sp,
                 lineHeight = 18.sp,
-                color = lightScheme.onPrimaryContainer,
+                color = darkScheme.onPrimaryContainer,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -1025,7 +1035,7 @@ private fun SongMiniCard(
                 fontWeight = FontWeight.Medium,
                 fontSize = 11.sp,
                 lineHeight = 14.sp,
-                color = lightScheme.onPrimaryContainer.copy(alpha = 0.55f),
+                color = darkScheme.onPrimaryContainer.copy(alpha = 0.65f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -1041,15 +1051,15 @@ private fun SongMiniCard(
                     fontFamily = GoogleSansRounded,
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 8.sp,
-                    color = lightScheme.onPrimaryContainer.copy(alpha = 0.6f)
+                    color = darkScheme.onPrimaryContainer.copy(alpha = 0.65f)
                 )
                 LinearWavyProgressIndicator(
                     progress = { 0.4f },
                     modifier = Modifier
                         .weight(1f)
                         .height(12.dp),
-                    color = lightScheme.primary,
-                    trackColor = lightScheme.primary.copy(alpha = 0.22f),
+                    color = darkScheme.primary,
+                    trackColor = darkScheme.primary.copy(alpha = 0.3f),
                     stroke = stroke,
                     trackStroke = stroke,
                     wavelength = 12.dp,
@@ -1061,7 +1071,7 @@ private fun SongMiniCard(
                     fontFamily = GoogleSansRounded,
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 8.sp,
-                    color = lightScheme.onPrimaryContainer.copy(alpha = 0.6f)
+                    color = darkScheme.onPrimaryContainer.copy(alpha = 0.65f)
                 )
             }
         }
