@@ -710,12 +710,8 @@ private fun ShareableCard(
     val lightScheme = albumColorScheme?.light ?: LightColorScheme
 
     val primaryColor = darkScheme.primary
-    val onPrimaryColor = darkScheme.onPrimary
-    val primaryContainerColor = darkScheme.primaryContainer
-    val onPrimaryContainerColor = darkScheme.onPrimaryContainer
     val secondaryColor = darkScheme.secondary
     val tertiaryColor = darkScheme.tertiary
-
     val surfaceContainerLow = darkScheme.surfaceContainerLow
     val surfaceContainerLowest = darkScheme.surfaceContainerLowest
 
@@ -725,153 +721,157 @@ private fun ShareableCard(
             .shadow(elevation = 16.dp, shape = cardShape, clip = true)
             .clip(cardShape)
     ) {
-        // ── 1. Dynamic Background Render ─────────────────────────────────────
-        when (themeStyle) {
-            ShareThemeStyle.DYNAMIC_PALETTE -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            brush = Brush.verticalGradient(
-                                colors = listOf(
-                                    surfaceContainerLow,
-                                    surfaceContainerLowest
-                                )
-                            )
-                        )
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(
-                                brush = Brush.radialGradient(
-                                    colors = listOf(
-                                        primaryColor.copy(alpha = 0.25f),
-                                        Color.Transparent
-                                    ),
-                                    radius = 600f
-                                )
-                            )
-                    )
-                }
-            }
-            ShareThemeStyle.SOOTHING_GRADIENT -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            brush = Brush.verticalGradient(
-                                colors = listOf(
-                                    surfaceContainerLow,
-                                    surfaceContainerLowest
-                                )
-                            )
-                        )
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(
-                                brush = Brush.linearGradient(
-                                    colors = listOf(
-                                        primaryColor.copy(alpha = 0.2f),
-                                        tertiaryColor.copy(alpha = 0.15f),
-                                        Color.Transparent
-                                    )
-                                )
-                            )
-                    )
-                }
-            }
-            ShareThemeStyle.BLURRED_ARTWORK -> {
-                Box(modifier = Modifier.fillMaxSize()) {
-                    SmartImage(
-                        model = song.albumArtUriString,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color.Black.copy(alpha = 0.35f))
-                    )
+        // ── 1. Outer Background ─────────────────────────────────────────────
+        // Lyrics card: full-bleed album art as background
+        // Song card: themeStyle dynamic dark bg
+        if (isLyricsMode) {
+            SmartImage(
+                model = song.albumArtUriString,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+            // Dark scrim for readability
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.52f))
+            )
+        } else {
+            when (themeStyle) {
+                ShareThemeStyle.DYNAMIC_PALETTE -> {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
                             .background(
                                 brush = Brush.verticalGradient(
-                                    colors = listOf(
-                                        surfaceContainerLow.copy(alpha = 0.82f),
-                                        surfaceContainerLowest.copy(alpha = 0.92f)
+                                    colors = listOf(surfaceContainerLow, surfaceContainerLowest)
+                                )
+                            )
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(
+                                    brush = Brush.radialGradient(
+                                        colors = listOf(primaryColor.copy(alpha = 0.25f), Color.Transparent),
+                                        radius = 600f
                                     )
                                 )
-                            )
-                    )
-                }
-            }
-            ShareThemeStyle.MIDNIGHT_MINIMAL -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(surfaceContainerLowest)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(420.dp)
-                            .align(Alignment.TopStart)
-                            .offset(x = (-120).dp, y = (-60).dp)
-                            .background(
-                                brush = Brush.radialGradient(
-                                    colors = listOf(primaryColor.copy(alpha = 0.12f), Color.Transparent)
-                                )
-                            )
-                    )
-                }
-            }
-            ShareThemeStyle.VIBRANT_GLOW -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            brush = Brush.verticalGradient(
-                                colors = listOf(
-                                    surfaceContainerLow,
-                                    surfaceContainerLowest
-                                )
-                            )
                         )
-                ) {
+                    }
+                }
+                ShareThemeStyle.SOOTHING_GRADIENT -> {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
                             .background(
-                                brush = Brush.linearGradient(
-                                    colors = listOf(
-                                        primaryColor.copy(alpha = 0.22f),
-                                        secondaryColor.copy(alpha = 0.15f),
-                                        tertiaryColor.copy(alpha = 0.1f)
-                                    )
+                                brush = Brush.verticalGradient(
+                                    colors = listOf(surfaceContainerLow, surfaceContainerLowest)
                                 )
                             )
-                    )
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(
+                                    brush = Brush.linearGradient(
+                                        colors = listOf(
+                                            primaryColor.copy(alpha = 0.2f),
+                                            tertiaryColor.copy(alpha = 0.15f),
+                                            Color.Transparent
+                                        )
+                                    )
+                                )
+                        )
+                    }
+                }
+                ShareThemeStyle.BLURRED_ARTWORK -> {
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        SmartImage(
+                            model = song.albumArtUriString,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Black.copy(alpha = 0.35f))
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(
+                                    brush = Brush.verticalGradient(
+                                        colors = listOf(
+                                            surfaceContainerLow.copy(alpha = 0.82f),
+                                            surfaceContainerLowest.copy(alpha = 0.92f)
+                                        )
+                                    )
+                                )
+                        )
+                    }
+                }
+                ShareThemeStyle.MIDNIGHT_MINIMAL -> {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(surfaceContainerLowest)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(420.dp)
+                                .align(Alignment.TopStart)
+                                .offset(x = (-120).dp, y = (-60).dp)
+                                .background(
+                                    brush = Brush.radialGradient(
+                                        colors = listOf(primaryColor.copy(alpha = 0.12f), Color.Transparent)
+                                    )
+                                )
+                        )
+                    }
+                }
+                ShareThemeStyle.VIBRANT_GLOW -> {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                brush = Brush.verticalGradient(
+                                    colors = listOf(surfaceContainerLow, surfaceContainerLowest)
+                                )
+                            )
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(
+                                    brush = Brush.linearGradient(
+                                        colors = listOf(
+                                            primaryColor.copy(alpha = 0.22f),
+                                            secondaryColor.copy(alpha = 0.15f),
+                                            tertiaryColor.copy(alpha = 0.1f)
+                                        )
+                                    )
+                                )
+                        )
+                    }
                 }
             }
+            // Vignette for depth on song card
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        brush = Brush.radialGradient(
+                            colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.45f)),
+                            radius = 1200f
+                        )
+                    )
+            )
         }
 
-        // Vignette Overlay for premium depth
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    brush = Brush.radialGradient(
-                        colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.45f)),
-                        radius = 1200f
-                    )
-                )
-        )
-
-        // ── 2. Content Column ───────────────────────────────────────────────
+        // ── 2. Foreground Content Column ────────────────────────────────────
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -879,379 +879,50 @@ private fun ShareableCard(
             verticalArrangement = Arrangement.SpaceBetween,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(4.dp))
 
-            // Centerpiece Floating Card (Player Styled & Frost Blended)
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth(0.86f)
-                    .weight(1f, fill = false)
-                    .shadow(16.dp, shape = RoundedCornerShape(20.dp)),
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = lightScheme.primaryContainer
-                ),
-                border = BorderStroke(1.dp, lightScheme.onPrimaryContainer.copy(alpha = 0.15f))
-            ) {
-                if (!isLyricsMode) {
-                    // SONG SHARE CARD (MINI PLAYER WIDGET DESIGN)
-                    val formattedDuration = remember(song.duration) {
-                        val totalSecs = song.duration / 1000
-                        val mins = totalSecs / 60
-                        val secs = totalSecs % 60
-                        String.format("%02d:%02d", mins, secs)
-                    }
-
-                    val formattedProgress = remember(song.duration) {
-                        val progressSecs = (song.duration * 0.4f / 1000).toLong()
-                        val mins = progressSecs / 60
-                        val secs = progressSecs % 60
-                        String.format("%02d:%02d", mins, secs)
-                    }
-
-                    Column(
-                        modifier = Modifier.padding(top = 6.dp, bottom = 10.dp, start = 18.dp, end = 18.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        // 1. Square Album Art with soft glow
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .aspectRatio(1f)
-                                .shadow(8.dp, shape = RoundedCornerShape(12.dp), clip = true)
-                                .clip(RoundedCornerShape(12.dp))
-                        ) {
-                            SmartImage(
-                                model = song.albumArtUriString,
-                                contentDescription = null,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        }
-
-                        Spacer(Modifier.height(4.dp))
-
-                        // 2. Song Details (Left-aligned for a modern player layout)
-                        Column(
-                            verticalArrangement = Arrangement.spacedBy(0.dp),
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)
-                        ) {
-                            Text(
-                                text = song.title,
-                                fontFamily = GoogleSansRounded,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp,
-                                lineHeight = 14.sp,
-                                color = lightScheme.onPrimaryContainer,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = song.displayArtist,
-                                fontFamily = GoogleSansRounded,
-                                fontWeight = FontWeight.Medium,
-                                fontSize = 9.sp,
-                                lineHeight = 11.sp,
-                                color = lightScheme.onPrimaryContainer.copy(alpha = 0.65f),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-
-                        Spacer(Modifier.height(6.dp))
-
-                        // 3. Sleek Wavy Progress / Seek Bar with Thumb
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text(
-                                text = formattedProgress,
-                                color = lightScheme.onPrimaryContainer.copy(alpha = 0.6f),
-                                fontSize = 9.sp,
-                                fontFamily = GoogleSansRounded,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(24.dp),
-                                contentAlignment = Alignment.CenterStart
-                            ) {
-                                LinearWavyProgressIndicator(
-                                    progress = { 0.4f },
-                                    modifier = Modifier.fillMaxWidth().height(8.dp),
-                                    color = lightScheme.onPrimaryContainer,
-                                    trackColor = lightScheme.onPrimaryContainer.copy(alpha = 0.2f)
-                                )
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth(0.4f)
-                                        .height(24.dp),
-                                    contentAlignment = Alignment.CenterEnd
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .offset(x = 3.5.dp)
-                                            .size(7.dp)
-                                            .clip(CircleShape)
-                                            .background(lightScheme.onPrimaryContainer)
-                                    )
-                                }
-                            }
-                            Text(
-                                text = formattedDuration,
-                                color = lightScheme.onPrimaryContainer.copy(alpha = 0.6f),
-                                fontSize = 9.sp,
-                                fontFamily = GoogleSansRounded,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        Spacer(Modifier.height(8.dp))
-
-                        // 4. Playback Controls Row (Dynamic Capsule Shape)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .width(60.dp)
-                                    .height(38.dp)
-                                    .clip(RoundedCornerShape(19.dp))
-                                    .background(lightScheme.primary)
-                                    .clickable { },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.SkipPrevious,
-                                    contentDescription = null,
-                                    tint = lightScheme.onPrimary,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                            }
-                            
-                            Spacer(modifier = Modifier.width(10.dp))
-
-                            Box(
-                                modifier = Modifier
-                                    .width(76.dp)
-                                    .height(38.dp)
-                                    .clip(RoundedCornerShape(19.dp))
-                                    .background(lightScheme.tertiaryContainer)
-                                    .clickable { },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.PlayArrow,
-                                    contentDescription = null,
-                                    tint = lightScheme.onTertiaryContainer,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.width(10.dp))
-
-                            Box(
-                                modifier = Modifier
-                                    .width(60.dp)
-                                    .height(38.dp)
-                                    .clip(RoundedCornerShape(19.dp))
-                                    .background(lightScheme.primary)
-                                    .clickable { },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.SkipNext,
-                                    contentDescription = null,
-                                    tint = lightScheme.onPrimary,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                            }
-                        }
-                    }
-                } else {
-                    // LYRICS SHARE CARD
-                    Column(
-                        modifier = Modifier.padding(14.dp)
-                    ) {
-                        // 1. Header (Mini Song Card style)
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            SmartImage(
-                                model = song.albumArtUriString,
-                                contentDescription = null,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .shadow(4.dp, RoundedCornerShape(8.dp), clip = true)
-                                    .clip(RoundedCornerShape(8.dp))
-                            )
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = song.title,
-                                    fontFamily = GoogleSansRounded,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp,
-                                    lineHeight = 14.sp,
-                                    color = lightScheme.onPrimaryContainer,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = song.displayArtist,
-                                    fontFamily = GoogleSansRounded,
-                                    fontWeight = FontWeight.Medium,
-                                    fontSize = 10.sp,
-                                    lineHeight = 12.sp,
-                                    color = lightScheme.onPrimaryContainer.copy(alpha = 0.65f),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-
-                        Spacer(Modifier.height(8.dp))
-                        HorizontalDivider(color = lightScheme.onPrimaryContainer.copy(alpha = 0.12f), thickness = 1.dp)
-                        Spacer(Modifier.height(8.dp))
-
-                        // 2. Verses Quote Block
-                        Column(
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            if (selectedLyrics.isEmpty()) {
-                                Text(
-                                    text = "Select lyrics below to share...",
-                                    fontFamily = GoogleSansRounded,
-                                    fontStyle = FontStyle.Italic,
-                                    fontSize = 14.sp,
-                                    color = lightScheme.onPrimaryContainer.copy(alpha = 0.4f),
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp)
-                                )
-                            } else {
-                                val fontSize = when (selectedLyrics.size) {
-                                    1 -> 19.sp
-                                    2, 3 -> 16.sp
-                                    else -> 13.sp
-                                }
-                                val lineHeight = when (selectedLyrics.size) {
-                                    1 -> 25.sp
-                                    2, 3 -> 21.sp
-                                    else -> 17.sp
-                                }
-                                selectedLyrics.forEach { line ->
-                                    Row(
-                                        verticalAlignment = Alignment.Top,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Rounded.FormatQuote,
-                                            contentDescription = null,
-                                            tint = lightScheme.primary.copy(alpha = 0.7f),
-                                            modifier = Modifier.size(16.dp).offset(y = 2.dp)
-                                        )
-                                        Text(
-                                            text = line,
-                                            fontFamily = GoogleSansRounded,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = fontSize,
-                                            lineHeight = lineHeight,
-                                            color = lightScheme.onPrimaryContainer,
-                                            textAlign = TextAlign.Start,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        Spacer(Modifier.weight(1f))
-
-                        Spacer(Modifier.height(8.dp))
-
-                        // 3. Mini Progress line to match Player widget theme
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(3.dp)
-                                .clip(CircleShape)
-                                .background(lightScheme.onPrimaryContainer.copy(alpha = 0.15f))
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxHeight()
-                                    .fillMaxWidth(0.55f)
-                                    .clip(CircleShape)
-                                    .background(lightScheme.primary)
-                            )
-                        }
-
-                        Spacer(Modifier.height(10.dp))
-
-                        // 4. App Branding Row
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(16.dp)
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .background(lightScheme.primary),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        painter = painterResource(R.drawable.pixelmusic_base_monochrome),
-                                        contentDescription = null,
-                                        tint = lightScheme.onPrimary,
-                                        modifier = Modifier
-                                            .padding(2.5.dp)
-                                            .fillMaxSize()
-                                    )
-                                }
-                                Text(
-                                    text = "PixelMusic",
-                                    fontFamily = GoogleSansRounded,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 11.sp,
-                                    color = lightScheme.onPrimaryContainer
-                                )
-                            }
-                            
-                            Text(
-                                text = "Lyric Card",
-                                fontFamily = GoogleSansRounded,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 9.sp,
-                                color = lightScheme.onPrimaryContainer.copy(alpha = 0.4f),
-                                letterSpacing = 1.sp
-                            )
-                        }
-                    }
+            if (!isLyricsMode) {
+                // ── SONG MINI CARD ───────────────────────────────────────────
+                // Inner card: album-art extracted dynamic color (lightScheme)
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth(0.88f)
+                        .weight(1f, fill = false)
+                        .shadow(20.dp, shape = RoundedCornerShape(20.dp)),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = lightScheme.primaryContainer
+                    ),
+                    border = BorderStroke(0.5.dp, lightScheme.onPrimaryContainer.copy(alpha = 0.12f))
+                ) {
+                    SongMiniCard(song = song, lightScheme = lightScheme)
+                }
+            } else {
+                // ── LYRICS GLASS PANEL ───────────────────────────────────────
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.92f)
+                        .weight(1f, fill = false)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(Color.White.copy(alpha = 0.09f))
+                        .border(
+                            width = 1.dp,
+                            color = Color.White.copy(alpha = 0.18f),
+                            shape = RoundedCornerShape(18.dp)
+                        )
+                        .padding(14.dp)
+                ) {
+                    LyricsGlassPanel(song = song, selectedLyrics = selectedLyrics)
                 }
             }
 
             Spacer(Modifier.height(16.dp))
 
-            // ── 3. Snapchat Replicated Link Clip Pill ────────────────────────
+            // ── PixelMusic pill — OUTSIDE mini card, in outer column ─────────
             val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                verticalArrangement = Arrangement.spacedBy(5.dp)
             ) {
                 Row(
                     modifier = Modifier
@@ -1259,15 +930,11 @@ private fun ShareableCard(
                         .background(Color.Black.copy(alpha = 0.35f))
                         .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(16.dp))
                         .clickable {
-                            try {
-                                uriHandler.openUri(GITHUB_LINK)
-                            } catch (e: Exception) {
-                                // Fallback
-                            }
+                            try { uriHandler.openUri(GITHUB_LINK) } catch (e: Exception) { }
                         }
-                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.Link,
@@ -1285,8 +952,8 @@ private fun ShareableCard(
                     Icon(
                         imageVector = Icons.Rounded.ChevronRight,
                         contentDescription = null,
-                        tint = Color.White.copy(alpha = 0.8f),
-                        modifier = Modifier.size(14.dp)
+                        tint = Color.White.copy(alpha = 0.7f),
+                        modifier = Modifier.size(13.dp)
                     )
                 }
                 Text(
@@ -1294,7 +961,7 @@ private fun ShareableCard(
                     fontFamily = GoogleSansRounded,
                     fontWeight = FontWeight.Medium,
                     fontSize = 8.sp,
-                    color = Color.White.copy(alpha = 0.4f),
+                    color = Color.White.copy(alpha = 0.38f),
                     textAlign = TextAlign.Center
                 )
             }
@@ -1303,6 +970,222 @@ private fun ShareableCard(
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Song Mini Card — inner content (album-art dynamic colors)
+// Layout: flush full-width art → title → artist → thin progress bar
+// NO controls. NO branding inside this card.
+// ────────────────────────────────────────────────────────────────────────────
+@Composable
+private fun SongMiniCard(
+    song: Song,
+    lightScheme: ColorScheme
+) {
+    val formattedDuration = remember(song.duration) {
+        val totalSecs = song.duration / 1000
+        val mins = totalSecs / 60
+        val secs = totalSecs % 60
+        String.format("%02d:%02d", mins, secs)
+    }
+    val formattedProgress = remember(song.duration) {
+        val progressSecs = (song.duration * 0.4f / 1000).toLong()
+        val mins = progressSecs / 60
+        val secs = progressSecs % 60
+        String.format("%02d:%02d", mins, secs)
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.Start
+    ) {
+        // Album Art — flush to all edges, no horizontal padding
+        SmartImage(
+            model = song.albumArtUriString,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .clip(
+                    RoundedCornerShape(
+                        topStart = 20.dp,
+                        topEnd = 20.dp,
+                        bottomStart = 0.dp,
+                        bottomEnd = 0.dp
+                    )
+                )
+        )
+
+        // Info Section
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp)
+                .padding(top = 10.dp, bottom = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            // Song Title
+            Text(
+                text = song.title,
+                fontFamily = GoogleSansRounded,
+                fontWeight = FontWeight.Bold,
+                fontSize = 15.sp,
+                lineHeight = 18.sp,
+                color = lightScheme.onPrimaryContainer,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            // Artist
+            Text(
+                text = song.displayArtist,
+                fontFamily = GoogleSansRounded,
+                fontWeight = FontWeight.Medium,
+                fontSize = 11.sp,
+                lineHeight = 14.sp,
+                color = lightScheme.onPrimaryContainer.copy(alpha = 0.55f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            // Thin Progress Bar + Timestamps
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    text = formattedProgress,
+                    fontFamily = GoogleSansRounded,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 8.sp,
+                    color = lightScheme.onPrimaryContainer.copy(alpha = 0.6f)
+                )
+                LinearWavyProgressIndicator(
+                    progress = { 0.4f },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(3.dp),
+                    color = lightScheme.primary,
+                    trackColor = lightScheme.primary.copy(alpha = 0.22f)
+                )
+                Text(
+                    text = formattedDuration,
+                    fontFamily = GoogleSansRounded,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 8.sp,
+                    color = lightScheme.onPrimaryContainer.copy(alpha = 0.6f)
+                )
+            }
+        }
+    }
+}
+
+
+// ────────────────────────────────────────────────────────────────────────────
+// Lyrics Glass Panel — content inside the frosted glass box on the lyrics card
+// Layout: thumbnail header → divider → dynamic-font lyric lines
+// ────────────────────────────────────────────────────────────────────────────
+@Composable
+private fun LyricsGlassPanel(
+    song: Song,
+    selectedLyrics: List<String>
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        // Header: small thumbnail + title + artist
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            SmartImage(
+                model = song.albumArtUriString,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(44.dp)
+                    .shadow(4.dp, RoundedCornerShape(8.dp), clip = true)
+                    .clip(RoundedCornerShape(8.dp))
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = song.title,
+                    fontFamily = GoogleSansRounded,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                    lineHeight = 15.sp,
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = song.displayArtist,
+                    fontFamily = GoogleSansRounded,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 10.sp,
+                    lineHeight = 13.sp,
+                    color = Color.White.copy(alpha = 0.55f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+
+        Spacer(Modifier.height(10.dp))
+        HorizontalDivider(
+            color = Color.White.copy(alpha = 0.15f),
+            thickness = 1.dp
+        )
+        Spacer(Modifier.height(12.dp))
+
+        // Lyric lines — dynamic font size shrinks as more lines are selected
+        if (selectedLyrics.isEmpty()) {
+            Text(
+                text = "Select lyrics below to share...",
+                fontFamily = GoogleSansRounded,
+                fontWeight = FontWeight.Medium,
+                fontSize = 13.sp,
+                color = Color.White.copy(alpha = 0.38f),
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 20.dp)
+            )
+        } else {
+            val fontSize = when (selectedLyrics.size) {
+                1    -> 22.sp
+                2    -> 18.sp
+                3    -> 15.sp
+                4    -> 13.sp
+                else -> 11.sp
+            }
+            val lineHeight = when (selectedLyrics.size) {
+                1    -> 28.sp
+                2    -> 24.sp
+                3    -> 20.sp
+                4    -> 17.sp
+                else -> 15.sp
+            }
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                selectedLyrics.forEach { line ->
+                    Text(
+                        text = line,
+                        fontFamily = GoogleSansRounded,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = fontSize,
+                        lineHeight = lineHeight,
+                        color = Color.White,
+                        textAlign = TextAlign.Start,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+
 // Scrollable Lyric Multi-Selector Composable
 // ────────────────────────────────────────────────────────────────────────────
 @Composable
