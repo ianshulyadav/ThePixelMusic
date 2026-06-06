@@ -1,6 +1,5 @@
 package com.unshoo.pixelmusic.presentation.components
 
-
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
@@ -36,9 +35,12 @@ import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Restore
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -58,6 +60,7 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -73,16 +76,30 @@ import racra.compose.smooth_corner_rect_library.AbsoluteSmoothCornerShape
 @Composable
 fun AiPlaylistSheet(
     onDismiss: () -> Unit,
-    onGenerateClick: (prompt: String, minLength: Int, maxLength: Int) -> Unit,
+    onGenerateClick: (
+        mode: String,
+        count: Int,
+        timePeriod: String,
+        seedTrackName: String,
+        seedArtistName: String,
+        seedArtistInput: String,
+        tagInput: String
+    ) -> Unit,
     isGenerating: Boolean,
     isSuccess: Boolean,
     status: String?,
     error: String?,
     onRetry: () -> Unit
 ) {
-    var prompt by remember { mutableStateOf("") }
-    var minLength by remember { mutableStateOf("5") }
-    var maxLength by remember { mutableStateOf("15") }
+    var selectedMode by remember { mutableStateOf("recommendations") }
+    var minLength by remember { mutableStateOf("30") }
+    var maxLength by remember { mutableStateOf("30") }
+
+    var seedTrackName by remember { mutableStateOf("") }
+    var seedArtistName by remember { mutableStateOf("") }
+    var seedArtistInput by remember { mutableStateOf("") }
+    var tagInput by remember { mutableStateOf("") }
+    var timePeriod by remember { mutableStateOf("overall") }
 
     val sheetState = rememberModalBottomSheetState(
         skipPartiallyExpanded = true,
@@ -125,8 +142,7 @@ fun AiPlaylistSheet(
         )
     }
 
-    // AI UI Optimization: Infinite transitions for a "living" generative feel
-    val infiniteTransition = rememberInfiniteTransition(label = "ai_animation")
+    val infiniteTransition = rememberInfiniteTransition(label = "animation")
     val iconRotation by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 360f,
@@ -146,10 +162,8 @@ fun AiPlaylistSheet(
         label = "scale"
     )
 
-    // AI UI Optimization: Bouncy haptic interaction for the generate button
     var isPressed by remember { mutableStateOf(false) }
     
-    // Animated scale for the button - shrinks when pressed, bounces back when released
     val buttonScale by animateFloatAsState(
         targetValue = if (isPressed) 0.92f else 1f,
         animationSpec = spring(
@@ -159,7 +173,6 @@ fun AiPlaylistSheet(
         label = "buttonScale"
     )
     
-    // Animated corner radius - more squared when pressed
     val buttonCornerRadius by animateDpAsState(
         targetValue = if (isPressed || isGenerating) 24.dp else 50.dp,
         animationSpec = spring(
@@ -182,6 +195,13 @@ fun AiPlaylistSheet(
         )
     }
 
+    val isInputReady = when (selectedMode) {
+        "similar-tracks" -> seedTrackName.isNotBlank() && seedArtistName.isNotBlank()
+        "similar-artists" -> seedArtistInput.isNotBlank()
+        "tag" -> tagInput.isNotBlank()
+        else -> true
+    }
+
     ModalBottomSheet(
         sheetState = sheetState,
         onDismissRequest = onDismiss,
@@ -194,7 +214,7 @@ fun AiPlaylistSheet(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Header with AI Icon
+            // Header
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -202,7 +222,6 @@ fun AiPlaylistSheet(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // Animated AI Icon
                 Surface(
                     modifier = Modifier
                         .size(64.dp)
@@ -227,8 +246,8 @@ fun AiPlaylistSheet(
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
-                            imageVector = Icons.Rounded.AutoAwesome,
-                            contentDescription = stringResource(R.string.cd_ai),
+                            painter = painterResource(R.drawable.rounded_instant_mix_24),
+                            contentDescription = "Mix Generator",
                             modifier = Modifier.size(32.dp),
                             tint = if (isGenerating) colors.onPrimaryContainer else colors.onTertiaryContainer
                         )
@@ -237,23 +256,15 @@ fun AiPlaylistSheet(
 
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = if (isSuccess) {
-                            stringResource(R.string.ai_playlist_headline_perfect)
-                        } else {
-                            stringResource(R.string.ai_playlist_headline_daily_mix)
-                        },
+                        text = if (isSuccess) "Perfectly Curated" else "Last.fm Recommendation Mix",
                         style = ExpTitleTypography.displayMedium.copy(
-                            fontSize = 32.sp,
+                            fontSize = 26.sp,
                             fontWeight = FontWeight.Bold
                         ),
                         color = if (isSuccess) colors.tertiary else colors.primary
                     )
                     Text(
-                        text = if (isSuccess) {
-                            stringResource(R.string.ai_playlist_subtitle_journey_ready)
-                        } else {
-                            stringResource(R.string.ai_playlist_subtitle_generator)
-                        },
+                        text = if (isSuccess) "Your sonic journey is ready" else "Based on Last.fm",
                         style = MaterialTheme.typography.titleMedium,
                         fontFamily = GoogleSansRounded,
                         color = if (isSuccess) colors.tertiary else colors.onSurfaceVariant
@@ -263,13 +274,13 @@ fun AiPlaylistSheet(
 
             // Description text
             Text(
-                text = stringResource(R.string.ai_playlist_description),
+                text = "Generate a tailored mix based on your Last.fm profile directly into your Daily Mix.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.onSurfaceVariant,
                 modifier = Modifier.fillMaxWidth()
             )
 
-            // Number inputs in styled container
+            // Number inputs
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = smoothCornerShape,
@@ -281,7 +292,7 @@ fun AiPlaylistSheet(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Text(
-                        text = stringResource(R.string.ai_playlist_section_size),
+                        text = "Playlist size",
                         style = MaterialTheme.typography.labelLarge,
                         fontFamily = GoogleSansRounded,
                         fontWeight = FontWeight.SemiBold,
@@ -294,7 +305,7 @@ fun AiPlaylistSheet(
                         OutlinedTextField(
                             value = minLength,
                             onValueChange = { minLength = it.filter { char -> char.isDigit() } },
-                            label = { Text(stringResource(R.string.ai_playlist_min_songs)) },
+                            label = { Text("Min songs") },
                             modifier = Modifier.weight(1f),
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             singleLine = true,
@@ -304,7 +315,7 @@ fun AiPlaylistSheet(
                         OutlinedTextField(
                             value = maxLength,
                             onValueChange = { maxLength = it.filter { char -> char.isDigit() } },
-                            label = { Text(stringResource(R.string.ai_playlist_max_songs)) },
+                            label = { Text("Max songs") },
                             modifier = Modifier.weight(1f),
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             singleLine = true,
@@ -315,24 +326,180 @@ fun AiPlaylistSheet(
                 }
             }
 
-            // Prompt field (without send button - using the main Generate button instead)
-            OutlinedTextField(
-                value = prompt,
-                shape = promptFieldShape,
-                colors = textFieldColors,
-                onValueChange = { prompt = it },
-                placeholder = { 
-                    Text(
-                        stringResource(R.string.ai_playlist_prompt_placeholder),
-                        color = colors.onSurfaceVariant.copy(alpha = 0.6f)
-                    ) 
-                },
-                modifier = Modifier.fillMaxWidth(),
-                isError = error != null,
-                singleLine = false,
-                minLines = 2,
-                maxLines = 4
-            )
+            // Dropdown Selector for Mode
+            var expandedModeDropdown by remember { mutableStateOf(false) }
+            Box(modifier = Modifier.fillMaxWidth()) {
+                OutlinedTextField(
+                    value = when (selectedMode) {
+                        "recommendations" -> "My Recommendations"
+                        "recent" -> "Recent Tracks"
+                        "top" -> "Top Tracks"
+                        "library" -> "My Library"
+                        "similar-tracks" -> "Similar Tracks"
+                        "similar-artists" -> "Similar Artists"
+                        "tag" -> "By Tag / Genre"
+                        "mix" -> "My Mix"
+                        else -> "My Recommendations"
+                    },
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Generation Mode") },
+                    trailingIcon = {
+                        IconButton(onClick = { expandedModeDropdown = true }) {
+                            Icon(
+                                painter = painterResource(R.drawable.rounded_keyboard_arrow_down_24),
+                                contentDescription = "Select Mode"
+                            )
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .pointerInput(Unit) {
+                            detectTapGestures(onTap = { expandedModeDropdown = true })
+                        },
+                    shape = promptFieldShape,
+                    colors = textFieldColors
+                )
+                
+                DropdownMenu(
+                    expanded = expandedModeDropdown,
+                    onDismissRequest = { expandedModeDropdown = false },
+                    modifier = Modifier.fillMaxWidth(0.85f)
+                ) {
+                    val modesList = listOf(
+                        "recommendations" to "My Recommendations",
+                        "recent" to "Recent Tracks",
+                        "top" to "Top Tracks",
+                        "library" to "My Library",
+                        "similar-tracks" to "Similar Tracks",
+                        "similar-artists" to "Similar Artists",
+                        "tag" to "By Tag / Genre",
+                        "mix" to "My Mix"
+                    )
+                    modesList.forEach { (modeId, modeName) ->
+                        DropdownMenuItem(
+                            text = { Text(modeName) },
+                            onClick = {
+                                selectedMode = modeId
+                                expandedModeDropdown = false
+                            }
+                        )
+                    }
+                }
+            }
+
+            // Conditional inputs
+            AnimatedVisibility(visible = selectedMode == "similar-tracks") {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedTextField(
+                        value = seedTrackName,
+                        onValueChange = { seedTrackName = it },
+                        label = { Text("Seed Track Name") },
+                        placeholder = { Text("e.g. Blinding Lights") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = smoothCornerShape,
+                        colors = textFieldColors,
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = seedArtistName,
+                        onValueChange = { seedArtistName = it },
+                        label = { Text("Seed Artist Name") },
+                        placeholder = { Text("e.g. The Weeknd") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = smoothCornerShape,
+                        colors = textFieldColors,
+                        singleLine = true
+                    )
+                }
+            }
+
+            AnimatedVisibility(visible = selectedMode == "similar-artists") {
+                OutlinedTextField(
+                    value = seedArtistInput,
+                    onValueChange = { seedArtistInput = it },
+                    label = { Text("Seed Artist Name") },
+                    placeholder = { Text("e.g. Coldplay") },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = smoothCornerShape,
+                    colors = textFieldColors,
+                    singleLine = true
+                )
+            }
+
+            AnimatedVisibility(visible = selectedMode == "tag") {
+                OutlinedTextField(
+                    value = tagInput,
+                    onValueChange = { tagInput = it },
+                    label = { Text("Genre or Tag") },
+                    placeholder = { Text("e.g. rock, lofi, jazz") },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = smoothCornerShape,
+                    colors = textFieldColors,
+                    singleLine = true
+                )
+            }
+
+            AnimatedVisibility(visible = selectedMode == "top") {
+                var expandedPeriodDropdown by remember { mutableStateOf(false) }
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = when (timePeriod) {
+                            "overall" -> "All Time"
+                            "12month" -> "Yearly"
+                            "6month" -> "6 Months"
+                            "3month" -> "3 Months"
+                            "1month" -> "Monthly"
+                            "7day" -> "Weekly"
+                            else -> "All Time"
+                        },
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Time Period") },
+                        trailingIcon = {
+                            IconButton(onClick = { expandedPeriodDropdown = true }) {
+                                Icon(
+                                    painter = painterResource(R.drawable.rounded_keyboard_arrow_down_24),
+                                    contentDescription = "Select Time Period"
+                                )
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .pointerInput(Unit) {
+                                detectTapGestures(onTap = { expandedPeriodDropdown = true })
+                            },
+                        shape = smoothCornerShape,
+                        colors = textFieldColors
+                    )
+                    
+                    DropdownMenu(
+                        expanded = expandedPeriodDropdown,
+                        onDismissRequest = { expandedPeriodDropdown = false }
+                    ) {
+                        val periodsList = listOf(
+                            "overall" to "All Time",
+                            "12month" to "Yearly",
+                            "6month" to "6 Months",
+                            "3month" to "3 Months",
+                            "1month" to "Monthly",
+                            "7day" to "Weekly"
+                        )
+                        periodsList.forEach { (pId, pName) ->
+                            DropdownMenuItem(
+                                text = { Text(pName) },
+                                onClick = {
+                                    timePeriod = pId
+                                    expandedPeriodDropdown = false
+                                }
+                            )
+                        }
+                    }
+                }
+            }
 
             // Error message with Retry
             AnimatedVisibility(
@@ -363,7 +530,7 @@ fun AiPlaylistSheet(
                         ) {
                             Icon(Icons.Rounded.Restore, null, tint = colors.error, modifier = Modifier.size(18.dp))
                             Text(
-                                text = stringResource(R.string.ai_playlist_tap_to_retry),
+                                text = "Tap to Retry",
                                 color = colors.error,
                                 style = MaterialTheme.typography.labelLarge,
                                 fontWeight = FontWeight.Bold
@@ -391,14 +558,14 @@ fun AiPlaylistSheet(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
-                            imageVector = Icons.Rounded.AutoAwesome, 
+                            painter = painterResource(R.drawable.rounded_instant_mix_24), 
                             contentDescription = null, 
                             tint = colors.onTertiaryContainer,
                             modifier = Modifier.size(24.dp)
                         )
                         Spacer(Modifier.width(12.dp))
                         Text(
-                            text = status ?: stringResource(R.string.ai_playlist_status_default),
+                            text = status ?: "Mix generated successfully!",
                             color = colors.onTertiaryContainer,
                             style = MaterialTheme.typography.bodyLarge,
                             fontWeight = FontWeight.ExtraBold,
@@ -410,7 +577,7 @@ fun AiPlaylistSheet(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Generate Button with bouncy animation
+            // Generate Button
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -419,21 +586,20 @@ fun AiPlaylistSheet(
                     .scale(buttonScale)
                     .clip(buttonShape)
                     .background(
-                        if (prompt.isBlank() && !isGenerating) 
+                        if (!isInputReady && !isGenerating) 
                             colors.surfaceContainerHighest 
                         else 
                             colors.primaryContainer
                     )
-                    .pointerInput(prompt, isGenerating, isSuccess) {
+                    .pointerInput(isInputReady, isGenerating, isSuccess) {
                         detectTapGestures(
                             onPress = {
-                                if (prompt.isNotBlank() && !isGenerating && !isSuccess) {
+                                if (isInputReady && !isGenerating && !isSuccess) {
                                     isPressed = true
                                     tryAwaitRelease()
                                     isPressed = false
-                                    val minLengthInt = minLength.toIntOrNull() ?: 5
-                                    val maxLengthInt = maxLength.toIntOrNull() ?: 15
-                                    onGenerateClick(prompt, minLengthInt, maxLengthInt)
+                                    val count = maxLength.toIntOrNull() ?: 30
+                                    onGenerateClick(selectedMode, count, timePeriod, seedTrackName, seedArtistName, seedArtistInput, tagInput)
                                 }
                             }
                         )
@@ -453,7 +619,7 @@ fun AiPlaylistSheet(
                         )
                         Spacer(modifier = Modifier.width(12.dp))
                         Text(
-                            text = stringResource(R.string.ai_playlist_ready_to_play),
+                            text = "Ready to Play",
                             style = MaterialTheme.typography.titleMedium,
                             fontFamily = GoogleSansRounded,
                             fontWeight = FontWeight.SemiBold,
@@ -467,7 +633,7 @@ fun AiPlaylistSheet(
                         )
                         Spacer(modifier = Modifier.width(12.dp))
                         Text(
-                            text = status ?: stringResource(R.string.ai_playlist_generating),
+                            text = status ?: "Generating…",
                             style = MaterialTheme.typography.titleMedium,
                             fontFamily = GoogleSansRounded,
                             fontWeight = FontWeight.SemiBold,
@@ -475,21 +641,21 @@ fun AiPlaylistSheet(
                         )
                     } else {
                         Icon(
-                            imageVector = Icons.Rounded.AutoAwesome,
+                            painter = painterResource(R.drawable.rounded_instant_mix_24),
                             contentDescription = null,
                             modifier = Modifier.size(22.dp),
-                            tint = if (prompt.isBlank()) 
+                            tint = if (!isInputReady) 
                                 colors.onSurfaceVariant 
                             else 
                                 colors.onPrimaryContainer
                         )
                         Spacer(modifier = Modifier.width(12.dp))
                         Text(
-                            text = stringResource(R.string.ai_playlist_generate),
+                            text = "Generate Mix",
                             style = MaterialTheme.typography.titleMedium,
                             fontFamily = GoogleSansRounded,
                             fontWeight = FontWeight.SemiBold,
-                            color = if (prompt.isBlank()) 
+                            color = if (!isInputReady) 
                                 colors.onSurfaceVariant 
                             else 
                                 colors.onPrimaryContainer
