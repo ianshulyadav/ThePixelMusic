@@ -13,6 +13,7 @@ import com.unshoo.pixelmusic.data.backup.model.RestorePlan
 import com.unshoo.pixelmusic.data.backup.model.RestoreResult
 import com.unshoo.pixelmusic.data.backup.model.ValidationError
 import com.unshoo.pixelmusic.data.preferences.AppThemeMode
+import com.unshoo.pixelmusic.data.preferences.AppFontMode
 import com.unshoo.pixelmusic.data.preferences.CarouselStyle
 import com.unshoo.pixelmusic.data.preferences.LibraryNavigationMode
 import com.unshoo.pixelmusic.data.preferences.ThemePreference
@@ -64,6 +65,7 @@ data class SettingsUiState(
     val isLoadingDirectories: Boolean = false,
     val appLanguageTag: String = AppLanguage.SYSTEM.tag,
     val appThemeMode: String = AppThemeMode.FOLLOW_SYSTEM,
+    val appFontMode: String = AppFontMode.APP_DEFAULT,
     val playerThemePreference: String = ThemePreference.ALBUM_ART,
     val colorPalette: String = "SAGE",
     val albumArtPaletteStyle: AlbumArtPaletteStyle = AlbumArtPaletteStyle.default,
@@ -180,6 +182,7 @@ private sealed interface SettingsUiUpdate {
     data class Group1(
         val appRebrandDialogShown: Boolean,
         val appThemeMode: String,
+        val appFontMode: String,
         val playerThemePreference: String,
         val colorPalette: String,
         val albumArtPaletteStyle: AlbumArtPaletteStyle,
@@ -573,7 +576,8 @@ class SettingsViewModel @Inject constructor(
                 userPreferencesRepository.libraryNavigationModeFlow,
                 userPreferencesRepository.carouselStyleFlow,
                 userPreferencesRepository.launchTabFlow,
-                userPreferencesRepository.showPlayerFileInfoFlow
+                userPreferencesRepository.showPlayerFileInfoFlow,
+                themePreferencesRepository.appFontModeFlow
             ) { values ->
                 SettingsUiUpdate.Group1(
                     appRebrandDialogShown = values[0] as Boolean,
@@ -589,13 +593,15 @@ class SettingsViewModel @Inject constructor(
                     libraryNavigationMode = values[10] as String,
                     carouselStyle = values[11] as String,
                     launchTab = values[12] as String,
-                    showPlayerFileInfo = values[13] as Boolean
+                    showPlayerFileInfo = values[13] as Boolean,
+                    appFontMode = values[14] as String
                 )
             }.collect { update ->
                 _uiState.update { state ->
                     state.copy(
                         appRebrandDialogShown = update.appRebrandDialogShown,
                         appThemeMode = update.appThemeMode,
+                        appFontMode = update.appFontMode,
                         playerThemePreference = update.playerThemePreference,
                         colorPalette = update.colorPalette,
                         albumArtPaletteStyle = update.albumArtPaletteStyle,
@@ -1091,6 +1097,12 @@ class SettingsViewModel @Inject constructor(
     fun setAppThemeMode(mode: String) {
         viewModelScope.launch {
             themePreferencesRepository.setAppThemeMode(mode)
+        }
+    }
+
+    fun setAppFontMode(mode: String) {
+        viewModelScope.launch {
+            themePreferencesRepository.setAppFontMode(mode)
         }
     }
 

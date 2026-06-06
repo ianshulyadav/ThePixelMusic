@@ -108,6 +108,9 @@ import com.unshoo.pixelmusic.presentation.telegram.channel.TelegramChannelSearch
 import com.unshoo.pixelmusic.presentation.telegram.dashboard.TelegramDashboardScreen
 import com.unshoo.pixelmusic.ui.theme.GoogleSansRounded
 import com.unshoo.pixelmusic.ui.theme.PixelMusicTheme
+import com.unshoo.pixelmusic.data.preferences.ThemePreferencesRepository
+import com.unshoo.pixelmusic.data.preferences.AppFontMode
+import javax.inject.Inject
 import dagger.hilt.android.AndroidEntryPoint
 import org.drinkless.tdlib.TdApi
 import racra.compose.smooth_corner_rect_library.AbsoluteSmoothCornerShape
@@ -117,11 +120,15 @@ import androidx.compose.ui.text.style.TextOverflow
 
 @AndroidEntryPoint
 class TelegramLoginActivity : ComponentActivity() {
+    @Inject
+    lateinit var themePreferencesRepository: ThemePreferencesRepository
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         setContent {
-            PixelMusicTheme {
+            val appFontMode by themePreferencesRepository.appFontModeFlow.collectAsStateWithLifecycle(initialValue = AppFontMode.APP_DEFAULT)
+            PixelMusicTheme(useSystemFont = (appFontMode == AppFontMode.SYSTEM)) {
                 TelegramLoginScreen(onFinish = { finish() })
             }
         }

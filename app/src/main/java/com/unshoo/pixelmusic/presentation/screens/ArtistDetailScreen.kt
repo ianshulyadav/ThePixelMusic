@@ -346,9 +346,15 @@ fun ArtistDetailScreen(
                         // ─── Popular Songs Section (Online Artists only) ───
                         if (isOnlineArtist && popularSongs.isNotEmpty()) {
                             item(key = "popular_songs_header", contentType = "section_header") {
-                                ArtistSectionHeader(
+                                ArtistSectionHeaderWithSeeAll(
                                     title = "Popular Songs",
-                                    icon = Icons.Rounded.MusicNote
+                                    icon = Icons.Rounded.MusicNote,
+                                    showSeeAll = uiState.songsMoreEndpoint != null,
+                                    onSeeAllClick = {
+                                        navController.navigateSafely(
+                                            Screen.ArtistSongsAll.createRoute(artistId)
+                                        )
+                                    }
                                 )
                             }
                             itemsIndexed(
@@ -566,7 +572,7 @@ fun ArtistDetailScreen(
                         SharedArtistTopBarProbe(
                             artist = artist,
                             effectiveImageUrl = uiState.effectiveImageUrl,
-                            songsCount = songs.size,
+                            songsCount = if (uiState.isOnlineArtist) artist.songCount else songs.size,
                             collapseFraction = collapseFraction,
                             headerHeight = currentTopBarHeightDp,
                             headerImageRequestSize = headerImageRequestSize,
@@ -584,7 +590,8 @@ fun ArtistDetailScreen(
                                                 playlistId = "RDAMVM$seedVideoId",
                                                 videoId = seedVideoId
                                             ),
-                                            artist.name
+                                            artist.name,
+                                            shuffle = true
                                         )
                                     } else if (songs.isNotEmpty()) {
                                         playerViewModel.playSongsShuffled(songs, artist.name)
@@ -603,7 +610,7 @@ fun ArtistDetailScreen(
                             hasCustomImage = !artist.customImageUri.isNullOrBlank(),
                             isSubscribed = isSubscribed,
                             onSubscribeClick = { viewModel.toggleSubscription() },
-                            songsCount = songs.size,
+                            songsCount = if (uiState.isOnlineArtist) artist.songCount else songs.size,
                             collapseFraction = collapseFraction,
                             headerHeight = currentTopBarHeightDp,
                             headerImageRequestSize = headerImageRequestSize,
@@ -617,7 +624,8 @@ fun ArtistDetailScreen(
                                                 playlistId = "RDAMVM$seedVideoId",
                                                 videoId = seedVideoId
                                             ),
-                                            artist.name
+                                            artist.name,
+                                            shuffle = true
                                         )
                                     } else if (songs.isNotEmpty()) {
                                         playerViewModel.playSongsShuffled(songs, artist.name)

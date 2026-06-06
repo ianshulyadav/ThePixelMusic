@@ -47,6 +47,7 @@ class ExploreViewModel @Inject constructor(
     private val playbackStatsRepository: com.unshoo.pixelmusic.data.stats.PlaybackStatsRepository,
     private val userPreferencesRepository: com.unshoo.pixelmusic.data.preferences.UserPreferencesRepository,
     private val playlistPreferencesRepository: PlaylistPreferencesRepository,
+    private val musicDao: com.unshoo.pixelmusic.data.database.MusicDao,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -143,6 +144,20 @@ class ExploreViewModel @Inject constructor(
             val candidateArtistId = withContext(Dispatchers.IO) {
                 userPreferencesRepository.subscribedArtistIdsFlow.first().firstOrNull()
             }
+            
+            // Query database for library artists with valid channel IDs to personalize New Releases
+            val dbArtists = withContext(Dispatchers.IO) {
+                try {
+                    musicDao.getAllArtistsListRaw()
+                } catch (e: Exception) {
+                    emptyList()
+                }
+            }
+            val libraryArtistChannelIds = dbArtists
+                .mapNotNull { it.channelId }
+                .filter { it.isNotBlank() }
+                .distinct()
+            val shuffledArtistIds = libraryArtistChannelIds.shuffled().take(8)
 
             val userActivityQuery = if (history.isNotEmpty()) {
                 val artistCounts = history.mapNotNull { it.artist }.groupingBy { it }.eachCount()
@@ -158,6 +173,13 @@ class ExploreViewModel @Inject constructor(
             val exploreDeferred = async(Dispatchers.IO) { YouTube.explore().getOrNull() }
             val chartsDeferred = async(Dispatchers.IO) { YouTube.getChartsPage().getOrNull() }
             val newReleasesDeferred = async(Dispatchers.IO) { YouTube.newReleaseAlbums().getOrNull() }
+
+            // Fetch releases for library artists in parallel
+            val personalizedReleasesDeferred = shuffledArtistIds.map { channelId ->
+                async(Dispatchers.IO) {
+                    YouTube.artist(channelId).getOrNull()
+                }
+            }
 
             // Library / account-based parallel requests (only if logged in)
             val likedAlbumsDeferred: kotlinx.coroutines.Deferred<List<AlbumItem>>? = if (hasLogin) {
@@ -219,6 +241,10 @@ class ExploreViewModel @Inject constructor(
             val explore = exploreDeferred.await()
             val charts = chartsDeferred.await()
             val newReleasesResult = newReleasesDeferred.await()
+            
+            // Await personalized artist pages
+            val personalizedArtistPages = personalizedReleasesDeferred.mapNotNull { it.await() }
+            
             val likedAlbums = likedAlbumsDeferred?.await() ?: emptyList()
             val likedArtists = likedArtistsDeferred?.await() ?: emptyList()
             val recentActivityItems = recentActivityDeferred?.await() ?: emptyList()
@@ -346,7 +372,28 @@ class ExploreViewModel @Inject constructor(
                     ))
                 }
 
-                val finalNewReleases = if (!newReleasesResult.isNullOrEmpty()) newReleasesResult else explore?.newReleaseAlbums ?: emptyList()
+                val personalizedNewReleases = mutableListOf<AlbumItem>()
+                personalizedArtistPages.forEach { artistPage ->
+                    artistPage.sections.forEach { section ->
+                        val isReleaseSection = section.title.contains("album", ignoreCase = true) || 
+                                               section.title.contains("single", ignoreCase = true) || 
+                                               section.title.contains("release", ignoreCase = true)
+                        if (isReleaseSection) {
+                            section.items.filterIsInstance<AlbumItem>().forEach { album ->
+                                val albumWithArtist = if (album.artists.isNullOrEmpty()) {
+                                    album.copy(artists = listOf(unshoo.ianshulyadav.pixelmusic.innertube.models.Artist(name = artistPage.artist.title, id = artistPage.artist.id)))
+                                } else album
+                                personalizedNewReleases.add(albumWithArtist)
+                            }
+                        }
+                    }
+                }
+                val sortedPersonalizedReleases = personalizedNewReleases
+                    .distinctBy { it.browseId }
+                    .sortedByDescending { it.year ?: 0 }
+
+                val globalNewReleases = if (!newReleasesResult.isNullOrEmpty()) newReleasesResult else explore?.newReleaseAlbums ?: emptyList()
+                val finalNewReleases = (sortedPersonalizedReleases + globalNewReleases).distinctBy { it.browseId }
 
                 val newState = ExploreUiState(
                     isLoading = false,

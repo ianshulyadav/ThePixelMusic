@@ -54,6 +54,7 @@ import com.unshoo.pixelmusic.presentation.screens.SmartMixScreen
 
 import com.unshoo.pixelmusic.presentation.screens.AboutScreen
 import com.unshoo.pixelmusic.presentation.screens.ArtistAlbumsAllScreen
+import com.unshoo.pixelmusic.presentation.screens.ArtistSongsAllScreen
 import com.unshoo.pixelmusic.presentation.screens.SearchScreen
 import com.unshoo.pixelmusic.presentation.screens.StatsScreen
 import com.unshoo.pixelmusic.presentation.screens.SettingsScreen
@@ -488,6 +489,25 @@ fun AppNavigation(
                         artistId = artistId,
                         type = albumType,
                         navController = navController
+                    )
+                }
+            }
+            composable(
+                route = Screen.ArtistSongsAll.route,
+                arguments = listOf(
+                    navArgument("artistId") { type = NavType.StringType }
+                ),
+                enterTransition = { enterTransition() },
+                exitTransition = { exitTransition() },
+                popEnterTransition = { popEnterTransition() },
+                popExitTransition = { popExitTransition() },
+            ) { backStackEntry ->
+                val artistId = backStackEntry.arguments?.getString("artistId") ?: return@composable
+                ScreenWrapper(navController = navController, playerViewModel = playerViewModel) {
+                    ArtistSongsAllScreen(
+                        artistId = artistId,
+                        navController = navController,
+                        playerViewModel = playerViewModel
                     )
                 }
             }

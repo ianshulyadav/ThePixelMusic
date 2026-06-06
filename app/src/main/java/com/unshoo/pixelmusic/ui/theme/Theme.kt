@@ -365,8 +365,10 @@ fun PixelMusicTheme(
     dynamicColor: Boolean = true,
     colorSchemePairOverride: ColorSchemePair? = null,
     colorPalette: String = "SAGE",
+    useSystemFont: Boolean = false,
     content: @Composable () -> Unit
 ) {
+    FontSettings.useSystemFont = useSystemFont
     val context = LocalContext.current
     val finalColorScheme = when {
         colorSchemePairOverride != null -> {

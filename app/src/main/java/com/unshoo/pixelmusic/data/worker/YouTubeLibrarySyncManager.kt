@@ -36,7 +36,7 @@ class YouTubeLibrarySyncManager @Inject constructor(
     companion object {
         private const val TAG = "YTLibSync"
         private const val LIKED_SONGS_PLAYLIST = "LM"
-        private const val BROWSE_SUBSCRIPTIONS = "FEmusic_library_subscriptions"
+        private const val BROWSE_SUBSCRIPTIONS = "FEmusic_library_corpus_artists"
     }
 
     /**

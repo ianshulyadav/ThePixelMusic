@@ -60,10 +60,15 @@ data class ArtistDetailUiState(
     val browseId: String? = null,
     val albumsMoreEndpoint: BrowseEndpoint? = null,
     val singlesMoreEndpoint: BrowseEndpoint? = null,
+    val songsMoreEndpoint: BrowseEndpoint? = null,
     val allItems: List<ArtistAlbumSection> = emptyList(),
     val isAllItemsLoading: Boolean = false,
     val allItemsContinuation: String? = null,
-    val allItemsError: String? = null
+    val allItemsError: String? = null,
+    val popularSongsAll: List<Song> = emptyList(),
+    val isPopularSongsAllLoading: Boolean = false,
+    val popularSongsAllContinuation: String? = null,
+    val popularSongsAllError: String? = null
 )
 
 enum class ArtistSectionType { ALBUM, SINGLE_EP, SONGS }
@@ -192,12 +197,6 @@ class ArtistDetailViewModel @Inject constructor(
 
                     artistPageResult.onSuccess { artistPage ->
                         val artistItem = artistPage.artist
-                        val artistModel = Artist(
-                            id = browseId.hashCode().toLong(),
-                            name = artistItem.title,
-                            songCount = 0,
-                            imageUrl = artistItem.thumbnail
-                        )
 
                         // ── Popular Songs: extract from the "Songs" section ──
                         val ytSongsSection = artistPage.sections.find {
@@ -207,6 +206,19 @@ class ArtistDetailViewModel @Inject constructor(
                         val popularSongs = ytSongsSection?.items?.mapNotNull { item ->
                             (item as? SongItem)?.toNativeSong()
                         }?.take(10) ?: emptyList()
+
+                        val localCount = withContext(Dispatchers.IO) {
+                            runCatching {
+                                musicDao.getLocalSongCountByArtistName(artistItem.title)
+                            }.getOrDefault(0)
+                        }
+
+                        val artistModel = Artist(
+                            id = browseId.hashCode().toLong(),
+                            name = artistItem.title,
+                            songCount = if (localCount > 0) localCount else popularSongs.size,
+                            imageUrl = artistItem.thumbnail
+                        )
 
                         // ── Albums: sections titled "Albums" or "Releases" ──
                         fun AlbumItem.toAlbumSection(artistTitle: String, artistIdHash: Long): ArtistAlbumSection {
@@ -275,7 +287,8 @@ class ArtistDetailViewModel @Inject constructor(
                             subscriberCount = artistItem.subscriberCountText,
                             browseId = browseId,
                             albumsMoreEndpoint = albumsSection?.moreEndpoint,
-                            singlesMoreEndpoint = singlesSection?.moreEndpoint
+                            singlesMoreEndpoint = singlesSection?.moreEndpoint,
+                            songsMoreEndpoint = ytSongsSection?.moreEndpoint
                         )
                     }.onFailure { e ->
                         _uiState.update {
@@ -567,6 +580,92 @@ class ArtistDetailViewModel @Inject constructor(
                     it.copy(
                         allItemsError = e.localizedMessage,
                         isAllItemsLoading = false
+                    )
+                }
+            }
+        }
+    }
+
+    private var popularSongsAllJob: Job? = null
+
+    fun loadAllPopularSongs() {
+        val endpoint = _uiState.value.songsMoreEndpoint
+        if (endpoint == null) {
+            _uiState.update { it.copy(popularSongsAll = it.popularSongs, popularSongsAllContinuation = null, isPopularSongsAllLoading = false) }
+            return
+        }
+
+        popularSongsAllJob?.cancel()
+        popularSongsAllJob = viewModelScope.launch {
+            _uiState.update { it.copy(isPopularSongsAllLoading = true, popularSongsAll = emptyList(), popularSongsAllContinuation = null, popularSongsAllError = null) }
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    InnerTubeYouTube.artistItems(endpoint)
+                }
+                result.onSuccess { page ->
+                    val mappedSongs = page.items.mapNotNull { item ->
+                        (item as? SongItem)?.toNativeSong()
+                    }
+                    _uiState.update {
+                        it.copy(
+                            popularSongsAll = mappedSongs,
+                            popularSongsAllContinuation = page.continuation,
+                            isPopularSongsAllLoading = false
+                        )
+                    }
+                }.onFailure { e ->
+                    _uiState.update {
+                        it.copy(
+                            popularSongsAllError = e.localizedMessage,
+                            isPopularSongsAllLoading = false
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        popularSongsAllError = e.localizedMessage,
+                        isPopularSongsAllLoading = false
+                    )
+                }
+            }
+        }
+    }
+
+    fun loadMorePopularSongs() {
+        val continuation = _uiState.value.popularSongsAllContinuation ?: return
+        if (_uiState.value.isPopularSongsAllLoading) return
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isPopularSongsAllLoading = true) }
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    InnerTubeYouTube.artistItemsContinuation(continuation)
+                }
+                result.onSuccess { page ->
+                    val mappedSongs = page.items.mapNotNull { item ->
+                        (item as? SongItem)?.toNativeSong()
+                    }
+                    _uiState.update {
+                        it.copy(
+                            popularSongsAll = it.popularSongsAll + mappedSongs,
+                            popularSongsAllContinuation = page.continuation,
+                            isPopularSongsAllLoading = false
+                        )
+                    }
+                }.onFailure { e ->
+                    _uiState.update {
+                        it.copy(
+                            popularSongsAllError = e.localizedMessage,
+                            isPopularSongsAllLoading = false
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        popularSongsAllError = e.localizedMessage,
+                        isPopularSongsAllLoading = false
                     )
                 }
             }

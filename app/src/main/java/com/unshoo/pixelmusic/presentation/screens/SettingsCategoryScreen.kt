@@ -171,6 +171,7 @@ import com.unshoo.pixelmusic.data.backup.model.ModuleRestoreDetail
 import com.unshoo.pixelmusic.data.backup.model.RestorePlan
 import com.unshoo.pixelmusic.data.preferences.AppLanguage
 import com.unshoo.pixelmusic.data.preferences.AppThemeMode
+import com.unshoo.pixelmusic.data.preferences.AppFontMode
 import com.unshoo.pixelmusic.data.preferences.CollagePattern
 import com.unshoo.pixelmusic.data.preferences.CarouselStyle
 import com.unshoo.pixelmusic.data.preferences.LaunchTab
@@ -715,6 +716,17 @@ fun SettingsCategoryScreen(
                                     selectedKey = uiState.appThemeMode,
                                     onSelectionChanged = { settingsViewModel.setAppThemeMode(it) },
                                     leadingIcon = { Icon(Icons.Outlined.LightMode, null, tint = MaterialTheme.colorScheme.secondary) }
+                                )
+                                ThemeSelectorItem(
+                                    label = stringResource(R.string.setcat_app_font_label),
+                                    description = stringResource(R.string.setcat_app_font_desc),
+                                    options = mapOf(
+                                        AppFontMode.APP_DEFAULT to stringResource(R.string.setcat_font_pixelmusic),
+                                        AppFontMode.SYSTEM to stringResource(R.string.setcat_font_system)
+                                    ),
+                                    selectedKey = uiState.appFontMode,
+                                    onSelectionChanged = { settingsViewModel.setAppFontMode(it) },
+                                    leadingIcon = { Icon(Icons.Outlined.Style, null, tint = MaterialTheme.colorScheme.secondary) }
                                 )
                                 ThemeSelectorItem(
                                     label = stringResource(R.string.setcat_app_color_palette_label),
