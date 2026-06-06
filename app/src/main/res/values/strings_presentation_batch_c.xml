@@ -36,21 +36,21 @@
     <string name="song_picker_load_more">Load more</string>
 
     <!-- AI playlist sheet -->
-    <string name="cd_ai">AI</string>
+    <string name="cd_ai">Last.fm</string>
     <string name="ai_playlist_headline_perfect">Perfectly Curated</string>
     <string name="ai_playlist_headline_daily_mix">Daily Mix</string>
     <string name="ai_playlist_subtitle_journey_ready">Your sonic journey is ready</string>
-    <string name="ai_playlist_subtitle_generator">AI Playlist Generator</string>
-    <string name="ai_playlist_description">Describe the vibe, mood, or activity and let AI curate the perfect playlist from your library.</string>
+    <string name="ai_playlist_subtitle_generator">Last.fm Recommendation Generator</string>
+    <string name="ai_playlist_description">Generate a tailored mix based on your Last.fm profile directly into your Daily Mix.</string>
     <string name="ai_playlist_section_size">Playlist size</string>
     <string name="ai_playlist_min_songs">Min songs</string>
     <string name="ai_playlist_max_songs">Max songs</string>
-    <string name="ai_playlist_prompt_placeholder">e.g. Chill evening vibes, upbeat workout energy…</string>
+    <string name="ai_playlist_prompt_placeholder">e.g. Genre tag, artist seed or similar track…</string>
     <string name="ai_playlist_tap_to_retry">Tap to Retry</string>
-    <string name="ai_playlist_status_default">Sonic journey synthesized!</string>
+    <string name="ai_playlist_status_default">Recommendation Mix Generated!</string>
     <string name="ai_playlist_generating">Generating…</string>
     <string name="ai_playlist_ready_to_play">Ready to Play</string>
-    <string name="ai_playlist_generate">Generate Playlist</string>
+    <string name="ai_playlist_generate">Generate Mix</string>
     
     <!-- Library Empty State -->
     <string name="lib_empty_songs_all_title">No songs yet</string>

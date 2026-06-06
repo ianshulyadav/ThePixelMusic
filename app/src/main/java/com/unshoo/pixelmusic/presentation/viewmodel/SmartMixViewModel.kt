@@ -65,10 +65,24 @@ class SmartMixViewModel @Inject constructor(
     private val musicRepository: MusicRepository,
     private val playlistPreferencesRepository: PlaylistPreferencesRepository,
     private val userPreferencesRepository: UserPreferencesRepository,
+    private val dailyMixStateHolder: DailyMixStateHolder,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SmartMixUiState())
+    
+    // Daily Mix Generation States for Last.fm Recommendation Generator
+    private val _dailyMixGenGenerating = MutableStateFlow(false)
+    val dailyMixGenGenerating: StateFlow<Boolean> = _dailyMixGenGenerating.asStateFlow()
+
+    private val _dailyMixGenProgress = MutableStateFlow<String?>(null)
+    val dailyMixGenProgress: StateFlow<String?> = _dailyMixGenProgress.asStateFlow()
+
+    private val _dailyMixGenError = MutableStateFlow<String?>(null)
+    val dailyMixGenError: StateFlow<String?> = _dailyMixGenError.asStateFlow()
+
+    private val _dailyMixGenSuccess = MutableStateFlow(false)
+    val dailyMixGenSuccess: StateFlow<Boolean> = _dailyMixGenSuccess.asStateFlow()
     val uiState: StateFlow<SmartMixUiState> = _uiState.asStateFlow()
 
     private val json = Json { 
@@ -837,5 +851,113 @@ class SmartMixViewModel @Inject constructor(
     // Dynamic coroutine helper
     private suspend fun <T> coroutineScope(block: suspend kotlinx.coroutines.CoroutineScope.() -> T): T {
         return kotlinx.coroutines.coroutineScope(block)
+    }
+
+    fun dismissDailyMixGenSheet() {
+        _dailyMixGenError.value = null
+        _dailyMixGenSuccess.value = false
+        _dailyMixGenGenerating.value = false
+        _dailyMixGenProgress.value = null
+    }
+
+    fun generateDailyMixLastFm(
+        mode: String,
+        trackCount: Int,
+        timePeriod: String = "overall",
+        seedTrackName: String = "",
+        seedArtistName: String = "",
+        seedArtistInput: String = "",
+        tagInput: String = ""
+    ) {
+        val user = _uiState.value.username
+        if (user.isEmpty()) {
+            _dailyMixGenError.value = "Link your Last.fm account first in settings."
+            return
+        }
+
+        viewModelScope.launch {
+            _dailyMixGenGenerating.value = true
+            _dailyMixGenError.value = null
+            _dailyMixGenSuccess.value = false
+            _dailyMixGenProgress.value = "Connecting to Last.fm..."
+
+            try {
+                // Step 1: Query Last.fm for tracks metadata
+                val lastFmTracks = withContext(Dispatchers.IO) {
+                    when (mode) {
+                        "top" -> fetchTopTracks(user, trackCount, timePeriod)
+                        "library" -> fetchTopTracks(user, trackCount, "overall")
+                        "recent" -> fetchRecentTracks(user, trackCount)
+                        "similar-tracks" -> {
+                            if (seedTrackName.isBlank() || seedArtistName.isBlank()) {
+                                throw IllegalArgumentException("Enter a seed track and artist")
+                            }
+                            fetchSimilarTracks(seedTrackName, seedArtistName, trackCount)
+                        }
+                        "similar-artists" -> {
+                            if (seedArtistInput.isBlank()) {
+                                throw IllegalArgumentException("Enter a seed artist")
+                            }
+                            fetchSimilarArtistTracks(seedArtistInput, trackCount)
+                        }
+                        "tag" -> {
+                            if (tagInput.isBlank()) {
+                                throw IllegalArgumentException("Enter a genre/tag")
+                            }
+                            fetchTagTracks(tagInput, trackCount)
+                        }
+                        "mix" -> fetchMix(user, trackCount)
+                        "recommendations" -> fetchRecommendations(user, trackCount)
+                        else -> emptyList()
+                    }
+                }
+
+                if (lastFmTracks.isEmpty()) {
+                    throw Exception("No tracks found on Last.fm for your selections.")
+                }
+
+                _dailyMixGenProgress.value = "Resolving tracks on YouTube Music (0/${lastFmTracks.size})..."
+
+                // Step 2: Resolve tracks to YouTube Music IDs
+                val resolvedSongs = mutableListOf<Song>()
+                val semaphore = Semaphore(3) // parallel resolution with concurrency limit
+                val deferreds = lastFmTracks.mapIndexed { index, track ->
+                    async(Dispatchers.IO) {
+                        semaphore.withPermit {
+                            val song = resolveTrackToYoutubeSong(track)
+                            if (song != null) {
+                                synchronized(resolvedSongs) {
+                                    resolvedSongs.add(song)
+                                    _dailyMixGenProgress.value = "Resolving tracks on YouTube Music (${resolvedSongs.size}/${lastFmTracks.size})..."
+                                }
+                            }
+                        }
+                    }
+                }
+                deferreds.awaitAll()
+
+                if (resolvedSongs.isEmpty()) {
+                    throw Exception("Could not find playable matches on YouTube Music.")
+                }
+
+                // Step 3: Insert songs into Room database
+                _dailyMixGenProgress.value = "Saving tracks to local database..."
+                withContext(Dispatchers.IO) {
+                    musicRepository.insertYoutubeSongs(resolvedSongs)
+                }
+
+                // Step 4: ONLY set Daily Mix songs
+                _dailyMixGenProgress.value = "Updating Daily Mix songs..."
+                dailyMixStateHolder.setDailyMixSongs(resolvedSongs)
+                
+                _dailyMixGenSuccess.value = true
+                _dailyMixGenProgress.value = "Success! Daily Mix updated."
+            } catch (e: Exception) {
+                Timber.e(e, "Daily Mix Last.fm generation failed")
+                _dailyMixGenError.value = e.localizedMessage ?: "Unknown error"
+            } finally {
+                _dailyMixGenGenerating.value = false
+            }
+        }
     }
 }

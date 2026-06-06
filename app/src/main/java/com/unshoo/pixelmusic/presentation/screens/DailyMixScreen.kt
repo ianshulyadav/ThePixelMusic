@@ -75,6 +75,7 @@ import com.unshoo.pixelmusic.R
 import com.unshoo.pixelmusic.data.model.Song
 import com.unshoo.pixelmusic.presentation.components.AiPlaylistSheet
 import com.unshoo.pixelmusic.presentation.components.DailyMixMenu
+import com.unshoo.pixelmusic.presentation.viewmodel.SmartMixViewModel
 import com.unshoo.pixelmusic.presentation.components.MiniPlayerHeight
 import com.unshoo.pixelmusic.presentation.components.PlaylistBottomSheet
 import com.unshoo.pixelmusic.presentation.components.SmartImage
@@ -100,6 +101,7 @@ import androidx.compose.ui.res.stringResource
 fun DailyMixScreen(
     mainViewModel: MainViewModel = hiltViewModel(),
     playlistViewModel: PlaylistViewModel = hiltViewModel(),
+    smartMixViewModel: SmartMixViewModel = hiltViewModel(),
     playerViewModel: PlayerViewModel,
     navController: NavController,
 ) {
@@ -121,10 +123,10 @@ fun DailyMixScreen(
     val selectedSongForInfo by playerViewModel.selectedSongForInfo.collectAsStateWithLifecycle()
 
     val showAiSheet by playerViewModel.showAiPlaylistSheet.collectAsStateWithLifecycle()
-    val isGeneratingAiPlaylist by playerViewModel.isGeneratingAiPlaylist.collectAsStateWithLifecycle()
-    val aiStatus by playerViewModel.aiStatus.collectAsStateWithLifecycle()
-    val aiError by playerViewModel.aiError.collectAsStateWithLifecycle()
-    val aiSuccess by playerViewModel.aiSuccess.collectAsStateWithLifecycle()
+    val isGeneratingAiPlaylist by smartMixViewModel.dailyMixGenGenerating.collectAsStateWithLifecycle()
+    val aiStatus by smartMixViewModel.dailyMixGenProgress.collectAsStateWithLifecycle()
+    val aiError by smartMixViewModel.dailyMixGenError.collectAsStateWithLifecycle()
+    val aiSuccess by smartMixViewModel.dailyMixGenSuccess.collectAsStateWithLifecycle()
     val isGeneratingAiMetadata by playerViewModel.isGeneratingAiMetadata.collectAsStateWithLifecycle()
     val aiMetadataSuccess by playerViewModel.aiMetadataSuccess.collectAsStateWithLifecycle()
     val lazyListState = rememberLazyListState()
@@ -144,18 +146,30 @@ fun DailyMixScreen(
     }
 
     if (showAiSheet) {
-        // AI Integration: Premium Material 3 Expressive sheet for interactive playlist curation
+        // Last.fm Recommendation Mix Generator
         AiPlaylistSheet(
-            onDismiss = { playerViewModel.dismissAiPlaylistSheet() },
-            onGenerateClick = { prompt, minLength, maxLength ->
-                // Optimize: Trigger background AI generation and track real-time status
-                playerViewModel.generateAiPlaylist(prompt, minLength, maxLength, saveAsPlaylist = false)
+            onDismiss = {
+                smartMixViewModel.dismissDailyMixGenSheet()
+                playerViewModel.dismissAiPlaylistSheet()
+            },
+            onGenerateClick = { mode, count, timePeriod, seedTrack, seedArtist, seedArtistInput, tag ->
+                smartMixViewModel.generateDailyMixLastFm(
+                    mode = mode,
+                    trackCount = count,
+                    timePeriod = timePeriod,
+                    seedTrackName = seedTrack,
+                    seedArtistName = seedArtist,
+                    seedArtistInput = seedArtistInput,
+                    tagInput = tag
+                )
             },
             isGenerating = isGeneratingAiPlaylist,
             isSuccess = aiSuccess,
             status = aiStatus,
             error = aiError,
-            onRetry = { playerViewModel.retryLastPlaylistGeneration() }
+            onRetry = {
+                smartMixViewModel.dismissDailyMixGenSheet()
+            }
         )
     }
 
@@ -576,8 +590,8 @@ private fun ExpressiveDailyMixHeader(
             ) {
                 Icon(
                     modifier = Modifier.size(20.dp),
-                    painter = painterResource(R.drawable.gemini_ai),
-                    contentDescription = stringResource(R.string.cd_use_gemini_ai)
+                    painter = painterResource(R.drawable.rounded_instant_mix_24),
+                    contentDescription = "Last.fm Recommendation Mix"
                 )
             }
         }
