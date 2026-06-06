@@ -9,6 +9,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -551,8 +552,8 @@ fun AnimatedSparklesIconButton(
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "sparkle_animation")
     val scale by infiniteTransition.animateFloat(
-        initialValue = 0.9f,
-        targetValue = 1.1f,
+        initialValue = 0.92f,
+        targetValue = 1.08f,
         animationSpec = infiniteRepeatable(
             animation = tween(1200, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
@@ -560,53 +561,74 @@ fun AnimatedSparklesIconButton(
         label = "sparkle_scale"
     )
     val rotation by infiniteTransition.animateFloat(
-        initialValue = -10f,
-        targetValue = 10f,
+        initialValue = -12f,
+        targetValue = 12f,
         animationSpec = infiniteRepeatable(
-            animation = tween(1800, easing = LinearEasing),
+            animation = tween(1800, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "sparkle_rotation"
     )
 
+    val colors = MaterialTheme.colorScheme
+    // Exciting gradient background for the button
+    val gradientBrush = remember(colors) {
+        Brush.linearGradient(
+            colors = listOf(
+                colors.primary,
+                colors.tertiary
+            )
+        )
+    }
+
     Box(
-        modifier = modifier.size(48.dp),
+        modifier = modifier
+            .size(54.dp), // slightly larger to contain the badge safely
         contentAlignment = Alignment.Center
     ) {
-        FilledIconButton(
-            onClick = onClick,
-            modifier = Modifier.size(40.dp),
-            shape = CircleShape,
-            colors = IconButtonDefaults.filledIconButtonColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-            )
+        // Exciting premium icon button with gradient and micro-animation
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                    rotationZ = rotation
+                }
+                .clip(CircleShape)
+                .background(gradientBrush)
+                .clickable(onClick = onClick),
+            contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = Icons.Rounded.AutoAwesome,
                 contentDescription = "Smart Mix",
-                modifier = Modifier
-                    .size(20.dp)
-                    .graphicsLayer {
-                        scaleX = scale
-                        scaleY = scale
-                        rotationZ = rotation
-                    }
+                modifier = Modifier.size(20.dp),
+                tint = colors.onPrimary
             )
         }
 
+        // Beautifully polished HOT badge that doesn't clip
         Box(
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .offset(x = 8.dp, y = (-6).dp)
-                .background(Color(0xFFE53935), RoundedCornerShape(5.dp))
-                .padding(horizontal = 3.5.dp, vertical = 1.dp)
+                .offset(x = (-2).dp, y = 2.dp)
+                .background(
+                    color = colors.error,
+                    shape = RoundedCornerShape(8.dp)
+                )
+                .border(
+                    width = 1.5.dp,
+                    color = colors.surfaceContainerLow,
+                    shape = RoundedCornerShape(8.dp)
+                )
+                .padding(horizontal = 5.dp, vertical = 2.5.dp)
         ) {
             Text(
                 text = "HOT",
-                fontSize = 7.sp,
+                fontSize = 8.sp,
                 fontWeight = FontWeight.ExtraBold,
-                color = Color.White,
+                color = colors.onError,
                 fontFamily = GoogleSansRounded,
                 letterSpacing = 0.5.sp
             )
