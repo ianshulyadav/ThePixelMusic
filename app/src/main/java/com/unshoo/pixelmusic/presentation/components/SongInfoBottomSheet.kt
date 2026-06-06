@@ -84,6 +84,8 @@ import com.unshoo.pixelmusic.data.ai.SongMetadata
 import com.unshoo.pixelmusic.data.media.CoverArtUpdate
 import com.unshoo.pixelmusic.ui.theme.MontserratFamily
 import com.unshoo.pixelmusic.presentation.viewmodel.SongInfoBottomSheetViewModel
+import com.unshoo.pixelmusic.presentation.viewmodel.PlayerViewModel
+import androidx.compose.material.icons.rounded.Shuffle
 import kotlinx.coroutines.launch
 
 import androidx.compose.ui.graphics.TransformOrigin
@@ -424,6 +426,35 @@ fun SongInfoBottomSheet(
                                         contentPadding = PaddingValues(horizontal = 16.dp),
                                         verticalArrangement = Arrangement.spacedBy(10.dp)
                                     ) {
+                                        item {
+                                            val playerViewModel: PlayerViewModel = hiltViewModel()
+                                            FilledTonalButton(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .heightIn(min = 66.dp),
+                                                colors = ButtonDefaults.filledTonalButtonColors(
+                                                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
+                                                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                                ),
+                                                shape = CircleShape,
+                                                onClick = {
+                                                    onDismiss()
+                                                    playerViewModel.startMixFromSong(song)
+                                                }
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Rounded.Shuffle,
+                                                    contentDescription = "Start Mix from this",
+                                                    modifier = Modifier.size(24.dp)
+                                                )
+                                                Spacer(Modifier.width(12.dp))
+                                                Text(
+                                                    text = "Start Mix from this",
+                                                    fontFamily = GoogleSansRounded,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                        }
                                         item {
                                             Row(
                                                 modifier = Modifier
