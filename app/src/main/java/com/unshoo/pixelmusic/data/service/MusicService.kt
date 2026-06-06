@@ -594,6 +594,8 @@ class MusicService : MediaLibraryService() {
                     MusicNotificationProvider.CUSTOM_COMMAND_SET_SLEEP_TIMER_DURATION,
                     MusicNotificationProvider.CUSTOM_COMMAND_SET_SLEEP_TIMER_END_OF_TRACK,
                     MusicNotificationProvider.CUSTOM_COMMAND_CANCEL_SLEEP_TIMER,
+                    MusicNotificationProvider.CUSTOM_COMMAND_SKIP_NEXT,
+                    MusicNotificationProvider.CUSTOM_COMMAND_SKIP_PREVIOUS,
                 ).map { SessionCommand(it, Bundle.EMPTY) }
 
                 val sessionCommandsBuilder = SessionCommands.Builder()
@@ -624,6 +626,12 @@ class MusicService : MediaLibraryService() {
                 Timber.tag("MusicService")
                     .d("onCustomCommand received: ${customCommand.customAction}")
                 when (customCommand.customAction) {
+                    MusicNotificationProvider.CUSTOM_COMMAND_SKIP_NEXT -> {
+                        session.player.seekToNext()
+                    }
+                    MusicNotificationProvider.CUSTOM_COMMAND_SKIP_PREVIOUS -> {
+                        session.player.seekToPrevious()
+                    }
                     MusicNotificationProvider.CUSTOM_COMMAND_CLOSE_PLAYER -> {
                         closeNotificationPlayer()
                     }
