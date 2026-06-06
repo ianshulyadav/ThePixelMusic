@@ -24,6 +24,9 @@
   <a href="https://github.com/ianshulyadav/PixelMusic"><img src="https://img.shields.io/badge/PRs-Welcome-brightgreen?style=for-the-badge" alt="PRs Welcome"></a>
 </p>
 
+> [!NOTE]
+> **Independent Fork & Attribution Notice:** This repository is an independent, community-driven fork of the excellent open-source project **[PixelPlayer](https://github.com/theovilardo/PixelPlayer)** created by **[Theo Vilardo](https://github.com/theovilardo)**. It is modified and distributed under the terms of the [Proprietary License](LICENSE). We extend our sincere gratitude to Theo Vilardo and all original contributors for their outstanding foundation work.
+
 ---
 
 ## 📖 Introduction & Philosophy
@@ -36,7 +39,7 @@ You can scan and play high-resolution local files like FLAC, ALAC, WAV, and MP3.
 
 Beautifully styled on the state-of-the-art **PixelPlayer** UI/UX, the interface adapts dynamically to the colors of your album artwork. The app is loaded with advanced features. You can follow along with synchronized LRC lyrics (complete with manual timing offset adjustments). You can customize your sound with a professional 10-band equalizer. You can also connect to other systems using built-in Chromecast, full Android Auto driving support, and a Wear OS watch companion.
 
-The app even includes custom generative AI playlist creation. You can simply describe a mood or style, and the built-in Gemini assistant will instantly curate the perfect queue for you. Released under the GNU GPL v3.0 license, Pixel Music provides a highly premium, privacy-focused, and completely unrestricted audio experience.
+The app even includes custom generative AI playlist creation. You can simply describe a mood or style, and the built-in Gemini assistant will instantly curate the perfect queue for you. Released under the Proprietary License, Pixel Music provides a highly premium, privacy-focused, and completely unrestricted audio experience.
 
 ---
 

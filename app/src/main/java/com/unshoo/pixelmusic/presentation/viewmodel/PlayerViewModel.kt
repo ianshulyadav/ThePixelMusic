@@ -1385,8 +1385,7 @@ class PlayerViewModel @Inject constructor(
             return Futures.immediateFuture(SessionResult(SessionError.ERROR_NOT_SUPPORTED))
         }
     }
-    private val mediaControllerFuture: ListenableFuture<MediaController> =
-        mediaControllerFactory.create(context, sessionToken, mediaControllerListener)
+    private var activeMediaControllerFuture: ListenableFuture<MediaController>? = null
     private var pendingRepeatMode: Int? = null
 
     private var pendingPlaybackAction: (() -> Unit)? = null
@@ -1982,25 +1981,7 @@ class PlayerViewModel @Inject constructor(
             }
         }
 
-        mediaControllerFuture.addListener({
-            try {
-                mediaController = mediaControllerFuture.get()
-                // Pass controller to PlaybackStateHolder
-                playbackStateHolder.setMediaController(mediaController)
-                _isMediaControllerReady.value = true
-
-
-                setupMediaControllerListeners()
-                flushPendingRepeatMode()
-                syncShuffleStateWithSession(playbackStateHolder.stablePlayerState.value.isShuffleEnabled)
-                // Execute any pending action that was queued while the controller was connecting
-                pendingPlaybackAction?.invoke()
-                pendingPlaybackAction = null
-            } catch (e: Exception) {
-                _playerUiState.update { it.copy(isLoadingInitialSongs = false, isLoadingLibraryCategories = false) }
-                Log.e("PlayerViewModel", "Error setting up MediaController", e)
-            }
-        }, ContextCompat.getMainExecutor(context))
+        connectMediaController()
 
 
         // Start Cast discovery
@@ -2216,8 +2197,54 @@ class PlayerViewModel @Inject constructor(
         try {
             preloadThemesAndInitialData()
             checkAndUpdateDailyMixIfNeeded()
+            checkAndReconnectMediaController()
         } finally {
             Trace.endSection()
+        }
+    }
+
+    private fun connectMediaController() {
+        activeMediaControllerFuture?.let {
+            try {
+                androidx.media3.session.MediaController.releaseFuture(it)
+            } catch (e: Exception) {
+                Log.e("PlayerViewModel", "Error releasing media controller future", e)
+            }
+        }
+        _isMediaControllerReady.value = false
+
+        val future = mediaControllerFactory.create(context, sessionToken, mediaControllerListener)
+        activeMediaControllerFuture = future
+
+        future.addListener({
+            try {
+                mediaControllerPlaybackListener?.let { listener ->
+                    mediaController?.removeListener(listener)
+                }
+                mediaController?.release()
+
+                val controller = future.get()
+                mediaController = controller
+                playbackStateHolder.setMediaController(controller)
+                _isMediaControllerReady.value = true
+
+                setupMediaControllerListeners()
+                flushPendingRepeatMode()
+                syncShuffleStateWithSession(playbackStateHolder.stablePlayerState.value.isShuffleEnabled)
+                pendingPlaybackAction?.invoke()
+                pendingPlaybackAction = null
+            } catch (e: Exception) {
+                _playerUiState.update { it.copy(isLoadingInitialSongs = false, isLoadingLibraryCategories = false) }
+                Log.e("PlayerViewModel", "Error setting up MediaController", e)
+            }
+        }, androidx.core.content.ContextCompat.getMainExecutor(context))
+    }
+
+    fun checkAndReconnectMediaController() {
+        val currentController = mediaController
+        if (currentController == null || !currentController.isConnected) {
+            Log.i("PlayerViewModel", "MediaController is null or disconnected. Triggering reconnect.")
+            connectMediaController()
         }
     }
 
@@ -5292,7 +5319,9 @@ class PlayerViewModel @Inject constructor(
         playbackStateHolder.setMediaController(null)
         mediaController?.release()
         mediaController = null
-        mediaControllerFuture.cancel(true)
+        activeMediaControllerFuture?.let {
+            androidx.media3.session.MediaController.releaseFuture(it)
+        }
         super.onCleared()
         remoteQueueLoadJob?.cancel()
         castSongUiSyncJob?.cancel()

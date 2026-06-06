@@ -18,4 +18,6 @@ object MusicNotificationProvider {
     const val CUSTOM_COMMAND_CANCEL_SLEEP_TIMER = "com.unshoo.pixelmusic.CANCEL_SLEEP_TIMER"
     const val EXTRA_SLEEP_TIMER_MINUTES = "com.unshoo.pixelmusic.extra.SLEEP_TIMER_MINUTES"
     const val EXTRA_END_OF_TRACK_ENABLED = "com.unshoo.pixelmusic.extra.END_OF_TRACK_ENABLED"
+    const val CUSTOM_COMMAND_SKIP_NEXT = "com.unshoo.pixelmusic.SKIP_NEXT"
+    const val CUSTOM_COMMAND_SKIP_PREVIOUS = "com.unshoo.pixelmusic.SKIP_PREVIOUS"
 }

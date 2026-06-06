@@ -223,26 +223,22 @@ private fun SmartMixConfigurator(
     val fabAreaHeight = 56.dp + 20.dp + (if (isPlayerActive) MiniPlayerHeight else 0.dp) + bottomBarHeightDp
     val isDark = androidx.compose.foundation.isSystemInDarkTheme()
 
-    // Unique per-mode colors matching app's Expressive Settings design language
-    val modeColors: Map<String, Pair<Color, Color>> = if (isDark) mapOf(
-        "top"             to (Color(0xFF4A3F00) to Color(0xFFFFE082)),
-        "recent"          to (Color(0xFF004A77) to Color(0xFFC2E7FF)),
-        "similar-tracks"  to (Color(0xFF005049) to Color(0xFF88FFD9)),
-        "similar-artists" to (Color(0xFF7D5260) to Color(0xFFFFD8E4)),
-        "tag"             to (Color(0xFF3E4C63) to Color(0xFFD7E3FF)),
-        "mix"             to (Color(0xFF004F58) to Color(0xFF88FAFF)),
-        "recommendations" to (Color(0xFF6E1B1B) to Color(0xFFFFDAD9)),
-        "library"         to (Color(0xFF324F34) to Color(0xFFCBEFD0))
-    ) else mapOf(
-        "top"             to (Color(0xFFFFF8E1) to Color(0xFFE65100)),
-        "recent"          to (Color(0xFFD7E3FF) to Color(0xFF005AC1)),
-        "similar-tracks"  to (Color(0xFF88FFD9) to Color(0xFF005049)),
-        "similar-artists" to (Color(0xFFFFD8E4) to Color(0xFF631835)),
-        "tag"             to (Color(0xFFD7E3FF) to Color(0xFF253347)),
-        "mix"             to (Color(0xFFCCE8EA) to Color(0xFF004F58)),
-        "recommendations" to (Color(0xFFFFDAD9) to Color(0xFF6E1B1B)),
-        "library"         to (Color(0xFFCBEFD0) to Color(0xFF042106))
-    )
+    val playerColorSchemePair by playerViewModel.activePlayerColorSchemePair.collectAsStateWithLifecycle()
+    val activeColorScheme = playerColorSchemePair?.let { if (isDark) it.dark else it.light }
+        ?: MaterialTheme.colorScheme
+
+    val modeColors = remember(activeColorScheme) {
+        mapOf(
+            "top"             to (activeColorScheme.primaryContainer to activeColorScheme.primary),
+            "recent"          to (activeColorScheme.secondaryContainer to activeColorScheme.secondary),
+            "similar-tracks"  to (activeColorScheme.tertiaryContainer to activeColorScheme.tertiary),
+            "similar-artists" to (activeColorScheme.errorContainer to activeColorScheme.error),
+            "tag"             to (activeColorScheme.surfaceVariant to activeColorScheme.onSurfaceVariant),
+            "mix"             to (activeColorScheme.primaryContainer to activeColorScheme.tertiary),
+            "recommendations" to (activeColorScheme.tertiaryContainer to activeColorScheme.primary),
+            "library"         to (activeColorScheme.secondaryContainer to activeColorScheme.primary)
+        )
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
@@ -250,7 +246,7 @@ private fun SmartMixConfigurator(
                 .fillMaxSize()
                 .padding(horizontal = 16.dp),
             contentPadding = PaddingValues(top = 8.dp, bottom = fabAreaHeight + 8.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             // 1. Slider Card
             item {
@@ -291,12 +287,52 @@ private fun SmartMixConfigurator(
                     val isSelected = uiState.selectedMode == mode.id
                     val colors = modeColors[mode.id]!!
 
-                    // Settings-style grouped shape: large radius top/bottom, small radius middle
-                    val itemShape = when {
-                        total == 1 -> RoundedCornerShape(24.dp)
-                        idx == 0 -> RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 6.dp, bottomEnd = 6.dp)
-                        idx == total - 1 -> RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp, bottomStart = 24.dp, bottomEnd = 24.dp)
-                        else -> RoundedCornerShape(6.dp)
+                    // Dynamic scale bounce micro-interaction on selection
+                    val cardScale by animateFloatAsState(
+                        targetValue = if (isSelected) 1.02f else 1.0f,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                            stiffness = Spring.StiffnessLow
+                        ),
+                        label = "card_scale"
+                    )
+
+                    val itemShape = remember { AbsoluteSmoothCornerShape(22.dp, 60) }
+
+                    val startColor = colors.first
+                    val ratio = if (isDark) 0.18f else 0.28f
+                    val endColor = Color(
+                        red = startColor.red * (1f - ratio) + colors.second.red * ratio,
+                        green = startColor.green * (1f - ratio) + colors.second.green * ratio,
+                        blue = startColor.blue * (1f - ratio) + colors.second.blue * ratio,
+                        alpha = 1f
+                    )
+
+                    val cardBgBrush = if (isSelected) {
+                        Brush.linearGradient(
+                            colors = listOf(startColor, endColor)
+                        )
+                    } else {
+                        Brush.linearGradient(
+                            colors = listOf(
+                                startColor.copy(alpha = if (isDark) 0.15f else 0.25f),
+                                startColor.copy(alpha = if (isDark) 0.08f else 0.15f)
+                            )
+                        )
+                    }
+
+                    val borderStroke = if (isSelected) {
+                        BorderStroke(
+                            width = 2.dp,
+                            brush = Brush.linearGradient(
+                                colors = listOf(colors.second, colors.second.copy(alpha = 0.5f))
+                            )
+                        )
+                    } else {
+                        BorderStroke(
+                            width = 1.dp,
+                            color = colors.second.copy(alpha = if (isDark) 0.15f else 0.25f)
+                        )
                     }
 
                     Surface(
@@ -305,12 +341,18 @@ private fun SmartMixConfigurator(
                             else viewModel.setSelectedMode(mode.id)
                         },
                         shape = itemShape,
-                        color = if (isSelected) MaterialTheme.colorScheme.primaryContainer
-                                else MaterialTheme.colorScheme.surfaceContainer,
-                        border = if (isSelected)
-                            BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary)
-                        else null,
-                        modifier = Modifier.fillMaxWidth()
+                        color = Color.Transparent,
+                        border = borderStroke,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .graphicsLayer {
+                                scaleX = cardScale
+                                scaleY = cardScale
+                            }
+                            .background(
+                                brush = cardBgBrush,
+                                shape = itemShape
+                            )
                     ) {
                         Column {
                             Row(
@@ -319,22 +361,34 @@ private fun SmartMixConfigurator(
                                     .fillMaxWidth()
                                     .padding(16.dp)
                             ) {
-                                // Solid colored circle icon — same as ExpressiveCategoryItem
+                                // Premium Squircle Icon Container with dynamic inversion
                                 Box(
                                     contentAlignment = Alignment.Center,
                                     modifier = Modifier
                                         .size(52.dp)
-                                        .clip(CircleShape)
+                                        .clip(AbsoluteSmoothCornerShape(16.dp, 60))
                                         .background(
-                                            if (isSelected) MaterialTheme.colorScheme.primary
-                                            else colors.first
+                                            Brush.verticalGradient(
+                                                colors = if (isSelected) listOf(
+                                                    colors.second,
+                                                    colors.second.copy(alpha = 0.85f)
+                                                ) else listOf(
+                                                    colors.first,
+                                                    colors.first.copy(alpha = 0.85f)
+                                                )
+                                            )
+                                        )
+                                        .border(
+                                            width = 1.dp,
+                                            color = (if (isSelected) colors.first else colors.second).copy(alpha = 0.2f),
+                                            shape = AbsoluteSmoothCornerShape(16.dp, 60)
                                         )
                                 ) {
                                     Icon(
                                         imageVector = mode.icon,
                                         contentDescription = null,
                                         modifier = Modifier.size(24.dp),
-                                        tint = if (isSelected) MaterialTheme.colorScheme.onPrimary
+                                        tint = if (isSelected) colors.first
                                                else colors.second
                                     )
                                 }
@@ -347,7 +401,7 @@ private fun SmartMixConfigurator(
                                         style = MaterialTheme.typography.titleMedium,
                                         fontWeight = FontWeight.SemiBold,
                                         fontFamily = GoogleSansRounded,
-                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
+                                        color = if (isSelected) colors.second
                                                 else MaterialTheme.colorScheme.onSurface,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
@@ -355,8 +409,8 @@ private fun SmartMixConfigurator(
                                     Text(
                                         text = mode.desc,
                                         style = MaterialTheme.typography.bodyMedium,
-                                        color = (if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
-                                                 else MaterialTheme.colorScheme.onSurface).copy(alpha = 0.65f),
+                                        color = if (isSelected) colors.second.copy(alpha = 0.75f)
+                                                 else MaterialTheme.colorScheme.onSurfaceVariant,
                                         maxLines = 2,
                                         overflow = TextOverflow.Ellipsis
                                     )
@@ -364,7 +418,7 @@ private fun SmartMixConfigurator(
 
                                 Spacer(modifier = Modifier.width(8.dp))
 
-                                // Animated chevron / collapse icon
+                                // Animated chevron / collapse icon matching the dynamic color scheme
                                 val iconRotation by animateFloatAsState(
                                     targetValue = if (isSelected) 90f else 0f,
                                     animationSpec = tween(200),
@@ -376,12 +430,12 @@ private fun SmartMixConfigurator(
                                     modifier = Modifier
                                         .size(22.dp)
                                         .graphicsLayer { rotationZ = iconRotation },
-                                    tint = if (isSelected) MaterialTheme.colorScheme.primary
+                                    tint = if (isSelected) colors.second
                                            else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
 
-                            // Inline expanded options
+                            // Inline expanded options styled symmetrically
                             AnimatedVisibility(
                                 visible = isSelected,
                                 enter = expandVertically(tween(220)) + fadeIn(tween(220)),
@@ -390,57 +444,58 @@ private fun SmartMixConfigurator(
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(start = 84.dp, end = 16.dp, bottom = 16.dp)
+                                        .padding(start = 20.dp, end = 20.dp, bottom = 20.dp)
                                 ) {
                                     HorizontalDivider(
-                                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                                        modifier = Modifier.padding(bottom = 12.dp)
+                                        color = colors.second.copy(alpha = 0.15f),
+                                        modifier = Modifier.padding(bottom = 16.dp)
                                     )
                                     when (mode.id) {
                                         "top", "library" -> PeriodSelectionSection(
                                             selectedPeriod = uiState.timePeriod,
-                                            onPeriodSelect = { viewModel.setTimePeriod(it) }
+                                            onPeriodSelect = { viewModel.setTimePeriod(it) },
+                                            colors = colors
                                         )
                                         "recent" -> Text(
                                             text = "Fetches what you have scrobbled recently on Last.fm.",
                                             style = MaterialTheme.typography.bodyMedium,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            color = colors.second.copy(alpha = 0.8f)
                                         )
                                         "similar-tracks" -> SimilarTracksInputs(
                                             uiState = uiState, viewModel = viewModel,
-                                            keyboardController = keyboardController
+                                            keyboardController = keyboardController,
+                                            colors = colors
                                         )
                                         "similar-artists" -> SimilarArtistsInputs(
                                             uiState = uiState, viewModel = viewModel,
-                                            keyboardController = keyboardController
+                                            keyboardController = keyboardController,
+                                            colors = colors
                                         )
                                         "tag" -> TagInputs(
                                             uiState = uiState, viewModel = viewModel,
-                                            keyboardController = keyboardController
+                                            keyboardController = keyboardController,
+                                            colors = colors
                                         )
                                         "mix" -> Text(
                                             text = "A smart blend of your top tracks, recent plays, and tracks similar to your favorite artists.",
                                             style = MaterialTheme.typography.bodyMedium,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            color = colors.second.copy(alpha = 0.8f)
                                         )
                                         "recommendations" -> Text(
                                             text = "Uses your Last.fm profile to score, filter, and balance familiar sounds with new discoveries.",
                                             style = MaterialTheme.typography.bodyMedium,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            color = colors.second.copy(alpha = 0.8f)
                                         )
                                     }
                                 }
                             }
                         }
                     }
-
-                    // Gap between non-adjacent items
-                    if (idx < total - 1) Spacer(Modifier.height(2.dp))
                 }
             }
         }
 
-        // FAB — always above mini player + nav bar
+        // FAB — always above mini player + nav bar, hidden when selectedMode is null
         val isGenerateEnabled = uiState.selectedMode != null && when (uiState.selectedMode) {
             "similar-tracks"  -> uiState.seedTrackName.isNotBlank() && uiState.seedArtistName.isNotBlank()
             "similar-artists" -> uiState.seedArtistInput.isNotBlank()
@@ -448,25 +503,31 @@ private fun SmartMixConfigurator(
             else              -> true
         }
 
-        ExtendedFloatingActionButton(
-            onClick = { keyboardController?.hide(); viewModel.generatePlaylist() },
-            expanded = isGenerateEnabled,
-            icon = { Icon(Icons.Rounded.AutoAwesome, contentDescription = null) },
-            text = {
-                Text(
-                    text = "Generate Mix",
-                    fontWeight = FontWeight.SemiBold,
-                    fontFamily = GoogleSansRounded
-                )
-            },
-            containerColor = if (isGenerateEnabled) MaterialTheme.colorScheme.primary
-                             else MaterialTheme.colorScheme.surfaceVariant,
-            contentColor = if (isGenerateEnabled) MaterialTheme.colorScheme.onPrimary
-                           else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+        AnimatedVisibility(
+            visible = uiState.selectedMode != null,
+            enter = fadeIn() + scaleIn(),
+            exit = fadeOut() + scaleOut(),
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = (if (isPlayerActive) MiniPlayerHeight else 0.dp) + bottomBarHeightDp + 12.dp)
-        )
+        ) {
+            ExtendedFloatingActionButton(
+                onClick = { keyboardController?.hide(); viewModel.generatePlaylist() },
+                expanded = isGenerateEnabled,
+                icon = { Icon(Icons.Rounded.AutoAwesome, contentDescription = null) },
+                text = {
+                    Text(
+                        text = "Generate Mix",
+                        fontWeight = FontWeight.SemiBold,
+                        fontFamily = GoogleSansRounded
+                    )
+                },
+                containerColor = if (isGenerateEnabled) MaterialTheme.colorScheme.primary
+                                 else MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = if (isGenerateEnabled) MaterialTheme.colorScheme.onPrimary
+                               else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+            )
+        }
     }
 }
 
@@ -546,7 +607,8 @@ private fun TrackCountSliderCard(
 @Composable
 private fun PeriodSelectionSection(
     selectedPeriod: String,
-    onPeriodSelect: (String) -> Unit
+    onPeriodSelect: (String) -> Unit,
+    colors: Pair<Color, Color>
 ) {
     val periods = listOf(
         "overall" to "All Time",
@@ -560,7 +622,7 @@ private fun PeriodSelectionSection(
     Text(
         text = "Select Time Period",
         style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-        color = MaterialTheme.colorScheme.primary,
+        color = colors.second,
         modifier = Modifier.padding(bottom = 8.dp)
     )
 
@@ -573,14 +635,14 @@ private fun PeriodSelectionSection(
             FilterChip(
                 selected = active,
                 onClick = { onPeriodSelect(id) },
-                label = { Text(label) },
+                label = { Text(label, fontFamily = GoogleSansRounded) },
                 colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = MaterialTheme.colorScheme.primary,
-                    selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    labelColor = MaterialTheme.colorScheme.onSurface
+                    selectedContainerColor = colors.second,
+                    selectedLabelColor = colors.first,
+                    containerColor = colors.second.copy(alpha = 0.15f),
+                    labelColor = colors.second
                 ),
-                shape = RoundedCornerShape(12.dp),
+                shape = AbsoluteSmoothCornerShape(12.dp, 60),
                 border = null
             )
         }
@@ -591,7 +653,8 @@ private fun PeriodSelectionSection(
 private fun SimilarTracksInputs(
     uiState: SmartMixUiState,
     viewModel: SmartMixViewModel,
-    keyboardController: androidx.compose.ui.platform.SoftwareKeyboardController?
+    keyboardController: androidx.compose.ui.platform.SoftwareKeyboardController?,
+    colors: Pair<Color, Color>
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -600,11 +663,11 @@ private fun SimilarTracksInputs(
         OutlinedTextField(
             value = uiState.seedTrackName,
             onValueChange = { viewModel.setSeedTrackName(it) },
-            label = { Text("Seed Track Name") },
-            placeholder = { Text("Enter track name...") },
+            label = { Text("Seed Track Name", fontFamily = GoogleSansRounded) },
+            placeholder = { Text("Enter track name...", fontFamily = GoogleSansRounded) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
+            shape = AbsoluteSmoothCornerShape(16.dp, 60),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(onSearch = {
                 keyboardController?.hide()
@@ -615,19 +678,41 @@ private fun SimilarTracksInputs(
                     keyboardController?.hide()
                     viewModel.searchSeedTrack()
                 }) {
-                    Icon(Icons.Rounded.Search, contentDescription = "Search")
+                    Icon(Icons.Rounded.Search, contentDescription = "Search", tint = colors.second)
                 }
-            }
+            },
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = colors.second,
+                unfocusedBorderColor = colors.second.copy(alpha = 0.3f),
+                focusedLabelColor = colors.second,
+                unfocusedLabelColor = colors.second.copy(alpha = 0.7f),
+                cursorColor = colors.second,
+                focusedTextColor = colors.second,
+                unfocusedTextColor = colors.second,
+                focusedContainerColor = colors.second.copy(alpha = 0.08f),
+                unfocusedContainerColor = colors.second.copy(alpha = 0.04f)
+            )
         )
 
         OutlinedTextField(
             value = uiState.seedArtistName,
             onValueChange = { viewModel.setSeedArtistName(it) },
-            label = { Text("Seed Artist Name (Optional)") },
-            placeholder = { Text("Enter artist name...") },
+            label = { Text("Seed Artist Name (Optional)", fontFamily = GoogleSansRounded) },
+            placeholder = { Text("Enter artist name...", fontFamily = GoogleSansRounded) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp)
+            shape = AbsoluteSmoothCornerShape(16.dp, 60),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = colors.second,
+                unfocusedBorderColor = colors.second.copy(alpha = 0.3f),
+                focusedLabelColor = colors.second,
+                unfocusedLabelColor = colors.second.copy(alpha = 0.7f),
+                cursorColor = colors.second,
+                focusedTextColor = colors.second,
+                unfocusedTextColor = colors.second,
+                focusedContainerColor = colors.second.copy(alpha = 0.08f),
+                unfocusedContainerColor = colors.second.copy(alpha = 0.04f)
+            )
         )
 
         Button(
@@ -636,15 +721,15 @@ private fun SimilarTracksInputs(
                 viewModel.loadTopTracksForSeed()
             },
             colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                containerColor = colors.second,
+                contentColor = colors.first
             ),
-            shape = RoundedCornerShape(12.dp),
+            shape = AbsoluteSmoothCornerShape(16.dp, 60),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Icon(Icons.Rounded.LibraryMusic, contentDescription = null)
+            Icon(Icons.Rounded.LibraryMusic, contentDescription = null, tint = colors.first)
             Spacer(modifier = Modifier.width(8.dp))
-            Text("Pick From My Top Tracks")
+            Text("Pick From My Top Tracks", fontFamily = GoogleSansRounded, fontWeight = FontWeight.Bold)
         }
 
         if (uiState.isSearchingTopSeeds || uiState.isSearchingSeed) {
@@ -654,7 +739,7 @@ private fun SimilarTracksInputs(
                     .height(60.dp),
                 contentAlignment = Alignment.Center
             ) {
-                CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                CircularProgressIndicator(color = colors.second, modifier = Modifier.size(24.dp))
             }
         }
 
@@ -662,7 +747,7 @@ private fun SimilarTracksInputs(
             Text(
                 text = "Search Results",
                 style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.primary
+                color = colors.second
             )
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 for (track in uiState.searchTrackResults) {
@@ -672,7 +757,8 @@ private fun SimilarTracksInputs(
                         onClick = {
                             viewModel.setSeedTrackName(track.name)
                             viewModel.setSeedArtistName(track.artist)
-                        }
+                        },
+                        colors = colors
                     )
                 }
             }
@@ -682,7 +768,7 @@ private fun SimilarTracksInputs(
             Text(
                 text = "My Top Tracks",
                 style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.primary
+                color = colors.second
             )
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 for (track in uiState.topTracksForSeed) {
@@ -692,7 +778,8 @@ private fun SimilarTracksInputs(
                         onClick = {
                             viewModel.setSeedTrackName(track.name)
                             viewModel.setSeedArtistName(track.artist)
-                        }
+                        },
+                        colors = colors
                     )
                 }
             }
@@ -704,7 +791,8 @@ private fun SimilarTracksInputs(
 private fun SimilarArtistsInputs(
     uiState: SmartMixUiState,
     viewModel: SmartMixViewModel,
-    keyboardController: androidx.compose.ui.platform.SoftwareKeyboardController?
+    keyboardController: androidx.compose.ui.platform.SoftwareKeyboardController?,
+    colors: Pair<Color, Color>
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -713,11 +801,11 @@ private fun SimilarArtistsInputs(
         OutlinedTextField(
             value = uiState.seedArtistInput,
             onValueChange = { viewModel.setSeedArtistInput(it) },
-            label = { Text("Seed Artist Name") },
-            placeholder = { Text("Enter artist name...") },
+            label = { Text("Seed Artist Name", fontFamily = GoogleSansRounded) },
+            placeholder = { Text("Enter artist name...", fontFamily = GoogleSansRounded) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
+            shape = AbsoluteSmoothCornerShape(16.dp, 60),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(onSearch = {
                 keyboardController?.hide()
@@ -728,9 +816,20 @@ private fun SimilarArtistsInputs(
                     keyboardController?.hide()
                     viewModel.searchSeedArtist()
                 }) {
-                    Icon(Icons.Rounded.Search, contentDescription = "Search")
+                    Icon(Icons.Rounded.Search, contentDescription = "Search", tint = colors.second)
                 }
-            }
+            },
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = colors.second,
+                unfocusedBorderColor = colors.second.copy(alpha = 0.3f),
+                focusedLabelColor = colors.second,
+                unfocusedLabelColor = colors.second.copy(alpha = 0.7f),
+                cursorColor = colors.second,
+                focusedTextColor = colors.second,
+                unfocusedTextColor = colors.second,
+                focusedContainerColor = colors.second.copy(alpha = 0.08f),
+                unfocusedContainerColor = colors.second.copy(alpha = 0.04f)
+            )
         )
 
         Button(
@@ -739,15 +838,15 @@ private fun SimilarArtistsInputs(
                 viewModel.loadTopArtistsForSeed()
             },
             colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                containerColor = colors.second,
+                contentColor = colors.first
             ),
-            shape = RoundedCornerShape(12.dp),
+            shape = AbsoluteSmoothCornerShape(16.dp, 60),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Icon(Icons.Rounded.People, contentDescription = null)
+            Icon(Icons.Rounded.People, contentDescription = null, tint = colors.first)
             Spacer(modifier = Modifier.width(8.dp))
-            Text("Pick From My Top Artists")
+            Text("Pick From My Top Artists", fontFamily = GoogleSansRounded, fontWeight = FontWeight.Bold)
         }
 
         if (uiState.isSearchingTopSeeds || uiState.isSearchingSeed) {
@@ -757,7 +856,7 @@ private fun SimilarArtistsInputs(
                     .height(60.dp),
                 contentAlignment = Alignment.Center
             ) {
-                CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                CircularProgressIndicator(color = colors.second, modifier = Modifier.size(24.dp))
             }
         }
 
@@ -765,7 +864,7 @@ private fun SimilarArtistsInputs(
             Text(
                 text = "Search Results",
                 style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.primary
+                color = colors.second
             )
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 for (artist in uiState.searchArtistResults) {
@@ -774,7 +873,8 @@ private fun SimilarArtistsInputs(
                         subtitle = "Artist",
                         onClick = {
                             viewModel.setSeedArtistInput(artist)
-                        }
+                        },
+                        colors = colors
                     )
                 }
             }
@@ -793,7 +893,8 @@ private fun SimilarArtistsInputs(
                         subtitle = "Artist",
                         onClick = {
                             viewModel.setSeedArtistInput(artist)
-                        }
+                        },
+                        colors = colors
                     )
                 }
             }
@@ -805,7 +906,8 @@ private fun SimilarArtistsInputs(
 private fun TagInputs(
     uiState: SmartMixUiState,
     viewModel: SmartMixViewModel,
-    keyboardController: androidx.compose.ui.platform.SoftwareKeyboardController?
+    keyboardController: androidx.compose.ui.platform.SoftwareKeyboardController?,
+    colors: Pair<Color, Color>
 ) {
     val suggestions = listOf("pop", "rock", "hip-hop", "electronic", "jazz", "lofi", "metal", "indie", "classical", "r&b", "ambient", "punk")
 
@@ -816,19 +918,30 @@ private fun TagInputs(
         OutlinedTextField(
             value = uiState.tagInput,
             onValueChange = { viewModel.setTagInput(it) },
-            label = { Text("Genre / Tag") },
-            placeholder = { Text("e.g. lofi, rock...") },
+            label = { Text("Genre / Tag", fontFamily = GoogleSansRounded) },
+            placeholder = { Text("e.g. lofi, rock...", fontFamily = GoogleSansRounded) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
+            shape = AbsoluteSmoothCornerShape(16.dp, 60),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-            keyboardActions = KeyboardActions(onDone = { keyboardController?.hide() })
+            keyboardActions = KeyboardActions(onDone = { keyboardController?.hide() }),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = colors.second,
+                unfocusedBorderColor = colors.second.copy(alpha = 0.3f),
+                focusedLabelColor = colors.second,
+                unfocusedLabelColor = colors.second.copy(alpha = 0.7f),
+                cursorColor = colors.second,
+                focusedTextColor = colors.second,
+                unfocusedTextColor = colors.second,
+                focusedContainerColor = colors.second.copy(alpha = 0.08f),
+                unfocusedContainerColor = colors.second.copy(alpha = 0.04f)
+            )
         )
 
         Text(
             text = "Suggested Genres",
             style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-            color = MaterialTheme.colorScheme.primary
+            color = colors.second
         )
 
         FlowRow(
@@ -841,14 +954,14 @@ private fun TagInputs(
                 FilterChip(
                     selected = active,
                     onClick = { viewModel.setTagInput(tag) },
-                    label = { Text(tag) },
+                    label = { Text(tag, fontFamily = GoogleSansRounded) },
                     colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = MaterialTheme.colorScheme.primary,
-                        selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                        labelColor = MaterialTheme.colorScheme.onSurface
+                        selectedContainerColor = colors.second,
+                        selectedLabelColor = colors.first,
+                        containerColor = colors.second.copy(alpha = 0.15f),
+                        labelColor = colors.second
                     ),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = AbsoluteSmoothCornerShape(12.dp, 60),
                     border = null
                 )
             }
@@ -860,14 +973,15 @@ private fun TagInputs(
 private fun SeedSearchResultItem(
     title: String,
     subtitle: String,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    colors: Pair<Color, Color>
 ) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest)
+        shape = AbsoluteSmoothCornerShape(16.dp, 60),
+        colors = CardDefaults.cardColors(containerColor = colors.second.copy(alpha = 0.1f))
     ) {
         Row(
             modifier = Modifier.padding(12.dp),
@@ -876,7 +990,7 @@ private fun SeedSearchResultItem(
             Icon(
                 imageVector = Icons.Rounded.MusicNote,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
+                tint = colors.second,
                 modifier = Modifier.size(20.dp)
             )
             Spacer(modifier = Modifier.width(12.dp))
@@ -884,14 +998,14 @@ private fun SeedSearchResultItem(
                 Text(
                     text = title,
                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = colors.second,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
                     text = subtitle,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = colors.second.copy(alpha = 0.7f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
