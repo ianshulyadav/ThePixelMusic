@@ -2538,27 +2538,62 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
+    private fun cleanForLastFm(text: String): String {
+        return text
+            .replace(Regex("\\s*[(\\[](Official|Music|Video|Audio|Lyric|Lyrics|Live|Remastered|Remaster|HD|HQ).*?[)\\]]", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("\\s*-\\s*(Official|Video|Audio|Lyric|Lyrics|Live|Remastered|Remaster|HD|HQ).*", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("\\s*-\\s*Topic", RegexOption.IGNORE_CASE), "")
+            .trim()
+    }
+
     fun startMixFromSong(song: Song) {
         if (!LastFM.isInitialized()) {
-            // Fall back to YouTube Music recommendations directly
+            sendToast("Last.fm not configured. Starting YouTube Music mix...")
             playWithArchiveTuneQueueBuilder(song, "Mix: ${song.title}")
             return
         }
         
         viewModelScope.launch {
-            sendToast("Generating mix from '${song.title}'...")
+            sendToast("Generating Last.fm mix for '${song.title}'...")
+            
+            var lastfmFailed = false
+            var lastfmFailReason = ""
             
             val songs = withContext(Dispatchers.IO) {
                 try {
+                    val cleanTitle = cleanForLastFm(song.title)
+                    val cleanArtist = cleanForLastFm(song.artist)
                     val res = LastFM.get(
                         "track.getsimilar",
-                        mapOf("track" to song.title, "artist" to song.artist, "limit" to "100")
+                        mapOf("track" to cleanTitle, "artist" to cleanArtist, "limit" to "100")
                     ).getOrNull()
                     
-                    if (res.isNullOrBlank()) return@withContext emptyList<Song>()
+                    if (res.isNullOrBlank()) {
+                        lastfmFailed = true
+                        lastfmFailReason = "Empty response"
+                        return@withContext emptyList<Song>()
+                    }
+                    
+                    // Check if response is actually a Last.fm error JSON
+                    if (res.contains("\"error\"") && res.contains("\"message\"")) {
+                        lastfmFailed = true
+                        try {
+                            val json = Json { isLenient = true; ignoreUnknownKeys = true }
+                            val root = json.parseToJsonElement(res).jsonObject
+                            val errorMsg = root["message"]?.jsonPrimitive?.content ?: "Track not found"
+                            lastfmFailReason = errorMsg
+                        } catch (e: Exception) {
+                            lastfmFailReason = "Track not found"
+                        }
+                        return@withContext emptyList<Song>()
+                    }
                     
                     val rawTracks = parseLastFmTracksForMix(res)
-                    if (rawTracks.isEmpty()) return@withContext emptyList<Song>()
+                    if (rawTracks.isEmpty()) {
+                        lastfmFailed = true
+                        lastfmFailReason = "No similar tracks found"
+                        return@withContext emptyList<Song>()
+                    }
                     
                     val filteredTracks = mutableListOf<LastFmTrack>()
                     val artistCounts = mutableMapOf<String, Int>()
@@ -2601,11 +2636,16 @@ class PlayerViewModel @Inject constructor(
                     
                     if (resolvedSongs.isNotEmpty()) {
                         musicRepository.insertYoutubeSongs(resolvedSongs)
+                    } else {
+                        lastfmFailed = true
+                        lastfmFailReason = "Could not resolve tracks on YouTube"
                     }
                     
                     resolvedSongs.toList()
                 } catch (e: Exception) {
                     Timber.e(e, "Error generating similar mix")
+                    lastfmFailed = true
+                    lastfmFailReason = e.localizedMessage ?: "Unknown error"
                     emptyList<Song>()
                 }
             }
@@ -2615,7 +2655,11 @@ class PlayerViewModel @Inject constructor(
                 playSongs(fullQueue, song, "Mix: ${song.title}")
                 sendToast("Playing similar mix for '${song.title}'")
             } else {
-                // Fall back to YouTube Music recommendations if Last.fm fails
+                if (lastfmFailed) {
+                    sendToast("Last.fm mix failed ($lastfmFailReason). Starting YouTube Music mix...")
+                } else {
+                    sendToast("Last.fm mix failed. Starting YouTube Music mix...")
+                }
                 playWithArchiveTuneQueueBuilder(song, "Mix: ${song.title}")
             }
         }
@@ -2657,6 +2701,7 @@ class PlayerViewModel @Inject constructor(
                 _playerUiState.update { it.copy(isLoadingInitialSongs = false) }
             }.onFailure { e ->
                 Timber.e(e, "Failed to start radio mix")
+                sendToast("Failed to start radio mix: ${e.localizedMessage ?: "Unknown error"}")
                 _playerUiState.update { it.copy(isLoadingInitialSongs = false) }
             }
         }
@@ -2965,6 +3010,7 @@ class PlayerViewModel @Inject constructor(
                 _playerUiState.update { it.copy(isLoadingInitialSongs = false) }
             }.onFailure { e ->
                 Timber.e(e, "ArchiveTune Queue Builder: Failed to fetch related queue")
+                sendToast("Failed to generate mix: ${e.localizedMessage ?: "Unknown error"}")
                 _playerUiState.update { it.copy(isLoadingInitialSongs = false) }
             }
         }
