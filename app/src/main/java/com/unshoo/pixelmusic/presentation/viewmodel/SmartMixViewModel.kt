@@ -280,7 +280,9 @@ class SmartMixViewModel @Inject constructor(
                             val song = resolveTrackToYoutubeSong(track)
                             if (song != null) {
                                 synchronized(resolvedSongs) {
-                                    resolvedSongs.add(song)
+                                    if (resolvedSongs.none { it.youtubeId == song.youtubeId }) {
+                                        resolvedSongs.add(song)
+                                    }
                                     _uiState.update { it.copy(generationProgress = "Resolving streamable tracks on YouTube Music (${resolvedSongs.size}/${lastFmTracks.size})...") }
                                 }
                             }
