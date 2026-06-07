@@ -2539,6 +2539,12 @@ class PlayerViewModel @Inject constructor(
     }
 
     fun startMixFromSong(song: Song) {
+        if (!LastFM.isInitialized()) {
+            // Fall back to YouTube Music recommendations directly
+            playWithArchiveTuneQueueBuilder(song, "Mix: ${song.title}")
+            return
+        }
+        
         viewModelScope.launch {
             sendToast("Generating mix from '${song.title}'...")
             
@@ -2609,7 +2615,8 @@ class PlayerViewModel @Inject constructor(
                 playSongs(fullQueue, song, "Mix: ${song.title}")
                 sendToast("Playing similar mix for '${song.title}'")
             } else {
-                sendToast("Could not generate a mix for this song. Please try again.")
+                // Fall back to YouTube Music recommendations if Last.fm fails
+                playWithArchiveTuneQueueBuilder(song, "Mix: ${song.title}")
             }
         }
     }
