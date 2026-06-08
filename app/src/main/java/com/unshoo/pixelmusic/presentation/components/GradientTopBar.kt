@@ -128,7 +128,7 @@ fun HomeGradientTopBar(
                     painter = painterResource(R.drawable.pixelmusic_base_monochrome),
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(32.dp)
+                    modifier = Modifier.size(36.dp)
                 )
                 Text(
                     text = "PixelMusic",
