@@ -15,17 +15,22 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import com.unshoo.pixelmusic.data.preferences.PlaylistPreferencesRepository
 
 @HiltViewModel
 class MainViewModel @Inject constructor(
     private val syncManager: SyncManager,
     private val youTubeLibrarySyncManager: YouTubeLibrarySyncManager,
     private val datastoreRepository: com.unshoo.pixelmusic.data.remote.youtube.DatastoreRepository,
+    private val playlistPreferencesRepository: PlaylistPreferencesRepository,
     musicRepository: MusicRepository,
     userPreferencesRepository: UserPreferencesRepository
 ) : ViewModel() {
 
     init {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            playlistPreferencesRepository.pruneExpiredPlaylists()
+        }
         viewModelScope.launch {
             datastoreRepository.cookies.collect { cookies ->
                 val rawCookie = cookies.toRawCookie()

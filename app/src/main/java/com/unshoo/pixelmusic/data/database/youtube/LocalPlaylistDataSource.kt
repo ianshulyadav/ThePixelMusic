@@ -63,7 +63,7 @@ interface LocalPlaylistDataSource {
     suspend fun insertPlaylistWithSongs(
         playlist: Playlist,
     ) {
-        if (playlist.info.isDownloadedPlaylist) {
+        if (playlist.info.id == "_downloaded_") {
             insertPlaylist(playlist.info)
             val songs = playlist.songs
             insertSongs(songs)

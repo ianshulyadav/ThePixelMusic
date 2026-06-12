@@ -271,9 +271,21 @@ class SmartMixViewModel @Inject constructor(
                 }
 
                 // Step 2: Resolve tracks to YouTube Music IDs
-                val playlistName = generatePlaylistName(mode, state)
-                val existingPlaylist = playlistPreferencesRepository.userPlaylistsFlow.first()
-                    .find { it.name.equals(playlistName, ignoreCase = true) }
+                val basePlaylistName = generatePlaylistName(mode, state)
+                val allPlaylists = playlistPreferencesRepository.userPlaylistsFlow.first()
+                var existingPlaylist = allPlaylists.find { it.name.equals(basePlaylistName, ignoreCase = true) }
+                var finalPlaylistName = basePlaylistName
+
+                // If it exists but is NOT AI-generated, resolve name collision by adding a suffix
+                if (existingPlaylist != null && !existingPlaylist.isAiGenerated) {
+                    var suffixCounter = 1
+                    while (allPlaylists.any { it.name.equals("$basePlaylistName ($suffixCounter)", ignoreCase = true) }) {
+                        suffixCounter++
+                    }
+                    finalPlaylistName = "$basePlaylistName ($suffixCounter)"
+                    existingPlaylist = null
+                }
+
                 val existingSongIds = existingPlaylist?.songIds?.map { it.removePrefix("youtube_") }?.toSet().orEmpty()
 
                 _uiState.update { it.copy(generationProgress = "Resolving streamable tracks on YouTube Music (0/${lastFmTracks.size})...") }
@@ -319,13 +331,23 @@ class SmartMixViewModel @Inject constructor(
                 val coverImage = lastFmTracks.firstOrNull { it.imageUrl.isNotEmpty() }?.imageUrl
 
                 val newPlaylist = withContext(Dispatchers.IO) {
-                    playlistPreferencesRepository.createPlaylist(
-                        name = playlistName,
-                        songIds = songIds,
-                        isAiGenerated = true,
-                        coverImageUri = coverImage,
-                        source = "LASTFM_MIX"
-                    )
+                    if (existingPlaylist != null && existingPlaylist.isAiGenerated) {
+                        val updated = existingPlaylist.copy(
+                            songIds = songIds,
+                            coverImageUri = coverImage,
+                            lastModified = System.currentTimeMillis()
+                        )
+                        playlistPreferencesRepository.updatePlaylist(updated)
+                        updated
+                    } else {
+                        playlistPreferencesRepository.createPlaylist(
+                            name = finalPlaylistName,
+                            songIds = songIds,
+                            isAiGenerated = true,
+                            coverImageUri = coverImage,
+                            source = "LASTFM_MIX"
+                        )
+                    }
                 }
 
                 _uiState.update {
@@ -373,25 +395,33 @@ class SmartMixViewModel @Inject constructor(
     private fun generatePlaylistName(mode: String, state: SmartMixUiState): String {
         return when (mode) {
             "top" -> {
-                val periodName = when (state.timePeriod) {
-                    "overall" -> "All Time"
-                    "12month" -> "Yearly"
-                    "6month" -> "6 Months"
-                    "3month" -> "3 Months"
-                    "1month" -> "Monthly"
-                    "7day" -> "Weekly"
-                    else -> "Top"
+                when (state.timePeriod) {
+                    "overall" -> "My Era"
+                    "12month" -> "Yearly Vibe"
+                    "6month" -> "6M Vibe Check"
+                    "3month" -> "3M Vibe Check"
+                    "1month" -> "Monthly Vibe"
+                    "7day" -> "Weekly Vibe"
+                    else -> "My Vibe"
                 }
-                "My $periodName Top Mix"
             }
-            "library" -> "My Library Mix"
-            "recent" -> "My Recent Plays Mix"
-            "similar-tracks" -> "${state.seedTrackName} Similar Mix"
-            "similar-artists" -> "Similar to ${state.seedArtistInput} Mix"
-            "tag" -> "${state.tagInput.replaceFirstChar { it.uppercase() }} Genre Mix"
-            "mix" -> "My Smart Mix"
-            "recommendations" -> "My Recommendations Mix"
-            else -> "Smart Mix"
+            "library" -> "My Vault"
+            "recent" -> "On Repeat"
+            "similar-tracks" -> {
+                val shortName = if (state.seedTrackName.length > 15) state.seedTrackName.take(15).trim() + "..." else state.seedTrackName.trim()
+                "$shortName Vibes"
+            }
+            "similar-artists" -> {
+                val shortName = if (state.seedArtistInput.length > 15) state.seedArtistInput.take(15).trim() + "..." else state.seedArtistInput.trim()
+                "Like $shortName"
+            }
+            "tag" -> {
+                val shortName = if (state.tagInput.length > 15) state.tagInput.take(15).trim() + "..." else state.tagInput.trim()
+                "${shortName.replaceFirstChar { it.uppercase() }} Vibe"
+            }
+            "mix" -> "Algorhythm"
+            "recommendations" -> "For You"
+            else -> "Smart Vibe"
         }
     }
 

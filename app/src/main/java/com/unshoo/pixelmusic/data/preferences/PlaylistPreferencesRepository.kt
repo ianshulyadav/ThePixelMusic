@@ -23,6 +23,7 @@ import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.absoluteValue
+import timber.log.Timber
 
 @Singleton
 class PlaylistPreferencesRepository @Inject constructor(
@@ -118,8 +119,8 @@ class PlaylistPreferencesRepository @Inject constructor(
             val detail3 = if (coverPrefs.contains("${pId}_coverShapeDetail3")) coverPrefs.getFloat("${pId}_coverShapeDetail3", 0f) else null
             val detail4 = if (coverPrefs.contains("${pId}_coverShapeDetail4")) coverPrefs.getFloat("${pId}_coverShapeDetail4", 0f) else null
 
-            val playlistTitle = if (ytPlaylist.info.isDownloadedPlaylist) "Downloaded Songs" else ytPlaylist.info.title
-            val playlistSongIds = if (ytPlaylist.info.isDownloadedPlaylist) {
+            val playlistTitle = if (ytPlaylist.info.id == "_downloaded_") "Downloaded Songs" else ytPlaylist.info.title
+            val playlistSongIds = if (ytPlaylist.info.id == "_downloaded_") {
                 downloadedSongs.filter { it.downloaded }.map { "youtube_${it.youtubeId}" }
             } else {
                 ytPlaylist.songs.map { "youtube_${it.youtubeId}" }
@@ -206,10 +207,10 @@ class PlaylistPreferencesRepository @Inject constructor(
         val ytPlaylist = AppDatabase.getInstance(context).playlistRepository().getPlaylistById(playlistId)
         if (ytPlaylist != null) {
             DownloadRepository(context).deletePlaylist(ytPlaylist)
-        } else {
-            localPlaylistDao.deletePlaylist(playlistId)
-            clearPlaylistSongOrderMode(playlistId)
         }
+        localPlaylistDao.deletePlaylist(playlistId)
+        localPlaylistDao.clearPlaylistSongs(playlistId)
+        clearPlaylistSongOrderMode(playlistId)
         coverPrefs.edit().apply {
             remove("${playlistId}_coverImageUri")
             remove("${playlistId}_coverColorArgb")
@@ -321,14 +322,42 @@ class PlaylistPreferencesRepository @Inject constructor(
         }
     }
 
+    private suspend fun getSongIdVariants(songId: String): Set<String> {
+        val variants = mutableSetOf(songId)
+        if (songId.startsWith("youtube_")) {
+            val raw = songId.removePrefix("youtube_")
+            variants.add(raw)
+            val expectedLongId = -(15_000_000_000_000L + raw.hashCode().toLong().absoluteValue)
+            variants.add(expectedLongId.toString())
+        } else {
+            val longId = songId.toLongOrNull()
+            if (longId != null) {
+                val songEntity = musicDao.getSongByIdOnce(longId)
+                if (songEntity != null) {
+                    if (songEntity.contentUriString.startsWith("youtube://")) {
+                        val raw = songEntity.contentUriString.removePrefix("youtube://")
+                        variants.add(raw)
+                        variants.add("youtube_$raw")
+                    }
+                }
+            } else {
+                variants.add("youtube_$songId")
+                val expectedLongId = -(15_000_000_000_000L + songId.hashCode().toLong().absoluteValue)
+                variants.add(expectedLongId.toString())
+            }
+        }
+        return variants
+    }
+
     suspend fun addOrRemoveSongFromPlaylists(songId: String, playlistIds: List<String>): MutableList<String> {
         ensureMigratedIfNeeded()
+        val variants = getSongIdVariants(songId)
         val currentPlaylists = userPlaylistsFlow.first()
         val removedPlaylistIds = mutableListOf<String>()
 
         currentPlaylists.forEach { playlist ->
             val shouldContain = playlist.id in playlistIds
-            val hasSong = songId in playlist.songIds
+            val hasSong = playlist.songIds.any { it in variants }
             when {
                 shouldContain && !hasSong -> {
                     addSongsToPlaylist(playlist.id, listOf(songId))
@@ -344,18 +373,19 @@ class PlaylistPreferencesRepository @Inject constructor(
 
     suspend fun removeSongFromPlaylist(playlistId: String, songIdToRemove: String) {
         ensureMigratedIfNeeded()
+        val variants = getSongIdVariants(songIdToRemove)
         val ytPlaylist = AppDatabase.getInstance(context).playlistRepository().getPlaylistById(playlistId)
         if (ytPlaylist != null) {
-            if (ytPlaylist.info.isDownloadedPlaylist) {
-                val rawYtId = songIdToRemove.removePrefix("youtube_")
+            val rawYtId = variants.find { !it.startsWith("youtube_") && it.toLongOrNull() == null }
+                ?: songIdToRemove.removePrefix("youtube_")
+            if (ytPlaylist.info.id == "_downloaded_") {
                 DownloadRepository(context).deleteSong(rawYtId)
             } else {
-                val rawYtId = songIdToRemove.removePrefix("youtube_")
                 AppDatabase.getInstance(context).playlistRepository().deleteCrossRef(playlistId, rawYtId)
             }
         } else {
             val existing = userPlaylistsFlow.first().find { it.id == playlistId } ?: return
-            updatePlaylist(existing.copy(songIds = existing.songIds.filterNot { it == songIdToRemove }))
+            updatePlaylist(existing.copy(songIds = existing.songIds.filterNot { it in variants }))
         }
     }
 
@@ -432,6 +462,31 @@ class PlaylistPreferencesRepository @Inject constructor(
                 }
             }
             migrationChecked = true
+        }
+    }
+
+    suspend fun pruneExpiredPlaylists() {
+        try {
+            val period = userPreferencesRepository.generatedPlaylistsRetentionPeriodFlow.first()
+            if (period == "permanent") return
+
+            val maxAgeMs = when (period) {
+                "24_hours" -> 24L * 60 * 60 * 1000
+                "7_days" -> 7L * 24 * 60 * 60 * 1000
+                "30_days" -> 30L * 24 * 60 * 60 * 1000
+                else -> return
+            }
+
+            val threshold = System.currentTimeMillis() - maxAgeMs
+            val playlists = getPlaylistsOnce()
+            playlists.forEach { playlist ->
+                if (playlist.isAiGenerated && playlist.lastModified < threshold) {
+                    deletePlaylist(playlist.id)
+                    Timber.d("Pruned expired AI playlist: ${playlist.name} (last modified: ${playlist.lastModified})")
+                }
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Error pruning expired playlists")
         }
     }
 }

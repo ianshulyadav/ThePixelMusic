@@ -154,7 +154,8 @@ data class SettingsUiState(
     val lastfmUseNowPlaying: Boolean = false,
     val scrobbleDelayPercent: Float = 0.5f,
     val scrobbleMinSongDuration: Int = 30,
-    val scrobbleDelaySeconds: Int = 180
+    val scrobbleDelaySeconds: Int = 180,
+    val generatedPlaylistsRetentionPeriod: String = "permanent"
 )
 
 data class FailedSongInfo(
@@ -779,6 +780,12 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             userPreferencesRepository.minTracksPerAlbumFlow.collect { minTracks ->
                 _uiState.update { it.copy(minTracksPerAlbum = minTracks) }
+            }
+        }
+
+        viewModelScope.launch {
+            userPreferencesRepository.generatedPlaylistsRetentionPeriodFlow.collect { period ->
+                _uiState.update { it.copy(generatedPlaylistsRetentionPeriod = period) }
             }
         }
 
@@ -1779,6 +1786,12 @@ class SettingsViewModel @Inject constructor(
     fun setScrobbleDelaySeconds(seconds: Int) {
         viewModelScope.launch {
             userPreferencesRepository.setScrobbleDelaySeconds(seconds)
+        }
+    }
+
+    fun setGeneratedPlaylistsRetentionPeriod(period: String) {
+        viewModelScope.launch {
+            userPreferencesRepository.setGeneratedPlaylistsRetentionPeriod(period)
         }
     }
 }
