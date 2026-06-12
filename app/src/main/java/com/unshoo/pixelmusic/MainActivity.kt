@@ -244,7 +244,7 @@ class MainActivity : ComponentActivity() {
             val playerThemePreference by themePreferencesRepository.playerThemePreferenceFlow.collectAsStateWithLifecycle(initialValue = ThemePreference.ALBUM_ART)
             val colorPalette by themePreferencesRepository.colorPalettePreferenceFlow.collectAsStateWithLifecycle(initialValue = "SAGE")
             val appFontMode by themePreferencesRepository.appFontModeFlow.collectAsStateWithLifecycle(initialValue = AppFontMode.APP_DEFAULT)
-            val dynamicColorEnabled = playerThemePreference == ThemePreference.DYNAMIC
+            val dynamicColorEnabled = colorPalette == "DYNAMIC" || playerThemePreference == ThemePreference.DYNAMIC
             val isSetupComplete by mainViewModel.isSetupComplete.collectAsStateWithLifecycle()
             
             // Crash report dialog state

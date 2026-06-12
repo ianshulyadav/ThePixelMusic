@@ -732,6 +732,7 @@ fun SettingsCategoryScreen(
                                     label = stringResource(R.string.setcat_app_color_palette_label),
                                     description = stringResource(R.string.setcat_app_color_palette_desc),
                                     options = mapOf(
+                                        "DYNAMIC" to stringResource(R.string.setcat_color_palette_dynamic),
                                         "SAGE" to stringResource(R.string.setcat_color_palette_sage),
                                         "PURPLE" to stringResource(R.string.setcat_color_palette_purple),
                                         "BLUE" to stringResource(R.string.setcat_color_palette_blue),
@@ -878,6 +879,7 @@ fun SettingsCategoryScreen(
                                     description = stringResource(R.string.setcat_default_tab_desc),
                                     options = mapOf(
                                         LaunchTab.HOME to stringResource(R.string.tab_home),
+                                        LaunchTab.EXPLORE to stringResource(R.string.tab_explore),
                                         LaunchTab.SEARCH to stringResource(R.string.search),
                                         LaunchTab.LIBRARY to stringResource(R.string.tab_library),
                                     ),
@@ -1612,6 +1614,30 @@ fun SettingsCategoryScreen(
                                             contentDescription = null, 
                                             tint = MaterialTheme.colorScheme.secondary
                                         ) 
+                                    }
+                                )
+                            }
+
+                            SettingsSubsection(title = "Smart Mix Playlists") {
+                                ThemeSelectorItem(
+                                    label = "Generated Playlists Retention",
+                                    description = "Choose how long to keep generated Last.fm mix playlists in your library.",
+                                    options = mapOf(
+                                        "permanent" to "Permanently Store",
+                                        "24_hours" to "Delete after 24 hours",
+                                        "7_days" to "Delete after 7 days",
+                                        "30_days" to "Delete after 30 days"
+                                    ),
+                                    selectedKey = uiState.generatedPlaylistsRetentionPeriod,
+                                    onSelectionChanged = { key ->
+                                        settingsViewModel.setGeneratedPlaylistsRetentionPeriod(key)
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Timer,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.secondary
+                                        )
                                     }
                                 )
                             }

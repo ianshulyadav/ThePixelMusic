@@ -139,7 +139,7 @@ class ExploreViewModel @Inject constructor(
         try {
             // 1. Get history and candidateArtistId immediately (fast database/prefs calls)
             val history = withContext(Dispatchers.IO) {
-                playbackStatsRepository.loadPlaybackHistory(limit = 15)
+                playbackStatsRepository.loadPlaybackHistory(limit = 30)
             }
             val candidateArtistId = withContext(Dispatchers.IO) {
                 userPreferencesRepository.subscribedArtistIdsFlow.first().firstOrNull()
@@ -157,7 +157,6 @@ class ExploreViewModel @Inject constructor(
                 .mapNotNull { it.channelId }
                 .filter { it.isNotBlank() }
                 .distinct()
-            val shuffledArtistIds = libraryArtistChannelIds.shuffled().take(8)
 
             val userActivityQuery = if (history.isNotEmpty()) {
                 val artistCounts = history.mapNotNull { it.artist }.groupingBy { it }.eachCount()
@@ -173,13 +172,6 @@ class ExploreViewModel @Inject constructor(
             val exploreDeferred = async(Dispatchers.IO) { YouTube.explore().getOrNull() }
             val chartsDeferred = async(Dispatchers.IO) { YouTube.getChartsPage().getOrNull() }
             val newReleasesDeferred = async(Dispatchers.IO) { YouTube.newReleaseAlbums().getOrNull() }
-
-            // Fetch releases for library artists in parallel
-            val personalizedReleasesDeferred = shuffledArtistIds.map { channelId ->
-                async(Dispatchers.IO) {
-                    YouTube.artist(channelId).getOrNull()
-                }
-            }
 
             // Library / account-based parallel requests (only if logged in)
             val likedAlbumsDeferred: kotlinx.coroutines.Deferred<List<AlbumItem>>? = if (hasLogin) {
@@ -236,20 +228,43 @@ class ExploreViewModel @Inject constructor(
                 }
             } else null
 
-            // 3. Await all results
             val home = homeDeferred.await()
             val explore = exploreDeferred.await()
             val charts = chartsDeferred.await()
             val newReleasesResult = newReleasesDeferred.await()
-            
-            // Await personalized artist pages
-            val personalizedArtistPages = personalizedReleasesDeferred.mapNotNull { it.await() }
             
             val likedAlbums = likedAlbumsDeferred?.await() ?: emptyList()
             val likedArtists = likedArtistsDeferred?.await() ?: emptyList()
             val recentActivityItems = recentActivityDeferred?.await() ?: emptyList()
             val personalPlaylists = personalPlaylistsDeferred?.await() ?: emptyList()
             val communityPlaylistsResult = communityPlaylistsDeferred.await()
+
+            // Personalize new releases based on local library, history, in-app subscriptions, and YouTube Music liked artists
+            val historyArtistNames = history.mapNotNull { it.artist }.distinct()
+            val historyArtistChannelIds = dbArtists
+                .filter { it.name in historyArtistNames }
+                .mapNotNull { it.channelId }
+                .filter { it.isNotBlank() }
+
+            val likedArtistChannelIds = likedArtists
+                .map { it.id }
+                .filter { it.isNotBlank() }
+
+            val subscribedArtistIds = withContext(Dispatchers.IO) {
+                userPreferencesRepository.subscribedArtistIdsFlow.first().toList()
+            }
+
+            val allCandidateArtistIds = (historyArtistChannelIds + likedArtistChannelIds + subscribedArtistIds + libraryArtistChannelIds)
+                .distinct()
+
+            val shuffledArtistIds = allCandidateArtistIds.shuffled().take(12)
+
+            // Fetch releases for these candidate artists in parallel
+            val personalizedArtistPages = shuffledArtistIds.map { channelId ->
+                async(Dispatchers.IO) {
+                    YouTube.artist(channelId).getOrNull()
+                }
+            }.mapNotNull { it.await() }
 
             if (home == null && explore == null && charts == null) {
                 // Only show error if we also have no cached data
@@ -402,7 +417,8 @@ class ExploreViewModel @Inject constructor(
                     homePageContinuation = home?.continuation,
                     newReleaseAlbums = finalNewReleases,
                     chartsPage = charts,
-                    selectedFilter = _uiState.value.selectedFilter
+                    selectedFilter = _uiState.value.selectedFilter,
+                    recentMixes = _uiState.value.recentMixes
                 )
                 _uiState.value = newState
                 persistToCache(newState)

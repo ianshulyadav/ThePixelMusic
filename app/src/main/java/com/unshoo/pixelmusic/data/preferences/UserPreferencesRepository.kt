@@ -327,6 +327,7 @@ constructor(
         val SCROBBLE_DELAY_PERCENT = androidx.datastore.preferences.core.floatPreferencesKey("scrobble_delay_percent")
         val SCROBBLE_MIN_SONG_DURATION = intPreferencesKey("scrobble_min_song_duration")
         val SCROBBLE_DELAY_SECONDS = intPreferencesKey("scrobble_delay_seconds")
+        val GENERATED_PLAYLISTS_RETENTION_PERIOD = stringPreferencesKey("generated_playlists_retention_period")
     }
 
     val preferTelegramAlternativeFlow: Flow<Boolean> =
@@ -2268,6 +2269,17 @@ constructor(
     suspend fun setScrobbleDelaySeconds(seconds: Int) {
         dataStore.edit { preferences ->
             preferences[PreferencesKeys.SCROBBLE_DELAY_SECONDS] = seconds
+        }
+    }
+
+    val generatedPlaylistsRetentionPeriodFlow: Flow<String> =
+        dataStore.data.map { preferences ->
+            preferences[PreferencesKeys.GENERATED_PLAYLISTS_RETENTION_PERIOD] ?: "permanent"
+        }.distinctUntilChanged()
+
+    suspend fun setGeneratedPlaylistsRetentionPeriod(period: String) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.GENERATED_PLAYLISTS_RETENTION_PERIOD] = period
         }
     }
 }

@@ -646,6 +646,7 @@ fun AppNavigation(
 }
 
 private fun String.toRoute(): String = when (this) {
+    LaunchTab.EXPLORE -> Screen.Explore.route
     LaunchTab.SEARCH -> Screen.Search.route
     LaunchTab.LIBRARY -> Screen.Library.route
     else -> Screen.Home.route

@@ -1266,9 +1266,17 @@ class PlaylistViewModel @Inject constructor(
             val mappedSongId = mappedIds.firstOrNull() ?: song.id
             
             val currentPlaylists = playlistPreferencesRepository.userPlaylistsFlow.first()
+            val songIds = mutableSetOf(song.id, mappedSongId)
+            song.youtubeId?.let { yid ->
+                songIds.add(yid)
+                songIds.add("youtube_$yid")
+            }
+            if (song.id.startsWith("youtube_")) {
+                songIds.add(song.id.removePrefix("youtube_"))
+            }
             val addedToPlaylists = playlistIds.filter { pid ->
                 val pl = currentPlaylists.find { it.id == pid }
-                pl != null && mappedSongId !in pl.songIds
+                pl != null && pl.songIds.none { it in songIds }
             }
 
             val removedFromPlaylists =
@@ -1351,15 +1359,24 @@ class PlaylistViewModel @Inject constructor(
         if (isFolderPlaylistId(playlistId)) return
         viewModelScope.launch {
             playlistPreferencesRepository.removeSongFromPlaylist(playlistId, songIdToRemove)
+            
+            val song = musicRepository.getSongsByIdsOnce(listOf(songIdToRemove)).firstOrNull()
+            val videoId = song?.youtubeId ?: if (songIdToRemove.startsWith("youtube_")) songIdToRemove.removePrefix("youtube_") else songIdToRemove
+            
             if (_uiState.value.currentPlaylistDetails?.id == playlistId) {
+                val targets = mutableSetOf(songIdToRemove)
+                if (videoId.isNotBlank() && videoId != songIdToRemove) {
+                    targets.add(videoId)
+                    targets.add("youtube_$videoId")
+                }
                 _uiState.update {
-                    it.copy(currentPlaylistSongs = it.currentPlaylistSongs.filterNot { s -> s.id == songIdToRemove })
+                    it.copy(currentPlaylistSongs = it.currentPlaylistSongs.filterNot { s -> 
+                        s.id in targets || (s.youtubeId != null && s.youtubeId in targets)
+                    })
                 }
             }
             val playlist = playlistPreferencesRepository.userPlaylistsFlow.first().find { it.id == playlistId }
             if (playlist != null && playlist.source == "YOUTUBE") {
-                val song = musicRepository.getSongsByIdsOnce(listOf(songIdToRemove)).firstOrNull()
-                val videoId = song?.youtubeId ?: if (songIdToRemove.startsWith("youtube_")) songIdToRemove.removePrefix("youtube_") else songIdToRemove
                 if (videoId.isNotBlank()) {
                     try {
                         withContext(Dispatchers.IO) {
