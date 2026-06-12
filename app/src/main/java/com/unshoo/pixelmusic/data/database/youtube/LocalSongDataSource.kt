@@ -6,6 +6,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import com.unshoo.pixelmusic.data.model.youtube.Song
+import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface LocalSongDataSource {
@@ -24,6 +25,19 @@ interface LocalSongDataSource {
 """
     )
     suspend fun getDownloadedSongs(): List<Song>
+
+    @Query(
+        """
+    SELECT * 
+    FROM songs 
+    WHERE audioFilePath IS NOT NULL 
+      AND audioFilePath != ''
+      ORDER BY  
+        songs.title COLLATE NOCASE ASC,
+        songs.artist COLLATE NOCASE ASC
+"""
+    )
+    fun observeDownloadedSongs(): Flow<List<Song>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun createAll(songs: List<Song>)

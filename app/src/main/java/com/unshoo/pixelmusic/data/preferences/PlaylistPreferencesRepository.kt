@@ -103,8 +103,9 @@ class PlaylistPreferencesRepository @Inject constructor(
                 }
             },
         AppDatabase.getInstance(context).playlistRepository().observeAll(),
+        AppDatabase.getInstance(context).songRepository().observeDownloadedSongs(),
         _pinnedPlaylistIds
-    ) { localPlaylists, ytPlaylists, pinnedIds ->
+    ) { localPlaylists, ytPlaylists, downloadedSongs, pinnedIds ->
         val mappedYtPlaylists = ytPlaylists.map { ytPlaylist ->
             val pId = ytPlaylist.info.id
             val defaultCoverImage = ytPlaylist.info.coverPath ?: ytPlaylist.info.coverHref
@@ -118,7 +119,11 @@ class PlaylistPreferencesRepository @Inject constructor(
             val detail4 = if (coverPrefs.contains("${pId}_coverShapeDetail4")) coverPrefs.getFloat("${pId}_coverShapeDetail4", 0f) else null
 
             val playlistTitle = if (ytPlaylist.info.isDownloadedPlaylist) "Downloaded Songs" else ytPlaylist.info.title
-            val playlistSongIds = ytPlaylist.songs.map { "youtube_${it.youtubeId}" }
+            val playlistSongIds = if (ytPlaylist.info.isDownloadedPlaylist) {
+                downloadedSongs.filter { it.downloaded }.map { "youtube_${it.youtubeId}" }
+            } else {
+                ytPlaylist.songs.map { "youtube_${it.youtubeId}" }
+            }
             val (cTime, mTime) = getOrCreatePlaylistTimestamps(pId, ytPlaylist.info.lastSyncTimestamp, playlistTitle, playlistSongIds)
 
             Playlist(

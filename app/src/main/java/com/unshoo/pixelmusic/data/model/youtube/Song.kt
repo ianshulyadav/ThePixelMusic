@@ -58,7 +58,8 @@ data class Song(
         get() = "${Constants.YoutubeApi.YOUTUBE_URL_PREFIX}${youtubeId}"
     val downloaded: Boolean
         get() = !audioFilePath.isNullOrBlank() &&
-                !audioFilePath.startsWith("http")
+                !audioFilePath.startsWith("http") &&
+                java.io.File(audioFilePath).exists()
 
     override fun equals(other: Any?): Boolean {
         if (other !is Song) return false

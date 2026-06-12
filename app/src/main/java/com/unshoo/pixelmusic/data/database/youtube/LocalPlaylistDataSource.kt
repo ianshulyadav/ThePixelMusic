@@ -63,12 +63,20 @@ interface LocalPlaylistDataSource {
     suspend fun insertPlaylistWithSongs(
         playlist: Playlist,
     ) {
-        deleteCrossRefsByPlaylistId(playlist.info.id)
-        insertPlaylist(playlist.info)
-        val songs = playlist.songs
-        insertSongs(songs)
-        val refs = songs.mapIndexed { index, song -> PlaylistSongCrossRef(playlist.info.id, song.youtubeId, index) }
-        insertCrossRefs(refs)
+        if (playlist.info.isDownloadedPlaylist) {
+            insertPlaylist(playlist.info)
+            val songs = playlist.songs
+            insertSongs(songs)
+            val refs = songs.mapIndexed { index, song -> PlaylistSongCrossRef(playlist.info.id, song.youtubeId, index) }
+            insertCrossRefs(refs)
+        } else {
+            deleteCrossRefsByPlaylistId(playlist.info.id)
+            insertPlaylist(playlist.info)
+            val songs = playlist.songs
+            insertSongs(songs)
+            val refs = songs.mapIndexed { index, song -> PlaylistSongCrossRef(playlist.info.id, song.youtubeId, index) }
+            insertCrossRefs(refs)
+        }
     }
 
     /**
