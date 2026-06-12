@@ -469,13 +469,14 @@ interface MusicDao {
         AND (
             songs.source_type = 0
             OR songs.is_favorite = 1
+            OR (songs.file_path IS NOT NULL AND songs.file_path != '')
             OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs)
-            OR songs.artist_id IN (
-                SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != ''
-                UNION
-                SELECT artist_id FROM songs WHERE source_type = 0 OR is_favorite = 1
-                UNION
-                SELECT artist_id FROM songs WHERE CAST(id AS TEXT) IN (SELECT song_id FROM playlist_songs) GROUP BY artist_id HAVING COUNT(id) > 3
+            OR songs.content_uri_string IN (SELECT REPLACE(song_id, 'youtube_', 'youtube://') FROM playlist_songs)
+            OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM song_engagements WHERE play_count > 0)
+            OR songs.content_uri_string IN (SELECT REPLACE(song_id, 'youtube_', 'youtube://') FROM song_engagements WHERE play_count > 0)
+            OR (
+                songs.artist_id IN (SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != '')
+                AND songs.id NOT IN (SELECT related_song_id FROM related_song_map)
             )
         )
         AND songs_fts MATCH :matchQuery
@@ -493,13 +494,14 @@ interface MusicDao {
         AND (
             source_type = 0
             OR is_favorite = 1
+            OR (file_path IS NOT NULL AND file_path != '')
             OR CAST(id AS TEXT) IN (SELECT song_id FROM playlist_songs)
-            OR artist_id IN (
-                SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != ''
-                UNION
-                SELECT artist_id FROM songs WHERE source_type = 0 OR is_favorite = 1
-                UNION
-                SELECT artist_id FROM songs WHERE CAST(id AS TEXT) IN (SELECT song_id FROM playlist_songs) GROUP BY artist_id HAVING COUNT(id) > 3
+            OR content_uri_string IN (SELECT REPLACE(song_id, 'youtube_', 'youtube://') FROM playlist_songs)
+            OR CAST(id AS TEXT) IN (SELECT song_id FROM song_engagements WHERE play_count > 0)
+            OR content_uri_string IN (SELECT REPLACE(song_id, 'youtube_', 'youtube://') FROM song_engagements WHERE play_count > 0)
+            OR (
+                artist_id IN (SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != '')
+                AND id NOT IN (SELECT related_song_id FROM related_song_map)
             )
         )
         AND (title LIKE '%' || :query || '%' OR artist_name LIKE '%' || :query || '%')
@@ -737,15 +739,16 @@ interface MusicDao {
         SELECT * FROM songs
         WHERE (:applyDirectoryFilter = 0 OR id < 0 OR parent_directory_path IN (:allowedParentDirs))
         AND (
-            source_type = 0 
-            OR is_favorite = 1 
+            source_type = 0
+            OR is_favorite = 1
+            OR (file_path IS NOT NULL AND file_path != '')
             OR CAST(id AS TEXT) IN (SELECT song_id FROM playlist_songs)
-            OR artist_id IN (
-                SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != ''
-                UNION
-                SELECT artist_id FROM songs WHERE source_type = 0 OR is_favorite = 1
-                UNION
-                SELECT artist_id FROM songs WHERE CAST(id AS TEXT) IN (SELECT song_id FROM playlist_songs) GROUP BY artist_id HAVING COUNT(id) > 3
+            OR content_uri_string IN (SELECT REPLACE(song_id, 'youtube_', 'youtube://') FROM playlist_songs)
+            OR CAST(id AS TEXT) IN (SELECT song_id FROM song_engagements WHERE play_count > 0)
+            OR content_uri_string IN (SELECT REPLACE(song_id, 'youtube_', 'youtube://') FROM song_engagements WHERE play_count > 0)
+            OR (
+                artist_id IN (SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != '')
+                AND id NOT IN (SELECT related_song_id FROM related_song_map)
             )
         )
         AND (
@@ -792,15 +795,16 @@ interface MusicDao {
         FROM songs
         WHERE (:applyDirectoryFilter = 0 OR id < 0 OR parent_directory_path IN (:allowedParentDirs))
         AND (
-            source_type = 0 
-            OR is_favorite = 1 
+            source_type = 0
+            OR is_favorite = 1
+            OR (file_path IS NOT NULL AND file_path != '')
             OR CAST(id AS TEXT) IN (SELECT song_id FROM playlist_songs)
-            OR artist_id IN (
-                SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != ''
-                UNION
-                SELECT artist_id FROM songs WHERE source_type = 0 OR is_favorite = 1
-                UNION
-                SELECT artist_id FROM songs WHERE CAST(id AS TEXT) IN (SELECT song_id FROM playlist_songs) GROUP BY artist_id HAVING COUNT(id) > 3
+            OR content_uri_string IN (SELECT REPLACE(song_id, 'youtube_', 'youtube://') FROM playlist_songs)
+            OR CAST(id AS TEXT) IN (SELECT song_id FROM song_engagements WHERE play_count > 0)
+            OR content_uri_string IN (SELECT REPLACE(song_id, 'youtube_', 'youtube://') FROM song_engagements WHERE play_count > 0)
+            OR (
+                artist_id IN (SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != '')
+                AND id NOT IN (SELECT related_song_id FROM related_song_map)
             )
         )
         AND (
@@ -998,13 +1002,14 @@ interface MusicDao {
         AND (
             songs.source_type = 0
             OR songs.is_favorite = 1
+            OR (songs.file_path IS NOT NULL AND songs.file_path != '')
             OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs)
-            OR songs.artist_id IN (
-                SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != ''
-                UNION
-                SELECT artist_id FROM songs WHERE source_type = 0 OR is_favorite = 1
-                UNION
-                SELECT artist_id FROM songs WHERE CAST(id AS TEXT) IN (SELECT song_id FROM playlist_songs) GROUP BY artist_id HAVING COUNT(id) > 3
+            OR songs.content_uri_string IN (SELECT REPLACE(song_id, 'youtube_', 'youtube://') FROM playlist_songs)
+            OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM song_engagements WHERE play_count > 0)
+            OR songs.content_uri_string IN (SELECT REPLACE(song_id, 'youtube_', 'youtube://') FROM song_engagements WHERE play_count > 0)
+            OR (
+                songs.artist_id IN (SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != '')
+                AND songs.id NOT IN (SELECT related_song_id FROM related_song_map)
             )
         )
         AND songs_fts MATCH :matchQuery
@@ -1036,13 +1041,14 @@ interface MusicDao {
         AND (
             songs.source_type = 0
             OR songs.is_favorite = 1
+            OR (songs.file_path IS NOT NULL AND songs.file_path != '')
             OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs)
-            OR songs.artist_id IN (
-                SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != ''
-                UNION
-                SELECT artist_id FROM songs WHERE source_type = 0 OR is_favorite = 1
-                UNION
-                SELECT artist_id FROM songs WHERE CAST(id AS TEXT) IN (SELECT song_id FROM playlist_songs) GROUP BY artist_id HAVING COUNT(id) > 3
+            OR songs.content_uri_string IN (SELECT REPLACE(song_id, 'youtube_', 'youtube://') FROM playlist_songs)
+            OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM song_engagements WHERE play_count > 0)
+            OR songs.content_uri_string IN (SELECT REPLACE(song_id, 'youtube_', 'youtube://') FROM song_engagements WHERE play_count > 0)
+            OR (
+                songs.artist_id IN (SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != '')
+                AND songs.id NOT IN (SELECT related_song_id FROM related_song_map)
             )
         )
         AND songs_fts MATCH :matchQuery
@@ -1065,13 +1071,14 @@ interface MusicDao {
         AND (
             source_type = 0
             OR is_favorite = 1
+            OR (file_path IS NOT NULL AND file_path != '')
             OR CAST(id AS TEXT) IN (SELECT song_id FROM playlist_songs)
-            OR artist_id IN (
-                SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != ''
-                UNION
-                SELECT artist_id FROM songs WHERE source_type = 0 OR is_favorite = 1
-                UNION
-                SELECT artist_id FROM songs WHERE CAST(id AS TEXT) IN (SELECT song_id FROM playlist_songs) GROUP BY artist_id HAVING COUNT(id) > 3
+            OR content_uri_string IN (SELECT REPLACE(song_id, 'youtube_', 'youtube://') FROM playlist_songs)
+            OR CAST(id AS TEXT) IN (SELECT song_id FROM song_engagements WHERE play_count > 0)
+            OR content_uri_string IN (SELECT REPLACE(song_id, 'youtube_', 'youtube://') FROM song_engagements WHERE play_count > 0)
+            OR (
+                artist_id IN (SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != '')
+                AND id NOT IN (SELECT related_song_id FROM related_song_map)
             )
         )
         AND title LIKE '%' || :query || '%'
@@ -1094,13 +1101,14 @@ interface MusicDao {
         AND (
             source_type = 0
             OR is_favorite = 1
+            OR (file_path IS NOT NULL AND file_path != '')
             OR CAST(id AS TEXT) IN (SELECT song_id FROM playlist_songs)
-            OR artist_id IN (
-                SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != ''
-                UNION
-                SELECT artist_id FROM songs WHERE source_type = 0 OR is_favorite = 1
-                UNION
-                SELECT artist_id FROM songs WHERE CAST(id AS TEXT) IN (SELECT song_id FROM playlist_songs) GROUP BY artist_id HAVING COUNT(id) > 3
+            OR content_uri_string IN (SELECT REPLACE(song_id, 'youtube_', 'youtube://') FROM playlist_songs)
+            OR CAST(id AS TEXT) IN (SELECT song_id FROM song_engagements WHERE play_count > 0)
+            OR content_uri_string IN (SELECT REPLACE(song_id, 'youtube_', 'youtube://') FROM song_engagements WHERE play_count > 0)
+            OR (
+                artist_id IN (SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != '')
+                AND id NOT IN (SELECT related_song_id FROM related_song_map)
             )
         )
         AND (title LIKE '%' || :query || '%' OR artist_name LIKE '%' || :query || '%')
@@ -1182,15 +1190,16 @@ interface MusicDao {
         INNER JOIN albums ON albums.id = songs.album_id
         WHERE (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
         AND (
-            songs.source_type = 0 
-            OR songs.is_favorite = 1 
+            songs.source_type = 0
+            OR songs.is_favorite = 1
+            OR (songs.file_path IS NOT NULL AND songs.file_path != '')
             OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs)
-            OR songs.artist_id IN (
-                SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != ''
-                UNION
-                SELECT artist_id FROM songs WHERE source_type = 0 OR is_favorite = 1
-                UNION
-                SELECT artist_id FROM songs WHERE CAST(id AS TEXT) IN (SELECT song_id FROM playlist_songs) GROUP BY artist_id HAVING COUNT(id) > 3
+            OR songs.content_uri_string IN (SELECT REPLACE(song_id, 'youtube_', 'youtube://') FROM playlist_songs)
+            OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM song_engagements WHERE play_count > 0)
+            OR songs.content_uri_string IN (SELECT REPLACE(song_id, 'youtube_', 'youtube://') FROM song_engagements WHERE play_count > 0)
+            OR (
+                songs.artist_id IN (SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != '')
+                AND songs.id NOT IN (SELECT related_song_id FROM related_song_map)
             )
         )
         AND (
@@ -1242,15 +1251,16 @@ interface MusicDao {
         INNER JOIN albums ON albums.id = songs.album_id
         WHERE (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
         AND (
-            songs.source_type = 0 
-            OR songs.is_favorite = 1 
+            songs.source_type = 0
+            OR songs.is_favorite = 1
+            OR (songs.file_path IS NOT NULL AND songs.file_path != '')
             OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs)
-            OR songs.artist_id IN (
-                SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != ''
-                UNION
-                SELECT artist_id FROM songs WHERE source_type = 0 OR is_favorite = 1
-                UNION
-                SELECT artist_id FROM songs WHERE CAST(id AS TEXT) IN (SELECT song_id FROM playlist_songs) GROUP BY artist_id HAVING COUNT(id) > 3
+            OR songs.content_uri_string IN (SELECT REPLACE(song_id, 'youtube_', 'youtube://') FROM playlist_songs)
+            OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM song_engagements WHERE play_count > 0)
+            OR songs.content_uri_string IN (SELECT REPLACE(song_id, 'youtube_', 'youtube://') FROM song_engagements WHERE play_count > 0)
+            OR (
+                songs.artist_id IN (SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != '')
+                AND songs.id NOT IN (SELECT related_song_id FROM related_song_map)
             )
         )
         AND (
@@ -1315,15 +1325,16 @@ interface MusicDao {
         INNER JOIN albums ON albums.id = songs.album_id
         WHERE (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
         AND (
-            songs.source_type = 0 
-            OR songs.is_favorite = 1 
+            songs.source_type = 0
+            OR songs.is_favorite = 1
+            OR (songs.file_path IS NOT NULL AND songs.file_path != '')
             OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs)
-            OR songs.artist_id IN (
-                SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != ''
-                UNION
-                SELECT artist_id FROM songs WHERE source_type = 0 OR is_favorite = 1
-                UNION
-                SELECT artist_id FROM songs WHERE CAST(id AS TEXT) IN (SELECT song_id FROM playlist_songs) GROUP BY artist_id HAVING COUNT(id) > 3
+            OR songs.content_uri_string IN (SELECT REPLACE(song_id, 'youtube_', 'youtube://') FROM playlist_songs)
+            OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM song_engagements WHERE play_count > 0)
+            OR songs.content_uri_string IN (SELECT REPLACE(song_id, 'youtube_', 'youtube://') FROM song_engagements WHERE play_count > 0)
+            OR (
+                songs.artist_id IN (SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != '')
+                AND songs.id NOT IN (SELECT related_song_id FROM related_song_map)
             )
         )
         AND (
@@ -1438,15 +1449,16 @@ interface MusicDao {
         INNER JOIN albums ON albums.id = songs.album_id
         WHERE (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
         AND (
-            songs.source_type = 0 
-            OR songs.is_favorite = 1 
+            songs.source_type = 0
+            OR songs.is_favorite = 1
+            OR (songs.file_path IS NOT NULL AND songs.file_path != '')
             OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs)
-            OR songs.artist_id IN (
-                SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != ''
-                UNION
-                SELECT artist_id FROM songs WHERE source_type = 0 OR is_favorite = 1
-                UNION
-                SELECT artist_id FROM songs WHERE CAST(id AS TEXT) IN (SELECT song_id FROM playlist_songs) GROUP BY artist_id HAVING COUNT(id) > 3
+            OR songs.content_uri_string IN (SELECT REPLACE(song_id, 'youtube_', 'youtube://') FROM playlist_songs)
+            OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM song_engagements WHERE play_count > 0)
+            OR songs.content_uri_string IN (SELECT REPLACE(song_id, 'youtube_', 'youtube://') FROM song_engagements WHERE play_count > 0)
+            OR (
+                songs.artist_id IN (SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != '')
+                AND songs.id NOT IN (SELECT related_song_id FROM related_song_map)
             )
         )
         GROUP BY
@@ -1532,15 +1544,16 @@ interface MusicDao {
     @Query("""
         SELECT DISTINCT artists.* FROM artists
         LEFT JOIN songs ON artists.id = songs.artist_id AND (
-            songs.source_type = 0 
-            OR songs.is_favorite = 1 
+            songs.source_type = 0
+            OR songs.is_favorite = 1
+            OR (songs.file_path IS NOT NULL AND songs.file_path != '')
             OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs)
-            OR songs.artist_id IN (
-                SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != ''
-                UNION
-                SELECT artist_id FROM songs WHERE source_type = 0 OR is_favorite = 1
-                UNION
-                SELECT artist_id FROM songs WHERE CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs) GROUP BY artist_id HAVING COUNT(id) > 3
+            OR songs.content_uri_string IN (SELECT REPLACE(song_id, 'youtube_', 'youtube://') FROM playlist_songs)
+            OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM song_engagements WHERE play_count > 0)
+            OR songs.content_uri_string IN (SELECT REPLACE(song_id, 'youtube_', 'youtube://') FROM song_engagements WHERE play_count > 0)
+            OR (
+                songs.artist_id IN (SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != '')
+                AND songs.id NOT IN (SELECT related_song_id FROM related_song_map)
             )
         )
         WHERE (artists.channel_id IS NOT NULL AND artists.channel_id != '')
@@ -1558,15 +1571,16 @@ interface MusicDao {
         FROM artists
         LEFT JOIN song_artist_cross_ref ON song_artist_cross_ref.artist_id = artists.id
         LEFT JOIN songs ON song_artist_cross_ref.song_id = songs.id AND (
-            songs.source_type = 0 
-            OR songs.is_favorite = 1 
+            songs.source_type = 0
+            OR songs.is_favorite = 1
+            OR (songs.file_path IS NOT NULL AND songs.file_path != '')
             OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs)
-            OR songs.artist_id IN (
-                SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != ''
-                UNION
-                SELECT artist_id FROM songs WHERE source_type = 0 OR is_favorite = 1
-                UNION
-                SELECT artist_id FROM songs WHERE CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs) GROUP BY artist_id HAVING COUNT(id) > 3
+            OR songs.content_uri_string IN (SELECT REPLACE(song_id, 'youtube_', 'youtube://') FROM playlist_songs)
+            OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM song_engagements WHERE play_count > 0)
+            OR songs.content_uri_string IN (SELECT REPLACE(song_id, 'youtube_', 'youtube://') FROM song_engagements WHERE play_count > 0)
+            OR (
+                songs.artist_id IN (SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != '')
+                AND songs.id NOT IN (SELECT related_song_id FROM related_song_map)
             )
         )
         WHERE (artists.channel_id IS NOT NULL AND artists.channel_id != '')
@@ -1615,15 +1629,16 @@ interface MusicDao {
         FROM artists
         LEFT JOIN song_artist_cross_ref ON song_artist_cross_ref.artist_id = artists.id
         LEFT JOIN songs ON song_artist_cross_ref.song_id = songs.id AND (
-            songs.source_type = 0 
-            OR songs.is_favorite = 1 
+            songs.source_type = 0
+            OR songs.is_favorite = 1
+            OR (songs.file_path IS NOT NULL AND songs.file_path != '')
             OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs)
-            OR songs.artist_id IN (
-                SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != ''
-                UNION
-                SELECT artist_id FROM songs WHERE source_type = 0 OR is_favorite = 1
-                UNION
-                SELECT artist_id FROM songs WHERE CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs) GROUP BY artist_id HAVING COUNT(id) > 3
+            OR songs.content_uri_string IN (SELECT REPLACE(song_id, 'youtube_', 'youtube://') FROM playlist_songs)
+            OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM song_engagements WHERE play_count > 0)
+            OR songs.content_uri_string IN (SELECT REPLACE(song_id, 'youtube_', 'youtube://') FROM song_engagements WHERE play_count > 0)
+            OR (
+                songs.artist_id IN (SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != '')
+                AND songs.id NOT IN (SELECT related_song_id FROM related_song_map)
             )
         )
         WHERE artists.id < 0
@@ -1647,15 +1662,16 @@ interface MusicDao {
         FROM artists
         LEFT JOIN song_artist_cross_ref ON song_artist_cross_ref.artist_id = artists.id
         LEFT JOIN songs ON song_artist_cross_ref.song_id = songs.id AND (
-            songs.source_type = 0 
-            OR songs.is_favorite = 1 
+            songs.source_type = 0
+            OR songs.is_favorite = 1
+            OR (songs.file_path IS NOT NULL AND songs.file_path != '')
             OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs)
-            OR songs.artist_id IN (
-                SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != ''
-                UNION
-                SELECT artist_id FROM songs WHERE source_type = 0 OR is_favorite = 1
-                UNION
-                SELECT artist_id FROM songs WHERE CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs) GROUP BY artist_id HAVING COUNT(id) > 3
+            OR songs.content_uri_string IN (SELECT REPLACE(song_id, 'youtube_', 'youtube://') FROM playlist_songs)
+            OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM song_engagements WHERE play_count > 0)
+            OR songs.content_uri_string IN (SELECT REPLACE(song_id, 'youtube_', 'youtube://') FROM song_engagements WHERE play_count > 0)
+            OR (
+                songs.artist_id IN (SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != '')
+                AND songs.id NOT IN (SELECT related_song_id FROM related_song_map)
             )
         )
         WHERE (artists.channel_id IS NOT NULL AND artists.channel_id != '')
@@ -1711,13 +1727,14 @@ interface MusicDao {
         LEFT JOIN songs ON artists.id = songs.artist_id AND (
             songs.source_type = 0
             OR songs.is_favorite = 1
+            OR (songs.file_path IS NOT NULL AND songs.file_path != '')
             OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs)
-            OR songs.artist_id IN (
-                SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != ''
-                UNION
-                SELECT artist_id FROM songs WHERE source_type = 0 OR is_favorite = 1
-                UNION
-                SELECT artist_id FROM songs WHERE CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs) GROUP BY artist_id HAVING COUNT(id) > 3
+            OR songs.content_uri_string IN (SELECT REPLACE(song_id, 'youtube_', 'youtube://') FROM playlist_songs)
+            OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM song_engagements WHERE play_count > 0)
+            OR songs.content_uri_string IN (SELECT REPLACE(song_id, 'youtube_', 'youtube://') FROM song_engagements WHERE play_count > 0)
+            OR (
+                songs.artist_id IN (SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != '')
+                AND songs.id NOT IN (SELECT related_song_id FROM related_song_map)
             )
         )
         WHERE ((artists.channel_id IS NOT NULL AND artists.channel_id != '') OR songs.id IS NOT NULL)
@@ -1733,15 +1750,16 @@ interface MusicDao {
     @Query("""
         SELECT DISTINCT artists.* FROM artists
         LEFT JOIN songs ON artists.id = songs.artist_id AND (
-            songs.source_type = 0 
-            OR songs.is_favorite = 1 
+            songs.source_type = 0
+            OR songs.is_favorite = 1
+            OR (songs.file_path IS NOT NULL AND songs.file_path != '')
             OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs)
-            OR songs.artist_id IN (
-                SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != ''
-                UNION
-                SELECT artist_id FROM songs WHERE source_type = 0 OR is_favorite = 1
-                UNION
-                SELECT artist_id FROM songs WHERE CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs) GROUP BY artist_id HAVING COUNT(id) > 3
+            OR songs.content_uri_string IN (SELECT REPLACE(song_id, 'youtube_', 'youtube://') FROM playlist_songs)
+            OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM song_engagements WHERE play_count > 0)
+            OR songs.content_uri_string IN (SELECT REPLACE(song_id, 'youtube_', 'youtube://') FROM song_engagements WHERE play_count > 0)
+            OR (
+                songs.artist_id IN (SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != '')
+                AND songs.id NOT IN (SELECT related_song_id FROM related_song_map)
             )
         )
         WHERE (artists.channel_id IS NOT NULL AND artists.channel_id != '')
@@ -1765,15 +1783,16 @@ interface MusicDao {
         FROM artists
         LEFT JOIN song_artist_cross_ref ON song_artist_cross_ref.artist_id = artists.id
         LEFT JOIN songs ON song_artist_cross_ref.song_id = songs.id AND (
-            songs.source_type = 0 
-            OR songs.is_favorite = 1 
+            songs.source_type = 0
+            OR songs.is_favorite = 1
+            OR (songs.file_path IS NOT NULL AND songs.file_path != '')
             OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs)
-            OR songs.artist_id IN (
-                SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != ''
-                UNION
-                SELECT artist_id FROM songs WHERE source_type = 0 OR is_favorite = 1
-                UNION
-                SELECT artist_id FROM songs WHERE CAST(songs.id AS TEXT) IN (SELECT song_id FROM playlist_songs) GROUP BY artist_id HAVING COUNT(id) > 3
+            OR songs.content_uri_string IN (SELECT REPLACE(song_id, 'youtube_', 'youtube://') FROM playlist_songs)
+            OR CAST(songs.id AS TEXT) IN (SELECT song_id FROM song_engagements WHERE play_count > 0)
+            OR songs.content_uri_string IN (SELECT REPLACE(song_id, 'youtube_', 'youtube://') FROM song_engagements WHERE play_count > 0)
+            OR (
+                songs.artist_id IN (SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != '')
+                AND songs.id NOT IN (SELECT related_song_id FROM related_song_map)
             )
         )
         WHERE ((artists.channel_id IS NOT NULL AND artists.channel_id != '')
