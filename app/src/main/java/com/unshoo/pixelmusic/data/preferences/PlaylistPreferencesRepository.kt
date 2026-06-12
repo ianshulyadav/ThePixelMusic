@@ -11,6 +11,8 @@ import com.unshoo.pixelmusic.data.model.SortOption
 import com.unshoo.pixelmusic.data.remote.youtube.DownloadRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -30,9 +32,65 @@ class PlaylistPreferencesRepository @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
     private val coverPrefs = context.getSharedPreferences("playlist_cover_customizations", Context.MODE_PRIVATE)
+    private val pinPrefs = context.getSharedPreferences("playlist_pins", Context.MODE_PRIVATE)
+    private val playlistTimestampsPrefs = context.getSharedPreferences("playlist_timestamps", Context.MODE_PRIVATE)
     private val migrationMutex = Mutex()
     @Volatile
     private var migrationChecked = false
+
+    private val _pinnedPlaylistIds = MutableStateFlow<Set<String>>(emptySet())
+    val pinnedPlaylistIds = _pinnedPlaylistIds.asStateFlow()
+
+    init {
+        val pinned = pinPrefs.getStringSet("pinned_ids", emptySet()) ?: emptySet()
+        _pinnedPlaylistIds.value = pinned
+    }
+
+    suspend fun togglePinPlaylist(playlistId: String) {
+        val current = _pinnedPlaylistIds.value
+        val next = if (current.contains(playlistId)) current - playlistId else current + playlistId
+        pinPrefs.edit().putStringSet("pinned_ids", next).apply()
+        _pinnedPlaylistIds.value = next
+    }
+
+    private fun getOrCreatePlaylistTimestamps(
+        pId: String,
+        syncTimestamp: Long,
+        title: String,
+        songIds: List<String>
+    ): Pair<Long, Long> {
+        val createdKey = "${pId}_createdAt"
+        val modifiedKey = "${pId}_lastModified"
+        val hashKey = "${pId}_stateHash"
+
+        var createdAt = playlistTimestampsPrefs.getLong(createdKey, 0L)
+        var lastModified = playlistTimestampsPrefs.getLong(modifiedKey, 0L)
+        val oldHash = playlistTimestampsPrefs.getInt(hashKey, 0)
+
+        val currentHash = (title + "_" + songIds.joinToString(",")).hashCode()
+        val now = if (syncTimestamp > 0L) syncTimestamp else System.currentTimeMillis()
+
+        if (createdAt == 0L) {
+            createdAt = now
+            playlistTimestampsPrefs.edit().putLong(createdKey, createdAt).apply()
+        }
+
+        if (lastModified == 0L) {
+            lastModified = createdAt
+            playlistTimestampsPrefs.edit()
+                .putLong(modifiedKey, lastModified)
+                .putInt(hashKey, currentHash)
+                .apply()
+        } else if (oldHash != currentHash) {
+            lastModified = System.currentTimeMillis()
+            playlistTimestampsPrefs.edit()
+                .putLong(modifiedKey, lastModified)
+                .putInt(hashKey, currentHash)
+                .apply()
+        }
+
+        return Pair(createdAt, lastModified)
+    }
 
     val userPlaylistsFlow: Flow<List<Playlist>> = combine(
         localPlaylistDao.observePlaylistsWithSongs()
@@ -44,8 +102,9 @@ class PlaylistPreferencesRepository @Inject constructor(
                     )
                 }
             },
-        AppDatabase.getInstance(context).playlistRepository().observeAll()
-    ) { localPlaylists, ytPlaylists ->
+        AppDatabase.getInstance(context).playlistRepository().observeAll(),
+        _pinnedPlaylistIds
+    ) { localPlaylists, ytPlaylists, pinnedIds ->
         val mappedYtPlaylists = ytPlaylists.map { ytPlaylist ->
             val pId = ytPlaylist.info.id
             val defaultCoverImage = ytPlaylist.info.coverPath ?: ytPlaylist.info.coverHref
@@ -58,12 +117,16 @@ class PlaylistPreferencesRepository @Inject constructor(
             val detail3 = if (coverPrefs.contains("${pId}_coverShapeDetail3")) coverPrefs.getFloat("${pId}_coverShapeDetail3", 0f) else null
             val detail4 = if (coverPrefs.contains("${pId}_coverShapeDetail4")) coverPrefs.getFloat("${pId}_coverShapeDetail4", 0f) else null
 
+            val playlistTitle = if (ytPlaylist.info.isDownloadedPlaylist) "Downloaded Songs" else ytPlaylist.info.title
+            val playlistSongIds = ytPlaylist.songs.map { "youtube_${it.youtubeId}" }
+            val (cTime, mTime) = getOrCreatePlaylistTimestamps(pId, ytPlaylist.info.lastSyncTimestamp, playlistTitle, playlistSongIds)
+
             Playlist(
                 id = pId,
-                name = if (ytPlaylist.info.isDownloadedPlaylist) "Downloaded Songs" else ytPlaylist.info.title,
-                songIds = ytPlaylist.songs.map { "youtube_${it.youtubeId}" },
-                createdAt = ytPlaylist.info.lastSyncTimestamp,
-                lastModified = ytPlaylist.info.lastSyncTimestamp,
+                name = playlistTitle,
+                songIds = playlistSongIds,
+                createdAt = cTime,
+                lastModified = mTime,
                 isAiGenerated = false,
                 isQueueGenerated = false,
                 coverImageUri = savedCoverImageUri ?: defaultCoverImage,
@@ -77,7 +140,9 @@ class PlaylistPreferencesRepository @Inject constructor(
                 source = "YOUTUBE"
             )
         }
-        (localPlaylists + mappedYtPlaylists).distinctBy { it.id }
+        val localWithPins = localPlaylists.map { it.copy(isPinned = pinnedIds.contains(it.id)) }
+        val ytWithPins = mappedYtPlaylists.map { it.copy(isPinned = pinnedIds.contains(it.id)) }
+        (localWithPins + ytWithPins).distinctBy { it.id }
     }
 
     val playlistSongOrderModesFlow: Flow<Map<String, String>> =

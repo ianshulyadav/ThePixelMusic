@@ -1,4 +1,4 @@
-@file:OptIn(ExperimentalMaterial3ExpressiveApi::class)
+﻿@file:OptIn(ExperimentalMaterial3ExpressiveApi::class)
 
 package com.unshoo.pixelmusic.presentation.screens
 
@@ -50,6 +50,8 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.PushPin
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.material.icons.automirrored.rounded.ViewList
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Edit
@@ -445,12 +447,12 @@ fun LibraryScreen(
     libraryViewModel: LibraryViewModel = hiltViewModel(),
     songInfoBottomSheetViewModel: SongInfoBottomSheetViewModel = hiltViewModel()
 ) {
-    // La recolección de estados de alto nivel se mantiene mínima.
+    // La recolecciÃ³n de estados de alto nivel se mantiene mÃ­nima.
     val context = LocalContext.current // Added context
     val haptic = LocalHapticFeedback.current
     val lastTabIndex by playerViewModel.lastLibraryTabIndexFlow.collectAsStateWithLifecycle()
     val folderArtworkPreference by playerViewModel.userPreferencesRepository.folderArtworkPreferenceFlow.collectAsStateWithLifecycle(initialValue = "recently_added")
-    val favoriteIds by playerViewModel.favoriteSongIds.collectAsStateWithLifecycle() // Reintroducir favoriteIds aquí
+    val favoriteIds by playerViewModel.favoriteSongIds.collectAsStateWithLifecycle() // Reintroducir favoriteIds aquÃ­
     val scope = rememberCoroutineScope() // Mantener si se usa para acciones de UI
     val syncManager = playerViewModel.syncManager
     var isRefreshing by remember { mutableStateOf(false) }
@@ -467,6 +469,8 @@ fun LibraryScreen(
     var showSongInfoBottomSheet by remember { mutableStateOf(false) }
     var showPlaylistBottomSheet by remember { mutableStateOf(false) }
     var playlistSheetSongs by remember { mutableStateOf<List<Song>>(emptyList()) }
+    var showSinglePlaylistOptionsSheet by remember { mutableStateOf(false) }
+    var selectedPlaylistForOptions by remember { mutableStateOf<com.unshoo.pixelmusic.data.model.Playlist?>(null) }
     val selectedSongForInfo by playerViewModel.selectedSongForInfo.collectAsStateWithLifecycle()
     val tabTitles by playerViewModel.libraryTabsFlow.collectAsStateWithLifecycle()
     val currentTabId by playerViewModel.currentLibraryTabId.collectAsStateWithLifecycle()
@@ -512,8 +516,23 @@ fun LibraryScreen(
     var pendingImportIsCsv by remember { mutableStateOf(false) }
     var showImportDialog by remember { mutableStateOf(false) }
 
+    // Observe M3U files opened/shared from other apps via ACTION_VIEW or ACTION_SEND
+    val activity = context as? com.unshoo.pixelmusic.MainActivity
+    LaunchedEffect(activity) {
+        activity?.pendingM3uImportUri?.collect { uri ->
+            if (uri != null) {
+                pendingImportUri = uri
+                pendingImportIsCsv = false
+                showImportDialog = true
+                activity.pendingM3uImportUri.value = null // consume
+            }
+        }
+    }
+
+    // Use "*/*" so the picker shows M3U/M3U8 files regardless of their MIME type
+    // (many apps tag them as text/plain or application/octet-stream)
     val m3uImportLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
+        contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) {
             pendingImportUri = uri
@@ -522,7 +541,7 @@ fun LibraryScreen(
         }
     }
     val csvImportLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
+        contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) {
             pendingImportUri = uri
@@ -612,12 +631,11 @@ fun LibraryScreen(
     var showMergePlaylistDialog by remember { mutableStateOf(false) }
     var pendingMergePlaylistIds by remember { mutableStateOf(emptyList<String>()) }
 
-    val onPlaylistLongPress: (com.unshoo.pixelmusic.data.model.Playlist) -> Unit = remember(playlistMultiSelectionState, haptic) {
+    val onPlaylistLongPress: (com.unshoo.pixelmusic.data.model.Playlist) -> Unit = remember(haptic) {
         { playlist ->
             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-            // Only toggle selection, don't show sheet immediately (similar to songs multi-selection)
-            playlistMultiSelectionState.toggleSelection(playlist)
-            android.util.Log.d("PlaylistMultiSelect", "Toggled: ${playlist.name}, total selected: ${playlistMultiSelectionState.selectedPlaylists.value.size}")
+            selectedPlaylistForOptions = playlist
+            showSinglePlaylistOptionsSheet = true
         }
     }
 
@@ -780,7 +798,7 @@ fun LibraryScreen(
             playerViewModel.clearAiPlaylistError()
         }
     }
-    // La lógica de carga diferida (lazy loading) se mantiene.
+    // La lÃ³gica de carga diferida (lazy loading) se mantiene.
     LaunchedEffect(Unit) {
         Trace.beginSection("LibraryScreen.InitialTabLoad")
         playerViewModel.onLibraryTabSelected(normalizedLastTabIndex)
@@ -1052,7 +1070,7 @@ fun LibraryScreen(
                     // shape = AbsoluteSmoothCornerShape(cornerRadiusTL = 24.dp, smoothnessAsPercentTR = 60, /*...*/) // Your custom shape
                 ) {
                     Column(Modifier.fillMaxSize()) {
-                        // OPTIMIZACIÓN: La lógica de ordenamiento ahora es más eficiente.
+                        // OPTIMIZACIÃ“N: La lÃ³gica de ordenamiento ahora es mÃ¡s eficiente.
                         val availableSortOptions by playerViewModel.availableSortOptions.collectAsStateWithLifecycle()
                         val sanitizedSortOptions = remember(availableSortOptions, currentTabId) {
                             val cleaned = availableSortOptions.filterIsInstance<SortOption>()
@@ -1956,6 +1974,150 @@ fun LibraryScreen(
         )
     }
 
+    if (showSinglePlaylistOptionsSheet && selectedPlaylistForOptions != null) {
+        val playlist = selectedPlaylistForOptions!!
+        val isPinned = playlist.isPinned
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+        ModalBottomSheet(
+            onDismissRequest = { showSinglePlaylistOptionsSheet = false },
+            sheetState = sheetState,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            tonalElevation = 4.dp,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 12.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        text = stringResource(R.string.presentation_batch_b_playlist_options_title),
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = playlist.name,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                        .clickable {
+                            showSinglePlaylistOptionsSheet = false
+                            playlistViewModel.togglePinPlaylist(playlist.id)
+                        }
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.PushPin,
+                            contentDescription = if (isPinned) "Unpin" else "Pin",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(14.dp))
+                    Text(
+                        text = if (isPinned) "Unpin Playlist" else "Pin Playlist",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                        .clickable {
+                            showSinglePlaylistOptionsSheet = false
+                            scope.launch {
+                                val songs = playerViewModel.getSongs(playlist.songIds)
+                                playerViewModel.addSongsToQueue(songs)
+                            }
+                        }
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.QueueMusic,
+                            contentDescription = stringResource(R.string.cd_add_all_to_queue),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(14.dp))
+                    Text(
+                        text = stringResource(R.string.cd_add_all_to_queue),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+
+                if (!playlist.id.startsWith(PlaylistViewModel.FOLDER_PLAYLIST_PREFIX)) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 6.dp)
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                            .clickable {
+                                showSinglePlaylistOptionsSheet = false
+                                playlistViewModel.deletePlaylist(playlist.id)
+                            }
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                painter = painterResource(R.drawable.rounded_delete_24),
+                                contentDescription = stringResource(R.string.presentation_batch_b_delete_playlist),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(14.dp))
+                        Text(
+                            text = stringResource(R.string.presentation_batch_b_delete_playlist),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     // Multi-Selection Bottom Sheet
     if (showMultiSelectionSheet && selectedSongs.isNotEmpty()) {
         val activity = context as? android.app.Activity
@@ -2168,11 +2330,12 @@ fun LibraryScreen(
             onDismiss = { showImportSheet = false },
             onImportM3u = {
                 showImportSheet = false
-                m3uImportLauncher.launch("audio/x-mpegurl")
+                // Accept all file types so M3U/M3U8 tagged as text/plain show up too
+                m3uImportLauncher.launch(arrayOf("audio/x-mpegurl", "audio/mpegurl", "application/vnd.apple.mpegurl", "text/plain", "application/octet-stream", "*/*"))
             },
             onImportCsv = {
                 showImportSheet = false
-                csvImportLauncher.launch("text/csv")
+                csvImportLauncher.launch(arrayOf("text/csv", "text/comma-separated-values", "text/plain", "application/octet-stream", "*/*"))
             }
         )
     }
@@ -2621,7 +2784,7 @@ private fun LibraryInlineSyncIndicator(
         ) + androidx.compose.animation.fadeOut(animationSpec = tween(160))
     ) {
         // Collected inside this subtree so progress ticks don't recompose the
-        // parent screen — same pattern as LibrarySyncOverlay.
+        // parent screen â€” same pattern as LibrarySyncOverlay.
         val syncProgress by syncManager.syncProgress
             .collectAsStateWithLifecycle(initialValue = SyncProgress())
 
@@ -2670,8 +2833,8 @@ private fun LibraryInlineSyncIndicator(
  *
  * By collecting [SyncManager.syncProgress] HERE instead of in the parent [LibraryScreen],
  * only this small subtree recomposes on every progress tick (e.g., file count updates
- * during a library scan). The rest of [LibraryScreen] — including the Scaffold, pager,
- * and all tab content — remains unaffected during sync.
+ * during a library scan). The rest of [LibraryScreen] â€” including the Scaffold, pager,
+ * and all tab content â€” remains unaffected during sync.
  */
 @Composable
 private fun LibrarySyncOverlay(syncManager: com.unshoo.pixelmusic.data.worker.SyncManager) {
@@ -3685,7 +3848,7 @@ fun AlbumGridItemRedesigned(
     val albumColorSchemePair by albumColorSchemePairFlow.collectAsStateWithLifecycle()
     val systemIsDark = LocalPixelMusicDarkTheme.current
 
-    // 1. Obtén el colorScheme del tema actual aquí, en el scope Composable.
+    // 1. ObtÃ©n el colorScheme del tema actual aquÃ­, en el scope Composable.
     val currentMaterialColorScheme = MaterialTheme.colorScheme
 
     val itemDesignColorScheme = remember(albumColorSchemePair, systemIsDark, currentMaterialColorScheme) {
@@ -3801,8 +3964,8 @@ fun AlbumGridItemRedesigned(
                             model = album.albumArtUriString,
                             contentDescription = stringResource(R.string.cd_album_art_for_title, album.title),
                             contentScale = ContentScale.Crop,
-                            // Reducido el tamaño para mejorar el rendimiento del scroll, como se sugiere en el informe.
-                            // ContentScale.Crop se encargará de ajustar la imagen al aspect ratio.
+                            // Reducido el tamaÃ±o para mejorar el rendimiento del scroll, como se sugiere en el informe.
+                            // ContentScale.Crop se encargarÃ¡ de ajustar la imagen al aspect ratio.
                             targetSize = Size(256, 256),
                             modifier = Modifier
                                 .aspectRatio(3f / 2f)
@@ -3865,7 +4028,7 @@ fun AlbumGridItemRedesigned(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = selectionIndex?.toString() ?: "✓",
+                            text = selectionIndex?.toString() ?: "âœ“",
                             color = MaterialTheme.colorScheme.onPrimary,
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Bold
@@ -4152,7 +4315,7 @@ fun AlbumListItem(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = selectionIndex?.toString() ?: "✓",
+                            text = selectionIndex?.toString() ?: "âœ“",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onPrimary,
                             fontWeight = FontWeight.Bold
@@ -4182,13 +4345,32 @@ private fun ImportPlaylistFileDialog(
                 val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
                 if (nameIndex != -1 && cursor.moveToFirst()) {
                     val rawName = cursor.getString(nameIndex)
-                    resolvedName = if (isCsv) rawName.removeSuffix(".csv") else rawName.removeSuffix(".m3u").removeSuffix(".m3u8")
+                    resolvedName = rawName
+                        .removeSuffix(".m3u8")
+                        .removeSuffix(".m3u")
+                        .removeSuffix(".csv")
+                        .removeSuffix(".txt")
                 }
             }
         } catch (e: Exception) {
             resolvedName = "Imported Playlist"
         }
         androidx.compose.runtime.mutableStateOf(resolvedName)
+    }
+
+    // Auto-detect format from the actual file extension (overrides the isCsv hint from which launcher was used)
+    val effectiveIsCsv = androidx.compose.runtime.remember(uri) {
+        var detectedCsv = isCsv
+        try {
+            context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                if (nameIndex != -1 && cursor.moveToFirst()) {
+                    val rawName = cursor.getString(nameIndex).lowercase()
+                    detectedCsv = rawName.endsWith(".csv")
+                }
+            }
+        } catch (_: Exception) {}
+        detectedCsv
     }
 
     var playlistNameInput by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(initialName) }
@@ -4218,7 +4400,7 @@ private fun ImportPlaylistFileDialog(
             },
             title = {
                 Text(
-                    text = if (isCsv) "Import CSV Playlist" else "Import M3U Playlist",
+                    text = if (effectiveIsCsv) "Import CSV Playlist" else "Import M3U Playlist",
                     fontFamily = GoogleSansRounded,
                     fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
                 )
@@ -4265,10 +4447,10 @@ private fun ImportPlaylistFileDialog(
                     enabled = !isImporting && playlistNameInput.isNotBlank(),
                     onClick = {
                         isImporting = true
-                        playlistViewModel.setImportingState(true, playlistNameInput, isCsv)
+                        playlistViewModel.setImportingState(true, playlistNameInput, effectiveIsCsv)
                         coroutineScope.launch {
                             try {
-                                val result = if (isCsv) {
+                                val result = if (effectiveIsCsv) {
                                     playlistViewModel.m3uManager.parseCsv(uri) { current, total, title, artist ->
                                         playlistViewModel.updateImportProgress(playlistNameInput, current, total, title, artist)
                                     }

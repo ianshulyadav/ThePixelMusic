@@ -628,9 +628,9 @@ fun SearchHistoryList(
         }
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
             contentPadding = PaddingValues(
-                top = 8.dp,
+                top = 2.dp,
             )
         ) {
             items(historyItems, key = { "history_${it.id ?: it.query}" }, contentType = { "search_history" }) { item ->
@@ -654,7 +654,7 @@ fun SearchHistoryListItem(
         modifier = Modifier
             .fillMaxWidth()
             .pointerInput(Unit) { detectTapGestures(onTap = { onHistoryClick(item.query) }) }
-            .padding(horizontal = 8.dp, vertical = 12.dp),
+            .padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {

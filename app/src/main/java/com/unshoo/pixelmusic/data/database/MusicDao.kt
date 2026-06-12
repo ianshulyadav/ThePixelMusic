@@ -107,6 +107,9 @@ interface MusicDao {
     @Query("UPDATE songs SET file_path = :filePath, parent_directory_path = :parentPath WHERE id = :songId")
     suspend fun updateSongFilePathAndParent(songId: Long, filePath: String, parentPath: String)
 
+    @Query("UPDATE songs SET album_art_uri_string = :artPath WHERE id = :songId")
+    suspend fun updateSongArtwork(songId: Long, artPath: String)
+
     @Query("UPDATE songs SET genre = :genre WHERE id = :songId")
     suspend fun updateSongGenre(songId: Long, genre: String)
 

@@ -1,4 +1,4 @@
-package com.unshoo.pixelmusic.data.playlist
+﻿package com.unshoo.pixelmusic.data.playlist
 
 import android.content.Context
 import android.net.Uri
@@ -176,27 +176,41 @@ class M3uManager @Inject constructor(
                     }
                     if (trimmedLine.startsWith("#")) continue
 
-                    val decodedLine = try {
+                    // Decode URL-encoded chars (%20 etc.) and normalize file:// URIs
+                    val rawDecoded = try {
                         java.net.URLDecoder.decode(trimmedLine, "UTF-8")
                     } catch (e: Exception) {
                         trimmedLine
+                    }
+                    // Strip file:// / file:/// scheme to get a plain filesystem path
+                    val decodedLine = when {
+                        rawDecoded.startsWith("file:///") -> rawDecoded.removePrefix("file://")
+                        rawDecoded.startsWith("file://") -> rawDecoded.removePrefix("file://")
+                        else -> rawDecoded
                     }
 
                     var extTitle = ""
                     var extArtist = ""
                     var extDurationMs = 0L
                     lastExtInf?.let { extInf ->
-                        val durationPart = extInf.substringAfter(":", "").substringBefore(",", "")
-                        val secs = durationPart.toLongOrNull() ?: 0L
+                        // #EXTINF: <duration> [optional attrs],<display title>
+                        // Duration is the first space-separated token after ':'
+                        val afterColon = extInf.substringAfter(":", "")
+                        val durationStr = afterColon.substringBefore(",", "").trim().split(" ").firstOrNull()?.trimEnd() ?: ""
+                        val secs = durationStr.toLongOrNull() ?: 0L
                         extDurationMs = secs * 1000L
 
-                        val metaPart = extInf.substringAfter(",", "")
-                        val parts = metaPart.split(Regex(" - |-"))
-                        if (parts.size >= 2) {
-                            extArtist = parts[0].trim()
-                            extTitle = parts.subList(1, parts.size).joinToString("-").trim()
-                        } else if (metaPart.isNotBlank()) {
-                            extTitle = metaPart.trim()
+                        // Everything after the first comma is the display name
+                        val metaPart = extInf.substringAfter(",", "").trim()
+                        if (metaPart.isNotBlank()) {
+                            // Split only on " - " (with spaces) to avoid breaking hyphenated titles
+                            val dashIdx = metaPart.indexOf(" - ")
+                            if (dashIdx > 0) {
+                                extArtist = metaPart.substring(0, dashIdx).trim()
+                                extTitle = metaPart.substring(dashIdx + 3).trim()
+                            } else {
+                                extTitle = metaPart.trim()
+                            }
                         }
                     }
                     entries.add(M3uEntry(decodedLine, extTitle, extArtist, extDurationMs))
