@@ -132,27 +132,6 @@ if not changelog:
 
 
 # ── Upload logic ───────────────────────────────────────────────────────────────
-async def send_apk(apk_path, display_name, caption, reply_to=None):
-    size_mb = os.path.getsize(apk_path) / (1024 * 1024)
-    print(f"Uploading {display_name} ({size_mb:.1f} MB)...", flush=True)
-    send_kwargs = dict(
-        entity=chat_id,
-        file=apk_path,
-        caption=caption,
-        parse_mode="html",
-        force_document=True,
-        attributes=[DocumentAttributeFilename(file_name=display_name)],
-        progress_callback=progress,
-    )
-    if reply_to:
-        send_kwargs["reply_to"] = reply_to
-    elif thread_id:
-        send_kwargs["reply_to"] = thread_id
-    result = await client.send_file(**send_kwargs)
-    print(f"\n  OK — sent {display_name} (msg id: {result.id})", flush=True)
-    return result
-
-
 async def send_message(text, reply_to=None):
     send_kwargs = dict(entity=chat_id, message=text, parse_mode="html", link_preview=False)
     if reply_to:
@@ -190,8 +169,23 @@ async def run():
         header_msg = await send_message(text)
         print(f"Changelog sent. ID: {header_msg.id}", flush=True)
 
-        for apk_path, display_name, cap in APKS:
-            await send_apk(apk_path, display_name, cap, reply_to=header_msg.id)
+        # Send all APKs in one batch (ArchiveTune pattern)
+        apk_paths = [apk_path for apk_path, _, _ in APKS]
+        apk_names = [name for _, name, _ in APKS]
+        total_mb = sum(os.path.getsize(p) / (1024 * 1024) for p in apk_paths)
+        print(f"Uploading all {len(apk_paths)} APKs ({total_mb:.1f} MB total) as one batch...", flush=True)
+
+        await client.send_file(
+            entity=chat_id,
+            file=apk_paths,
+            captions=[cap for _, _, cap in APKS],
+            parse_mode="html",
+            force_document=True,
+            reply_to=header_msg.id,
+            progress_callback=progress,
+            attributes=[[DocumentAttributeFilename(file_name=name)] for name in apk_names],
+        )
+        print("All APKs sent.", flush=True)
 
     else:
         # ── NIGHTLY POST ────────────────────────────────────────────────────────
@@ -210,16 +204,27 @@ async def run():
             f"• <b>x86_64:</b> Emulators & Chromebooks\n"
             f"• <b>wear:</b> Wear OS smartwatches only</blockquote>"
         )
-        first_msg = None
-        for index, (apk_path, display_name, _) in enumerate(APKS):
-            msg = await send_apk(
-                apk_path=apk_path,
-                display_name=display_name,
-                caption=caption if index == 0 else None,
-                reply_to=first_msg.id if (index > 0 and first_msg) else None,
-            )
-            if index == 0:
-                first_msg = msg
+
+        # Send all APKs in one batch (ArchiveTune pattern)
+        apk_paths = [apk_path for apk_path, _, _ in APKS]
+        apk_names = [name for _, name, _ in APKS]
+        total_mb = sum(os.path.getsize(p) / (1024 * 1024) for p in apk_paths)
+        print(f"Uploading all {len(apk_paths)} APKs ({total_mb:.1f} MB total) as one batch...", flush=True)
+
+        send_kwargs = dict(
+            entity=chat_id,
+            file=apk_paths,
+            caption=caption,
+            parse_mode="html",
+            force_document=True,
+            progress_callback=progress,
+            attributes=[[DocumentAttributeFilename(file_name=name)] for name in apk_names],
+        )
+        if thread_id:
+            send_kwargs["reply_to"] = thread_id
+
+        await client.send_file(**send_kwargs)
+        print("All APKs sent.", flush=True)
 
     print("All APKs published successfully.", flush=True)
 
