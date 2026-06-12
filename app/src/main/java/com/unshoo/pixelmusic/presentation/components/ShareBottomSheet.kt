@@ -106,7 +106,7 @@ object LyricCleaner {
         // Strip timestamp tags like [00:12.34], [01:23], [00:12.345] or empty brackets
         val noTimestamps = noMeta.replace(Regex("\\[\\d{2}:\\d{2}(?:\\.\\d{1,3})?\\]"), "")
         return noTimestamps.lines()
-            .map { it.trim() }
+            .map { it.trim().replace("\"", "").replace("“", "").replace("”", "").trim() }
             // Filter out blank lines and noise starting with bracket tags
             .filter { it.isNotEmpty() && !it.startsWith("[") && !it.startsWith("(") }
     }
@@ -1111,10 +1111,10 @@ private fun LyricsGlassPanel(
     selectedLyrics: List<String>
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
-        // Header: small thumbnail + title + artist
+        // Header: properly sized thumbnail + title + artist
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
             SmartImage(
@@ -1131,8 +1131,8 @@ private fun LyricsGlassPanel(
                     text = song.title,
                     fontFamily = GoogleSansRounded,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 12.sp,
-                    lineHeight = 15.sp,
+                    fontSize = 16.sp,
+                    lineHeight = 20.sp,
                     color = Color.White,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -1141,21 +1141,21 @@ private fun LyricsGlassPanel(
                     text = song.displayArtist,
                     fontFamily = GoogleSansRounded,
                     fontWeight = FontWeight.Medium,
-                    fontSize = 10.sp,
-                    lineHeight = 13.sp,
-                    color = Color.White.copy(alpha = 0.55f),
+                    fontSize = 12.sp,
+                    lineHeight = 15.sp,
+                    color = Color.White.copy(alpha = 0.65f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
         }
 
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(12.dp))
         HorizontalDivider(
             color = Color.White.copy(alpha = 0.15f),
             thickness = 1.dp
         )
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(14.dp))
 
         // Lyric lines — dynamic font size shrinks as more lines are selected
         if (selectedLyrics.isEmpty()) {
@@ -1191,7 +1191,7 @@ private fun LyricsGlassPanel(
             ) {
                 selectedLyrics.forEach { line ->
                     Text(
-                        text = line,
+                        text = line.replace("\"", "").replace("“", "").replace("”", "").trim(),
                         fontFamily = GoogleSansRounded,
                         fontWeight = FontWeight.Bold,
                         fontSize = fontSize,
@@ -1202,6 +1202,24 @@ private fun LyricsGlassPanel(
                     )
                 }
             }
+        }
+
+        Spacer(Modifier.height(18.dp))
+
+        // Premium Progress Bar
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(3.dp)
+                .clip(CircleShape)
+                .background(Color.White.copy(alpha = 0.22f))
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.42f)
+                    .fillMaxHeight()
+                    .background(Color.White)
+            )
         }
     }
 }
