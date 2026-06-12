@@ -48,6 +48,9 @@ import java.util.UUID
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import com.unshoo.pixelmusic.data.database.MusicDao
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import com.unshoo.pixelmusic.data.remote.youtube.DownloadHelper
 import com.unshoo.pixelmusic.data.database.SongEntity
 import com.unshoo.pixelmusic.data.database.AlbumEntity
 import com.unshoo.pixelmusic.data.database.ArtistEntity
@@ -291,6 +294,33 @@ class PlaylistViewModel @Inject constructor(
                                 isLoading = songsList.isEmpty() && playlist.source == "YOUTUBE",
                                 playlistNotFound = false
                             )
+                        }
+
+                        if (playlistId == com.unshoo.pixelmusic.data.remote.youtube.Constants.Downloads.DOWNLOADED_PLAYLIST_ID) {
+                            viewModelScope.launch(Dispatchers.IO) {
+                                if (isNetworkAvailable(context)) {
+                                    val ytSongRepo = com.unshoo.pixelmusic.data.database.youtube.AppDatabase.getInstance(context).songRepository()
+                                    var anyDownloaded = false
+                                    songsList.forEach { song ->
+                                        val youtubeId = song.youtubeId ?: song.id.removePrefix("youtube_")
+                                        if (song.id.startsWith("youtube_") || song.youtubeId != null) {
+                                            val ytSong = ytSongRepo.getSong(youtubeId)
+                                            if (ytSong != null && (ytSong.thumbnailPath.isNullOrBlank() || ytSong.thumbnailPath.startsWith("http"))) {
+                                                val downloadedImage = DownloadHelper.downloadImage(context, ytSong.thumbnailHref, ytSong.youtubeId)
+                                                if (downloadedImage != null) {
+                                                    anyDownloaded = true
+                                                    val updatedYtSong = ytSong.copy(thumbnailPath = downloadedImage.path)
+                                                    ytSongRepo.create(updatedYtSong)
+                                                    musicDao.updateSongArtwork(song.id.toLong(), downloadedImage.path)
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if (anyDownloaded) {
+                                        loadPlaylistDetails(playlistId)
+                                    }
+                                }
+                            }
                         }
 
                         // Background fetch & sync for synced YouTube playlists
@@ -769,6 +799,12 @@ class PlaylistViewModel @Inject constructor(
                 e.printStackTrace()
                 null
             }
+        }
+    }
+
+    fun togglePinPlaylist(playlistId: String) {
+        viewModelScope.launch {
+            playlistPreferencesRepository.togglePinPlaylist(playlistId)
         }
     }
 
@@ -1485,6 +1521,17 @@ class PlaylistViewModel @Inject constructor(
         playlists: List<com.unshoo.pixelmusic.data.model.Playlist>,
         sortOption: SortOption
     ): List<com.unshoo.pixelmusic.data.model.Playlist> {
+        val pinned = playlists.filter { it.isPinned }
+        val unpinned = playlists.filter { !it.isPinned }
+        val sortedPinned = sortPlaylistsListRaw(pinned, sortOption)
+        val sortedUnpinned = sortPlaylistsListRaw(unpinned, sortOption)
+        return sortedPinned + sortedUnpinned
+    }
+
+    private fun sortPlaylistsListRaw(
+        playlists: List<com.unshoo.pixelmusic.data.model.Playlist>,
+        sortOption: SortOption
+    ): List<com.unshoo.pixelmusic.data.model.Playlist> {
         return when (sortOption) {
             SortOption.PlaylistNameAZ -> playlists.sortedWith(
                 compareBy<com.unshoo.pixelmusic.data.model.Playlist> { it.name.lowercase() }
@@ -2073,5 +2120,12 @@ class PlaylistViewModel @Inject constructor(
                 _syncingPlaylists.update { it - playlistId }
             }
         }
+    }
+
+    private fun isNetworkAvailable(context: Context): Boolean {
+        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        val activeNetwork = connectivityManager?.activeNetwork ?: return false
+        val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return false
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
 }

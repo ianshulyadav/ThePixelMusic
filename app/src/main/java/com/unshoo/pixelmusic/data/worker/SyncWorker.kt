@@ -1812,7 +1812,11 @@ constructor(
                         duration = durationMs,
                         genre = ySong.genre?.takeIf { it.isNotBlank() } ?: YOUTUBE_GENRE,
                         filePath = ySong.audioFilePath ?: "",
-                        parentDirectoryPath = YOUTUBE_PARENT_DIRECTORY,
+                        parentDirectoryPath = if (!ySong.audioFilePath.isNullOrBlank()) {
+                            java.io.File(ySong.audioFilePath).parent ?: YOUTUBE_PARENT_DIRECTORY
+                        } else {
+                            YOUTUBE_PARENT_DIRECTORY
+                        },
                         isFavorite = songId in localFavorites,
                         lyrics = null,
                         trackNumber = 0,

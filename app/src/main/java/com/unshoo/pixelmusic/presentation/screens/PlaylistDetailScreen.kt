@@ -53,6 +53,7 @@ import androidx.compose.material.icons.rounded.DragIndicator
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.PushPin
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -781,6 +782,16 @@ fun PlaylistDetailScreen(
                         playerViewModel.addSongsToQueue(localReorderableSongs)
                     }
                 )
+                currentPlaylist?.let { playlist ->
+                    PlaylistActionItem(
+                        icon = rememberVectorPainter(Icons.Rounded.PushPin),
+                        label = if (playlist.isPinned) "Unpin Playlist" else "Pin Playlist",
+                        onClick = {
+                            showPlaylistOptionsSheet = false
+                            playlistViewModel.togglePinPlaylist(playlist.id)
+                        }
+                    )
+                }
                 if (!isFolderPlaylist) {
                     PlaylistActionItem(
                         icon = painterResource(R.drawable.rounded_edit_24),

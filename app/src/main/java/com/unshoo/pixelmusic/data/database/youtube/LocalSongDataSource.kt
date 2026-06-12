@@ -17,7 +17,7 @@ interface LocalSongDataSource {
     SELECT * 
     FROM songs 
     WHERE audioFilePath IS NOT NULL 
-      AND thumbnailPath IS NOT NULL
+      AND audioFilePath != ''
       ORDER BY  
         songs.title COLLATE NOCASE ASC,
         songs.artist COLLATE NOCASE ASC

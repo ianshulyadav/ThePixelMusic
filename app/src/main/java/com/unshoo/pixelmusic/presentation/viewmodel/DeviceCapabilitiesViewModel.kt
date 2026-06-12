@@ -512,6 +512,7 @@ private fun audioFormatCandidates(): List<AudioFormatCandidate> {
         } else {
             add(AudioFormatCandidate("Opus", "audio/opus", null))
         }
+        add(AudioFormatCandidate("WebM", "audio/webm", null))
         add(AudioFormatCandidate("ALAC", "audio/alac", null))
         add(AudioFormatCandidate("AIFF", "audio/x-aiff", null))
         add(AudioFormatCandidate("AC3", "audio/ac3", null))
@@ -541,6 +542,7 @@ private fun normalizeMimeType(mimeType: String): String {
         "audio/evrc", "audio/x-evrc" -> "audio/evrc"
         "audio/qcelp", "audio/x-qcelp" -> "audio/qcelp"
         "audio/x-ima-adpcm", "audio/ima-adpcm" -> "audio/x-ima-adpcm"
+        "audio/webm", "video/webm" -> "audio/webm"
         else -> mime
     }
 }
@@ -562,6 +564,7 @@ private fun compatibleMimeTypes(mimeType: String): Set<String> {
         "audio/evrc" -> setOf("audio/evrc", "audio/x-evrc")
         "audio/qcelp" -> setOf("audio/qcelp", "audio/x-qcelp")
         "audio/x-ima-adpcm" -> setOf("audio/x-ima-adpcm", "audio/ima-adpcm", "audio/raw")
+        "audio/webm" -> setOf("audio/webm", "audio/opus", "audio/vorbis")
         else -> setOf(normalized)
     }
 }

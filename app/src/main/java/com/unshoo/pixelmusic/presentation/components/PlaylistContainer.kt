@@ -39,6 +39,7 @@ import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.Topic
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Link
+import androidx.compose.material.icons.rounded.PushPin
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material3.BasicAlertDialog
@@ -467,6 +468,15 @@ fun PlaylistItem(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false)
                     )
+                    if (playlist.isPinned) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Icon(
+                            imageVector = Icons.Rounded.PushPin,
+                            contentDescription = "Pinned",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
                     if (playlist.isAiGenerated) {
                         Spacer(modifier = Modifier.width(8.dp))
                         Icon(

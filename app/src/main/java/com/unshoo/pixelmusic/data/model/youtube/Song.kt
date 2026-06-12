@@ -58,8 +58,6 @@ data class Song(
         get() = "${Constants.YoutubeApi.YOUTUBE_URL_PREFIX}${youtubeId}"
     val downloaded: Boolean
         get() = !audioFilePath.isNullOrBlank() &&
-                !thumbnailPath.isNullOrBlank() &&
-                !thumbnailPath.startsWith("http") &&
                 !audioFilePath.startsWith("http")
 
     override fun equals(other: Any?): Boolean {

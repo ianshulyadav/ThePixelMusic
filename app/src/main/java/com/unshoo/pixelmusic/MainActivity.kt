@@ -180,6 +180,8 @@ class MainActivity : ComponentActivity() {
     // For handling shortcut navigation - using StateFlow so composables can observe changes
     private val _pendingPlaylistNavigation = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
     private val _pendingShuffleAll = kotlinx.coroutines.flow.MutableStateFlow(false)
+    /** URI of an M3U/M3U8 file shared/opened from another app, waiting to be imported. */
+    val pendingM3uImportUri = kotlinx.coroutines.flow.MutableStateFlow<android.net.Uri?>(null)
 
     private val requestAllFilesAccessLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { _ ->
         // Handle the result in onResume
@@ -378,6 +380,26 @@ class MainActivity : ComponentActivity() {
                 playerViewModel.showPlayer()
             }
 
+            // Handle incoming M3U/M3U8 playlist — import instead of play
+            intent.action == android.content.Intent.ACTION_VIEW &&
+                intent.data != null &&
+                isM3uMimeOrExtension(intent.type, intent.data?.lastPathSegment) -> {
+                intent.data?.let { uri ->
+                    persistUriPermissionIfNeeded(intent, uri)
+                    pendingM3uImportUri.value = uri
+                }
+                clearExternalIntentPayload(intent)
+            }
+
+            intent.action == android.content.Intent.ACTION_SEND &&
+                isM3uMimeOrExtension(intent.type, null) -> {
+                resolveStreamUri(intent)?.let { uri ->
+                    persistUriPermissionIfNeeded(intent, uri)
+                    pendingM3uImportUri.value = uri
+                }
+                clearExternalIntentPayload(intent)
+            }
+
             intent.action == android.content.Intent.ACTION_VIEW && intent.data != null -> {
                 intent.data?.let { uri ->
                     persistUriPermissionIfNeeded(intent, uri)
@@ -450,6 +472,18 @@ class MainActivity : ComponentActivity() {
         intent.data = null
         intent.clipData = null
         intent.removeExtra(android.content.Intent.EXTRA_STREAM)
+    }
+
+    /** Returns true if the MIME type or file name indicates an M3U/M3U8 playlist. */
+    private fun isM3uMimeOrExtension(mimeType: String?, fileName: String?): Boolean {
+        val m3uMimeTypes = setOf(
+            "audio/x-mpegurl",
+            "audio/mpegurl",
+            "application/vnd.apple.mpegurl"
+        )
+        if (mimeType != null && mimeType.lowercase() in m3uMimeTypes) return true
+        val lower = fileName?.lowercase() ?: return false
+        return lower.endsWith(".m3u") || lower.endsWith(".m3u8")
     }
 
     private fun openExternalUrl(url: String) {
