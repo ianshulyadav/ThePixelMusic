@@ -510,38 +510,36 @@ fun SongCardItem(
     onClick: () -> Unit
 ) {
     val shape = remember { AbsoluteSmoothCornerShape(20.dp, 60) }
-    Card(
+    Column(
         modifier = Modifier
             .width(140.dp)
-            .clickable(onClick = onClick),
-        shape = shape,
-        colors = CardDefaults.cardColors(containerColor = Color.Transparent)
+            .clickable(onClick = onClick)
     ) {
-        Column {
-            SmartImage(
-                model = song.albumArtUriString,
-                contentDescription = song.title,
-                modifier = Modifier
-                    .size(140.dp)
-                    .clip(shape),
-                contentScale = ContentScale.Crop
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = song.title,
-                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Text(
-                text = song.artist,
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
+        SmartImage(
+            model = song.albumArtUriString,
+            contentDescription = song.title,
+            modifier = Modifier
+                .size(140.dp)
+                .clip(shape),
+            contentScale = ContentScale.Crop
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = song.title,
+            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(horizontal = 4.dp)
+        )
+        Text(
+            text = song.artist,
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 4.dp)
+        )
     }
 }
 
@@ -629,38 +627,36 @@ fun RecentMixCardItem(
         }
     }
 
-    Card(
+    Column(
         modifier = Modifier
             .width(140.dp)
-            .clickable(onClick = onClick),
-        shape = shape,
-        colors = CardDefaults.cardColors(containerColor = Color.Transparent)
+            .clickable(onClick = onClick)
     ) {
-        Column {
-            PlaylistCover(
-                playlist = playlist,
-                playlistSongs = playlistSongs ?: emptyList(),
-                modifier = Modifier
-                    .size(140.dp)
-                    .clip(shape),
-                size = 140.dp
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = playlist.name,
-                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Text(
-                text = "Smart Mix",
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
+        PlaylistCover(
+            playlist = playlist,
+            playlistSongs = playlistSongs ?: emptyList(),
+            modifier = Modifier
+                .size(140.dp)
+                .clip(shape),
+            size = 140.dp
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = playlist.name,
+            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(horizontal = 4.dp)
+        )
+        Text(
+            text = "Smart Mix",
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 4.dp)
+        )
     }
 }
 
@@ -768,38 +764,36 @@ fun AlbumCarouselItem(
         )
     }
 
-    Card(
+    Column(
         modifier = Modifier
             .width(140.dp)
-            .clickable(onClick = onClick),
-        shape = shape,
-        colors = CardDefaults.cardColors(containerColor = Color.Transparent)
+            .clickable(onClick = onClick)
     ) {
-        Column {
-            SmartImage(
-                model = album.thumbnail,
-                contentDescription = album.title,
-                modifier = Modifier
-                    .size(140.dp)
-                    .clip(shape),
-                contentScale = ContentScale.Crop
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = album.title,
-                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Text(
-                text = album.artists?.joinToString { it.name } ?: "",
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
+        SmartImage(
+            model = album.thumbnail,
+            contentDescription = album.title,
+            modifier = Modifier
+                .size(140.dp)
+                .clip(shape),
+            contentScale = ContentScale.Crop
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = album.title,
+            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(horizontal = 4.dp)
+        )
+        Text(
+            text = album.artists?.joinToString { it.name } ?: "",
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 4.dp)
+        )
     }
 }
 
@@ -808,51 +802,49 @@ fun ArtistCardItem(
     artist: ArtistItem,
     onClick: () -> Unit
 ) {
-    Card(
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
             .width(120.dp)
-            .clickable(onClick = onClick),
-        shape = androidx.compose.ui.graphics.RectangleShape,
-        colors = CardDefaults.cardColors(containerColor = Color.Transparent)
+            .clickable(onClick = onClick)
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            SmartImage(
-                model = artist.thumbnail,
-                contentDescription = artist.title,
-                modifier = Modifier
-                    .size(100.dp)
-                    .clip(CircleShape),
-                contentScale = ContentScale.Crop
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = artist.title,
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = GoogleSansRounded
-                ),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.fillMaxWidth(),
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = "Artist",
-                style = MaterialTheme.typography.bodySmall.copy(
-                    fontWeight = FontWeight.Medium
-                ),
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
+        SmartImage(
+            model = artist.thumbnail,
+            contentDescription = artist.title,
+            modifier = Modifier
+                .size(100.dp)
+                .clip(CircleShape),
+            contentScale = ContentScale.Crop
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = artist.title,
+            style = MaterialTheme.typography.bodyMedium.copy(
+                fontWeight = FontWeight.Bold,
+                fontFamily = GoogleSansRounded
+            ),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp),
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+        )
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = "Artist",
+            style = MaterialTheme.typography.bodySmall.copy(
+                fontWeight = FontWeight.Medium
+            ),
+            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp)
+        )
     }
 }
 
@@ -862,38 +854,36 @@ fun PlaylistCardItem(
     onClick: () -> Unit
 ) {
     val shape = RoundedCornerShape(16.dp)
-    Card(
+    Column(
         modifier = Modifier
             .width(140.dp)
-            .clickable(onClick = onClick),
-        shape = shape,
-        colors = CardDefaults.cardColors(containerColor = Color.Transparent)
+            .clickable(onClick = onClick)
     ) {
-        Column {
-            SmartImage(
-                model = playlist.thumbnail,
-                contentDescription = playlist.title,
-                modifier = Modifier
-                    .size(140.dp)
-                    .clip(shape),
-                contentScale = ContentScale.Crop
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = playlist.title,
-                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Text(
-                text = playlist.author?.name ?: "",
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
+        SmartImage(
+            model = playlist.thumbnail,
+            contentDescription = playlist.title,
+            modifier = Modifier
+                .size(140.dp)
+                .clip(shape),
+            contentScale = ContentScale.Crop
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = playlist.title,
+            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(horizontal = 4.dp)
+        )
+        Text(
+            text = playlist.author?.name ?: "",
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 4.dp)
+        )
     }
 }
 
