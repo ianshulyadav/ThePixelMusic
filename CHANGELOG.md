@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Phased Explore screen rendering (Lazy loading above-the-fold feeds first, then personalized lists in the background) for near-instant page loads.
 - **Explore Personalization**:
   - Integrated ArchiveTune's sorting algorithm to prioritize explore new release albums by your favorite and most-played artists.
+- **Material You Dynamic Colors**: Added a "Dynamic (System)" option to the App Color Palette setting on Android 12+ devices.
+- **Explore Launch Tab**: Support setting the Explore screen as the default tab upon launching the app.
+- **Smart Mix Playlist Retention**: Added settings to choose retention periods (24 hours, 7 days, 30 days, or permanent) for generated AI playlists, with automated startup pruning.
 
 ### Changed
 - Reworked share and options bottom sheets to use dynamic themes and rounded list items.
@@ -36,6 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Database optimizations**: Resolved Room database parameter warnings and optimized large database queries.
 - **Explore screen crash**: Added ProGuard keep rules for Explore cache models to prevent Gson ClassCastException under R8 optimization.
 - **Search Result Queueing**: Restored click behavior to play only the selected search result rather than loading the entire list.
+- **Library isolation & database updates**: Excluded YouTube Music related/similar songs from showing up in the main library, and corrected dynamic download/favorite status updates in the UI.
+- **Playlist management & song removal**: Upgraded playlist deletion and song removal to support all song ID variants, resolving issues with "ghost" playlists, and fixed downloaded songs isolation so downloading new tracks doesn't clear the local downloaded playlist.
 
 ### Performance
 - Optimized prefetching by making audio bytes loading cooperatively cancelable on skipping.
