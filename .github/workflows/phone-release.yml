@@ -45,8 +45,12 @@ jobs:
           echo "TELEGRAM_API_ID=${{ secrets.TELEGRAM_API_ID }}" > local.properties
           echo "TELEGRAM_API_HASH=${{ secrets.TELEGRAM_API_HASH }}" >> local.properties
 
+      - name: Get commit count
+        id: commit_count
+        run: echo "count=$(git rev-list --count HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Build all split + universal release APKs
-        run: ./gradlew :app:assembleRelease :wear:assembleRelease -Ppixelmusic.enableAbiSplits=true
+        run: ./gradlew :app:assembleRelease :wear:assembleRelease -Ppixelmusic.enableAbiSplits=true -PAPP_VERSION_CODE=${{ steps.commit_count.outputs.count }}
 
       # ── Read version from gradle.properties (single source of truth) ──────────
       - name: Read version name
@@ -153,10 +157,11 @@ jobs:
           TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: "@PixelMusicApp"
-          TELEGRAM_THREAD_ID: "2"
+          TELEGRAM_THREAD_ID: ${{ steps.version_check.outputs.is_new_version == 'true' && '2457' || '2' }}
           VERSION_NAME: ${{ steps.version.outputs.version_name }}
           COMMIT_SHA: ${{ github.sha }}
           IS_RELEASE: ${{ steps.version_check.outputs.is_new_version }}
+          CHANGELOG: ${{ steps.changelog.outputs.changelog_html }}
         run: |
           if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_API_ID" ]; then
             echo "Telegram secrets not set, skipping."

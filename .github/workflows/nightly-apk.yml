@@ -98,36 +98,29 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v6
 
-      - name: Cache nightly keystore
-        id: cache-keystore
-        uses: actions/cache@v5
-        with:
-          path: vz-pixelmusic.jks
-          key: ${{ runner.os }}-nightly-keystore-vz-pixelmusic
-
-      - name: Generate nightly keystore if not cached
-        if: steps.cache-keystore.outputs.cache-hit != 'true'
-        run: |
-          keytool -genkey -v -keystore vz-pixelmusic.jks -alias pixelmusic-nightly-key -keyalg RSA -keysize 4096 -validity 10000 \
-            -storepass 994273 -keypass 994273 \
-            -dname "CN=PixelMusic Nightly, OU=Dev, O=PixelMusic, L=World, S=World, C=US"
+      - name: Decode release keystore
+        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > vz-pixelmusic.jks
 
       - name: Create keystore.properties
         run: |
-          echo "storePassword=994273" > keystore.properties
-          echo "keyAlias=pixelmusic-nightly-key" >> keystore.properties
-          echo "keyPassword=994273" >> keystore.properties
+          echo "storePassword=${{ secrets.KEYSTORE_PASSWORD }}" > keystore.properties
+          echo "keyAlias=${{ secrets.KEY_ALIAS }}" >> keystore.properties
+          echo "keyPassword=${{ secrets.KEY_PASSWORD }}" >> keystore.properties
 
       - name: Create local.properties
         run: |
           echo "TELEGRAM_API_ID=${{ secrets.TELEGRAM_API_ID }}" > local.properties
           echo "TELEGRAM_API_HASH=${{ secrets.TELEGRAM_API_HASH }}" >> local.properties
 
+      - name: Get commit count
+        id: commit_count
+        run: echo "count=$(git rev-list --count HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Build Phone nightly release APKs
-        run: gradle :app:assembleRelease -Ppixelmusic.enableAbiSplits=true
+        run: ./gradlew :app:assembleRelease -Ppixelmusic.enableAbiSplits=true -PAPP_VERSION_CODE=${{ steps.commit_count.outputs.count }}
 
       - name: Build Wear OS nightly release APK
-        run: gradle :wear:assembleRelease
+        run: ./gradlew :wear:assembleRelease -PAPP_VERSION_CODE=${{ steps.commit_count.outputs.count }}
 
       - name: Verify Phone nightly split APKs
         run: |

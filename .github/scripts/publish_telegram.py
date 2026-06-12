@@ -208,18 +208,19 @@ async def publish():
                     chat_id=chat_id,
                     document=apk_path,
                     file_name=display_name,
-                    caption=cap if cap else None,
+                    caption=None,
                     parse_mode=ParseMode.HTML,
-                    reply_to_message_id=changelog_msg.id,
+                    reply_to_message_id=reply_to,
                     force_document=True,
                 )
                 print(f"  OK — sent {display_name}", flush=True)
 
         else:
            
-            caption = (
+            text = (
+                f"🎵 <b>PixelMusic Nightly Build</b> 🎵\n\n"
                 f"Commit by: {commit_author}\n"
-                f"Commit message.\n<blockquote>{commit_message}</blockquote>\n"
+                f"Commit message:\n<blockquote>{commit_message}</blockquote>\n"
                 f"Commit hash: #{commit_sha[:7]}\n"
                 f"Device: mobile, wearos\n"
                 f"ABI: arm64, armeabi, universal, x86_64\n"
@@ -233,17 +234,24 @@ async def publish():
                 f"• <b>wear:</b> Wear OS smartwatches only</blockquote>"
             )
 
-            for index, (apk_path, display_name, _) in enumerate(apks):
+            print("Sending nightly build text message...", flush=True)
+            await app.send_message(
+                chat_id=chat_id,
+                text=text,
+                parse_mode=ParseMode.HTML,
+                reply_to_message_id=reply_to,
+                disable_web_page_preview=True,
+            )
+
+            for apk_path, display_name, cap in apks:
                 size_mb = os.path.getsize(apk_path) / (1024 * 1024)
                 print(f"Uploading nightly build {display_name} ({size_mb:.1f} MB)...", flush=True)
-
-                file_caption = caption if index == 0 else None
 
                 await app.send_document(
                     chat_id=chat_id,
                     document=apk_path,
                     file_name=display_name,
-                    caption=file_caption,
+                    caption=None,
                     parse_mode=ParseMode.HTML,
                     reply_to_message_id=reply_to,
                     force_document=True,
