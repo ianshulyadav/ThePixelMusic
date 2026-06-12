@@ -135,6 +135,8 @@ fun ShareBottomSheet(
 
     // Card mode: 0 = Song Card, 1 = Lyrics Card
     var selectedCardMode by remember { mutableStateOf(0) }
+    // Lyrics card style: false = Glass, true = Solid Color
+    var useSolidLyricsCard by remember { mutableStateOf(false) }
 
     // Lyric state
     val cleanedLyrics = remember(song.lyrics, lyricsLines) {
@@ -321,6 +323,48 @@ fun ShareBottomSheet(
                     Spacer(Modifier.height(12.dp))
                 }
 
+                // ── Card Style Selector for Lyrics Mode ─────────────────────
+                if (selectedCardMode == 1) {
+                    Row(
+                        modifier = Modifier
+                            .padding(horizontal = 20.dp)
+                            .fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Card Style: ",
+                            fontFamily = GoogleSansRounded,
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        FilterChip(
+                            selected = !useSolidLyricsCard,
+                            onClick = { useSolidLyricsCard = false },
+                            label = { Text("Glass Panel", fontFamily = GoogleSansRounded) },
+                            shape = CircleShape,
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = primaryColor,
+                                selectedLabelColor = onPrimaryColor
+                            )
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        FilterChip(
+                            selected = useSolidLyricsCard,
+                            onClick = { useSolidLyricsCard = true },
+                            label = { Text("Solid Color", fontFamily = GoogleSansRounded) },
+                            shape = CircleShape,
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = primaryColor,
+                                selectedLabelColor = onPrimaryColor
+                            )
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                }
+
                 // ── 9:16 Card Preview (Capturable) ──────────────────────────
                 Box(
                     modifier = Modifier
@@ -329,12 +373,12 @@ fun ShareBottomSheet(
                     contentAlignment = Alignment.Center
                 ) {
                     AnimatedContent(
-                        targetState = Pair(selectedCardMode, selectedLyrics.toList()),
+                        targetState = Triple(selectedCardMode, selectedLyrics.toList(), useSolidLyricsCard),
                         transitionSpec = {
                             fadeIn(tween(200)) togetherWith fadeOut(tween(150))
                         },
                         label = "cardPreview"
-                    ) { (mode, lyricsList) ->
+                    ) { (mode, lyricsList, solidMode) ->
                         ShareableCard(
                             modifier = Modifier
                                 .fillMaxWidth(0.70f)
@@ -345,7 +389,8 @@ fun ShareBottomSheet(
                             themeStyle = activeThemeStyle,
                             colorScheme = colorScheme,
                             cardShape = cardShape,
-                            albumColorScheme = albumColorSchemeState
+                            albumColorScheme = albumColorSchemeState,
+                            useSolidLyricsCard = solidMode
                         )
                     }
                 }
@@ -712,7 +757,8 @@ private fun ShareableCard(
     themeStyle: ShareThemeStyle,
     colorScheme: ColorScheme,
     cardShape: Shape,
-    albumColorScheme: ColorSchemePair?
+    albumColorScheme: ColorSchemePair?,
+    useSolidLyricsCard: Boolean = false
 ) {
     val cardRatio = 9f / 16f
     val darkScheme = albumColorScheme?.dark ?: DarkColorScheme
@@ -910,20 +956,37 @@ private fun ShareableCard(
                 }
                 } // end bloom Box
             } else {
-                // ── LYRICS GLASS PANEL ───────────────────────────────────────
+                // ── LYRICS PANEL ─────────────────────────────────────────────
+                val containerColor = if (useSolidLyricsCard) {
+                    lightScheme.primaryContainer.copy(alpha = 0.9f)
+                } else {
+                    Color.White.copy(alpha = 0.18f)
+                }
+                val borderColor = if (useSolidLyricsCard) {
+                    Color.White.copy(alpha = 0.45f)
+                } else {
+                    Color.White.copy(alpha = 0.18f)
+                }
+                val borderStrokeWidth = if (useSolidLyricsCard) 1.2.dp else 1.dp
+
                 Box(
                     modifier = Modifier
                         .fillMaxWidth(0.92f)
                         .clip(RoundedCornerShape(18.dp))
-                        .background(Color.White.copy(alpha = 0.18f))
+                        .background(containerColor)
                         .border(
-                            width = 1.dp,
-                            color = Color.White.copy(alpha = 0.18f),
+                            width = borderStrokeWidth,
+                            color = borderColor,
                             shape = RoundedCornerShape(18.dp)
                         )
                         .padding(14.dp)
                 ) {
-                    LyricsGlassPanel(song = song, selectedLyrics = selectedLyrics)
+                    LyricsGlassPanel(
+                        song = song,
+                        selectedLyrics = selectedLyrics,
+                        isSolid = useSolidLyricsCard,
+                        lightScheme = lightScheme
+                    )
                 }
             }
 
@@ -1108,8 +1171,16 @@ private fun SongMiniCard(
 @Composable
 private fun LyricsGlassPanel(
     song: Song,
-    selectedLyrics: List<String>
+    selectedLyrics: List<String>,
+    isSolid: Boolean = false,
+    lightScheme: ColorScheme = LightColorScheme
 ) {
+    val textColor = if (isSolid) lightScheme.onPrimaryContainer else Color.White
+    val artistColor = if (isSolid) lightScheme.onPrimaryContainer.copy(alpha = 0.65f) else Color.White.copy(alpha = 0.65f)
+    val dividerColor = if (isSolid) lightScheme.onPrimaryContainer.copy(alpha = 0.15f) else Color.White.copy(alpha = 0.15f)
+    val activeProgressColor = if (isSolid) lightScheme.onPrimaryContainer else Color.White
+    val progressTrackColor = if (isSolid) lightScheme.onPrimaryContainer.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.22f)
+
     Column(modifier = Modifier.fillMaxWidth()) {
         // Header: properly sized thumbnail + title + artist
         Row(
@@ -1131,9 +1202,9 @@ private fun LyricsGlassPanel(
                     text = song.title,
                     fontFamily = GoogleSansRounded,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp,
-                    lineHeight = 20.sp,
-                    color = Color.White,
+                    fontSize = 13.sp,
+                    lineHeight = 17.sp,
+                    color = textColor,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -1141,9 +1212,9 @@ private fun LyricsGlassPanel(
                     text = song.displayArtist,
                     fontFamily = GoogleSansRounded,
                     fontWeight = FontWeight.Medium,
-                    fontSize = 12.sp,
-                    lineHeight = 15.sp,
-                    color = Color.White.copy(alpha = 0.65f),
+                    fontSize = 10.sp,
+                    lineHeight = 13.sp,
+                    color = artistColor,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -1152,7 +1223,7 @@ private fun LyricsGlassPanel(
 
         Spacer(Modifier.height(12.dp))
         HorizontalDivider(
-            color = Color.White.copy(alpha = 0.15f),
+            color = dividerColor,
             thickness = 1.dp
         )
         Spacer(Modifier.height(14.dp))
@@ -1164,7 +1235,7 @@ private fun LyricsGlassPanel(
                 fontFamily = GoogleSansRounded,
                 fontWeight = FontWeight.Medium,
                 fontSize = 13.sp,
-                color = Color.White.copy(alpha = 0.38f),
+                color = textColor.copy(alpha = 0.38f),
                 textAlign = TextAlign.Center,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1196,7 +1267,7 @@ private fun LyricsGlassPanel(
                         fontWeight = FontWeight.Bold,
                         fontSize = fontSize,
                         lineHeight = lineHeight,
-                        color = Color.White,
+                        color = textColor,
                         textAlign = TextAlign.Start,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -1212,13 +1283,13 @@ private fun LyricsGlassPanel(
                 .fillMaxWidth()
                 .height(3.dp)
                 .clip(CircleShape)
-                .background(Color.White.copy(alpha = 0.22f))
+                .background(progressTrackColor)
         ) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth(0.42f)
                     .fillMaxHeight()
-                    .background(Color.White)
+                    .background(activeProgressColor)
             )
         }
     }
