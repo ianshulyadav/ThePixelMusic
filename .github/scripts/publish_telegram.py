@@ -125,6 +125,8 @@ async def publish():
         api_hash=api_hash,
         bot_token=bot_token,
         in_memory=True,
+        workers=8,
+        max_concurrent_transmissions=8,
     ) as app:
         # Get changelog from environment, fallback to commit message if empty
         changelog = os.environ.get("CHANGELOG", "").strip()
