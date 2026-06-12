@@ -218,7 +218,7 @@ private fun SmartMixConfigurator(
     val isPlayerActive = playerStableState.currentSong != null
 
     val systemNavBarInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    val bottomBarHeightDp = resolveNavBarOccupiedHeight(systemNavBarInset, navBarCompactMode)
+    val bottomBarHeightDp = systemNavBarInset
 
     val fabAreaHeight = 56.dp + 20.dp + (if (isPlayerActive) MiniPlayerHeight else 0.dp) + bottomBarHeightDp
     val isDark = androidx.compose.foundation.isSystemInDarkTheme()
