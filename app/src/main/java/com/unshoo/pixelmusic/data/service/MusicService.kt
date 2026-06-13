@@ -22,6 +22,7 @@ import androidx.core.graphics.drawable.toBitmap
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.state.updateAppWidgetState
 import androidx.media3.common.C
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
@@ -959,10 +960,9 @@ class MusicService : MediaLibraryService() {
                 key.contains(marker, ignoreCase = true)
             }
         }
-        return hasWearHints
         // If hints identify a Wear/remote controller and it's not our app package,
         // reject to avoid the default Wear system media player hijacking the session.
-        return true
+        return hasWearHints
     }
 
     private fun createSleepTimerPendingIntent(): PendingIntent {
@@ -1606,20 +1606,24 @@ class MusicService : MediaLibraryService() {
             override fun onStatusUpdated() {
                 syncCastListeningStatsFromRemote()
                 requestWidgetFullUpdate(force = false)
+                (mediaSession?.player as? CastMediaSessionPlayer)?.notifyStateChanged()
             }
 
             override fun onMetadataUpdated() {
                 syncCastListeningStatsFromRemote()
                 requestWidgetFullUpdate(force = false)
+                (mediaSession?.player as? CastMediaSessionPlayer)?.notifyStateChanged()
             }
 
             override fun onQueueStatusUpdated() {
                 syncCastListeningStatsFromRemote()
                 requestWidgetFullUpdate(force = false)
+                (mediaSession?.player as? CastMediaSessionPlayer)?.notifyStateChanged()
             }
 
             override fun onPreloadStatusUpdated() {
                 requestWidgetFullUpdate(force = false)
+                (mediaSession?.player as? CastMediaSessionPlayer)?.notifyStateChanged()
             }
         }
         castRemoteClientCallback = remoteCallback
@@ -1668,17 +1672,228 @@ class MusicService : MediaLibraryService() {
         }
 
         observedCastSession = session
-        session?.remoteMediaClient?.let { remoteClient ->
-            castRemoteClientCallback?.let { callback ->
-                runCatching { remoteClient.registerCallback(callback) }
+        if (session != null) {
+            val castPlayer = CastMediaSessionPlayer(engine.masterPlayer)
+            publishMediaSessionPlayer(castPlayer, "Casting active")
+
+            session.remoteMediaClient?.let { remoteClient ->
+                castRemoteClientCallback?.let { callback ->
+                    runCatching { remoteClient.registerCallback(callback) }
+                }
+                remoteClient.requestStatus()
+                syncCastListeningStatsFromRemote()
+            } ?: run {
+                activeCastStatsOccurrenceId = null
+                listeningStatsTracker.onPlaybackStopped()
             }
-            remoteClient.requestStatus()
-            syncCastListeningStatsFromRemote()
-        } ?: run {
+        } else {
+            publishMediaSessionPlayer(engine.masterPlayer, "Casting stopped")
             activeCastStatsOccurrenceId = null
             listeningStatsTracker.onPlaybackStopped()
         }
         requestWidgetFullUpdate(force = true)
+    }
+
+    private inner class CastMediaSessionPlayer(
+        localPlayer: Player
+    ) : ForwardingPlayer(localPlayer) {
+
+        // Stable singleton sentinels so that getIndexOfPeriod/getUidOfPeriod work
+        // correctly across repeated Timeline instances. Using `Any()` per-call breaks
+        // equality checks inside Media3 because each construction yields a new object.
+        private val windowUid = Object()
+        private val periodUid = Object()
+
+        private val listeners = java.util.concurrent.CopyOnWriteArrayList<Player.Listener>()
+
+        // Track last-notified state to avoid firing expensive transition callbacks on every
+        // Cast status poll (every ~1 s) when only position changed.
+        private var lastNotifiedMediaId: String? = null
+        private var lastNotifiedIsPlaying: Boolean? = null
+
+        override fun addListener(listener: Player.Listener) {
+            super.addListener(listener)
+            listeners.add(listener)
+        }
+
+        override fun removeListener(listener: Player.Listener) {
+            super.removeListener(listener)
+            listeners.remove(listener)
+        }
+
+        fun notifyStateChanged() {
+            val currentItem = getCurrentMediaItem()
+            val isPlaying = isPlaying()
+            val playbackState = getPlaybackState()
+
+            val mediaIdChanged = currentItem?.mediaId != lastNotifiedMediaId
+            val playingChanged = isPlaying != lastNotifiedIsPlaying
+
+            if (!mediaIdChanged && !playingChanged) {
+                // Only position/buffering changed — nothing worth re-notifying listeners about.
+                return
+            }
+
+            lastNotifiedMediaId = currentItem?.mediaId
+            lastNotifiedIsPlaying = isPlaying
+
+            val timeline = getCurrentTimeline()
+            listeners.forEach { listener ->
+                runCatching {
+                    if (mediaIdChanged) {
+                        listener.onMediaItemTransition(
+                            currentItem,
+                            Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED
+                        )
+                        listener.onTimelineChanged(
+                            timeline,
+                            Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED
+                        )
+                    }
+                    if (playingChanged) {
+                        listener.onIsPlayingChanged(isPlaying)
+                        listener.onPlaybackStateChanged(playbackState)
+                    }
+                }
+            }
+        }
+
+        override fun getCurrentMediaItem(): MediaItem? {
+            val remote = resolveCastRemoteSnapshot() ?: return null
+            val metadata = MediaMetadata.Builder()
+                .setTitle(remote.title)
+                .setArtist(remote.artist)
+                .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+                .setArtworkUri(remote.artworkUri)
+                .build()
+            return MediaItem.Builder()
+                .setMediaId(remote.songId ?: "")
+                .setMediaMetadata(metadata)
+                .build()
+        }
+
+        override fun getPlayWhenReady(): Boolean {
+            val remoteSnapshot = resolveCastRemoteSnapshot()
+            return remoteSnapshot?.isPlaying ?: false
+        }
+
+        override fun isPlaying(): Boolean {
+            val remoteSnapshot = resolveCastRemoteSnapshot()
+            return remoteSnapshot?.isPlaying ?: false
+        }
+
+        override fun getPlaybackState(): Int {
+            val remoteSnapshot = resolveCastRemoteSnapshot()
+            return if (remoteSnapshot != null) Player.STATE_READY else Player.STATE_IDLE
+        }
+
+        override fun getCurrentPosition(): Long {
+            val remoteSnapshot = resolveCastRemoteSnapshot()
+            return remoteSnapshot?.currentPositionMs ?: 0L
+        }
+
+        override fun getDuration(): Long {
+            val remoteSnapshot = resolveCastRemoteSnapshot()
+            return remoteSnapshot?.totalDurationMs ?: 0L
+        }
+
+        override fun getBufferedPosition(): Long {
+            return getCurrentPosition()
+        }
+
+        override fun getBufferedPercentage(): Int {
+            return 100
+        }
+
+        override fun getRepeatMode(): Int {
+            val remoteSnapshot = resolveCastRemoteSnapshot()
+            return remoteSnapshot?.repeatMode ?: Player.REPEAT_MODE_OFF
+        }
+
+        override fun getShuffleModeEnabled(): Boolean {
+            val remoteSnapshot = resolveCastRemoteSnapshot()
+            return remoteSnapshot?.isShuffleEnabled ?: false
+        }
+
+        override fun getCurrentTimeline(): Timeline {
+            val item = getCurrentMediaItem() ?: return Timeline.EMPTY
+            val durationUs = getDuration() * 1000L
+            // Stable uid references are captured from the instance fields above.
+            val capturedWindowUid = windowUid
+            val capturedPeriodUid = periodUid
+            return object : Timeline() {
+                override fun getWindowCount(): Int = 1
+                override fun getPeriodCount(): Int = 1
+                override fun getWindow(
+                    windowIndex: Int,
+                    window: Window,
+                    defaultPositionProjectionUs: Long
+                ): Window {
+                    window.set(
+                        capturedWindowUid,
+                        item,
+                        null,
+                        C.TIME_UNSET,
+                        C.TIME_UNSET,
+                        C.TIME_UNSET,
+                        true,
+                        false,
+                        null,
+                        0,
+                        durationUs,
+                        0,
+                        0,
+                        0
+                    )
+                    return window
+                }
+                override fun getPeriod(
+                    periodIndex: Int,
+                    period: Period,
+                    setIds: Boolean
+                ): Period {
+                    period.set(
+                        if (setIds) capturedPeriodUid else null,
+                        if (setIds) capturedWindowUid else null,
+                        0,
+                        durationUs,
+                        0
+                    )
+                    return period
+                }
+                override fun getIndexOfPeriod(uid: Any): Int =
+                    if (uid === capturedPeriodUid) 0 else C.INDEX_UNSET
+                override fun getUidOfPeriod(periodIndex: Int): Any = capturedPeriodUid
+            }
+        }
+
+        override fun pause() {
+            observedCastSession?.remoteMediaClient?.pause()
+        }
+
+        override fun play() {
+            observedCastSession?.remoteMediaClient?.play()
+        }
+
+        override fun seekTo(mediaItemIndex: Int, positionMs: Long) {
+            observedCastSession?.remoteMediaClient?.seek(positionMs)
+        }
+
+        override fun seekTo(positionMs: Long) {
+            observedCastSession?.remoteMediaClient?.seek(positionMs)
+        }
+
+        override fun stop() {
+            observedCastSession?.remoteMediaClient?.stop()
+        }
+
+        override fun seekToNext() {
+            observedCastSession?.remoteMediaClient?.queueNext(null)
+        }
+
+        override fun seekToPrevious() {
+            observedCastSession?.remoteMediaClient?.queuePrev(null)
+        }
     }
 
     private fun stopCastWearSync() {
@@ -3443,13 +3658,6 @@ class MusicService : MediaLibraryService() {
             engine.masterPlayer.repeatMode = Player.REPEAT_MODE_OFF
         }
     }
-
-    /**
-     * Bridges a suspend block into a [ListenableFuture] for Media3 callback methods.
-     */
-    /**
-     * Bridges a suspend block into a [ListenableFuture] for Media3 callback methods.
-     */
 
     /**
      * Bridges a suspend block into a [ListenableFuture] for Media3 callback methods.

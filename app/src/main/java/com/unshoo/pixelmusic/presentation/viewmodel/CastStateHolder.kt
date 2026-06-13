@@ -34,14 +34,19 @@ class CastStateHolder @Inject constructor(
     private val CAST_STATE_TAG = "CastStateHolder"
 
     // Cast session manager
-    val sessionManager: SessionManager? by lazy {
-        try {
-            CastContext.getSharedInstance(context).sessionManager
+    val sessionManager: SessionManager?
+        get() = try {
+            if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+                CastContext.getSharedInstance(context).sessionManager
+            } else {
+                kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.Main) {
+                    CastContext.getSharedInstance(context).sessionManager
+                }
+            }
         } catch (e: Exception) {
             Timber.tag(CAST_STATE_TAG).e(e, "Failed to get CastContext sharedInstance")
             null
         }
-    }
     
     // Current cast session
     private val _castSession = MutableStateFlow<CastSession?>(null)
