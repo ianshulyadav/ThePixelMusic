@@ -5191,6 +5191,23 @@ class PlayerViewModel @Inject constructor(
                 }
             }
 
+            // For non-local songs (YouTube / cloud sources), there is no physical file to delete.
+            // The song ID is non-numeric (e.g. a YouTube video ID), so the MediaStore path above is
+            // skipped. We just confirm with the user and remove it from the library.
+            val hasNoLocalFile = song.youtubeId != null || song.path.isBlank()
+            if (hasNoLocalFile) {
+                val userConfirmed = songRemovalStateHolder.showDeleteConfirmation(activity, song)
+                if (!userConfirmed) {
+                    onResult(false)
+                    return@launch
+                }
+                _toastEvents.emit(context.getString(R.string.player_file_deleted))
+                removeFromMediaControllerQueue(song.id)
+                removeSong(song)
+                onResult(true)
+                return@launch
+            }
+
             // Fallback for older Android or files not in MediaStore
             val userConfirmed = songRemovalStateHolder.showDeleteConfirmation(activity, song)
             if (!userConfirmed) {

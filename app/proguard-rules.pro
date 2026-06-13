@@ -227,4 +227,5 @@
 -dontwarn javax.script.**
 -dontwarn org.mozilla.javascript.engine.**
 
-
+# Keep desugared library classes (prevent R8 from stripping backported JDK APIs)
+-keep class j$.** { *; }

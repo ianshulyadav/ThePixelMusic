@@ -375,12 +375,8 @@ fun PlaylistDetailScreen(
                 ) {
                     Button(
                         onClick = {
-                            if (currentPlaylist.source == "YOUTUBE") {
-                                playerViewModel.playRadio(
-                                    unshoo.ianshulyadav.pixelmusic.innertube.models.WatchEndpoint(playlistId = currentPlaylist.id),
-                                    currentPlaylist.name
-                                )
-                            } else if (localReorderableSongs.isNotEmpty()) {
+                            if (localReorderableSongs.isNotEmpty()) {
+                                // Always prefer playing the actual songs in the playlist
                                 playerViewModel.playSongs(
                                     localReorderableSongs,
                                     localReorderableSongs.first(),
@@ -388,6 +384,12 @@ fun PlaylistDetailScreen(
                                     currentPlaylist.id
                                 )
                                 if (playerStableState.isShuffleEnabled) playerViewModel.toggleShuffle()
+                            } else if (currentPlaylist.source == "YOUTUBE") {
+                                // Fallback: no songs loaded yet, start radio from the YouTube playlist
+                                playerViewModel.playRadio(
+                                    unshoo.ianshulyadav.pixelmusic.innertube.models.WatchEndpoint(playlistId = currentPlaylist.id),
+                                    currentPlaylist.name
+                                )
                             }
                         },
                         modifier = Modifier

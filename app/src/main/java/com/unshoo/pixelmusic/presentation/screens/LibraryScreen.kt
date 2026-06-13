@@ -1,4 +1,4 @@
-﻿@file:OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@file:OptIn(ExperimentalMaterial3ExpressiveApi::class)
 
 package com.unshoo.pixelmusic.presentation.screens
 
@@ -2946,7 +2946,7 @@ fun LibraryNavigationPill(
             // High fallback value for initial composition
             1000.dp
         }
-        val maxTitleWidth = (availableWidth - targetArrowWidth - pillGap - 40.dp).coerceAtLeast(0.dp)
+        val maxTitleWidth = (availableWidth - targetArrowWidth - pillGap - 4.dp).coerceAtLeast(0.dp)
         val idealTitleWidth = idealTextWidth +
                 titleHorizontalPadding * 2 +
                 (if (showIcon) (titleIconSize + titleIconSpacing) else 0.dp) +

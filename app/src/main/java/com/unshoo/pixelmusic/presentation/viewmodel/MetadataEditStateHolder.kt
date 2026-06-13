@@ -196,31 +196,15 @@ class MetadataEditStateHolder @Inject constructor(
 
     suspend fun deleteSong(song: Song): Boolean = withContext(Dispatchers.IO) {
         val fileInfo = FileDeletionUtils.getFileInfo(song.path)
-        if (fileInfo.exists && fileInfo.canWrite) {
-            val success = FileDeletionUtils.deleteFile(context, song.path)
-            if (success) {
-                // Remove from DB happens in ViewModel call logic or should happen here?
-                // VM's deleteFromDevice calls removeSong -> toggleFavorite(false) -> updates lists.
-                // It does NOT explicitly call repository.deleteSong() because MediaStore/FileObserver handles it?
-                // Or maybe explicit deletion IS needed but VM logic (Line 3687) says "removeSong(song)".
-                // removeSong(3698) toggles favorites and updates _masterAllSongs. It implies memory update.
-                // FileDeletionUtils deletes the physical file. The MediaScanner should eventually pick it up, 
-                // but for immediate UI responsiveness, manual update is good.
-                // Also, MusicRepository.deleteById(id) exists.
-                // ViewModel did NOT call musicRepository.deleteById(). It relied on "removeSong" which is UI state only? 
-                // Wait, removeSong updates UI state. Does it update DB?
-                // Line 3698: toggleFavoriteSpecificSong(song, true)?? Wait.
-                
-                // Let's stick to returning success and letting ViewModel handle UI updates for now, 
-                // or if we want to be thorough, we call repository delete.
-                // But if ViewModel wasn't doing it, I won't add it to change behavior.
-                true
-            } else {
-                false
-            }
-        } else {
-            false
+        // NOTE: Do NOT gate on fileInfo.canWrite.
+        // On Android 10+ (Scoped Storage), File.canWrite() always returns false for files
+        // in shared storage not created by the app — even when the file physically exists
+        // and is legitimately deletable via ContentResolver. Checking canWrite here would
+        // cause every delete to fail with "file not found" on modern Android.
+        if (!fileInfo.exists) {
+            return@withContext false
         }
+        FileDeletionUtils.deleteFile(context, song.path)
     }
 
     private fun resolveSongIdForMetadataEdit(song: Song): Long? {

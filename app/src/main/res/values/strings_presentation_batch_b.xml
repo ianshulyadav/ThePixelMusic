@@ -21,7 +21,7 @@
     <!-- PlaylistDetailScreen -->
     <string name="presentation_batch_b_sort_songs">Sort Songs</string>
     <string name="presentation_batch_b_more_options">More Options</string>
-    <string name="presentation_batch_b_play_it">Play it</string>
+    <string name="presentation_batch_b_play_it">Play all</string>
     <string name="presentation_batch_b_add_songs">Add songs</string>
     <string name="presentation_batch_b_add">Add</string>
     <string name="presentation_batch_b_remove_songs">Remove songs</string>
