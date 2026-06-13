@@ -75,14 +75,19 @@ class CastTransferStateHolder @Inject constructor(
     private var onSongChanged: ((String?) -> Unit)? = null
 
     // Session Management
-    private val sessionManager: SessionManager? by lazy {
-        try {
-            CastContext.getSharedInstance(context).sessionManager
+    private val sessionManager: SessionManager?
+        get() = try {
+            if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+                CastContext.getSharedInstance(context).sessionManager
+            } else {
+                kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.Main) {
+                    CastContext.getSharedInstance(context).sessionManager
+                }
+            }
         } catch (e: Exception) {
             Timber.tag(CAST_LOG_TAG).e(e, "Failed to get CastContext sharedInstance")
             null
         }
-    }
     
     // We retain MediaRouter reference if needed, but managing routes is usually done via callbacks
     // in PlayerViewModel. We'll assume route selection logic remains there or is migrated separately.
@@ -987,15 +992,19 @@ class CastTransferStateHolder @Inject constructor(
 
     suspend fun ensureHttpServerRunning(castDeviceIpHint: String? = null): Boolean = httpServerStartMutex.withLock {
         val runningServerAddress = MediaFileHttpServerService.serverAddress
+        val currentLocalIpSelection = MediaFileHttpServerService.selectIpAddress(context, castDeviceIpHint)
+        val currentLocalHostAddress = currentLocalIpSelection?.hostAddress
         if (MediaFileHttpServerService.isServerRunning && runningServerAddress != null) {
-            if (isServerAddressCompatibleWithCastDevice(runningServerAddress, castDeviceIpHint)) {
+            val isCompatible = isServerAddressCompatibleWithCastDevice(runningServerAddress, castDeviceIpHint)
+            val ipMatches = currentLocalHostAddress == null || MediaFileHttpServerService.serverHostAddress == currentLocalHostAddress
+            if (isCompatible && ipMatches) {
                 return@withLock true
             }
             Timber.tag(CAST_LOG_TAG).w(
-                "HTTP server host (%s) is not in Cast subnet (castDeviceIp=%s, prefix=%d). Restarting service.",
-                runningServerAddress,
-                castDeviceIpHint,
-                MediaFileHttpServerService.serverPrefixLength
+                "HTTP server address mismatch or incompatible. serverHostAddress=%s, currentHostAddress=%s, compatible=%b. Restarting service.",
+                MediaFileHttpServerService.serverHostAddress,
+                currentLocalHostAddress,
+                isCompatible
             )
             context.stopService(Intent(context, MediaFileHttpServerService::class.java))
             for (attempt in 0 until 30) {
