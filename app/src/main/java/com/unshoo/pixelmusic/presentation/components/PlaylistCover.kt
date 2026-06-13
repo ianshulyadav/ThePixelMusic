@@ -85,7 +85,7 @@ fun PlaylistCover(
     ) {
         if (!playlist.coverImageUri.isNullOrBlank()) {
             AsyncImage(
-                model = playlist.coverImageUri,
+                model = if (playlist.coverImageUri.startsWith("/")) java.io.File(playlist.coverImageUri) else playlist.coverImageUri,
                 contentDescription = null,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop

@@ -38,9 +38,12 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
 
+    <uses-feature android:name="android.hardware.type.automotive" android:required="false" />
+
     <application
         android:name=".PixelMusicApplication"
         android:allowBackup="true"
+        android:appCategory="audio"
         android:enableOnBackInvokedCallback="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
@@ -180,10 +183,12 @@
             android:foregroundServiceType="mediaPlayback">
             <intent-filter>
                 <action android:name="android.media.browse.MediaBrowserService" />
+            </intent-filter>
+            <intent-filter>
                 <action android:name="androidx.media3.session.MediaLibraryService" />
+            </intent-filter>
+            <intent-filter>
                 <action android:name="android.intent.action.MEDIA_BUTTON" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.APP_MUSIC" />
             </intent-filter>
         </service>
 
