@@ -887,7 +887,21 @@ class DualPlayerEngine @Inject constructor(
         val scheme = uri.scheme
         if (scheme !in REMOTE_MEDIA_SCHEMES) return mediaItem
         val resolvedUri = resolveCloudUri(uri)
-        return if (resolvedUri == uri) mediaItem else mediaItem.buildUpon().setUri(resolvedUri).build()
+        if (resolvedUri == uri) return mediaItem
+        
+        val builder = mediaItem.buildUpon().setUri(resolvedUri)
+        if (scheme == "youtube") {
+            val videoId = uri.toString().removePrefix("youtube://")
+            val cachedMime = com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.streamMimeTypeLruCache.let { cache ->
+                cache.get("${videoId}_high")
+                    ?: cache.get("${videoId}_low")
+                    ?: cache.snapshot().keys.find { it.startsWith("${videoId}_") }?.let { cache.get(it) }
+            }
+            if (cachedMime != null) {
+                builder.setMimeType(cachedMime)
+            }
+        }
+        return builder.build()
     }
 
     suspend fun prepareNext(target: TransitionTarget, startPositionMs: Long = 0L) {

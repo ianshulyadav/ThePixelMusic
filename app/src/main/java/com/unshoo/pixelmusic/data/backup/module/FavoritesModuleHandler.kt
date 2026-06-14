@@ -175,7 +175,7 @@ class FavoritesModuleHandler @Inject constructor(
                             discNumber = null,
                             year = 0,
                             dateAdded = System.currentTimeMillis(),
-                            mimeType = "audio/webm",
+                            mimeType = "audio/opus",
                             bitrate = null,
                             sampleRate = null,
                             telegramChatId = null,

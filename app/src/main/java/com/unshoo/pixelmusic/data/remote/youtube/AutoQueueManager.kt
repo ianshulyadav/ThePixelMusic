@@ -1567,7 +1567,7 @@ object AutoQueueManager {
                             discNumber = null,
                             year = 0,
                             dateAdded = System.currentTimeMillis(),
-                            mimeType = "audio/webm",
+                            mimeType = "audio/opus",
                             bitrate = 128,
                             sampleRate = 44100,
                             sourceType = SourceType.YOUTUBE
@@ -1631,7 +1631,7 @@ object AutoQueueManager {
                             discNumber = null,
                             year = 0,
                             dateAdded = System.currentTimeMillis(),
-                            mimeType = "audio/webm",
+                            mimeType = "audio/opus",
                             bitrate = 128,
                             sampleRate = 44100,
                             sourceType = SourceType.YOUTUBE
