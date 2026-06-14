@@ -1506,33 +1506,44 @@ private fun shareToInstagramStory(
     topColorHex: String? = null,
     bottomColorHex: String? = null
 ) {
-    val intent = Intent("com.instagram.share.ADD_TO_STORY").apply {
-        type = "image/png"
+    fun grantInstagramRead() {
+        runCatching { context.grantUriPermission(INSTAGRAM_PACKAGE, imageUri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+    }
+
+    grantInstagramRead()
+
+    val storyIntent = Intent("com.instagram.share.ADD_TO_STORY").apply {
+        setDataAndType(imageUri, "image/png")
+        putExtra("background_asset_uri", imageUri)
         putExtra("interactive_asset_uri", imageUri)
+        putExtra("source_application", context.packageName)
         putExtra("content_url", GITHUB_LINK)
-        if (topColorHex != null) {
-            putExtra("top_background_color", topColorHex)
-        }
-        if (bottomColorHex != null) {
-            putExtra("bottom_background_color", bottomColorHex)
-        }
+        if (topColorHex != null) putExtra("top_background_color", topColorHex)
+        if (bottomColorHex != null) putExtra("bottom_background_color", bottomColorHex)
+        clipData = ClipData.newUri(context.contentResolver, "PixelMusic share card", imageUri)
+        `package` = INSTAGRAM_PACKAGE
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+
+    try {
+        context.startActivity(storyIntent)
+        return
+    } catch (_: Exception) {
+        // Fall through to feed/share intent. Instagram does not allow silent direct posting;
+        // this opens Instagram's composer with the card attached.
+    }
+
+    val feedIntent = Intent(Intent.ACTION_SEND).apply {
+        type = "image/png"
+        putExtra(Intent.EXTRA_STREAM, imageUri)
+        clipData = ClipData.newUri(context.contentResolver, "PixelMusic share card", imageUri)
         `package` = INSTAGRAM_PACKAGE
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
     try {
-        context.startActivity(intent)
-    } catch (e: Exception) {
-        val fallback = Intent(Intent.ACTION_SEND).apply {
-            type = "image/png"
-            putExtra(Intent.EXTRA_STREAM, imageUri)
-            `package` = INSTAGRAM_PACKAGE
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        try {
-            context.startActivity(fallback)
-        } catch (ex: Exception) {
-            Toast.makeText(context, "Instagram not available", Toast.LENGTH_SHORT).show()
-        }
+        context.startActivity(feedIntent)
+    } catch (_: Exception) {
+        Toast.makeText(context, "Instagram sharing failed", Toast.LENGTH_SHORT).show()
     }
 }
 

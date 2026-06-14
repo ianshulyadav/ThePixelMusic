@@ -62,7 +62,9 @@ class SongRemovalStateHolder @Inject constructor(
 
     suspend fun removeSongFromLibrary(song: Song) {
         libraryStateHolder.removeSong(song.id)
-        musicRepository.deleteById(song.id.toLong())
+        // Some cloud/YouTube songs use non-numeric UI IDs. Do not crash removal if the
+        // backing DB row cannot be addressed by the visible id.
+        song.id.toLongOrNull()?.let { musicRepository.deleteById(it) }
         playlistPreferencesRepository.removeSongFromAllPlaylists(song.id)
     }
 }

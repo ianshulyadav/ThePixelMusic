@@ -5405,7 +5405,9 @@ class PlayerViewModel @Inject constructor(
     }
 
     suspend fun removeSong(song: Song) {
-        toggleFavoriteSpecificSong(song, true)
+        // Local cleanup only. The previous path used toggleFavoriteSpecificSong(...), which can
+        // trigger remote YouTube liked-song sync while deleting and make removal slow/flaky.
+        runCatching { musicRepository.setFavoriteStatusWithMetadata(song, false, awaitRemoteSync = false) }
         playbackStateHolder.setCurrentPosition(0L)
         _playerUiState.update { currentState ->
             currentState.copy(
