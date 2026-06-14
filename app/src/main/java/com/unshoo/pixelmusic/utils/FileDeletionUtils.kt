@@ -17,6 +17,13 @@ object FileDeletionUtils {
      */
     suspend fun deleteFile(context: Context, filePath: String): Boolean {
         return try {
+            val parsedUri = runCatching { Uri.parse(filePath) }.getOrNull()
+            if (parsedUri?.scheme == "content") {
+                return withContext(Dispatchers.IO) {
+                    runCatching { context.contentResolver.delete(parsedUri, null, null) > 0 }.getOrDefault(false)
+                }
+            }
+
             when {
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> {
                     deleteFileAndroid11Plus(context, filePath)

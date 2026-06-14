@@ -7,6 +7,7 @@ import com.unshoo.pixelmusic.data.database.MusicDao
 import com.unshoo.pixelmusic.data.database.toArtist
 import com.unshoo.pixelmusic.data.model.Artist
 import com.unshoo.pixelmusic.data.model.Song
+import com.unshoo.pixelmusic.data.repository.MusicRepository
 import com.unshoo.pixelmusic.data.service.wear.PhoneWatchTransferState
 import com.unshoo.pixelmusic.data.service.wear.PhoneWatchTransferStateStore
 import com.unshoo.pixelmusic.data.service.wear.WearPhoneTransferSender
@@ -34,6 +35,7 @@ class SongInfoBottomSheetViewModel @Inject constructor(
     private val wearPhoneTransferSender: WearPhoneTransferSender,
     private val transferStateStore: PhoneWatchTransferStateStore,
     private val musicDao: MusicDao,
+    private val musicRepository: MusicRepository,
     private val downloadRepository: com.unshoo.pixelmusic.data.remote.youtube.DownloadRepository,
 ) : ViewModel() {
 
@@ -283,6 +285,9 @@ class SongInfoBottomSheetViewModel @Inject constructor(
         val youtubeId = song.youtubeId ?: return
         viewModelScope.launch {
             downloadRepository.deleteSong(youtubeId)
+            // Also remove the unified library row for downloaded YouTube songs so the item
+            // disappears immediately instead of staying until a later sync.
+            song.id.toLongOrNull()?.let { runCatching { musicRepository.deleteById(it) } }
             _isSongDownloaded.value = false
             _isSongDownloading.value = false
         }

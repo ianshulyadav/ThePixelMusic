@@ -195,16 +195,18 @@ class MetadataEditStateHolder @Inject constructor(
     }
 
     suspend fun deleteSong(song: Song): Boolean = withContext(Dispatchers.IO) {
-        val fileInfo = FileDeletionUtils.getFileInfo(song.path)
-        // NOTE: Do NOT gate on fileInfo.canWrite.
-        // On Android 10+ (Scoped Storage), File.canWrite() always returns false for files
-        // in shared storage not created by the app — even when the file physically exists
-        // and is legitimately deletable via ContentResolver. Checking canWrite here would
-        // cause every delete to fail with "file not found" on modern Android.
-        if (!fileInfo.exists) {
-            return@withContext false
+        val deletionTarget = song.path.takeIf { it.isNotBlank() } ?: song.contentUriString
+        val isContentUri = deletionTarget.startsWith("content://")
+        if (!isContentUri) {
+            val fileInfo = FileDeletionUtils.getFileInfo(deletionTarget)
+            // NOTE: Do NOT gate on fileInfo.canWrite.
+            // On Android 10+ (Scoped Storage), File.canWrite() can be false for files
+            // in shared storage not created by the app — even when legitimately deletable.
+            if (!fileInfo.exists) {
+                return@withContext false
+            }
         }
-        FileDeletionUtils.deleteFile(context, song.path)
+        FileDeletionUtils.deleteFile(context, deletionTarget)
     }
 
     private fun resolveSongIdForMetadataEdit(song: Song): Long? {
