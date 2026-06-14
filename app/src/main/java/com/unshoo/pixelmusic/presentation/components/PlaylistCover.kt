@@ -38,7 +38,8 @@ fun PlaylistCover(
     playlist: Playlist,
     playlistSongs: List<Song>,
     modifier: Modifier = Modifier,
-    size: Dp = 48.dp
+    size: Dp = 48.dp,
+    fallbackImageUri: String? = null
 ) {
     val shape = remember(playlist.coverShapeType, playlist.coverShapeDetail1, playlist.coverShapeDetail2, playlist.coverShapeDetail3, size) {
         when (playlist.coverShapeType) {
@@ -83,9 +84,17 @@ fun PlaylistCover(
             .then(shapeMod)
             .clip(shape)
     ) {
-        if (!playlist.coverImageUri.isNullOrBlank()) {
+        val resolvedCoverUri = if (!playlist.coverImageUri.isNullOrBlank()) {
+            playlist.coverImageUri
+        } else if (playlist.coverColorArgb == null && !fallbackImageUri.isNullOrBlank()) {
+            fallbackImageUri
+        } else {
+            null
+        }
+
+        if (resolvedCoverUri != null) {
             AsyncImage(
-                model = if (playlist.coverImageUri.startsWith("/")) java.io.File(playlist.coverImageUri) else playlist.coverImageUri,
+                model = if (resolvedCoverUri.startsWith("/")) java.io.File(resolvedCoverUri) else resolvedCoverUri,
                 contentDescription = null,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop
