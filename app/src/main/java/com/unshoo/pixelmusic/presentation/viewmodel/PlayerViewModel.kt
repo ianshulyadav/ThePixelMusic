@@ -3693,6 +3693,42 @@ class PlayerViewModel @Inject constructor(
                         ?: cache.snapshot().keys.find { it.startsWith("${videoId}_") }?.let { cache.get(it) }
                 }
             }
+
+            // Bulletproof fallback: Parse the itag parameter from the YouTube URL if cache missed
+            if (cachedBitrate == null || cachedMime == null) {
+                val playingUriString = uri.toString()
+                if (playingUriString.startsWith("http")) {
+                    val itag = playingUriString.substringAfter("itag=", "").substringBefore("&")
+                    if (itag.isNotEmpty()) {
+                        when (itag) {
+                            "251" -> {
+                                if (cachedBitrate == null) cachedBitrate = 160_000
+                                if (cachedMime == null) cachedMime = "audio/webm; codecs=\"opus\""
+                            }
+                            "140" -> {
+                                if (cachedBitrate == null) cachedBitrate = 128_000
+                                if (cachedMime == null) cachedMime = "audio/mp4; codecs=\"mp4a.40.2\""
+                            }
+                            "250" -> {
+                                if (cachedBitrate == null) cachedBitrate = 70_000
+                                if (cachedMime == null) cachedMime = "audio/webm; codecs=\"opus\""
+                            }
+                            "249" -> {
+                                if (cachedBitrate == null) cachedBitrate = 50_000
+                                if (cachedMime == null) cachedMime = "audio/webm; codecs=\"opus\""
+                            }
+                            "171" -> {
+                                if (cachedBitrate == null) cachedBitrate = 128_000
+                                if (cachedMime == null) cachedMime = "audio/webm; codecs=\"vorbis\""
+                            }
+                            "139" -> {
+                                if (cachedBitrate == null) cachedBitrate = 48_000
+                                if (cachedMime == null) cachedMime = "audio/mp4; codecs=\"mp4a.40.2\""
+                            }
+                        }
+                    }
+                }
+            }
             
             _playbackAudioMetadata.update { current ->
                 if (current.mediaId != mediaId) return@update current
