@@ -62,10 +62,25 @@ object YoutubeHelper {
 
     /**
      * LRU cache for resolved YouTube stream URLs.
-     * Key format: "<videoId>_low" or "<videoId>_high".
-     * Holds up to 100 entries; expired/invalid entries are evicted lazily on next access.
+     * Key format: "<videoId>_low", "<videoId>_high", or "<videoId>_q<bitrate>".
+     * Holds up to 200 entries; expired/invalid entries are evicted lazily on next access.
      */
     val streamUrlLruCache = LruCache<String, String>(200)
+
+    /**
+     * Parallel cache storing the MIME type (e.g. "audio/opus", "audio/mp4") for the
+     * corresponding entry in [streamUrlLruCache]. Keyed identically to [streamUrlLruCache].
+     * Allows ExoPlayer to be told the exact codec upfront so it can skip WEBM container
+     * sniffing, cutting several hundred ms off the initial buffer/decode latency.
+     */
+    val streamMimeTypeLruCache = LruCache<String, String>(200)
+
+    /**
+     * Parallel cache storing the actual bitrate (in bps) for the corresponding entry in
+     * [streamUrlLruCache]. Keyed identically. Allows the player UI to show the real
+     * YouTube stream bitrate (e.g. 160000 → "160 kbps") without an extra network probe.
+     */
+    val streamBitrateLruCache = LruCache<String, Int>(200)
 
     /** Register a locally-available file path for a YouTube video ID so playback is instant. */
     private val localFilePathCache = LruCache<String, String>(200)
@@ -565,10 +580,17 @@ object YoutubeHelper {
             }
         }
 
-        val newUri = getSongUrlFromYoutube(context, song, lowQuality = false, maxBitrateKbps = maxBitrate)
+        val result = getSongUrlFromYoutube(context, song, lowQuality = false, maxBitrateKbps = maxBitrate)
+        val newUri = result.first
+        val mimeType = result.second
+        val bitrate = result.third
         streamUrlLruCache.put(cacheKey, newUri)
+        mimeType?.let { streamMimeTypeLruCache.put(cacheKey, it) }
+        bitrate?.let { streamBitrateLruCache.put(cacheKey, it) }
         if (maxBitrate == 0 || maxBitrate >= 256) {
             streamUrlLruCache.put("${videoId}_high", newUri)
+            mimeType?.let { streamMimeTypeLruCache.put("${videoId}_high", it) }
+            bitrate?.let { streamBitrateLruCache.put("${videoId}_high", it) }
         }
 
         // We do NOT save transient remote streaming URLs to the Room database anymore.
@@ -610,8 +632,13 @@ object YoutubeHelper {
             if (isYoutubeUrlValid(it)) return it 
         }
 
-        val lowUrl = getSongUrlFromYoutube(context, song, lowQuality = true)
+        val lowResult = getSongUrlFromYoutube(context, song, lowQuality = true)
+        val lowUrl = lowResult.first
+        val mimeType = lowResult.second
+        val bitrate = lowResult.third
         streamUrlLruCache.put("${videoId}_low", lowUrl)
+        mimeType?.let { streamMimeTypeLruCache.put("${videoId}_low", it) }
+        bitrate?.let { streamBitrateLruCache.put("${videoId}_low", it) }
         return lowUrl
     }
 
@@ -643,10 +670,17 @@ object YoutubeHelper {
             if (isYoutubeUrlValid(it)) return it 
         }
 
-        val highUrl = getSongUrlFromYoutube(context, song, lowQuality = false, maxBitrateKbps = maxBitrate)
+        val highResult = getSongUrlFromYoutube(context, song, lowQuality = false, maxBitrateKbps = maxBitrate)
+        val highUrl = highResult.first
+        val mimeType = highResult.second
+        val bitrate = highResult.third
         streamUrlLruCache.put(cacheKey, highUrl)
+        mimeType?.let { streamMimeTypeLruCache.put(cacheKey, it) }
+        bitrate?.let { streamBitrateLruCache.put(cacheKey, it) }
         if (maxBitrate == 0 || maxBitrate >= 256) {
             streamUrlLruCache.put("${videoId}_high", highUrl)
+            mimeType?.let { streamMimeTypeLruCache.put("${videoId}_high", it) }
+            bitrate?.let { streamBitrateLruCache.put("${videoId}_high", it) }
         }
         return highUrl
     }
@@ -696,8 +730,13 @@ object YoutubeHelper {
             if (isYoutubeUrlValid(it)) return it 
         }
 
-        val url = getSongUrlFromYoutube(context, song, lowQuality = false, maxBitrateKbps = maxBitrateKbps)
+        val urlResult = getSongUrlFromYoutube(context, song, lowQuality = false, maxBitrateKbps = maxBitrateKbps)
+        val url = urlResult.first
+        val mimeType = urlResult.second
+        val bitrate = urlResult.third
         streamUrlLruCache.put(cacheKey, url)
+        mimeType?.let { streamMimeTypeLruCache.put(cacheKey, it) }
+        bitrate?.let { streamBitrateLruCache.put(cacheKey, it) }
         return url
     }
 
@@ -705,6 +744,10 @@ object YoutubeHelper {
     fun invalidateStreamCache(youtubeId: String) {
         streamUrlLruCache.remove("${youtubeId}_low")
         streamUrlLruCache.remove("${youtubeId}_high")
+        streamMimeTypeLruCache.remove("${youtubeId}_low")
+        streamMimeTypeLruCache.remove("${youtubeId}_high")
+        streamBitrateLruCache.remove("${youtubeId}_low")
+        streamBitrateLruCache.remove("${youtubeId}_high")
     }
 
     private fun extractDuration(songContent: JsonObject): String {
@@ -870,70 +913,87 @@ object YoutubeHelper {
         }.distinct()
     }
 
-    private fun buildPlaybackProbeRanges(): List<String> =
-        listOf(
-            "bytes=0-0",
-        )
-
+    /**
+     * Validates a YouTube stream URL.
+     *
+     * Fast path: YouTube CDN URLs contain an `expire=<unix_seconds>` query parameter.
+     * If the URL is still fresh (more than 60 s until expiry) we trust it immediately
+     * without hitting the network — saving one full HTTP round-trip per candidate.
+     *
+     * Slow path: Only performed when the URL has no expiry param or is about to expire.
+     * Makes a minimal `bytes=0-0` range probe to confirm the server returns media bytes.
+     */
     private fun validateStatus(url: String): Boolean {
-        UmihiHelper.printd("Validating stream URL status")
+        // ── Fast path: trust unexpired YouTube CDN URLs ──────────────────────────────
+        val expireParam = url.substringAfter("expire=", "").substringBefore("&")
+        if (expireParam.isNotEmpty()) {
+            val expireSecs = expireParam.toLongOrNull()
+            if (expireSecs != null) {
+                val currentSecs = System.currentTimeMillis() / 1000
+                if (expireSecs > currentSecs + 60) {
+                    UmihiHelper.printd("validateStatus: URL fresh (expires in ${expireSecs - currentSecs}s) — skipping HTTP probe")
+                    return true
+                }
+            }
+        }
+
+        // ── Slow path: live byte-range probe ─────────────────────────────────────────
+        UmihiHelper.printd("validateStatus: URL near/past expiry — performing HTTP probe")
         try {
             val requestProfile = StreamClientUtils.resolveRequestProfile(url)
-            val probeRanges = buildPlaybackProbeRanges()
-
-            var sawReadableProbe = false
-            for (range in probeRanges) {
-                val rangeRequest = StreamClientUtils
-                    .applyRequestProfile(
-                        okhttp3.Request.Builder()
-                            .get()
-                            .header("Range", range)
-                            .url(url),
-                        requestProfile
-                    ).build()
-                val streamProxy = unshoo.ianshulyadav.pixelmusic.innertube.YouTube.streamProxy
-                val httpClient = if (streamProxy != null) {
-                    OkHttpClient.Builder()
-                        .connectionPool(okhttp3.ConnectionPool(10, 5, java.util.concurrent.TimeUnit.MINUTES))
-                        .proxy(streamProxy)
-                        .build()
-                } else {
-                    client
-                }
-                val probeValid =
-                    httpClient.newCall(rangeRequest).execute().use { response ->
-                        val code = response.code
-                        if (code == 403) return@use false
-                        if (code !in 200..399 && code != 416) return@use false
-                        if (code == 416) return@use sawReadableProbe
-
-                        val contentType = response.header("Content-Type").orEmpty().lowercase(Locale.US)
-                        if (
-                            contentType.startsWith("text/html") ||
-                            contentType.startsWith("text/plain") ||
-                            contentType.startsWith("application/json") ||
-                            contentType.startsWith("application/xml") ||
-                            contentType.startsWith("text/xml")
-                        ) {
-                            UmihiHelper.printd("Rejecting stream probe because it returned non-media content-type: $contentType")
-                            return@use false
-                        }
-
-                        val readable = response.body.source().request(1) == true
-                        if (readable) {
-                            sawReadableProbe = true
-                        }
-                        readable
-                    }
-                if (!probeValid) return false
+            val rangeRequest = StreamClientUtils
+                .applyRequestProfile(
+                    okhttp3.Request.Builder()
+                        .get()
+                        .header("Range", "bytes=0-0")
+                        .url(url),
+                    requestProfile
+                ).build()
+            val streamProxy = unshoo.ianshulyadav.pixelmusic.innertube.YouTube.streamProxy
+            val httpClient = if (streamProxy != null) {
+                OkHttpClient.Builder()
+                    .connectionPool(okhttp3.ConnectionPool(10, 5, java.util.concurrent.TimeUnit.MINUTES))
+                    .proxy(streamProxy)
+                    .build()
+            } else {
+                client
             }
+            return httpClient.newCall(rangeRequest).execute().use { response ->
+                val code = response.code
+                if (code == 403) return@use false
+                if (code !in 200..399 && code != 416) return@use false
 
-            return true
+                val contentType = response.header("Content-Type").orEmpty().lowercase(Locale.US)
+                if (
+                    contentType.startsWith("text/html") ||
+                    contentType.startsWith("text/plain") ||
+                    contentType.startsWith("application/json") ||
+                    contentType.startsWith("application/xml") ||
+                    contentType.startsWith("text/xml")
+                ) {
+                    UmihiHelper.printd("validateStatus: Rejecting — non-media Content-Type: $contentType")
+                    return@use false
+                }
+
+                if (code == 416) return@use true  // server says range not satisfiable but URL exists
+                response.body.source().request(1)
+            }
         } catch (e: Exception) {
-            UmihiHelper.printe("Stream URL validation failed with exception: ${e.message}")
+            UmihiHelper.printe("validateStatus: probe failed: ${e.message}")
         }
         return false
     }
+
+    /**
+     * Returns the cached MIME type (e.g. "audio/opus") for a URL cache key, or null.
+     * Used by callers to set an accurate MIME hint on the MediaItem so ExoPlayer skips
+     * slow container sniffing.
+     */
+    fun getMimeTypeForCachedUrl(cacheKey: String): String? = streamMimeTypeLruCache.get(cacheKey)
+
+    /** Returns the cached stream bitrate in bps (e.g. 160000) for a URL cache key, or null. */
+    fun getBitrateForCachedUrl(cacheKey: String): Int? = streamBitrateLruCache.get(cacheKey)
+
 
     /**
      * Resolves a stream URL from YouTube.
@@ -999,7 +1059,7 @@ object YoutubeHelper {
         retries: Int = Constants.YoutubeApi.RETRY_COUNT,
         lowQuality: Boolean = false,
         maxBitrateKbps: Int = 0
-    ): String {
+    ): Triple<String, String?, Int?> {
         val videoId = song.youtubeId
 
         val entryPoint = EntryPointAccessors.fromApplication(context.applicationContext, YoutubeHelperEntryPoint::class.java)
@@ -1020,83 +1080,10 @@ object YoutubeHelper {
         var didRefreshVisitorData = false
         val playerResponseCache = mutableMapOf<String, PlayerResponse>()
 
-        // Phase 1: If user preference is High Quality (maxBitrateKbps == 0), scan all clients for the highest bitrate Opus format first.
-        if (maxBitrateKbps == 0) {
-            UmihiHelper.printd("Enforcing HIGH quality Opus resolution first across all clients for videoId=$videoId...")
-            for (clientObj in clients) {
-                try {
-                    var playerResponse = playerResponseCache[clientObj.clientName]
-                    if (playerResponse == null) {
-                        var playerResResult = YouTube.player(
-                            videoId = videoId,
-                            playlistId = null,
-                            client = clientObj,
-                            signatureTimestamp = signatureTimestamp,
-                            setLogin = authState.hasPlaybackLoginContext,
-                            authState = authState
-                        )
-                        playerResponse = playerResResult.getOrNull()
-                        if (playerResponse != null) {
-                            var status = playerResponse.playabilityStatus.status
-                            var reason = playerResponse.playabilityStatus.reason.orEmpty()
-                            val isBot = "bot" in reason.lowercase(Locale.US) || "unusual traffic" in reason.lowercase(Locale.US) || "automated" in reason.lowercase(Locale.US)
-
-                            if (status != "OK" && isBot && !didRefreshVisitorData) {
-                                val refreshedVisitorData = YouTube.visitorData().getOrNull()
-                                if (!refreshedVisitorData.isNullOrBlank()) {
-                                    YouTube.visitorData = refreshedVisitorData
-                                    authState = authState.copy(visitorData = refreshedVisitorData).normalized()
-                                    didRefreshVisitorData = true
-
-                                    playerResResult = YouTube.player(
-                                        videoId = videoId,
-                                        playlistId = null,
-                                        client = clientObj,
-                                        signatureTimestamp = signatureTimestamp,
-                                        setLogin = authState.hasPlaybackLoginContext,
-                                        authState = authState
-                                    )
-                                    playerResponse = playerResResult.getOrNull()
-                                }
-                            }
-                        }
-                        if (playerResponse != null) {
-                            playerResponseCache[clientObj.clientName] = playerResponse
-                        }
-                    }
-
-                    if (playerResponse == null || playerResponse.playabilityStatus.status != "OK") {
-                        continue
-                    }
-
-                    val opusFormats = playerResponse.streamingData?.adaptiveFormats.orEmpty()
-                        .filter { 
-                            it.mimeType.contains("opus", ignoreCase = true) && 
-                            it.bitrate > 0
-                        }
-                        .sortedByDescending { it.bitrate }
-
-                    for (candidate in opusFormats) {
-                        if (shouldSkipCipheredWebCandidate(clientObj, candidate, authState)) continue
-                        val deobfuscated = NewPipeUtils.getStreamUrl(candidate, videoId, clientObj, authState).getOrNull() ?: continue
-                        val patched = StreamClientUtils.patchClientVersion(deobfuscated, clientObj.clientVersion)
-                        
-                        if (validateStatus(patched)) {
-                            playerResponse.playbackTracking?.videostatsPlaybackUrl?.baseUrl?.let { baseUrl ->
-                                playbackTrackingCache[videoId] = baseUrl
-                            }
-                            lastSuccessfulClientKey = StreamClientUtils.buildClientKey(clientObj)
-                            UmihiHelper.printd("Enforced HIGH quality Opus URL resolved with client: ${clientObj.clientName} (bitrate: ${candidate.bitrate})")
-                            return patched
-                        }
-                    }
-                } catch (e: Exception) {
-                    UmihiHelper.printe("Error in HIGH quality Opus pre-resolution for client ${clientObj.clientName}: ${e.message}")
-                }
-            }
-        }
-
-        // Phase 2: Standard client-by-client candidate evaluation fallback
+        // Single-pass client-by-client resolution.
+        // selectCandidates() already returns formats in Opus → M4A → WebM → other priority
+        // order, so no separate Opus-first scan is needed. Removed the old "Phase 1" that
+        // iterated all clients twice, doubling API call count for no quality benefit.
         for (clientObj in clients) {
             try {
                 UmihiHelper.printd("Trying playback client: ${clientObj.clientName}")
@@ -1166,6 +1153,8 @@ object YoutubeHelper {
                 }
 
                 var resolvedUrl: String? = null
+                var resolvedMimeType: String? = null
+                var resolvedBitrate: Int? = null
                 for (candidate in candidates) {
                     if (shouldSkipCipheredWebCandidate(clientObj, candidate, authState)) continue
                     val deobfuscated = NewPipeUtils.getStreamUrl(candidate, videoId, clientObj, authState).getOrNull() ?: continue
@@ -1173,8 +1162,11 @@ object YoutubeHelper {
                     
                     if (validateStatus(patched)) {
                         resolvedUrl = patched
+                        // Extract bare MIME type (e.g. "audio/webm; codecs=\"opus\"" → "audio/opus")
+                        resolvedMimeType = normalizeMimeType(candidate.mimeType)
+                        resolvedBitrate = candidate.bitrate
                         lastSuccessfulClientKey = StreamClientUtils.buildClientKey(clientObj)
-                        UmihiHelper.printd("Successfully validated stream URL with client: ${clientObj.clientName}")
+                        UmihiHelper.printd("Successfully validated stream URL with client: ${clientObj.clientName} mime=$resolvedMimeType")
                         break
                     } else {
                         UmihiHelper.printe("Stream URL validation failed for client ${clientObj.clientName}")
@@ -1185,7 +1177,7 @@ object YoutubeHelper {
                     playerResponse.playbackTracking?.videostatsPlaybackUrl?.baseUrl?.let { baseUrl ->
                         playbackTrackingCache[videoId] = baseUrl
                     }
-                    return resolvedUrl
+                    return Triple(resolvedUrl, resolvedMimeType, resolvedBitrate)
                 }
 
             } catch (e: Exception) {
@@ -1195,6 +1187,7 @@ object YoutubeHelper {
 
         // Failsafe: Original NewPipe Extractor fallback
         UmihiHelper.printd("All premium stream clients failed. Using failsafe NewPipe extractor...")
+        @Suppress("UNUSED_VARIABLE")
         val service = ServiceList.YouTube
         var attempts = 0
         repeat(retries) { attempt ->
@@ -1253,7 +1246,16 @@ object YoutubeHelper {
 
                     val orderedStreams = sortNewPipeGroup(opusStreams) + sortNewPipeGroup(m4aStreams) + sortNewPipeGroup(webmStreams) + sortNewPipeGroup(otherStreams)
                     val selectedStream = orderedStreams.firstOrNull() ?: streams.firstOrNull() ?: throw Exception("No audio streams found after filtering")
-                    selectedStream.content
+                    // Infer MIME from format name/suffix
+                    val suffix = selectedStream.format?.suffix?.lowercase().orEmpty()
+                    val name = selectedStream.format?.name?.lowercase().orEmpty()
+                    val mime = when {
+                        suffix.contains("opus") || name.contains("opus") -> "audio/opus"
+                        suffix.contains("m4a") || name.contains("m4a") -> "audio/mp4"
+                        suffix.contains("webm") || name.contains("webm") -> "audio/webm"
+                        else -> null
+                    }
+                    Triple(selectedStream.content, mime, selectedStream.averageBitrate.toInt())
                 }
                 return streamUrl
             } catch (e: Exception) {
@@ -1263,6 +1265,26 @@ object YoutubeHelper {
         }
 
         throw Exception("Fatal fail for song ${song.youtubeId}. Could not get it after $attempts failsafe attempts")
+    }
+
+    /**
+     * Normalises a raw MIME type string from the YouTube player response into a simple
+     * ExoPlayer-compatible MIME type.
+     *
+     * Examples:
+     *   "audio/webm; codecs=\"opus\""  →  "audio/opus"
+     *   "audio/mp4; codecs=\"mp4a.40.2\""  →  "audio/mp4"
+     *   "audio/webm; codecs=\"vorbis\""  →  "audio/webm"
+     */
+    private fun normalizeMimeType(rawMimeType: String): String {
+        val lower = rawMimeType.lowercase(Locale.US)
+        return when {
+            lower.contains("opus") -> "audio/opus"
+            lower.contains("mp4a") || lower.contains("mp4") || lower.contains("m4a") -> "audio/mp4"
+            lower.contains("vorbis") -> "audio/ogg"
+            lower.contains("webm") -> "audio/webm"
+            else -> rawMimeType.substringBefore(";").trim()
+        }
     }
 
     private suspend fun isYoutubeUrlValid(url: String): Boolean = withContext(Dispatchers.IO) {

@@ -166,7 +166,13 @@ object MediaItemBuilder {
             filePath?.startsWith("/") == true
         if (!isLikelyLocalMedia) {
             if (contentUriString.startsWith("youtube://")) {
-                return null
+                val videoId = contentUriString.removePrefix("youtube://")
+                val cachedMime = com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.streamMimeTypeLruCache.let { cache ->
+                    cache.get("${videoId}_high")
+                        ?: cache.get("${videoId}_low")
+                        ?: cache.snapshot().keys.find { it.startsWith("${videoId}_") }?.let { cache.get(it) }
+                }
+                return cachedMime ?: "audio/opus"
             }
             return mimeType
         }

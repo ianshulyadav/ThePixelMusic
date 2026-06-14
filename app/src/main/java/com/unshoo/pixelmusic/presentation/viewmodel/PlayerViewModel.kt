@@ -2909,7 +2909,7 @@ class PlayerViewModel @Inject constructor(
                         discNumber = song.discNumber,
                         year = song.year,
                         dateAdded = System.currentTimeMillis(),
-                        mimeType = song.mimeType ?: "audio/webm",
+                        mimeType = song.mimeType ?: "audio/opus",
                         bitrate = song.bitrate,
                         sampleRate = song.sampleRate,
                         telegramChatId = null,
@@ -3646,6 +3646,23 @@ class PlayerViewModel @Inject constructor(
         val mediaItem = player.currentMediaItem ?: return
         val mediaId = mediaItem.mediaId
         val uri = mediaItem.localConfiguration?.uri ?: return
+
+        val isYoutube = mediaId.startsWith("youtube_")
+        if (isYoutube) {
+            val cacheKey = com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.streamUrlLruCache.snapshot().entries
+                .find { it.value == uri.toString() }?.key
+            val cachedBitrate = cacheKey?.let { com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.streamBitrateLruCache.get(it) }
+            val cachedMime = cacheKey?.let { com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.streamMimeTypeLruCache.get(it) }
+            
+            _playbackAudioMetadata.update { current ->
+                if (current.mediaId != mediaId) return@update current
+                current.copy(
+                    bitrate = current.bitrate ?: cachedBitrate,
+                    mimeType = current.mimeType ?: cachedMime
+                )
+            }
+            return
+        }
 
         if (metadataProbeMediaId == mediaId && metadataProbeJob?.isActive == true) return
 
