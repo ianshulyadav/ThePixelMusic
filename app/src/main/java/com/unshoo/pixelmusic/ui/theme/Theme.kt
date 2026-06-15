@@ -342,8 +342,8 @@ val OrangeLightColorScheme = lightColorScheme(
 )
 
 // --- Dark & Grey Palette (Monochrome/Minimal) ---
-private val GreyDarkBackground = Color(0xFF000000) // Pure Black
-private val GreyDarkSurface = Color(0xFF121212) // Very Dark Grey
+private val GreyDarkBackground = Color(0xFF121212) // Very Dark Grey
+private val GreyDarkSurface = Color(0xFF000000) // Pure Black
 private val GreyDarkSurfaceVariant = Color(0xFF1E1E1E) // Dark Grey
 private val GreyDarkPrimary = Color(0xFFE0E0E0) // Light Grey
 private val GreyDarkSecondary = Color(0xFFB0B0B0) // Medium Light Grey
@@ -402,7 +402,7 @@ val GreyDarkColorScheme = darkColorScheme(
     surfaceBright = Color(0xFF242424),
     surfaceDim = Color(0xFF121212),
     surfaceContainer = Color(0xFF161616),
-    surfaceContainerLowest = Color(0xFF0D0D0D),
+    surfaceContainerLowest = Color(0xFF000000),
     surfaceContainerLow = Color(0xFF121212),
     surfaceContainerHigh = Color(0xFF1C1C1C),
     surfaceContainerHighest = Color(0xFF242424)
