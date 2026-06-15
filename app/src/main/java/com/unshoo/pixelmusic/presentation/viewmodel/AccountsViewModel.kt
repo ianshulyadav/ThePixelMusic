@@ -231,7 +231,7 @@ class AccountsViewModel @Inject constructor(
                         ExternalServiceAccount.YOUTUBE -> {
                             datastoreRepository.saveCookies(com.unshoo.pixelmusic.data.model.youtube.Cookies(""))
                             datastoreRepository.saveDataSyncId("")
-                            com.unshoo.pixelmusic.data.database.youtube.AppDatabase.clearDownloads(context)
+                            // Do not clear downloaded songs/playlists on logout. Offline downloads are local user data.
                         }
                         ExternalServiceAccount.LASTFM -> {
                             userPreferencesRepository.setLastfmSession("")

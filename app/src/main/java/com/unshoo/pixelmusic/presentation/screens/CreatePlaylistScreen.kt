@@ -562,7 +562,10 @@ private fun CreatePlaylistContent(
                                  onClick = { playerViewModel.setPlaylistPickerStorageFilter(filter) },
                                  transformOrigin = if (index == 0) TransformOrigin(0f, 0.5f) else TransformOrigin(1f, 0.5f)
                              ) {
-                                 Box(contentAlignment = Alignment.Center) {
+                                 Row(
+                                     verticalAlignment = Alignment.CenterVertically,
+                                     horizontalArrangement = Arrangement.Center
+                                 ) {
                                      when (filter) {
                                          StorageFilter.LOCAL -> {
                                              Icon(
@@ -582,8 +585,7 @@ private fun CreatePlaylistContent(
                                              Icon(
                                                  painter = painterResource(id = R.drawable.ic_youtube),
                                                  contentDescription = null,
-                                                 modifier = Modifier.size(18.dp),
-                                                 tint = Color.Unspecified
+                                                 modifier = Modifier.size(18.dp)
                                              )
                                          }
                                          else -> {
@@ -594,6 +596,13 @@ private fun CreatePlaylistContent(
                                              )
                                          }
                                      }
+                                     Spacer(Modifier.width(8.dp))
+                                     Text(
+                                         text = stringResource(labelRes),
+                                         fontFamily = GoogleSansRounded,
+                                         fontWeight = FontWeight.Bold,
+                                         modifier = Modifier.padding(end = 4.dp)
+                                     )
                                  }
                              }
                          }

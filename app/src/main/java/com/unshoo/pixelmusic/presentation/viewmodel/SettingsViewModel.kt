@@ -951,9 +951,8 @@ class SettingsViewModel @Inject constructor(
             datastoreRepository.saveCookies(com.unshoo.pixelmusic.data.model.youtube.Cookies(""))
             datastoreRepository.saveDataSyncId("")
             datastoreRepository.saveYtProfile("", "", "")
-            withContext(Dispatchers.IO) {
-                com.unshoo.pixelmusic.data.database.youtube.AppDatabase.clearDownloads(context)
-            }
+            // Keep downloaded YouTube songs after logout. Users expect offline downloads to remain
+            // available; clearing the YouTube DB here also made the Downloaded playlist show wrong counts.
         }
     }
 
