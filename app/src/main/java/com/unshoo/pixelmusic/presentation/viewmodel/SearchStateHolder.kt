@@ -146,7 +146,14 @@ class SearchStateHolder @Inject constructor(
 
                     try {
                         val results = withContext(Dispatchers.IO) {
-                            searchYouTube(query, _selectedSearchFilter.value)
+                            val remote = searchYouTube(query, _selectedSearchFilter.value)
+                            if (remote.isEmpty()) {
+                                // Helpful fallback: if YouTube returns nothing but the user has an exact/local
+                                // file match, show it instead of a dead "No results" state.
+                                musicRepository.searchAllOnce(query, _selectedSearchFilter.value)
+                            } else {
+                                remote
+                            }
                         }
                         if (request.requestId == latestSearchRequestId.get()) {
                             val immutable = results.toImmutableList()
