@@ -189,6 +189,8 @@ fun PlaylistDetailScreen(
     val currentPlaylist = uiState.currentPlaylistDetails
     val isFolderPlaylist = currentPlaylist?.id?.startsWith(FOLDER_PLAYLIST_PREFIX) == true
     val songsInPlaylist = uiState.currentPlaylistSongs
+    val playlistDisplaySongCount = currentPlaylist?.displaySongCount ?: songsInPlaylist.size
+    val isYoutubePlaylistHydrating = currentPlaylist?.source == "YOUTUBE" && songsInPlaylist.isEmpty()
     val isPlaylistFullyDownloaded by remember(songsInPlaylist) {
         derivedStateOf {
             songsInPlaylist.isNotEmpty() && songsInPlaylist.all { it.path.isNotBlank() }
@@ -301,7 +303,7 @@ fun PlaylistDetailScreen(
                         modifier = Modifier.padding(start = 8.dp),
                         text = stringResource(
                             R.string.presentation_batch_f_status_bullet_step,
-                            formatSongCount(songsInPlaylist.size),
+                            formatSongCount(playlistDisplaySongCount),
                             formatTotalDuration(songsInPlaylist)
                         ),
                         style = MaterialTheme.typography.labelMedium.copy(fontFamily = GoogleSansRounded),
@@ -375,7 +377,7 @@ fun PlaylistDetailScreen(
                     songs = localReorderableSongs,
                     songCountLabel = stringResource(
                         R.string.presentation_batch_f_status_bullet_step,
-                        formatSongCount(songsInPlaylist.size),
+                        formatSongCount(playlistDisplaySongCount),
                         formatTotalDuration(songsInPlaylist)
                     )
                 )
@@ -607,15 +609,26 @@ fun PlaylistDetailScreen(
                         .fillMaxSize()
                         .weight(1f), Alignment.Center) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(Icons.Filled.MusicOff, null, Modifier.size(48.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Spacer(Modifier.height(8.dp))
-                            Text(playlistEmptyTitle, style = MaterialTheme.typography.titleMedium)
-                            val emptyMessage = if (isFolderPlaylist) {
-                                playlistEmptyFolder
+                            if (isYoutubePlaylistHydrating) {
+                                androidx.compose.material3.CircularProgressIndicator(modifier = Modifier.size(42.dp))
+                                Spacer(Modifier.height(12.dp))
+                                Text("Syncing playlist songs...", style = MaterialTheme.typography.titleMedium)
+                                Text(
+                                    "Songs will appear here automatically when YouTube Music hydration finishes.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             } else {
-                                playlistEmptyAddHint
+                                Icon(Icons.Filled.MusicOff, null, Modifier.size(48.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Spacer(Modifier.height(8.dp))
+                                Text(playlistEmptyTitle, style = MaterialTheme.typography.titleMedium)
+                                val emptyMessage = if (isFolderPlaylist) {
+                                    playlistEmptyFolder
+                                } else {
+                                    playlistEmptyAddHint
+                                }
+                                Text(emptyMessage, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-                            Text(emptyMessage, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 } else {

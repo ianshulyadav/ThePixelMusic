@@ -1668,39 +1668,33 @@ constructor(
             try {
                 val remotePlaylists = YoutubePlaylistDataSource().retrieveAll(settings)
                 // ArchiveTune-style: surface playlist cards immediately from the lightweight
-                // library page before fetching every playlist's songs. This makes login/library
-                // feel instant instead of waiting for all remote playlist details.
-                val currentUserPlaylists = playlistPreferencesRepository.getPlaylistsOnce()
+                // library page before fetching every playlist's songs. Store them in the YouTube
+                // playlist DB (not local playlist prefs) so hydrated song lists win as soon as ready.
                 remotePlaylists.forEach { playlistInfo ->
-                    val cover = com.unshoo.pixelmusic.data.remote.youtube.upgradeThumbnailUrlToHighQuality(
-                        playlistInfo.coverPath ?: playlistInfo.coverHref
+                    val existingPlaylist = appDatabase.playlistRepository().getPlaylistById(playlistInfo.id)
+                    appDatabase.playlistRepository().insertPlaylist(
+                        playlistInfo.copy(
+                            coverHref = com.unshoo.pixelmusic.data.remote.youtube.upgradeThumbnailUrlToHighQuality(
+                                playlistInfo.coverPath ?: playlistInfo.coverHref
+                            ) ?: playlistInfo.coverHref,
+                            lastSyncSongCount = existingPlaylist?.info?.lastSyncSongCount ?: playlistInfo.lastSyncSongCount,
+                            lastSyncTimestamp = existingPlaylist?.info?.lastSyncTimestamp ?: playlistInfo.lastSyncTimestamp
+                        )
                     )
-                    val existing = currentUserPlaylists.find { it.id == playlistInfo.id }
-                    if (existing == null) {
-                        playlistPreferencesRepository.createPlaylist(
-                            name = playlistInfo.title,
-                            songIds = emptyList(),
-                            coverImageUri = cover,
-                            customId = playlistInfo.id,
-                            source = "YOUTUBE"
-                        )
-                    } else if (existing.name != playlistInfo.title || existing.coverImageUri != cover) {
-                        playlistPreferencesRepository.updatePlaylist(
-                            existing.copy(name = playlistInfo.title, coverImageUri = cover)
-                        )
-                    }
                 }
 
                 remotePlaylists.forEach { playlistInfo ->
                     yield()
                     val existingPlaylist = appDatabase.playlistRepository().getPlaylistById(playlistInfo.id)
                     val existingSongCount = existingPlaylist?.info?.lastSyncSongCount ?: 0
+                    val existingHydratedCount = existingPlaylist?.songs?.size ?: 0
 
                     val emptyPlaylist = Playlist(playlistInfo, emptyList())
                     val fullPlaylist = YoutubePlaylistDataSource().retrieveOne(emptyPlaylist, settings)
 
-                    // Delta check: only process if song count changed or first sync
-                    if (fullPlaylist.songs.size != existingSongCount || existingPlaylist == null) {
+                    // Delta check: process if song count changed OR the lightweight card exists
+                    // but has no cross-refs yet. This prevents permanent "0 songs" cards.
+                    if (fullPlaylist.songs.size != existingSongCount || existingHydratedCount == 0 || existingPlaylist == null) {
                         // Use preserving insert — keeps existing downloaded songs intact
                         appDatabase.playlistRepository().insertPlaylistWithSongsPreserving(
                             fullPlaylist,
