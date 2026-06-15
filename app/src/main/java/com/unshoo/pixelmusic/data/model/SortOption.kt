@@ -185,6 +185,28 @@ sealed class SortOption(
         direction = SortDirection.Ascending
     )
 
+    object ArtistSubscribed : SortOption(
+        storageKey = "artist_subscribed",
+        displayName = "YouTube Subscribed",
+        methodLabel = "Subscribed",
+        methodKey = "artist_subscribed"
+    )
+
+    object ArtistMinSongs : SortOption(
+        storageKey = "artist_min_songs",
+        displayName = "All Artists",
+        methodLabel = "All",
+        methodKey = "artist_min_songs"
+    )
+
+    object ArtistMostPlayed : SortOption(
+        storageKey = "artist_most_played",
+        displayName = "Most Played",
+        methodLabel = "Most Played",
+        methodKey = "artist_most_played",
+        direction = SortDirection.Descending
+    )
+
     // Playlist Sort Options
     object PlaylistNameAZ : SortOption(
         storageKey = "playlist_name_az",
@@ -375,7 +397,10 @@ sealed class SortOption(
                 ArtistNameAZ,
                 ArtistNameZA,
                 ArtistNumSongsDesc,
-                ArtistNumSongsAsc
+                ArtistNumSongsAsc,
+                ArtistSubscribed,
+                ArtistMinSongs,
+                ArtistMostPlayed
             )
         }
 
