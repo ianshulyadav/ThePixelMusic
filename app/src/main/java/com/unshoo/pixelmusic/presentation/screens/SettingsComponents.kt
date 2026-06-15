@@ -290,7 +290,9 @@ fun ThemeSelectorItem(
     }
 
     if (showSheet) {
+        val sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
         androidx.compose.material3.ModalBottomSheet(
+            sheetState = sheetState,
             onDismissRequest = { showSheet = false },
             containerColor = MaterialTheme.colorScheme.surface,
             contentColor = MaterialTheme.colorScheme.onSurface
@@ -305,8 +307,7 @@ fun ThemeSelectorItem(
                 
                 LazyColumn(
                     modifier = Modifier
-                        .padding(horizontal = 16.dp)
-                        .heightIn(max = 400.dp),
+                        .padding(horizontal = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(options.entries.toList()) { (key, optionLabel) ->
