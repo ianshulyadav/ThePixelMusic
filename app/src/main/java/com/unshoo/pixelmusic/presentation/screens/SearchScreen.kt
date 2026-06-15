@@ -180,7 +180,6 @@ fun SearchScreen(
     val searchSource by playerViewModel.searchSource.collectAsStateWithLifecycle()
     var showSongInfoBottomSheet by remember { mutableStateOf(false) }
     val keyboardController = LocalSoftwareKeyboardController.current
-    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     val searchInputFocusRequester = remember { FocusRequester() }
 
     // On every visit to the search screen, clear the query + results so we
@@ -522,8 +521,6 @@ fun SearchScreen(
                 },
                 onDismiss = { showSongInfoBottomSheet = false },
                 onPlaySong = {
-                    focusManager.clearFocus()
-                    keyboardController?.hide()
                     playerViewModel.showAndPlaySong(currentSong)
                     showSongInfoBottomSheet = false
                 },
@@ -751,8 +748,6 @@ fun SearchResultsList(
 ) {
     val localDensity = LocalDensity.current
     val playerStableState by playerViewModel.stablePlayerState.collectAsStateWithLifecycle()
-    val keyboardController = LocalSoftwareKeyboardController.current
-    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
 
     if (results.isEmpty()) {
         Box(
@@ -792,12 +787,10 @@ fun SearchResultsList(
             ?.let { "Search: $it" }
             ?: "Search Results"
     }
-    val onSongResultClick = remember(playerViewModel, onItemSelected, searchQueueName, keyboardController, focusManager) {
+    val onSongResultClick = remember(playerViewModel, onItemSelected, searchQueueName) {
         { song: Song ->
             // INSTANT PLAYBACK FIX: Always play the song immediately via showAndPlaySong.
             // This gives instant response on tap without waiting for a network call.
-            focusManager.clearFocus()
-            keyboardController?.hide()
             playerViewModel.showAndPlaySong(song, listOf(song), searchQueueName)
             onItemSelected()
         }
@@ -913,12 +906,10 @@ fun SearchResultsList(
                             }
 
                             is SearchResultItem.AlbumItem -> {
-                                val onPlayClick = remember(item.album, playerViewModel, onItemSelected, keyboardController, focusManager) {
+                                val onPlayClick = remember(item.album, playerViewModel, onItemSelected) {
                                     {
                                         Timber.tag("SearchScreen")
                                             .d("Album clicked: ${item.album.title}")
-                                        focusManager.clearFocus()
-                                        keyboardController?.hide()
                                         playerViewModel.playAlbum(item.album)
                                         onItemSelected()
                                     }
@@ -943,12 +934,10 @@ fun SearchResultsList(
                             }
 
                             is SearchResultItem.ArtistItem -> {
-                                val onPlayClick = remember(item.artist, playerViewModel, onItemSelected, keyboardController, focusManager) {
+                                val onPlayClick = remember(item.artist, playerViewModel, onItemSelected) {
                                     {
                                         Timber.tag("SearchScreen")
                                             .d("Artist clicked: ${item.artist.name}")
-                                        focusManager.clearFocus()
-                                        keyboardController?.hide()
                                         playerViewModel.playArtist(item.artist)
                                         onItemSelected()
                                     }
@@ -979,8 +968,6 @@ fun SearchResultsList(
                                 }.collectAsStateWithLifecycle(initialValue = emptyList())
                                 val coroutineScope = rememberCoroutineScope()
                                 val onPlayClick: () -> Unit = {
-                                    focusManager.clearFocus()
-                                    keyboardController?.hide()
                                     val playlistId = item.playlist.id
                                     coroutineScope.launch {
                                         if (playlistId.startsWith("PL") || playlistId.startsWith("VL") || playlistId.toLongOrNull() == null) {
@@ -1301,8 +1288,7 @@ fun SearchResultPlaylistItem(
         }
     }
 }
-
-@androidx.annotation.OptIn(UnstableApi::class)
+@androidx.annotation.OptIn(UnstableApi::class)
 @Composable
 fun SearchFilterChip(
     filterType: SearchFilterType,
