@@ -400,6 +400,14 @@ class MainActivity : ComponentActivity() {
                 clearExternalIntentPayload(intent)
             }
 
+            intent.action == android.content.Intent.ACTION_VIEW && intent.data != null &&
+                isYouTubeMusicLink(intent.data) -> {
+                intent.data?.let { uri ->
+                    playerViewModel.openYouTubeMusicLink(uri)
+                }
+                clearExternalIntentPayload(intent)
+            }
+
             intent.action == android.content.Intent.ACTION_VIEW && intent.data != null -> {
                 intent.data?.let { uri ->
                     persistUriPermissionIfNeeded(intent, uri)
@@ -472,6 +480,15 @@ class MainActivity : ComponentActivity() {
         intent.data = null
         intent.clipData = null
         intent.removeExtra(android.content.Intent.EXTRA_STREAM)
+    }
+
+    private fun isYouTubeMusicLink(uri: android.net.Uri?): Boolean {
+        if (uri == null) return false
+        val scheme = uri.scheme?.lowercase() ?: return false
+        if (scheme != "http" && scheme != "https") return false
+        val host = uri.host?.lowercase() ?: return false
+        return host == "music.youtube.com" || host == "youtube.com" ||
+            host == "www.youtube.com" || host == "m.youtube.com" || host == "youtu.be"
     }
 
     /** Returns true if the MIME type or file name indicates an M3U/M3U8 playlist. */
