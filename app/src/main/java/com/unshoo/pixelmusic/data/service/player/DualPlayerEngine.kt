@@ -719,7 +719,12 @@ class DualPlayerEngine @Inject constructor(
 
                     val resolved = resolvedUriCache.get(originalUri)
                     if (resolved != null) {
-                        return dataSpec.buildUpon().setUri(resolved).build()
+                        if (isResolvedUriFresh(originalUri, resolved)) {
+                            return dataSpec.buildUpon().setUri(resolved).build()
+                        } else {
+                            resolvedUriCache.remove(originalUri)
+                            activePlaybackResolvedUris.remove(originalUri)
+                        }
                     }
 
                     try {
@@ -807,12 +812,20 @@ class DualPlayerEngine @Inject constructor(
     suspend fun resolveCloudUri(uri: Uri): Uri = withContext(Dispatchers.IO) {
         val uriString = uri.toString()
         
-        // Return active playback locked URI to prevent ExoPlayer from stuttering or re-loading due to mid-stream URL changes
-        activePlaybackResolvedUris[uriString]?.let { return@withContext it }
+        // Return active playback locked URI to prevent ExoPlayer from stuttering or re-loading due to mid-stream URL changes.
+        // YouTube googlevideo URLs expire; after a long pause using a stale locked URL causes endless buffering.
+        activePlaybackResolvedUris[uriString]?.let { lockedUri ->
+            if (isResolvedUriFresh(uriString, lockedUri)) return@withContext lockedUri
+            activePlaybackResolvedUris.remove(uriString)
+            resolvedUriCache.remove(uriString)
+        }
         
         resolvedUriCache.get(uriString)?.let { cachedUri ->
-            activePlaybackResolvedUris[uriString] = cachedUri
-            return@withContext cachedUri
+            if (isResolvedUriFresh(uriString, cachedUri)) {
+                activePlaybackResolvedUris[uriString] = cachedUri
+                return@withContext cachedUri
+            }
+            resolvedUriCache.remove(uriString)
         }
 
         val deferred = activeResolutions.getOrPut(uriString) {
@@ -842,6 +855,19 @@ class DualPlayerEngine @Inject constructor(
         } finally {
             activeResolutions.remove(uriString)
         }
+    }
+
+    private fun isResolvedUriFresh(originalUriString: String, resolvedUri: Uri): Boolean {
+        val resolved = resolvedUri.toString()
+        val isYoutubeResolution = originalUriString.startsWith("youtube://") ||
+            resolved.contains("googlevideo.com", ignoreCase = true) ||
+            resolved.contains("youtube.com", ignoreCase = true)
+        if (!isYoutubeResolution) return true
+
+        val expireSeconds = resolvedUri.getQueryParameter("expire")?.toLongOrNull()
+            ?: return true
+        val nowSeconds = System.currentTimeMillis() / 1000L
+        return expireSeconds > nowSeconds + 120L
     }
 
     private suspend fun resolveTelegramUriAsync(uri: Uri, uriString: String): Uri? = withContext(Dispatchers.IO) {
