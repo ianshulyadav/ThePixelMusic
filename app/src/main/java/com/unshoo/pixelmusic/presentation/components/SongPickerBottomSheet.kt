@@ -190,6 +190,7 @@ fun SongPickerContent(
                         indicator = {}
                     ) {
                         tabs.forEachIndexed { index, (filter, labelRes) ->
+                            val isSelected = index == selectedTabIndex
                             TabAnimation(
                                 index = index,
                                 title = stringResource(labelRes),
@@ -220,7 +221,8 @@ fun SongPickerContent(
                                             Icon(
                                                 painter = painterResource(id = R.drawable.ic_youtube),
                                                 contentDescription = null,
-                                                modifier = Modifier.size(18.dp)
+                                                modifier = Modifier.size(18.dp),
+                                                tint = Color.Unspecified
                                             )
                                         }
                                         else -> {
@@ -231,13 +233,16 @@ fun SongPickerContent(
                                             )
                                         }
                                     }
-                                    Spacer(Modifier.width(8.dp))
-                                    Text(
-                                        text = stringResource(labelRes),
-                                        fontFamily = GoogleSansRounded,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(end = 4.dp)
-                                    )
+                                    if (isSelected) {
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(
+                                            text = stringResource(labelRes),
+                                            fontFamily = GoogleSansRounded,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Clip
+                                        )
+                                    }
                                 }
                             }
                         }
