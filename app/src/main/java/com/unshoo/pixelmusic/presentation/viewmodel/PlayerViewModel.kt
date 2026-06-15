@@ -4363,6 +4363,83 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
+    fun openYouTubeMusicLink(uri: Uri) {
+        viewModelScope.launch {
+            val host = uri.host?.lowercase().orEmpty()
+            val path = uri.path.orEmpty()
+            val videoId = when {
+                host == "youtu.be" -> uri.pathSegments.firstOrNull()
+                else -> uri.getQueryParameter("v")
+            }?.takeIf { it.isNotBlank() }
+            val playlistId = uri.getQueryParameter("list")
+                ?: path.removePrefix("/playlist/").takeIf { path.startsWith("/playlist/") && it.isNotBlank() }
+            val browseId = path.removePrefix("/browse/").takeIf { path.startsWith("/browse/") && it.isNotBlank() }
+
+            try {
+                when {
+                    videoId != null -> {
+                        val ytSong = withContext(Dispatchers.IO) {
+                            runCatching { com.unshoo.pixelmusic.data.remote.youtube.SongDataSource().getSongInfo(videoId) }
+                                .getOrElse {
+                                    com.unshoo.pixelmusic.data.model.youtube.Song(
+                                        youtubeId = videoId,
+                                        title = videoId,
+                                        artist = "YouTube Music",
+                                        thumbnailHref = "https://i.ytimg.com/vi/$videoId/hqdefault.jpg"
+                                    )
+                                }
+                        }
+                        val song = ytSong.toNativeSong()
+                        val queue = if (!playlistId.isNullOrBlank()) {
+                            val page = withContext(Dispatchers.IO) {
+                                unshoo.ianshulyadav.pixelmusic.innertube.YouTube.playlist(playlistId).getOrNull()
+                            }
+                            val songs = page?.songs?.map { it.toNativeSong() }.orEmpty()
+                            (listOf(song) + songs.filterNot { it.youtubeId == videoId || it.id == song.id })
+                                .ifEmpty { listOf(song) }
+                        } else {
+                            listOf(song)
+                        }
+                        playSongs(queue, song, "YouTube Music", playlistId)
+                    }
+
+                    !playlistId.isNullOrBlank() -> {
+                        val page = withContext(Dispatchers.IO) {
+                            unshoo.ianshulyadav.pixelmusic.innertube.YouTube.playlist(playlistId).getOrNull()
+                        }
+                        val songs = page?.songs?.map { it.toNativeSong() }.orEmpty()
+                        if (songs.isNotEmpty()) {
+                            playSongs(songs, songs.first(), page?.playlist?.title ?: "YouTube Music Playlist", playlistId)
+                        } else {
+                            playRadio(
+                                unshoo.ianshulyadav.pixelmusic.innertube.models.WatchEndpoint(playlistId = playlistId),
+                                "YouTube Music Playlist"
+                            )
+                        }
+                    }
+
+                    !browseId.isNullOrBlank() -> {
+                        val songs = withContext(Dispatchers.IO) {
+                            unshoo.ianshulyadav.pixelmusic.innertube.YouTube.albumSongs(browseId).getOrNull()
+                                ?.map { it.toNativeSong() }
+                                .orEmpty()
+                        }
+                        if (songs.isNotEmpty()) {
+                            playSongs(songs, songs.first(), "YouTube Music Album", browseId)
+                        } else {
+                            sendToast("Could not open YouTube Music link")
+                        }
+                    }
+
+                    else -> sendToast("Unsupported YouTube Music link")
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to open YouTube Music link: %s", uri)
+                sendToast("Failed to open YouTube Music link")
+            }
+        }
+    }
+
     fun playExternalUri(uri: Uri) {
         viewModelScope.launch {
             val externalResult = externalMediaStateHolder.buildExternalSongFromUri(uri)
