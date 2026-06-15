@@ -48,14 +48,14 @@ class MainViewModel @Inject constructor(
                                         handle = info.channelHandle ?: "",
                                         avatarUrl = info.thumbnailUrl ?: ""
                                     )
-                                    if (!hasTriggeredAccountLibrarySync) {
-                                        hasTriggeredAccountLibrarySync = true
-                                        youTubeLibrarySyncManager.syncNow()
-                                    }
                                 }
                                 .onFailure { e ->
                                     LogUtils.e(this@MainViewModel, e, "Failed to fetch YouTube account info")
                                 }
+                            if (!hasTriggeredAccountLibrarySync) {
+                                hasTriggeredAccountLibrarySync = true
+                                youTubeLibrarySyncManager.syncNow()
+                            }
                         } catch (e: Exception) {
                             LogUtils.e(this@MainViewModel, e, "Error fetching YouTube account info")
                         }

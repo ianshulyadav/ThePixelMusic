@@ -542,7 +542,7 @@ fun PlaylistItem(
                 }
                 val playlistCountText = when {
                     playlist.displaySongCount != null -> formatSongCount(playlist.displaySongCount)
-                    playlist.source == "YOUTUBE" && playlist.songIds.isEmpty() -> "Syncing songs..."
+                    playlist.source == "YOUTUBE" && playlist.songIds.isEmpty() -> "Syncing songs…"
                     else -> formatSongCount(playlist.songIds.size)
                 }
                 Text(

@@ -39,7 +39,7 @@ class AuthViewModel @Inject constructor(
                 _eventsChannel.emit(ScreenEvent.Out.LoginCompleted)
                 // Immediately hydrate account-owned artists/liked songs so Library is not empty
                 // while the heavier playlist/song sync runs in WorkManager.
-                launch(kotlinx.coroutines.Dispatchers.IO) { youTubeLibrarySyncManager.syncNow() }
+                launch(kotlinx.coroutines.Dispatchers.IO) { youTubeLibrarySyncManager.syncNow(force = true) }
                 // Trigger a lighter incremental sync; full local rescans on login make the app laggy.
                 syncManager.incrementalSync()
             }

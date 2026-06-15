@@ -34,15 +34,32 @@ class YoutubePlaylistDataSource {
      * The "liked_songs" playlist id is translated to YouTube's internal "LM" browse id.
      */
     fun retrieveOne(playlist: Playlist, settings: UmihiSettings): Playlist {
-        val remoteId = if (playlist.info.id == "liked_songs") "LM" else playlist.info.id
-        val remoteSongs = YoutubeHelper.extractSongList(
-            YoutubeRequestHelper.browse(
-                remoteId,
-                settings
-            ),
-            settings
-        )
+        val remoteCandidates = when {
+            playlist.info.id == "liked_songs" -> listOf("LM")
+            playlist.info.id == "LM" -> listOf("LM")
+            playlist.info.id.startsWith("VL") -> listOf(playlist.info.id, playlist.info.id.removePrefix("VL"))
+            else -> listOf("VL${playlist.info.id}", playlist.info.id)
+        }.distinct()
+
+        var remoteSongs = emptyList<com.unshoo.pixelmusic.data.model.youtube.Song>()
+        for (remoteId in remoteCandidates) {
+            remoteSongs = runCatching {
+                YoutubeHelper.extractSongList(
+                    YoutubeRequestHelper.browse(
+                        remoteId,
+                        settings
+                    ),
+                    settings
+                )
+            }.getOrDefault(emptyList())
+            if (remoteSongs.isNotEmpty()) break
+        }
+
         return playlist.copy(
+            info = playlist.info.copy(
+                lastSyncSongCount = if (remoteSongs.isNotEmpty()) remoteSongs.size else playlist.info.lastSyncSongCount,
+                lastSyncTimestamp = if (remoteSongs.isNotEmpty()) System.currentTimeMillis() else playlist.info.lastSyncTimestamp
+            ),
             unsortedSongs = remoteSongs,
             crossRefs = remoteSongs.mapIndexed { index, song ->
                 PlaylistSongCrossRef(playlist.info.id, song.youtubeId, index)

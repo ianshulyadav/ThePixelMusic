@@ -50,36 +50,6 @@ val MontserratFamily = FontFamily(
     Font(googleFont = montserrat, fontProvider = provider, weight = FontWeight.Light),
 )
 
-val ExpTitleTypography = Typography(
-    displayLarge = TextStyle(
-        fontFamily = UnicodeSafeFontFamily,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 60.sp,
-        textGeometricTransform = TextGeometricTransform(scaleX = 1.5f),
-        letterSpacing = (-0.02).em,
-        lineHeight = 0.95.em,
-        platformStyle = PlatformTextStyle(includeFontPadding = false)
-    ),
-    displayMedium = TextStyle(
-        fontFamily = UnicodeSafeFontFamily,
-        fontWeight = FontWeight.Normal,
-        fontSize = 50.sp,
-        //textGeometricTransform = TextGeometricTransform(scaleX = 1f),
-        letterSpacing = (-0.02).em,
-        lineHeight = 0.95.em,
-        platformStyle = PlatformTextStyle(includeFontPadding = false)
-    ),
-    titleMedium = TextStyle(
-        fontFamily = UnicodeSafeFontFamily,
-        fontWeight = FontWeight.Bold,
-        fontSize = 32.sp,
-        textGeometricTransform = TextGeometricTransform(scaleX = 1.3f),
-        letterSpacing = (-0.02).em,
-        lineHeight = 0.95.em,
-        platformStyle = PlatformTextStyle(includeFontPadding = false)
-    )
-)
-
 // Google Sans Flex variable font with rounded axis for Google Sans Rounded-like appearance.
 private const val GoogleSansFlexRond = 100f
 
@@ -127,8 +97,38 @@ val ActualGoogleSansRounded = FontFamily(
     ),
 )
 
+val ExpTitleTypography = Typography(
+    displayLarge = TextStyle(
+        fontFamily = ActualGoogleSansRounded,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 60.sp,
+        textGeometricTransform = TextGeometricTransform(scaleX = 1.5f),
+        letterSpacing = (-0.02).em,
+        lineHeight = 0.95.em,
+        platformStyle = PlatformTextStyle(includeFontPadding = false)
+    ),
+    displayMedium = TextStyle(
+        fontFamily = ActualGoogleSansRounded,
+        fontWeight = FontWeight.Normal,
+        fontSize = 50.sp,
+        //textGeometricTransform = TextGeometricTransform(scaleX = 1f),
+        letterSpacing = (-0.02).em,
+        lineHeight = 0.95.em,
+        platformStyle = PlatformTextStyle(includeFontPadding = false)
+    ),
+    titleMedium = TextStyle(
+        fontFamily = ActualGoogleSansRounded,
+        fontWeight = FontWeight.Bold,
+        fontSize = 32.sp,
+        textGeometricTransform = TextGeometricTransform(scaleX = 1.3f),
+        letterSpacing = (-0.02).em,
+        lineHeight = 0.95.em,
+        platformStyle = PlatformTextStyle(includeFontPadding = false)
+    )
+)
+
 val GoogleSansRounded: FontFamily
-    get() = if (FontSettings.useSystemFont) FontFamily.Default else UnicodeSafeFontFamily
+    get() = if (FontSettings.useSystemFont) FontFamily.Default else ActualGoogleSansRounded
 
 private fun createBaseTypography(family: FontFamily): Typography = Typography(
     displayLarge = TextStyle(
@@ -238,7 +238,7 @@ private fun createBaseTypography(family: FontFamily): Typography = Typography(
     )
 )
 
-private val DefaultAppTypography = createBaseTypography(UnicodeSafeFontFamily)
+private val DefaultAppTypography = createBaseTypography(ActualGoogleSansRounded)
 private val SystemFontTypography = createBaseTypography(FontFamily.Default)
 
 val Typography: Typography

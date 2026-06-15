@@ -20,7 +20,7 @@ import java.io.InputStream
 
 object AlbumArtUtils {
     private const val CACHE_VERSION_SUFFIX = "_v4"
-    private const val MAX_CACHED_ART_DIMENSION = 2048
+    private const val MAX_CACHED_ART_DIMENSION = 1280
     private const val MAX_RAW_ART_BYTES_TO_KEEP = 512 * 1024
 
     // P2-1: Dedicated app-level scope to replace GlobalScope.
