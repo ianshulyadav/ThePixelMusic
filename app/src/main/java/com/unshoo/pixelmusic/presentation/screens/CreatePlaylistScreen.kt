@@ -555,7 +555,6 @@ private fun CreatePlaylistContent(
                          indicator = {}
                      ) {
                          tabs.forEachIndexed { index, (filter, labelRes) ->
-                             val isSelected = index == selectedTabIndex
                              TabAnimation(
                                  index = index,
                                  title = stringResource(labelRes),
@@ -597,16 +596,6 @@ private fun CreatePlaylistContent(
                                                  modifier = Modifier.size(18.dp)
                                              )
                                          }
-                                     }
-                                     if (isSelected) {
-                                         Spacer(Modifier.width(6.dp))
-                                         Text(
-                                             text = stringResource(labelRes),
-                                             fontFamily = GoogleSansRounded,
-                                             fontWeight = FontWeight.Bold,
-                                             maxLines = 1,
-                                             overflow = TextOverflow.Clip
-                                         )
                                      }
                                  }
                              }
