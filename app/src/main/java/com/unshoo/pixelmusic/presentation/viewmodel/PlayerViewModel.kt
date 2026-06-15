@@ -415,7 +415,7 @@ class PlayerViewModel @Inject constructor(
 
 
 
-    private val _playlistPickerStorageFilter = MutableStateFlow(com.unshoo.pixelmusic.data.model.StorageFilter.OFFLINE)
+    private val _playlistPickerStorageFilter = MutableStateFlow(com.unshoo.pixelmusic.data.model.StorageFilter.LOCAL)
     val playlistPickerStorageFilter: StateFlow<com.unshoo.pixelmusic.data.model.StorageFilter> = _playlistPickerStorageFilter.asStateFlow()
 
     /**
@@ -2358,10 +2358,11 @@ class PlayerViewModel @Inject constructor(
     fun toggleStorageFilter() {
         val current = _playerUiState.value.currentStorageFilter
         val next = when (current) {
-            com.unshoo.pixelmusic.data.model.StorageFilter.ALL -> com.unshoo.pixelmusic.data.model.StorageFilter.ONLINE
-            com.unshoo.pixelmusic.data.model.StorageFilter.ONLINE -> com.unshoo.pixelmusic.data.model.StorageFilter.OFFLINE
-            com.unshoo.pixelmusic.data.model.StorageFilter.OFFLINE -> com.unshoo.pixelmusic.data.model.StorageFilter.DOWNLOADED_ONLY
-            com.unshoo.pixelmusic.data.model.StorageFilter.DOWNLOADED_ONLY -> com.unshoo.pixelmusic.data.model.StorageFilter.ALL
+            com.unshoo.pixelmusic.data.model.StorageFilter.ALL -> com.unshoo.pixelmusic.data.model.StorageFilter.LOCAL
+            com.unshoo.pixelmusic.data.model.StorageFilter.LOCAL -> com.unshoo.pixelmusic.data.model.StorageFilter.TELEGRAM
+            com.unshoo.pixelmusic.data.model.StorageFilter.TELEGRAM -> com.unshoo.pixelmusic.data.model.StorageFilter.YOUTUBE
+            com.unshoo.pixelmusic.data.model.StorageFilter.YOUTUBE -> com.unshoo.pixelmusic.data.model.StorageFilter.ALL
+            com.unshoo.pixelmusic.data.model.StorageFilter.ONLINE -> com.unshoo.pixelmusic.data.model.StorageFilter.ALL
         }
         setStorageFilter(next)
     }

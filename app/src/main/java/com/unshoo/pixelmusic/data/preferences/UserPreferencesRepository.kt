@@ -1496,9 +1496,10 @@ constructor(
     val lastStorageFilterFlow: Flow<StorageFilter> =
         dataStore.data.map { preferences ->
             when (preferences[PreferencesKeys.LAST_STORAGE_FILTER]) {
-                "ONLINE"  -> StorageFilter.ONLINE
-                "OFFLINE" -> StorageFilter.OFFLINE
-                else      -> StorageFilter.ALL
+                "LOCAL", "OFFLINE" -> StorageFilter.LOCAL
+                "TELEGRAM"         -> StorageFilter.TELEGRAM
+                "YOUTUBE", "ONLINE" -> StorageFilter.YOUTUBE
+                else               -> StorageFilter.ALL
             }
         }
 

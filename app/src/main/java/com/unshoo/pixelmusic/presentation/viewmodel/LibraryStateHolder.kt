@@ -157,7 +157,7 @@ class LibraryStateHolder @Inject constructor(
             ) { filter, sortOption ->
                 filter to sortOption
             }.flatMapLatest { (filter, sortOption) ->
-                musicRepository.getMusicFolders(StorageFilter.OFFLINE)
+                musicRepository.getMusicFolders(StorageFilter.LOCAL)
                     .map { folders ->
                         sortFoldersList(folders, sortOption).toImmutableList()
                     }

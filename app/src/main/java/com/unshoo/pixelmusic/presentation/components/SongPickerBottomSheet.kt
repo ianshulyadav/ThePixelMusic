@@ -35,6 +35,7 @@ import androidx.compose.material.icons.rounded.AudioFile
 import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Dataset
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
@@ -137,8 +138,8 @@ fun SongPickerContent(
     val showCloudFilter = hasCloudSongs != false
 
     LaunchedEffect(hasCloudSongs, storageFilter) {
-        if (hasCloudSongs == false && storageFilter != StorageFilter.OFFLINE) {
-            playerViewModel.setPlaylistPickerStorageFilter(StorageFilter.OFFLINE)
+        if (hasCloudSongs == false && storageFilter != StorageFilter.LOCAL) {
+            playerViewModel.setPlaylistPickerStorageFilter(StorageFilter.LOCAL)
         }
     }
 
@@ -170,8 +171,10 @@ fun SongPickerContent(
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     val tabs = listOf(
-                        StorageFilter.OFFLINE to R.string.library_storage_filter_offline,
-                        StorageFilter.ONLINE to R.string.library_storage_filter_online
+                        StorageFilter.ALL to R.string.library_storage_filter_all_songs,
+                        StorageFilter.LOCAL to R.string.library_storage_filter_local,
+                        StorageFilter.TELEGRAM to R.string.library_storage_filter_telegram,
+                        StorageFilter.YOUTUBE to R.string.library_storage_filter_youtube
                     )
                     val selectedTabIndex = tabs.indexOfFirst { it.first == storageFilter }.coerceAtLeast(0)
 
@@ -198,18 +201,35 @@ fun SongPickerContent(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.Center
                                 ) {
-                                    if (filter == StorageFilter.OFFLINE) {
-                                        Icon(
-                                            painter = painterResource(R.drawable.ic_phonef),
-                                            contentDescription = null,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    } else {
-                                        Icon(
-                                            imageVector = Icons.Rounded.Cloud,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(18.dp)
-                                        )
+                                    when (filter) {
+                                        StorageFilter.LOCAL -> {
+                                            Icon(
+                                                painter = painterResource(id = R.drawable.ic_phonef),
+                                                contentDescription = null,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                        StorageFilter.TELEGRAM -> {
+                                            Icon(
+                                                painter = painterResource(id = R.drawable.telegram),
+                                                contentDescription = null,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                        StorageFilter.YOUTUBE -> {
+                                            Icon(
+                                                painter = painterResource(id = R.drawable.ic_youtube),
+                                                contentDescription = null,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                        else -> {
+                                            Icon(
+                                                imageVector = Icons.Rounded.Dataset,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
                                     }
                                     Spacer(Modifier.width(8.dp))
                                     Text(
@@ -304,16 +324,9 @@ fun SongPickerSelectionPane(
         playerViewModel.searchSongs(searchQuery)
             .map { songs ->
                 when (storageFilter) {
-                    StorageFilter.OFFLINE -> songs.filter { s ->
-                        s.telegramFileId == null && s.neteaseId == null && s.gdriveFileId == null &&
-                                s.qqMusicMid == null && s.navidromeId == null && s.jellyfinId == null
-                    }
-
-                    StorageFilter.ONLINE -> songs.filter { s ->
-                        s.telegramFileId != null || s.neteaseId != null || s.gdriveFileId != null ||
-                                s.qqMusicMid != null || s.navidromeId != null || s.jellyfinId != null
-                    }
-
+                    StorageFilter.LOCAL -> songs.filter { it.isLocal }
+                    StorageFilter.TELEGRAM -> songs.filter { it.isTelegram }
+                    StorageFilter.YOUTUBE -> songs.filter { it.isYouTube }
                     else -> songs
                 }
             }
@@ -717,15 +730,13 @@ fun SongPickerEmptyState(
     val spec = when (tabId) {
         LibraryTabId.LIKED -> when (storageFilter) {
             StorageFilter.ALL -> Triple(R.drawable.round_favorite_24, R.string.lib_empty_liked_all_title, R.string.lib_empty_liked_all_subtitle)
-            StorageFilter.OFFLINE -> Triple(R.drawable.round_favorite_24, R.string.lib_empty_liked_offline_title, R.string.lib_empty_liked_offline_subtitle)
-            StorageFilter.ONLINE -> Triple(R.drawable.round_favorite_24, R.string.lib_empty_liked_online_title, R.string.lib_empty_liked_online_subtitle)
-            StorageFilter.DOWNLOADED_ONLY -> Triple(R.drawable.round_favorite_24, R.string.lib_empty_liked_offline_title, R.string.lib_empty_liked_offline_subtitle)
+            StorageFilter.LOCAL -> Triple(R.drawable.round_favorite_24, R.string.lib_empty_liked_offline_title, R.string.lib_empty_liked_offline_subtitle)
+            StorageFilter.TELEGRAM, StorageFilter.YOUTUBE, StorageFilter.ONLINE -> Triple(R.drawable.round_favorite_24, R.string.lib_empty_liked_online_title, R.string.lib_empty_liked_online_subtitle)
         }
         else -> when (storageFilter) {
             StorageFilter.ALL -> Triple(R.drawable.rounded_music_off_24, R.string.lib_empty_songs_all_title, R.string.lib_empty_songs_all_subtitle)
-            StorageFilter.OFFLINE -> Triple(R.drawable.rounded_music_off_24, R.string.lib_empty_songs_offline_title, R.string.lib_empty_songs_offline_subtitle)
-            StorageFilter.ONLINE -> Triple(R.drawable.rounded_music_off_24, R.string.lib_empty_songs_online_title, R.string.lib_empty_songs_online_subtitle)
-            StorageFilter.DOWNLOADED_ONLY -> Triple(R.drawable.rounded_music_off_24, R.string.lib_empty_songs_offline_title, R.string.lib_empty_songs_offline_subtitle)
+            StorageFilter.LOCAL -> Triple(R.drawable.rounded_music_off_24, R.string.lib_empty_songs_offline_title, R.string.lib_empty_songs_offline_subtitle)
+            StorageFilter.TELEGRAM, StorageFilter.YOUTUBE, StorageFilter.ONLINE -> Triple(R.drawable.rounded_music_off_24, R.string.lib_empty_songs_online_title, R.string.lib_empty_songs_online_subtitle)
         }
     }
 

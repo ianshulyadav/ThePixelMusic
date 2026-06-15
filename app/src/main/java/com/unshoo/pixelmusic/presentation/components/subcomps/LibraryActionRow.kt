@@ -29,6 +29,8 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.vectorResource
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
@@ -340,17 +342,19 @@ fun LibraryActionRow(
                     exit = slideOutHorizontally(targetOffsetX = { it / 2 }) + fadeOut()
                 ) {
                      val finalIcon = when(currentStorageFilter) {
-                         com.unshoo.pixelmusic.data.model.StorageFilter.ALL -> Icons.Rounded.Dataset
-                         com.unshoo.pixelmusic.data.model.StorageFilter.ONLINE -> Icons.Rounded.Cloud
-                         com.unshoo.pixelmusic.data.model.StorageFilter.OFFLINE -> Icons.Rounded.PhoneAndroid
-                         com.unshoo.pixelmusic.data.model.StorageFilter.DOWNLOADED_ONLY -> Icons.Rounded.Download
-                     }
-                     val tooltipText = when(currentStorageFilter) {
-                         com.unshoo.pixelmusic.data.model.StorageFilter.ALL -> stringResource(R.string.library_storage_filter_all_songs)
-                         com.unshoo.pixelmusic.data.model.StorageFilter.ONLINE -> stringResource(R.string.library_storage_filter_online)
-                         com.unshoo.pixelmusic.data.model.StorageFilter.OFFLINE -> stringResource(R.string.library_storage_filter_offline)
-                         com.unshoo.pixelmusic.data.model.StorageFilter.DOWNLOADED_ONLY -> stringResource(R.string.library_storage_filter_downloaded_only)
-                     }
+                          com.unshoo.pixelmusic.data.model.StorageFilter.ALL -> Icons.Rounded.Dataset
+                          com.unshoo.pixelmusic.data.model.StorageFilter.LOCAL -> Icons.Rounded.PhoneAndroid
+                          com.unshoo.pixelmusic.data.model.StorageFilter.TELEGRAM -> ImageVector.vectorResource(id = R.drawable.telegram)
+                          com.unshoo.pixelmusic.data.model.StorageFilter.YOUTUBE -> ImageVector.vectorResource(id = R.drawable.ic_youtube)
+                          com.unshoo.pixelmusic.data.model.StorageFilter.ONLINE -> Icons.Rounded.Cloud
+                      }
+                      val tooltipText = when(currentStorageFilter) {
+                          com.unshoo.pixelmusic.data.model.StorageFilter.ALL -> stringResource(R.string.library_storage_filter_all_songs)
+                          com.unshoo.pixelmusic.data.model.StorageFilter.LOCAL -> stringResource(R.string.library_storage_filter_local)
+                          com.unshoo.pixelmusic.data.model.StorageFilter.TELEGRAM -> stringResource(R.string.library_storage_filter_telegram)
+                          com.unshoo.pixelmusic.data.model.StorageFilter.YOUTUBE -> stringResource(R.string.library_storage_filter_youtube)
+                          com.unshoo.pixelmusic.data.model.StorageFilter.ONLINE -> stringResource(R.string.library_storage_filter_online)
+                      }
                      val tooltipState = rememberTooltipState()
 
                     @OptIn(ExperimentalMaterial3Api::class)
