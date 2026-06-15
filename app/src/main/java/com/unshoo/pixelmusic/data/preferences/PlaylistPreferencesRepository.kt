@@ -103,13 +103,15 @@ class PlaylistPreferencesRepository @Inject constructor(
                     )
                 }
             },
-        AppDatabase.getInstance(context).playlistRepository().observeAll(),
+        AppDatabase.getInstance(context).playlistRepository().observeAllPlaylistInfo(),
+        AppDatabase.getInstance(context).playlistRepository().observePlaylistSongCounts(),
         AppDatabase.getInstance(context).songRepository().observeDownloadedSongs(),
         _pinnedPlaylistIds
-    ) { localPlaylists, ytPlaylists, downloadedSongs, pinnedIds ->
-        val mappedYtPlaylists = ytPlaylists.map { ytPlaylist ->
-            val pId = ytPlaylist.info.id
-            val defaultCoverImage = ytPlaylist.info.coverPath ?: ytPlaylist.info.coverHref
+    ) { localPlaylists, ytPlaylistInfos, ytSongCountRows, downloadedSongs, pinnedIds ->
+        val ytSongCounts = ytSongCountRows.associate { it.playlistId to it.songCount }
+        val mappedYtPlaylists = ytPlaylistInfos.map { ytPlaylistInfo ->
+            val pId = ytPlaylistInfo.id
+            val defaultCoverImage = ytPlaylistInfo.coverPath ?: ytPlaylistInfo.coverHref
             val savedCoverImageUri = coverPrefs.getString("${pId}_coverImageUri", null)
             val coverColor = if (coverPrefs.contains("${pId}_coverColorArgb")) coverPrefs.getInt("${pId}_coverColorArgb", 0) else null
             val coverIcon = coverPrefs.getString("${pId}_coverIconName", null)
@@ -119,13 +121,16 @@ class PlaylistPreferencesRepository @Inject constructor(
             val detail3 = if (coverPrefs.contains("${pId}_coverShapeDetail3")) coverPrefs.getFloat("${pId}_coverShapeDetail3", 0f) else null
             val detail4 = if (coverPrefs.contains("${pId}_coverShapeDetail4")) coverPrefs.getFloat("${pId}_coverShapeDetail4", 0f) else null
 
-            val playlistTitle = if (ytPlaylist.info.id == "_downloaded_") "Downloaded Songs" else ytPlaylist.info.title
-            val playlistSongIds = if (ytPlaylist.info.id == "_downloaded_") {
+            val playlistTitle = if (ytPlaylistInfo.id == "_downloaded_") "Downloaded Songs" else ytPlaylistInfo.title
+            val storedSongCount = ytSongCounts[pId] ?: ytPlaylistInfo.lastSyncSongCount
+            val playlistSongIds = if (ytPlaylistInfo.id == "_downloaded_") {
                 downloadedSongs.filter { it.downloaded }.map { "youtube_${it.youtubeId}" }
             } else {
-                ytPlaylist.songs.map { "youtube_${it.youtubeId}" }
+                // Keep library playlist cards lightweight. Song IDs are loaded on demand in
+                // PlaylistDetailScreen; otherwise 10k-song playlists make every library update huge.
+                emptyList()
             }
-            val (cTime, mTime) = getOrCreatePlaylistTimestamps(pId, ytPlaylist.info.lastSyncTimestamp, playlistTitle, playlistSongIds)
+            val (cTime, mTime) = getOrCreatePlaylistTimestamps(pId, ytPlaylistInfo.lastSyncTimestamp, playlistTitle, playlistSongIds)
 
             Playlist(
                 id = pId,
@@ -144,7 +149,7 @@ class PlaylistPreferencesRepository @Inject constructor(
                 coverShapeDetail3 = detail3,
                 coverShapeDetail4 = detail4,
                 source = "YOUTUBE",
-                displaySongCount = ytPlaylist.info.lastSyncSongCount.takeIf { it > 0 }
+                displaySongCount = storedSongCount.takeIf { it > 0 }
             )
         }
         val ytIds = mappedYtPlaylists.map { it.id }.toSet()

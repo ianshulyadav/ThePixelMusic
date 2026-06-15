@@ -1684,6 +1684,7 @@ constructor(
 
             // 1. Fetch remote user-created playlists (delta sync — only insert new songs)
             var remotePlaylistsSuccess = false
+            var youtubePlaylistContentChanged = false
             try {
                 val remotePlaylists = YoutubePlaylistDataSource().retrieveAll(settings)
                 // ArchiveTune-style: surface playlist cards immediately from the lightweight
@@ -1707,18 +1708,29 @@ constructor(
                     val existingPlaylist = appDatabase.playlistRepository().getPlaylistById(playlistInfo.id)
                     val existingSongCount = existingPlaylist?.info?.lastSyncSongCount ?: 0
                     val existingHydratedCount = existingPlaylist?.songs?.size ?: 0
+                    val remoteReportedCount = playlistInfo.lastSyncSongCount
+
+                    // If YouTube's lightweight library card provides a count and it matches our
+                    // hydrated cache, skip the expensive full playlist fetch. This is the key path
+                    // for 5k-20k song playlists on normal startup/resync.
+                    if (existingPlaylist != null && existingHydratedCount > 0 && remoteReportedCount > 0 && remoteReportedCount == existingSongCount) {
+                        Log.d(TAG, "Skipping playlist '${playlistInfo.title}' — count unchanged ($existingSongCount songs)")
+                        kotlinx.coroutines.delay(20L)
+                        return@forEach
+                    }
 
                     val emptyPlaylist = Playlist(playlistInfo, emptyList())
                     val fullPlaylist = YoutubePlaylistDataSource().retrieveOne(emptyPlaylist, settings)
 
                     // Delta check: process if song count changed OR the lightweight card exists
-                    // but has no cross-refs yet. This prevents permanent "0 songs" cards.
+                    // but has no cross-refs yet. This prevents permanent empty cards.
                     if (fullPlaylist.songs.size != existingSongCount || existingHydratedCount == 0 || existingPlaylist == null) {
                         // Use preserving insert — keeps existing downloaded songs intact
                         appDatabase.playlistRepository().insertPlaylistWithSongsPreserving(
                             fullPlaylist,
                             appDatabase.songRepository()
                         )
+                        youtubePlaylistContentChanged = true
                         Log.i(TAG, "Delta synced playlist '${playlistInfo.title}': ${fullPlaylist.songs.size} songs (was $existingSongCount)")
                     } else {
                         Log.d(TAG, "Skipping playlist '${playlistInfo.title}' — no changes (${existingSongCount} songs)")
@@ -1775,6 +1787,11 @@ constructor(
             val downloadedSongs = appDatabase.songRepository().getDownloadedSongs()
 
             val existingUnifiedYoutubeIds = musicDao.getAllYoutubeSongIds()
+
+            if (!youtubePlaylistContentChanged && existingUnifiedYoutubeIds.isNotEmpty()) {
+                Log.d(TAG, "YouTube playlists unchanged; skipping heavy unified YouTube remap.")
+                return
+            }
 
             if (youtubePlaylists.isEmpty() && downloadedSongs.isEmpty() && remoteLikedSongsList.isEmpty()) {
                 if (existingUnifiedYoutubeIds.isNotEmpty()) {
