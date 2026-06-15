@@ -14,6 +14,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import timber.log.Timber
 import unshoo.ianshulyadav.pixelmusic.innertube.YouTube
 import unshoo.ianshulyadav.pixelmusic.innertube.models.ArtistItem
@@ -41,22 +43,39 @@ class YouTubeLibrarySyncManager @Inject constructor(
         private const val TAG = "YTLibSync"
         private const val LIKED_SONGS_PLAYLIST = "LM"
         private const val BROWSE_SUBSCRIPTIONS = "FEmusic_library_corpus_artists"
+        private const val MIN_SYNC_INTERVAL_MS = 10 * 60 * 1000L
     }
+
+    private val syncMutex = Mutex()
+    @Volatile private var lastSuccessfulSyncAtMs: Long = 0L
 
     /**
      * Performs a full YouTube library sync (subscribed artists + liked songs).
      * Runs on IO dispatcher; safe to call from any coroutine.
      */
-    suspend fun syncNow() = withContext(Dispatchers.IO) {
-        try {
-            syncSubscribedArtists()
-        } catch (e: Exception) {
-            Timber.tag(TAG).w(e, "Failed to sync subscribed artists")
+    suspend fun syncNow(force: Boolean = false) = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        if (!force && now - lastSuccessfulSyncAtMs < MIN_SYNC_INTERVAL_MS) {
+            Timber.tag(TAG).d("Skipping account sync; recently synced")
+            return@withContext
         }
-        try {
-            syncLikedSongs()
-        } catch (e: Exception) {
-            Timber.tag(TAG).w(e, "Failed to sync liked songs")
+
+        syncMutex.withLock {
+            val lockedNow = System.currentTimeMillis()
+            if (!force && lockedNow - lastSuccessfulSyncAtMs < MIN_SYNC_INTERVAL_MS) {
+                return@withLock
+            }
+            try {
+                syncSubscribedArtists()
+            } catch (e: Exception) {
+                Timber.tag(TAG).w(e, "Failed to sync subscribed artists")
+            }
+            try {
+                syncLikedSongs()
+            } catch (e: Exception) {
+                Timber.tag(TAG).w(e, "Failed to sync liked songs")
+            }
+            lastSuccessfulSyncAtMs = System.currentTimeMillis()
         }
     }
 

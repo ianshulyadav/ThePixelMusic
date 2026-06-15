@@ -804,18 +804,6 @@ class SettingsViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
-            userPreferencesRepository.youtubePlaylistUploadSyncEnabledFlow.collect { enabled ->
-                _uiState.update { it.copy(youtubePlaylistUploadSyncEnabled = enabled) }
-            }
-        }
-
-        viewModelScope.launch {
-            userPreferencesRepository.showSmartMixPlaylistsFlow.collect { show ->
-                _uiState.update { it.copy(showSmartMixPlaylists = show) }
-            }
-        }
-
-        viewModelScope.launch {
             userPreferencesRepository.replayGainEnabledFlow.collect { enabled ->
                 _uiState.update { it.copy(replayGainEnabled = enabled) }
             }

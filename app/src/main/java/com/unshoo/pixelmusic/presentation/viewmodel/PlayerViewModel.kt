@@ -811,6 +811,7 @@ class PlayerViewModel @Inject constructor(
     private var pendingDeleteSong: Song? = null
     private var pendingDeleteCallback: ((Boolean) -> Unit)? = null
     private var lastRegisteredVideoId: String? = null
+    private var pendingYoutubeHistoryVideoId: String? = null
     private var youtubePlaybackHistoryJob: Job? = null
 
     private val _albumNavigationRequests = MutableSharedFlow<String>(extraBufferCapacity = 1)
@@ -3974,6 +3975,7 @@ class PlayerViewModel @Inject constructor(
                 transitionSchedulerJob?.cancel()
                 lyricsStateHolder.cancelLoading()
                 lastRegisteredVideoId = null
+                pendingYoutubeHistoryVideoId = null
                 if (playerCtrl.isPlaying) {
                     mediaItem?.let { registerYoutubePlaybackHistoryIfNeeded(it) }
                 }
@@ -4717,14 +4719,38 @@ class PlayerViewModel @Inject constructor(
                 ?.substringAfter("youtube://")
             ?: return
 
-        if (videoId.isBlank() || videoId == lastRegisteredVideoId) return
+        if (videoId.isBlank() || videoId == lastRegisteredVideoId || videoId == pendingYoutubeHistoryVideoId) return
 
         val playlistId = mediaItem.mediaMetadata.extras?.getString("playlistId")
+        pendingYoutubeHistoryVideoId = videoId
         youtubePlaybackHistoryJob?.cancel()
         youtubePlaybackHistoryJob = viewModelScope.launch(Dispatchers.IO) {
-            val registered = registerYoutubePlaybackHistory(videoId, playlistId)
-            if (registered) {
-                lastRegisteredVideoId = videoId
+            try {
+                // Match ArchiveTune PR #780 behavior: register after meaningful playback,
+                // not immediately on a short accidental skip. YouTube Music may still show
+                // it with a small server-side delay after this request succeeds.
+                delay(30_000L)
+                val stillPlayingSameVideo = withContext(Dispatchers.Main.immediate) {
+                    val controller = mediaController
+                    val currentItem = controller?.currentMediaItem
+                    val currentSong = currentItem?.let { resolveSongFromMediaItem(it) }
+                    val currentVideoId = currentSong?.youtubeId
+                        ?: currentItem?.mediaId?.takeIf { it.startsWith("youtube_") }?.substringAfter("youtube_")
+                        ?: currentItem?.localConfiguration?.uri?.toString()
+                            ?.takeIf { it.startsWith("youtube://") }
+                            ?.substringAfter("youtube://")
+                    controller?.isPlaying == true && currentVideoId == videoId
+                }
+                if (!stillPlayingSameVideo) return@launch
+
+                val registered = registerYoutubePlaybackHistory(videoId, playlistId)
+                if (registered) {
+                    lastRegisteredVideoId = videoId
+                }
+            } finally {
+                if (pendingYoutubeHistoryVideoId == videoId) {
+                    pendingYoutubeHistoryVideoId = null
+                }
             }
         }
     }
@@ -4746,6 +4772,8 @@ class PlayerViewModel @Inject constructor(
             com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.playbackTrackingCache.remove(videoId, cachedUrl)
         }
 
+        // ArchiveTune-style fallback: if stream URL resolution returned from cache or local file and
+        // no tracking URL was captured, fetch a lightweight player response just for playbackTracking.
         val trackingUrl = runCatching {
             val signatureTimestamp = unshoo.ianshulyadav.pixelmusic.innertube.NewPipeUtils
                 .getSignatureTimestamp(videoId)

@@ -610,9 +610,9 @@ fun PlaylistDetailScreen(
                         .weight(1f), Alignment.Center) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             if (isYoutubePlaylistHydrating) {
-                                androidx.compose.material3.CircularProgressIndicator(modifier = Modifier.size(42.dp))
+                                CircularProgressIndicator(modifier = Modifier.size(42.dp))
                                 Spacer(Modifier.height(12.dp))
-                                Text("Syncing playlist songs...", style = MaterialTheme.typography.titleMedium)
+                                Text("Syncing playlist songs…", style = MaterialTheme.typography.titleMedium)
                                 Text(
                                     "Songs will appear here automatically when YouTube Music hydration finishes.",
                                     style = MaterialTheme.typography.bodyMedium,
@@ -1388,13 +1388,15 @@ private fun DynamicPlaylistCoverHero(
     }
     val baseColor = playlist.coverColorArgb?.let(::Color)
         ?: MaterialTheme.colorScheme.primaryContainer
-    val bottomColor = MaterialTheme.colorScheme.surface
+    val bottomColor = MaterialTheme.colorScheme.surfaceContainerLowest
     val textColor = MaterialTheme.colorScheme.onSurface
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(200.dp)
+            .height(184.dp)
+            .padding(horizontal = 20.dp, vertical = 8.dp)
+            .clip(AbsoluteSmoothCornerShape(28.dp, 60, 28.dp, 60, 28.dp, 60, 28.dp, 60))
             .background(baseColor.copy(alpha = 0.38f))
     ) {
         if (!heroImageModel.isNullOrBlank()) {
@@ -1405,7 +1407,7 @@ private fun DynamicPlaylistCoverHero(
                 targetSize = Size(900, 900),
                 modifier = Modifier
                     .fillMaxSize()
-                    .blur(22.dp)
+                    .blur(12.dp)
                     .graphicsLayer {
                         scaleX = 1.12f
                         scaleY = 1.12f
@@ -1417,7 +1419,7 @@ private fun DynamicPlaylistCoverHero(
                 songs = fallbackSongs,
                 modifier = Modifier
                     .fillMaxSize()
-                    .blur(22.dp)
+                    .blur(12.dp)
                     .graphicsLayer {
                         scaleX = 1.15f
                         scaleY = 1.15f
@@ -1457,7 +1459,7 @@ private fun DynamicPlaylistCoverHero(
         Row(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(start = 20.dp, end = 20.dp, bottom = 16.dp, top = 8.dp),
+                .padding(18.dp),
             verticalAlignment = Alignment.Bottom,
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {

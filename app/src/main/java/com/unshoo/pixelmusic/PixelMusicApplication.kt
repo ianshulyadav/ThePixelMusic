@@ -167,15 +167,9 @@ class PixelMusicApplication : Application(), ImageLoaderFactory, Configuration.P
             }
         }
 
-        startupScope.launch {
-            kotlinx.coroutines.delay(2_500L)
-            val sessionId = unshoo.ianshulyadav.pixelmusic.innertube.YouTube.currentPlaybackAuthState().visitorData
-                ?: unshoo.ianshulyadav.pixelmusic.innertube.YouTube.currentPlaybackAuthState().dataSyncId
-            if (!sessionId.isNullOrBlank()) {
-                BotGuardTokenGenerator.preWarm(sessionId)
-            }
-        }
-
+        // Do not prewarm BotGuard/WebView during normal app startup. Spinning up a hidden
+        // WebView costs memory/CPU and makes midrange devices feel hot/laggy. The token engine
+        // is created lazily only if a YouTube track is still playing long enough to sync history.
         startupScope.launch {
             AlbumArtUtils.migrateLegacyCacheLocation(this@PixelMusicApplication)
             val savedLimit = runCatching {

@@ -199,9 +199,15 @@ object YoutubeHelper {
 
                 val thumbnailUrl =
                     getBestThumbnailUrl(playlistRenderer["thumbnailRenderer"] ?: return@forEach)
+                val songCount = extractPlaylistSongCount(playlistRenderer)
 
                 playlistInfos.add(
-                    PlaylistInfo(id = browseId, title = title, coverHref = thumbnailUrl)
+                    PlaylistInfo(
+                        id = browseId,
+                        title = title,
+                        coverHref = thumbnailUrl,
+                        lastSyncSongCount = songCount
+                    )
                 )
             }
 
@@ -244,9 +250,15 @@ object YoutubeHelper {
 
             val thumbnailUrl =
                 getBestThumbnailUrl(playlistRenderer["thumbnailRenderer"] ?: return@forEach)
+            val songCount = extractPlaylistSongCount(playlistRenderer)
 
             playlistInfos.add(
-                PlaylistInfo(id = browseId, title = title, coverHref = thumbnailUrl)
+                PlaylistInfo(
+                    id = browseId,
+                    title = title,
+                    coverHref = thumbnailUrl,
+                    lastSyncSongCount = songCount
+                )
             )
         }
 
@@ -271,6 +283,31 @@ object YoutubeHelper {
         }
 
         return playlistInfos
+    }
+
+    private fun extractPlaylistSongCount(playlistRenderer: JsonObject): Int {
+        fun parseCount(text: String): Int? {
+            val normalized = text.replace("\u00A0", " ")
+            val match = Regex("""(?i)(\d[\d,\.]*)\s*(songs?|tracks?|videos?|episodes?)""")
+                .find(normalized)
+                ?: return null
+            return match.groupValues[1]
+                .filter { it.isDigit() }
+                .toIntOrNull()
+                ?.takeIf { it > 0 }
+        }
+
+        val subtitleText = playlistRenderer["subtitle"]
+            ?.jsonObject?.get("runs")
+            ?.jsonArray
+            ?.joinToString(" ") { run ->
+                run.jsonObject["text"]?.jsonPrimitive?.contentOrNull.orEmpty()
+            }
+            .orEmpty()
+        parseCount(subtitleText)?.let { return it }
+
+        // Fallback for renderer variants/locales where the count is not in subtitle.runs.
+        return parseCount(playlistRenderer.toString()) ?: 0
     }
 
     fun extractSearchResults(jsonString: String): List<Song> {

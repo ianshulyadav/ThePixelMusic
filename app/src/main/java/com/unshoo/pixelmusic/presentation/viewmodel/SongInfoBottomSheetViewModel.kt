@@ -289,16 +289,6 @@ class SongInfoBottomSheetViewModel @Inject constructor(
         }
     }
 
-    fun downloadTelegramSong(song: Song) {
-        val fileId = song.telegramFileId ?: return
-        viewModelScope.launch {
-            _isSongDownloading.value = true
-            val path = runCatching { telegramRepository.downloadFileAwait(fileId, priority = 16) }.getOrNull()
-            _isSongDownloaded.value = !path.isNullOrBlank()
-            _isSongDownloading.value = false
-        }
-    }
-
     fun deleteYoutubeSong(song: Song) {
         val youtubeId = song.youtubeId ?: return
         viewModelScope.launch {
@@ -307,6 +297,16 @@ class SongInfoBottomSheetViewModel @Inject constructor(
             // disappears immediately instead of staying until a later sync.
             song.id.toLongOrNull()?.let { runCatching { musicRepository.deleteById(it) } }
             _isSongDownloaded.value = false
+            _isSongDownloading.value = false
+        }
+    }
+
+    fun downloadTelegramSong(song: Song) {
+        val fileId = song.telegramFileId ?: return
+        viewModelScope.launch {
+            _isSongDownloading.value = true
+            val path = runCatching { telegramRepository.downloadFileAwait(fileId, priority = 16) }.getOrNull()
+            _isSongDownloaded.value = !path.isNullOrBlank()
             _isSongDownloading.value = false
         }
     }
