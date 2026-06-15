@@ -485,8 +485,6 @@ fun LibraryArtistsTab(
     playerViewModel: PlayerViewModel,
     bottomBarHeight: Dp,
     currentArtistSortOption: SortOption,
-    artistLibraryFilter: String,
-    onArtistLibraryFilterChange: (String) -> Unit,
     onArtistClick: (Long) -> Unit,
     isRefreshing: Boolean,
     onRefresh: () -> Unit,
@@ -535,31 +533,6 @@ fun LibraryArtistsTab(
             (refreshState is LoadState.NotLoading && !reachedEndOfPagination)
     )
 
-    val artistFilterHeader: @Composable () -> Unit = @Composable {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 4.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Button(
-                onClick = { onArtistLibraryFilterChange("SUBSCRIBED") },
-                enabled = artistLibraryFilter != "SUBSCRIBED",
-                modifier = Modifier.weight(1f)
-            ) {
-                Text("Subscribed", maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            Button(
-                onClick = { onArtistLibraryFilterChange("ALL_5_PLUS") },
-                enabled = artistLibraryFilter != "ALL_5_PLUS",
-                modifier = Modifier.weight(1f)
-            ) {
-                Text("All artists 5+", maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-        }
-    }
-
     when {
         refreshState is LoadState.Error && artists.itemCount == 0 -> {
             val error = (refreshState as LoadState.Error).error
@@ -601,7 +574,6 @@ fun LibraryArtistsTab(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 contentPadding = PaddingValues(bottom = bottomBarHeight + MiniPlayerHeight + ListExtraBottomGap)
             ) {
-                item(key = "artist_filter_header_loading", contentType = "artist_filter") { artistFilterHeader() }
                 item(key = "skeleton_top_spacer") { Spacer(Modifier.height(4.dp)) }
                 items(10, key = { "skeleton_artist_$it" }) {
                     ArtistListItem(
@@ -614,20 +586,11 @@ fun LibraryArtistsTab(
         }
 
         artists.itemCount == 0 && refreshState is LoadState.NotLoading -> {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 12.dp)
-            ) {
-                artistFilterHeader()
-                Box(modifier = Modifier.weight(1f)) {
-                    LibraryExpressiveEmptyState(
-                        tabId = LibraryTabId.ARTISTS,
-                        storageFilter = storageFilter,
-                        bottomBarHeight = bottomBarHeight
-                    )
-                }
-            }
+            LibraryExpressiveEmptyState(
+                tabId = LibraryTabId.ARTISTS,
+                storageFilter = storageFilter,
+                bottomBarHeight = bottomBarHeight
+            )
         }
 
         else -> {
@@ -664,7 +627,6 @@ fun LibraryArtistsTab(
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                             contentPadding = PaddingValues(bottom = bottomBarHeight + MiniPlayerHeight + ListExtraBottomGap)
                         ) {
-                            item(key = "artist_filter_header", contentType = "artist_filter") { artistFilterHeader() }
                             items(
                                 count = artists.itemCount,
                                 key = { index -> artists.peek(index)?.id ?: "artist_placeholder_$index" },

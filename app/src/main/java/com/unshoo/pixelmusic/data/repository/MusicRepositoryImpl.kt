@@ -246,13 +246,19 @@ class MusicRepositoryImpl @Inject constructor(
     ): Flow<PagingData<Artist>> {
         return combine(
             userPreferencesRepository.allowedDirectoriesFlow,
-            userPreferencesRepository.blockedDirectoriesFlow
-        ) { allowedDirs, blockedDirs ->
-            allowedDirs to blockedDirs
-        }.flatMapLatest { (allowedDirs, blockedDirs) ->
+            userPreferencesRepository.blockedDirectoriesFlow,
+            userPreferencesRepository.subscribedArtistIdsFlow
+        ) { allowedDirs, blockedDirs, subscribedIds ->
+            Triple(allowedDirs, blockedDirs, subscribedIds)
+        }.flatMapLatest { (allowedDirs, blockedDirs, subscribedIds) ->
             flow {
                 val (allowedParentDirs, applyDirectoryFilter) =
                     computeAllowedDirs(allowedDirs, blockedDirs)
+                val safeSubscribedIds = subscribedIds.filter { it.isNotBlank() }.ifEmpty { listOf("__none__") }
+
+                val isSubscribedOnly = sortOption == SortOption.ArtistSubscribed
+                val minSongCount = if (sortOption == SortOption.ArtistMinSongs) 5 else 0
+
                 emit(
                     Pager(
                         config = defaultLibraryPagingConfig,
@@ -261,7 +267,10 @@ class MusicRepositoryImpl @Inject constructor(
                                 allowedParentDirs = allowedParentDirs,
                                 applyDirectoryFilter = applyDirectoryFilter,
                                 filterMode = storageFilter.toFilterMode(),
-                                sortOrder = sortOption.storageKey
+                                sortOrder = sortOption.storageKey,
+                                subscribedOnly = if (isSubscribedOnly) 1 else 0,
+                                subscribedIds = safeSubscribedIds,
+                                minSongCount = minSongCount
                             )
                         }
                     ).flow

@@ -1567,7 +1567,8 @@ interface MusicDao {
 
     @Query("""
         SELECT artists.id, artists.name, artists.image_url, artists.custom_image_uri,
-               artists.channel_id, COUNT(DISTINCT songs.id) AS track_count
+               artists.channel_id, COUNT(DISTINCT songs.id) AS track_count,
+               SUM(COALESCE(song_engagements.play_count, 0)) AS total_play_count
         FROM artists
         LEFT JOIN song_artist_cross_ref ON song_artist_cross_ref.artist_id = artists.id
         LEFT JOIN songs ON song_artist_cross_ref.song_id = songs.id AND (
@@ -1583,32 +1584,46 @@ interface MusicDao {
                 AND songs.id NOT IN (SELECT related_song_id FROM related_song_map)
             )
         )
-        WHERE (artists.channel_id IS NOT NULL AND artists.channel_id != '')
-           OR (
-               songs.id IS NOT NULL 
-               AND (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
-               AND (
-                   :filterMode = 0
-                   OR (
-                       :filterMode = 1
-                       AND (songs.source_type = 0 OR (songs.file_path IS NOT NULL AND songs.file_path != ''))
-                   )
-                   OR (
-                       :filterMode = 2
-                       AND songs.source_type != 0
-                   )
-                   OR (
-                       :filterMode = 3
-                       AND (songs.file_path IS NOT NULL AND songs.file_path != '')
-                   )
-               )
-           )
+        LEFT JOIN song_engagements ON (
+            (songs.source_type != 7 AND CAST(songs.id AS TEXT) = song_engagements.song_id)
+            OR (songs.source_type = 7 AND songs.content_uri_string = REPLACE(song_engagements.song_id, 'youtube_', 'youtube://'))
+        )
+        WHERE (
+            (:subscribedOnly = 0 OR (
+                artists.channel_id IN (:subscribedIds)
+                OR CAST(artists.id AS TEXT) IN (:subscribedIds)
+            ))
+            AND (
+                (artists.channel_id IS NOT NULL AND artists.channel_id != '')
+                OR (
+                    songs.id IS NOT NULL 
+                    AND (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
+                    AND (
+                        :filterMode = 0
+                        OR (
+                            :filterMode = 1
+                            AND (songs.source_type = 0 OR (songs.file_path IS NOT NULL AND songs.file_path != ''))
+                        )
+                        OR (
+                            :filterMode = 2
+                            AND songs.source_type != 0
+                        )
+                        OR (
+                            :filterMode = 3
+                            AND (songs.file_path IS NOT NULL AND songs.file_path != '')
+                        )
+                    )
+                )
+            )
+        )
         GROUP BY artists.id
+        HAVING track_count >= :minSongCount
         ORDER BY
             CASE WHEN :sortOrder = 'artist_name_az' THEN artists.name END COLLATE NOCASE ASC,
             CASE WHEN :sortOrder = 'artist_name_za' THEN artists.name END COLLATE NOCASE DESC,
             CASE WHEN :sortOrder = 'artist_num_songs_desc' THEN track_count END DESC,
             CASE WHEN :sortOrder = 'artist_num_songs_asc' THEN track_count END ASC,
+            CASE WHEN :sortOrder = 'artist_most_played' THEN total_play_count END DESC,
             artists.name COLLATE NOCASE ASC,
             artists.id ASC
     """)
@@ -1616,7 +1631,10 @@ interface MusicDao {
         allowedParentDirs: List<String>,
         applyDirectoryFilter: Boolean,
         filterMode: Int,
-        sortOrder: String
+        sortOrder: String,
+        subscribedOnly: Int,
+        subscribedIds: List<String>,
+        minSongCount: Int
     ): PagingSource<Int, ArtistEntity>
 
     /**

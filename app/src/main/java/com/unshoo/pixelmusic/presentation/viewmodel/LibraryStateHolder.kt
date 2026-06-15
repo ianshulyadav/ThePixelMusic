@@ -122,21 +122,11 @@ class LibraryStateHolder @Inject constructor(
     val artistsPagingFlow: Flow<androidx.paging.PagingData<Artist>> =
         combine(
             _currentArtistSortOption,
-            userPreferencesRepository.artistLibraryFilterFlow,
-            userPreferencesRepository.subscribedArtistIdsFlow
-        ) { sortOption, filter, subscribedIds ->
-            Triple(sortOption, filter, subscribedIds)
-        }.flatMapLatest { (sortOption, filter, subscribedIds) ->
-            when (filter) {
-                "ALL_5_PLUS" -> musicRepository.getPaginatedAllLibraryArtistsMinSongs(
-                    sortOption = sortOption,
-                    minSongCount = 5
-                )
-                else -> musicRepository.getPaginatedSubscribedYouTubeArtists(
-                    sortOption = sortOption,
-                    subscribedIds = subscribedIds
-                )
-            }
+            effectiveStorageFilter
+        ) { sortOption, filter ->
+            sortOption to filter
+        }.flatMapLatest { (sortOption, filter) ->
+            musicRepository.getPaginatedArtists(sortOption, filter)
         }.flowOn(Dispatchers.IO)
 
     @OptIn(ExperimentalCoroutinesApi::class)
