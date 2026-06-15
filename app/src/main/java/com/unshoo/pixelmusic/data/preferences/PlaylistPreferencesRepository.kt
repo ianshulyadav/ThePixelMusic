@@ -143,10 +143,14 @@ class PlaylistPreferencesRepository @Inject constructor(
                 coverShapeDetail2 = detail2,
                 coverShapeDetail3 = detail3,
                 coverShapeDetail4 = detail4,
-                source = "YOUTUBE"
+                source = "YOUTUBE",
+                displaySongCount = ytPlaylist.info.lastSyncSongCount.takeIf { it > 0 }
             )
         }
-        val localWithPins = localPlaylists.map { it.copy(isPinned = pinnedIds.contains(it.id)) }
+        val ytIds = mappedYtPlaylists.map { it.id }.toSet()
+        val localWithPins = localPlaylists
+            .filterNot { it.source == "YOUTUBE" && it.id in ytIds }
+            .map { it.copy(isPinned = pinnedIds.contains(it.id)) }
         val ytWithPins = mappedYtPlaylists.map { it.copy(isPinned = pinnedIds.contains(it.id)) }
         (localWithPins + ytWithPins).distinctBy { it.id }
     }

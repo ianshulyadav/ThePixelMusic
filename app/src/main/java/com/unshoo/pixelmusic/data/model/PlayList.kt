@@ -23,7 +23,10 @@ data class Playlist(
     val coverShapeDetail3: Float? = null, // e.g., StarScale
     val coverShapeDetail4: Float? = null, // e.g., Star Sides (Int)
     val source: String = "LOCAL", // Source: "LOCAL", "NETEASE", "TELEGRAM", "AI", etc.
-    val isPinned: Boolean = false
+    val isPinned: Boolean = false,
+    // Optional remote/library count shown before a full playlist hydration finishes.
+    // Keeps YouTube Music playlists from displaying "0 Song" while details load.
+    val displaySongCount: Int? = null
 )
 
 enum class PlaylistShapeType {

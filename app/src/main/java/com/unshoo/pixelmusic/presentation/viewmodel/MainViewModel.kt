@@ -27,6 +27,8 @@ class MainViewModel @Inject constructor(
     userPreferencesRepository: UserPreferencesRepository
 ) : ViewModel() {
 
+    private var hasTriggeredAccountLibrarySync = false
+
     init {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             playlistPreferencesRepository.pruneExpiredPlaylists()
@@ -46,6 +48,10 @@ class MainViewModel @Inject constructor(
                                         handle = info.channelHandle ?: "",
                                         avatarUrl = info.thumbnailUrl ?: ""
                                     )
+                                    if (!hasTriggeredAccountLibrarySync) {
+                                        hasTriggeredAccountLibrarySync = true
+                                        youTubeLibrarySyncManager.syncNow()
+                                    }
                                 }
                                 .onFailure { e ->
                                     LogUtils.e(this@MainViewModel, e, "Failed to fetch YouTube account info")
@@ -55,6 +61,7 @@ class MainViewModel @Inject constructor(
                         }
                     }
                 } else {
+                    hasTriggeredAccountLibrarySync = false
                     viewModelScope.launch {
                         datastoreRepository.saveYtProfile("", "", "")
                     }

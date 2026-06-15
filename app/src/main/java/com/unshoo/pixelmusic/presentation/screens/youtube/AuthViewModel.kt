@@ -8,6 +8,7 @@ import com.unshoo.pixelmusic.data.remote.youtube.DatastoreRepository
 import com.unshoo.pixelmusic.data.remote.youtube.UmihiHelper.printd
 import com.unshoo.pixelmusic.data.model.youtube.Cookies
 import com.unshoo.pixelmusic.data.worker.SyncManager
+import com.unshoo.pixelmusic.data.worker.YouTubeLibrarySyncManager
 import unshoo.ianshulyadav.pixelmusic.innertube.YouTube
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -20,7 +21,8 @@ import javax.inject.Inject
 @HiltViewModel
 class AuthViewModel @Inject constructor(
     private val datastoreRepository: DatastoreRepository,
-    private val syncManager: SyncManager
+    private val syncManager: SyncManager,
+    private val youTubeLibrarySyncManager: YouTubeLibrarySyncManager
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(SettingsState())
     //  val uiState = _uiState.asStateFlow()
@@ -35,8 +37,11 @@ class AuthViewModel @Inject constructor(
                 saveCookies(Cookies(cookies))
                 _uiState.update { it.copy(isLoggedIn = true) }
                 _eventsChannel.emit(ScreenEvent.Out.LoginCompleted)
-                // Trigger an immediate background synchronization of user playlists and library
-                syncManager.fullSync()
+                // Immediately hydrate account-owned artists/liked songs so Library is not empty
+                // while the heavier playlist/song sync runs in WorkManager.
+                launch(kotlinx.coroutines.Dispatchers.IO) { youTubeLibrarySyncManager.syncNow() }
+                // Trigger a lighter incremental sync; full local rescans on login make the app laggy.
+                syncManager.incrementalSync()
             }
         }
     }
