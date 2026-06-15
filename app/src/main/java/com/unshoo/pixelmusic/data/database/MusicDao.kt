@@ -504,8 +504,15 @@ interface MusicDao {
                 AND id NOT IN (SELECT related_song_id FROM related_song_map)
             )
         )
-        AND (title LIKE '%' || :query || '%' OR artist_name LIKE '%' || :query || '%')
-        ORDER BY title ASC
+        AND (
+            title LIKE '%' || :query || '%'
+            OR artist_name LIKE '%' || :query || '%'
+            OR album_name LIKE '%' || :query || '%'
+            OR file_path LIKE '%' || :query || '%'
+        )
+        ORDER BY
+            CASE WHEN title = :query COLLATE NOCASE THEN 0 ELSE 1 END ASC,
+            title ASC
     """)
     fun searchSongsLike(
         query: String,
@@ -1081,8 +1088,13 @@ interface MusicDao {
                 AND id NOT IN (SELECT related_song_id FROM related_song_map)
             )
         )
-        AND title LIKE '%' || :query || '%'
-        ORDER BY title ASC
+        AND (
+            title LIKE '%' || :query || '%'
+            OR file_path LIKE '%' || :query || '%'
+        )
+        ORDER BY
+            CASE WHEN title = :query COLLATE NOCASE THEN 0 ELSE 1 END ASC,
+            title ASC
         LIMIT :limit
     """)
     fun searchSongsLimitedByTitleLike(
@@ -1111,8 +1123,15 @@ interface MusicDao {
                 AND id NOT IN (SELECT related_song_id FROM related_song_map)
             )
         )
-        AND (title LIKE '%' || :query || '%' OR artist_name LIKE '%' || :query || '%')
-        ORDER BY title ASC
+        AND (
+            title LIKE '%' || :query || '%'
+            OR artist_name LIKE '%' || :query || '%'
+            OR album_name LIKE '%' || :query || '%'
+            OR file_path LIKE '%' || :query || '%'
+        )
+        ORDER BY
+            CASE WHEN title = :query COLLATE NOCASE THEN 0 ELSE 1 END ASC,
+            title ASC
         LIMIT :limit
     """)
     fun searchSongsLimitedLike(

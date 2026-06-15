@@ -88,6 +88,7 @@ class PlaybackStateHolder @Inject constructor(
     private var pausedPositionOverrideToken: Long? = null
     private var pausedPositionOverrideMs: Long? = null
     private var pausedPositionOverrideSetAtMs: Long = 0L
+    private var consecutiveMediaMismatchProgressSkips = 0
     private var coldStartSnapshotMediaId: String? = null
     private var coldStartSnapshotToken: Long? = null
     private var coldStartSnapshotPositionMs: Long? = null
@@ -676,13 +677,18 @@ class PlaybackStateHolder @Inject constructor(
                                  visibleSong.id != currentMediaId
 
                              if (hasMediaMismatch) {
-                                Timber.tag(TAG).v(
-                                     "Skipping local progress tick due media mismatch (visible=%s, player=%s)",
-                                     visibleSong?.id,
-                                     currentMediaId
-                                 )
-                                delay(tickMs)
-                                continue
+                                consecutiveMediaMismatchProgressSkips++
+                                if (consecutiveMediaMismatchProgressSkips <= 2) {
+                                    Timber.tag(TAG).v(
+                                         "Skipping local progress tick due media mismatch (visible=%s, player=%s)",
+                                         visibleSong?.id,
+                                         currentMediaId
+                                     )
+                                    delay(tickMs)
+                                    continue
+                                }
+                            } else {
+                                consecutiveMediaMismatchProgressSkips = 0
                             }
 
                               val currentPosition = controller.currentPosition.coerceAtLeast(0L)
