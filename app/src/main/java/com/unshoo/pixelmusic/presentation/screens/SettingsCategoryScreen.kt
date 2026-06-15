@@ -1172,6 +1172,45 @@ fun SettingsCategoryScreen(
                         }
                         SettingsCategory.BEHAVIOR -> {
                             SettingsSubsection(
+                                title = "YouTube Link Integration"
+                            ) {
+                                ActionSettingsItem(
+                                    title = "YouTube Link Intercept",
+                                    subtitle = "Configure Android System settings to allow Pixel Music to automatically open music.youtube.com links.",
+                                    icon = {
+                                        Icon(
+                                            painterResource(R.drawable.rounded_touch_app_24),
+                                            null,
+                                            tint = MaterialTheme.colorScheme.secondary
+                                        )
+                                    },
+                                    primaryActionLabel = "Open System Settings",
+                                    onPrimaryAction = {
+                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                            try {
+                                                val intent = Intent(
+                                                    Settings.ACTION_APP_OPEN_BY_DEFAULT_SETTINGS,
+                                                    Uri.parse("package:${context.packageName}")
+                                                )
+                                                context.startActivity(intent)
+                                            } catch (e: Exception) {
+                                                val intent = Intent(
+                                                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                                    Uri.parse("package:${context.packageName}")
+                                                )
+                                                context.startActivity(intent)
+                                            }
+                                        } else {
+                                            val intent = Intent(
+                                                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                                Uri.parse("package:${context.packageName}")
+                                            )
+                                            context.startActivity(intent)
+                                        }
+                                    }
+                                )
+                            }
+                            SettingsSubsection(
                                 title = stringResource(R.string.setcat_folders)
                             ) {
                                 SwitchSettingItem(
