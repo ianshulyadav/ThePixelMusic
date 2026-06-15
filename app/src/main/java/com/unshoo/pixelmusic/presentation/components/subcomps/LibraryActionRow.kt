@@ -192,7 +192,6 @@ fun LibraryActionRow(
                                 modifier = Modifier.size(20.dp).rotate(iconRotation)
                             )
                             Text(
-                                modifier = Modifier.animateContentSize(),
                                 text = text,
                                 overflow = TextOverflow.Ellipsis,
                                 style = MaterialTheme.typography.labelLarge,

@@ -1168,7 +1168,7 @@ fun LibraryScreen(
                                 }
                         }
 
-                        val currentSelectedSortOption: SortOption? = when (currentTabId) {
+                        val currentSelectedSortOption: SortOption? = when (currentTab) {
                             LibraryTabId.SONGS -> playerUiState.currentSongSortOption
                             LibraryTabId.ALBUMS -> playerUiState.currentAlbumSortOption
                             LibraryTabId.ARTISTS -> playerUiState.currentArtistSortOption
@@ -1177,13 +1177,13 @@ fun LibraryScreen(
                             LibraryTabId.FOLDERS -> playerUiState.currentFolderSortOption
                         }
 
-                        val showLocateButton = when (currentTabId) {
+                        val showLocateButton = when (currentTab) {
                             LibraryTabId.SONGS -> songsShowLocateButton
                             LibraryTabId.LIKED -> likedShowLocateButton
                             LibraryTabId.FOLDERS -> foldersShowLocateButton
                             else -> false
                         }
-                        val locateAction = when (currentTabId) {
+                        val locateAction = when (currentTab) {
                             LibraryTabId.SONGS -> songsLocateAction
                             LibraryTabId.LIKED -> likedLocateAction
                             LibraryTabId.FOLDERS -> foldersLocateAction
@@ -1221,7 +1221,7 @@ fun LibraryScreen(
                         ) { inSelectionMode ->
                             if (inSelectionMode) {
                                 // Playlist selection row
-                                if (currentTabId == LibraryTabId.PLAYLISTS && isPlaylistSelectionMode) {
+                                if (currentTab == LibraryTabId.PLAYLISTS && isPlaylistSelectionMode) {
                                     SelectionActionRow(
                                         selectedCount = selectedPlaylists.size,
                                         onSelectAll = {
@@ -1230,7 +1230,7 @@ fun LibraryScreen(
                                         onDeselect = { playerViewModel.playlistSelectionStateHolder.clearSelection() },
                                         onOptionsClick = { showPlaylistMultiSelectionSheet = true }
                                     )
-                                } else if (currentTabId == LibraryTabId.ALBUMS && isAlbumSelectionMode) {
+                                } else if (currentTab == LibraryTabId.ALBUMS && isAlbumSelectionMode) {
                                     SelectionActionRow(
                                         selectedCount = selectedAlbums.size,
                                         onSelectAll = {
@@ -1301,8 +1301,8 @@ fun LibraryScreen(
                                     showLocateButton = showLocateButton,
                                     onSortClick = { playerViewModel.showSortingSheet() },
                                     onLocateClick = { locateAction?.invoke() },
-                                    isPlaylistTab = currentTabId == LibraryTabId.PLAYLISTS,
-                                    isFoldersTab = currentTabId == LibraryTabId.FOLDERS && (!playerUiState.isFoldersPlaylistView || playerUiState.currentFolder != null),
+                                    isPlaylistTab = currentTab == LibraryTabId.PLAYLISTS,
+                                    isFoldersTab = currentTab == LibraryTabId.FOLDERS && (!playerUiState.isFoldersPlaylistView || playerUiState.currentFolder != null),
                                     onImportM3uClick = { showImportSheet = true },
                                     currentFolder = playerUiState.currentFolder,
                                     folderRootPath = playerUiState.folderSourceRootPath.ifBlank {
@@ -1312,11 +1312,11 @@ fun LibraryScreen(
                                     onFolderClick = { playerViewModel.navigateToFolder(it) },
                                     onNavigateBack = { playerViewModel.navigateBackFolder() },
                                     isShuffleEnabled = isShuffleEnabled,
-                                    showStorageFilterButton = currentTabId == LibraryTabId.SONGS ||
-                                            currentTabId == LibraryTabId.ALBUMS ||
-                                            currentTabId == LibraryTabId.ARTISTS ||
-                                            currentTabId == LibraryTabId.LIKED ||
-                                            (ENABLE_FOLDERS_STORAGE_FILTER && currentTabId == LibraryTabId.FOLDERS),
+                                    showStorageFilterButton = currentTab == LibraryTabId.SONGS ||
+                                            currentTab == LibraryTabId.ALBUMS ||
+                                            currentTab == LibraryTabId.ARTISTS ||
+                                            currentTab == LibraryTabId.LIKED ||
+                                            (ENABLE_FOLDERS_STORAGE_FILTER && currentTab == LibraryTabId.FOLDERS),
                                     currentStorageFilter = playerUiState.currentStorageFilter,
                                     onStorageFilterClick = { playerViewModel.toggleStorageFilter() }
                                 )
