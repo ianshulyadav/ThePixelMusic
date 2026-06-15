@@ -342,26 +342,28 @@ val OrangeLightColorScheme = lightColorScheme(
 )
 
 // --- Dark & Grey Palette (Monochrome/Minimal) ---
-private val GreyDarkBackground = Color(0xFF121212)
-private val GreyDarkSurface = Color(0xFF1E1E1E)
-private val GreyDarkPrimary = Color(0xFFE0E0E0)
-private val GreyDarkSecondary = Color(0xFF9E9E9E)
-private val GreyDarkTertiary = Color(0xFFCCCCCC)
+private val GreyDarkBackground = Color(0xFF000000) // Pure Black
+private val GreyDarkSurface = Color(0xFF121212) // Very Dark Grey
+private val GreyDarkSurfaceVariant = Color(0xFF1E1E1E) // Dark Grey
+private val GreyDarkPrimary = Color(0xFFE0E0E0) // Light Grey
+private val GreyDarkSecondary = Color(0xFFB0B0B0) // Medium Light Grey
+private val GreyDarkTertiary = Color(0xFF8E8E93) // System Grey
 private val GreyDarkOnPrimary = Color(0xFF121212)
-private val GreyDarkOnBackground = Color(0xFFF2F2F7)
+private val GreyDarkOnBackground = Color(0xFFFFFFFF) // Pure White text
 private val GreyDarkOnSurface = Color(0xFFF2F2F7)
 private val GreyDarkOnSurfaceVariant = Color(0xFFAEAEB2)
+private val GreyDarkOutline = Color(0xFF3A3A3C)
 
-private val GreyLightBackground = Color(0xFFF2F2F7)
-private val GreyLightSurface = Color(0xFFFFFFFF)
-private val GreyLightPrimary = Color(0xFF1C1C1E)
+private val GreyLightBackground = Color(0xFFFFFFFF) // Pure White
+private val GreyLightSurface = Color(0xFFF2F2F7) // Off-white
+private val GreyLightPrimary = Color(0xFF1C1C1E) // Near black
 private val GreyLightOnPrimary = Color(0xFFFFFFFF)
 private val GreyLightPrimaryContainer = Color(0xFFE5E5EA)
 private val GreyLightOnPrimaryContainer = Color(0xFF1C1C1E)
 private val GreyLightSecondary = Color(0xFF636366)
-private val GreyLightSecondaryContainer = Color(0xFFE5E5EA)
-private val GreyLightOnSecondaryContainer = Color(0xFF2C2C2E)
-private val GreyLightTertiary = Color(0xFF48484A)
+private val GreyLightSecondaryContainer = Color(0xFFF2F2F7)
+private val GreyLightOnSecondaryContainer = Color(0xFF1C1C1E)
+private val GreyLightTertiary = Color(0xFF8E8E93)
 private val GreyLightOnBackground = Color(0xFF1C1C1E)
 private val GreyLightOnSurface = Color(0xFF1C1C1E)
 private val GreyLightSurfaceVariant = Color(0xFFE5E5EA)
@@ -370,18 +372,40 @@ private val GreyLightOutline = Color(0xFF8E8E93)
 
 val GreyDarkColorScheme = darkColorScheme(
     primary = GreyDarkPrimary,
-    secondary = GreyDarkSecondary,
-    tertiary = GreyDarkTertiary,
-    background = GreyDarkBackground,
-    surface = GreyDarkSurface,
     onPrimary = GreyDarkOnPrimary,
+    primaryContainer = Color(0xFF1E1E1E),
+    onPrimaryContainer = Color(0xFFE0E0E0),
+    secondary = GreyDarkSecondary,
     onSecondary = GreyDarkOnPrimary,
+    secondaryContainer = Color(0xFF161616),
+    onSecondaryContainer = GreyDarkSecondary,
+    tertiary = GreyDarkTertiary,
     onTertiary = GreyDarkOnPrimary,
+    tertiaryContainer = Color(0xFF1C1C1E),
+    onTertiaryContainer = GreyDarkTertiary,
+    background = GreyDarkBackground,
     onBackground = GreyDarkOnBackground,
+    surface = GreyDarkSurface,
     onSurface = GreyDarkOnSurface,
+    surfaceVariant = GreyDarkSurfaceVariant,
     onSurfaceVariant = GreyDarkOnSurfaceVariant,
-    error = Color(0xFFFF5252),
-    onError = Color.White
+    outline = GreyDarkOutline,
+    outlineVariant = Color(0xFF2C2C2E),
+    surfaceTint = GreyDarkPrimary,
+    inversePrimary = Color(0xFF1C1C1E),
+    inverseSurface = Color(0xFFF2F2F7),
+    inverseOnSurface = Color(0xFF121212),
+    error = Color(0xFFFF453A),
+    onError = Color(0xFFFFFFFF),
+    errorContainer = Color(0xFF4A0E0E),
+    onErrorContainer = Color(0xFFFF8888),
+    surfaceBright = Color(0xFF242424),
+    surfaceDim = Color(0xFF121212),
+    surfaceContainer = Color(0xFF161616),
+    surfaceContainerLowest = Color(0xFF0D0D0D),
+    surfaceContainerLow = Color(0xFF121212),
+    surfaceContainerHigh = Color(0xFF1C1C1C),
+    surfaceContainerHighest = Color(0xFF242424)
 )
 
 val GreyLightColorScheme = lightColorScheme(
@@ -402,10 +426,22 @@ val GreyLightColorScheme = lightColorScheme(
     surfaceVariant = GreyLightSurfaceVariant,
     onSurfaceVariant = GreyLightOnSurfaceVariant,
     outline = GreyLightOutline,
-    outlineVariant = GreyLightOutline.copy(alpha = 0.6f),
+    outlineVariant = Color(0xFFC7C7CC),
     surfaceTint = GreyLightPrimary,
+    inversePrimary = Color(0xFFFFFFFF),
+    inverseSurface = Color(0xFF1C1C1E),
+    inverseOnSurface = Color(0xFFFFFFFF),
     error = Color(0xFFD32F2F),
-    onError = Color.White
+    onError = Color.White,
+    errorContainer = Color(0xFFFFDAD6),
+    onErrorContainer = Color(0xFF410002),
+    surfaceBright = Color(0xFFFFFFFF),
+    surfaceDim = Color(0xFFF2F2F7),
+    surfaceContainer = Color(0xFFF2F2F7),
+    surfaceContainerLowest = Color(0xFFFFFFFF),
+    surfaceContainerLow = Color(0xFFF2F2F7),
+    surfaceContainerHigh = Color(0xFFE5E5EA),
+    surfaceContainerHighest = Color(0xFFD1D1D6)
 )
 
 fun getStaticColorScheme(palette: String, darkTheme: Boolean): androidx.compose.material3.ColorScheme {
