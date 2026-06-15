@@ -54,6 +54,7 @@ import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.GridView
+import androidx.compose.material.icons.rounded.Dataset
 import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Link
@@ -533,60 +534,79 @@ private fun CreatePlaylistContent(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    val storageFilter by playerViewModel.playlistPickerStorageFilter.collectAsStateWithLifecycle()
-                    val tabs = listOf(
-                        StorageFilter.OFFLINE to R.string.library_storage_filter_offline,
-                        StorageFilter.ONLINE to R.string.library_storage_filter_online
-                    )
-                    val selectedTabIndex = tabs.indexOfFirst { it.first == storageFilter }.coerceAtLeast(0)
-
-                    PrimaryTabRow(
-                        selectedTabIndex = selectedTabIndex,
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                            .padding(5.dp),
-                        containerColor = Color.Transparent,
-                        divider = {},
-                        indicator = {}
-                    ) {
-                        tabs.forEachIndexed { index, (filter, labelRes) ->
-                            TabAnimation(
-                                index = index,
-                                title = stringResource(labelRes),
-                                selectedIndex = selectedTabIndex,
-                                onClick = { playerViewModel.setPlaylistPickerStorageFilter(filter) },
-                                transformOrigin = if (index == 0) TransformOrigin(0f, 0.5f) else TransformOrigin(1f, 0.5f)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.Center
-                                ) {
-                                    if (filter == StorageFilter.OFFLINE) {
-                                        Icon(
-                                            painter = painterResource(id = R.drawable.ic_phonef),
-                                            contentDescription = null,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    } else {
-                                        Icon(
-                                            imageVector = Icons.Rounded.Cloud,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                    Spacer(Modifier.width(8.dp))
-                                    Text(
-                                        text = stringResource(labelRes),
-                                        fontFamily = GoogleSansRounded,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(end = 4.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
+                     val storageFilter by playerViewModel.playlistPickerStorageFilter.collectAsStateWithLifecycle()
+                     val tabs = listOf(
+                         StorageFilter.ALL to R.string.library_storage_filter_all_songs,
+                         StorageFilter.LOCAL to R.string.library_storage_filter_local,
+                         StorageFilter.TELEGRAM to R.string.library_storage_filter_telegram,
+                         StorageFilter.YOUTUBE to R.string.library_storage_filter_youtube
+                     )
+                     val selectedTabIndex = tabs.indexOfFirst { it.first == storageFilter }.coerceAtLeast(0)
+ 
+                     PrimaryTabRow(
+                         selectedTabIndex = selectedTabIndex,
+                         modifier = Modifier
+                             .weight(1f)
+                             .clip(CircleShape)
+                             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                             .padding(5.dp),
+                         containerColor = Color.Transparent,
+                         divider = {},
+                         indicator = {}
+                     ) {
+                         tabs.forEachIndexed { index, (filter, labelRes) ->
+                             TabAnimation(
+                                 index = index,
+                                 title = stringResource(labelRes),
+                                 selectedIndex = selectedTabIndex,
+                                 onClick = { playerViewModel.setPlaylistPickerStorageFilter(filter) },
+                                 transformOrigin = if (index == 0) TransformOrigin(0f, 0.5f) else TransformOrigin(1f, 0.5f)
+                             ) {
+                                 Row(
+                                     verticalAlignment = Alignment.CenterVertically,
+                                     horizontalArrangement = Arrangement.Center
+                                 ) {
+                                     when (filter) {
+                                         StorageFilter.LOCAL -> {
+                                             Icon(
+                                                 painter = painterResource(id = R.drawable.ic_phonef),
+                                                 contentDescription = null,
+                                                 modifier = Modifier.size(18.dp)
+                                             )
+                                         }
+                                         StorageFilter.TELEGRAM -> {
+                                             Icon(
+                                                 painter = painterResource(id = R.drawable.telegram),
+                                                 contentDescription = null,
+                                                 modifier = Modifier.size(18.dp)
+                                             )
+                                         }
+                                         StorageFilter.YOUTUBE -> {
+                                             Icon(
+                                                 painter = painterResource(id = R.drawable.ic_youtube),
+                                                 contentDescription = null,
+                                                 modifier = Modifier.size(18.dp)
+                                             )
+                                         }
+                                         else -> {
+                                             Icon(
+                                                 imageVector = Icons.Rounded.Dataset,
+                                                 contentDescription = null,
+                                                 modifier = Modifier.size(18.dp)
+                                             )
+                                         }
+                                     }
+                                     Spacer(Modifier.width(8.dp))
+                                     Text(
+                                         text = stringResource(labelRes),
+                                         fontFamily = GoogleSansRounded,
+                                         fontWeight = FontWeight.Bold,
+                                         modifier = Modifier.padding(end = 4.dp)
+                                     )
+                                 }
+                             }
+                         }
+                     }
 
                     FilledIconButton(
                         onClick = {

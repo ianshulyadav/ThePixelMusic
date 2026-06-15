@@ -45,20 +45,15 @@ private fun libraryEmptySpec(
                 titleRes = R.string.lib_empty_songs_all_title,
                 subtitleRes = R.string.lib_empty_songs_all_subtitle
             )
-            StorageFilter.OFFLINE -> LibraryEmptySpec(
+            StorageFilter.LOCAL -> LibraryEmptySpec(
                 iconRes = R.drawable.rounded_music_off_24,
                 titleRes = R.string.lib_empty_songs_offline_title,
                 subtitleRes = R.string.lib_empty_songs_offline_subtitle
             )
-            StorageFilter.ONLINE -> LibraryEmptySpec(
+            else -> LibraryEmptySpec(
                 iconRes = R.drawable.rounded_music_off_24,
                 titleRes = R.string.lib_empty_songs_online_title,
                 subtitleRes = R.string.lib_empty_songs_online_subtitle
-            )
-            StorageFilter.DOWNLOADED_ONLY -> LibraryEmptySpec(
-                iconRes = R.drawable.rounded_music_off_24,
-                titleRes = R.string.lib_empty_songs_offline_title,
-                subtitleRes = R.string.lib_empty_songs_offline_subtitle
             )
         }
 
@@ -68,20 +63,15 @@ private fun libraryEmptySpec(
                 titleRes = R.string.lib_empty_albums_all_title,
                 subtitleRes = R.string.lib_empty_albums_all_subtitle
             )
-            StorageFilter.OFFLINE -> LibraryEmptySpec(
+            StorageFilter.LOCAL -> LibraryEmptySpec(
                 iconRes = R.drawable.rounded_album_24,
                 titleRes = R.string.lib_empty_albums_offline_title,
                 subtitleRes = R.string.lib_empty_albums_offline_subtitle
             )
-            StorageFilter.ONLINE -> LibraryEmptySpec(
+            else -> LibraryEmptySpec(
                 iconRes = R.drawable.rounded_album_24,
                 titleRes = R.string.lib_empty_albums_online_title,
                 subtitleRes = R.string.lib_empty_albums_online_subtitle
-            )
-            StorageFilter.DOWNLOADED_ONLY -> LibraryEmptySpec(
-                iconRes = R.drawable.rounded_album_24,
-                titleRes = R.string.lib_empty_albums_offline_title,
-                subtitleRes = R.string.lib_empty_albums_offline_subtitle
             )
         }
 
@@ -91,20 +81,15 @@ private fun libraryEmptySpec(
                 titleRes = R.string.lib_empty_artists_all_title,
                 subtitleRes = R.string.lib_empty_artists_all_subtitle
             )
-            StorageFilter.OFFLINE -> LibraryEmptySpec(
+            StorageFilter.LOCAL -> LibraryEmptySpec(
                 iconRes = R.drawable.rounded_artist_24,
                 titleRes = R.string.lib_empty_artists_offline_title,
                 subtitleRes = R.string.lib_empty_artists_offline_subtitle
             )
-            StorageFilter.ONLINE -> LibraryEmptySpec(
+            else -> LibraryEmptySpec(
                 iconRes = R.drawable.rounded_artist_24,
                 titleRes = R.string.lib_empty_artists_online_title,
                 subtitleRes = R.string.lib_empty_artists_online_subtitle
-            )
-            StorageFilter.DOWNLOADED_ONLY -> LibraryEmptySpec(
-                iconRes = R.drawable.rounded_artist_24,
-                titleRes = R.string.lib_empty_artists_offline_title,
-                subtitleRes = R.string.lib_empty_artists_offline_subtitle
             )
         }
 
@@ -114,20 +99,15 @@ private fun libraryEmptySpec(
                 titleRes = R.string.lib_empty_liked_all_title,
                 subtitleRes = R.string.lib_empty_liked_all_subtitle
             )
-            StorageFilter.OFFLINE -> LibraryEmptySpec(
+            StorageFilter.LOCAL -> LibraryEmptySpec(
                 iconRes = R.drawable.round_favorite_24,
                 titleRes = R.string.lib_empty_liked_offline_title,
                 subtitleRes = R.string.lib_empty_liked_offline_subtitle
             )
-            StorageFilter.ONLINE -> LibraryEmptySpec(
+            else -> LibraryEmptySpec(
                 iconRes = R.drawable.round_favorite_24,
                 titleRes = R.string.lib_empty_liked_online_title,
                 subtitleRes = R.string.lib_empty_liked_online_subtitle
-            )
-            StorageFilter.DOWNLOADED_ONLY -> LibraryEmptySpec(
-                iconRes = R.drawable.round_favorite_24,
-                titleRes = R.string.lib_empty_liked_offline_title,
-                subtitleRes = R.string.lib_empty_liked_offline_subtitle
             )
         }
 

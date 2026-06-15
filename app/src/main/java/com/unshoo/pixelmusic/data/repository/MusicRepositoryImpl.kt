@@ -521,9 +521,10 @@ class MusicRepositoryImpl @Inject constructor(
 
     private fun StorageFilter.toFilterMode(): Int = when (this) {
         StorageFilter.ALL -> 0
-        StorageFilter.OFFLINE -> 1
-        StorageFilter.ONLINE -> 2
-        StorageFilter.DOWNLOADED_ONLY -> 3
+        StorageFilter.LOCAL -> 1
+        StorageFilter.TELEGRAM -> 2
+        StorageFilter.YOUTUBE -> 3
+        StorageFilter.ONLINE -> 4
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)

@@ -67,6 +67,23 @@ data class Song(
             ?: artists.firstOrNull()
             ?: ArtistRef(id = artistId, name = artist, isPrimary = true)
 
+    val isLocal: Boolean
+        get() = !contentUriString.startsWith("telegram://") &&
+                !contentUriString.startsWith("netease://") &&
+                !contentUriString.startsWith("gdrive://") &&
+                !contentUriString.startsWith("qqmusic://") &&
+                !contentUriString.startsWith("navidrome://") &&
+                !contentUriString.startsWith("jellyfin://") &&
+                !contentUriString.startsWith("youtube://") &&
+                telegramFileId == null && neteaseId == null && gdriveFileId == null &&
+                qqMusicMid == null && navidromeId == null && jellyfinId == null && youtubeId == null
+
+    val isTelegram: Boolean
+        get() = contentUriString.startsWith("telegram://") || telegramFileId != null
+
+    val isYouTube: Boolean
+        get() = contentUriString.startsWith("youtube://") || youtubeId != null
+
     companion object {
         fun emptySong(): Song {
             return Song(
