@@ -1,5 +1,6 @@
 package com.unshoo.pixelmusic.data.database.youtube
 
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
@@ -11,6 +12,12 @@ import com.unshoo.pixelmusic.data.model.youtube.PlaylistSongCrossRef
 import com.unshoo.pixelmusic.data.model.youtube.Song
 import kotlinx.coroutines.flow.Flow
 
+/** Lightweight projection for playlist list screens; avoids loading 5k-20k songs per playlist. */
+data class PlaylistSongCountRow(
+    val playlistId: String,
+    @ColumnInfo(name = "songCount") val songCount: Int
+)
+
 @Dao
 interface LocalPlaylistDataSource {
     @Transaction
@@ -20,6 +27,12 @@ interface LocalPlaylistDataSource {
     @Transaction
     @Query("SELECT * FROM playlists")
     fun observeAll(): Flow<List<Playlist>>
+
+    @Query("SELECT * FROM playlists")
+    fun observeAllPlaylistInfo(): Flow<List<PlaylistInfo>>
+
+    @Query("SELECT playlistId, COUNT(songId) AS songCount FROM PlaylistSongCrossRef GROUP BY playlistId")
+    fun observePlaylistSongCounts(): Flow<List<PlaylistSongCountRow>>
 
     @Transaction
     @Query("SELECT * FROM playlists WHERE id = :playlistId")
@@ -101,14 +114,20 @@ interface LocalPlaylistDataSource {
         val newSongs = playlist.songs.filter { it.youtubeId !in existingIds }
 
         if (newSongs.isNotEmpty()) {
-            insertSongs(newSongs)
+            newSongs.chunked(YOUTUBE_DB_BATCH_SIZE).forEach { chunk ->
+                insertSongs(chunk)
+            }
         }
 
         // Clear existing cross references to reflect the updated composition
         deleteCrossRefsByPlaylistId(playlist.info.id)
-        // Always update cross refs to reflect current playlist composition
-        val refs = playlist.songs.mapIndexed { index, song -> PlaylistSongCrossRef(playlist.info.id, song.youtubeId, index) }
-        insertCrossRefs(refs)
+        // Always update cross refs to reflect current playlist composition.
+        // Chunk to support 5k-20k+ song playlists without large statement pressure.
+        playlist.songs
+            .asSequence()
+            .mapIndexed { index, song -> PlaylistSongCrossRef(playlist.info.id, song.youtubeId, index) }
+            .chunked(YOUTUBE_DB_BATCH_SIZE)
+            .forEach { chunk -> insertCrossRefs(chunk) }
     }
 
     @Query("DELETE FROM playlists")
@@ -119,6 +138,10 @@ interface LocalPlaylistDataSource {
 
     @Query("DELETE FROM PlaylistSongCrossRef WHERE playlistId = :playlistId")
     suspend fun deleteCrossRefsByPlaylistId(playlistId: String)
+
+    companion object {
+        private const val YOUTUBE_DB_BATCH_SIZE = 500
+    }
 
     @Transaction
     suspend fun deleteFullPlaylist(playlistId: String) {

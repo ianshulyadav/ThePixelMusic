@@ -66,7 +66,13 @@ interface LocalSongDataSource {
 
     /** Get all song IDs that exist in the local DB. Used for delta sync. */
     @Query("SELECT youtubeId FROM songs WHERE youtubeId IN (:ids)")
-    suspend fun getExistingSongIds(ids: List<String>): List<String>
+    suspend fun getExistingSongIdsRaw(ids: List<String>): List<String>
+
+    /** Chunked wrapper to handle very large YouTube playlists without SQLite variable-limit issues. */
+    suspend fun getExistingSongIds(ids: List<String>): List<String> {
+        if (ids.isEmpty()) return emptyList()
+        return ids.distinct().chunked(800).flatMap { chunk -> getExistingSongIdsRaw(chunk) }
+    }
 
     /** Mark a song as permanently downloaded by the user (won't be auto-deleted). */
     @Query("UPDATE songs SET isPermanentlyDownloaded = 1, downloadTimestamp = :timestamp WHERE youtubeId = :songId")

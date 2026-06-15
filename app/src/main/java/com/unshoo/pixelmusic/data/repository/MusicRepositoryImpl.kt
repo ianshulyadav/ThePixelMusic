@@ -891,12 +891,20 @@ class MusicRepositoryImpl @Inject constructor(
         val validLongIds = idMappings.mapNotNull { it.second }
         if (validLongIds.isEmpty()) return flowOf(emptyList())
 
-        return musicDao.getSongsByIds(validLongIds, emptyList(), false).map { entities ->
+        // For very large playlists, a single IN query is both unsafe (SQLite parameter limit)
+        // and expensive. Use a one-shot chunked flow; playlist details explicitly reload when
+        // playlist membership changes.
+        return flow {
+            val entities = validLongIds
+                .distinct()
+                .chunked(800)
+                .flatMap { chunk -> musicDao.getSongsByIdsListSimple(chunk) }
             val songMapById = entities.associate { it.id to it.toSong() }
-            // Preserve the requested order using the mapped IDs
-            idMappings.mapNotNull { (_, longId) ->
-                longId?.let { songMapById[it] }
-            }
+            emit(
+                idMappings.mapNotNull { (_, longId) ->
+                    longId?.let { songMapById[it] }
+                }
+            )
         }.flowOn(Dispatchers.IO)
     }
 
@@ -921,9 +929,13 @@ class MusicRepositoryImpl @Inject constructor(
         val validLongIds = idMappings.mapNotNull { it.second }
         if (validLongIds.isEmpty()) return@withContext emptyList()
 
-        val entities = musicDao.getSongsByIdsListSimple(validLongIds)
+        // Chunk large playlists/libraries to avoid SQLite variable limits and giant cursor work.
+        val entities = validLongIds
+            .distinct()
+            .chunked(800)
+            .flatMap { chunk -> musicDao.getSongsByIdsListSimple(chunk) }
         val songMapById = entities.associate { it.id to it.toSong() }
-        
+
         idMappings.mapNotNull { (_, longId) ->
             longId?.let { songMapById[it] }
         }

@@ -301,9 +301,27 @@ class PlaylistViewModel @Inject constructor(
                         val orderMode = _uiState.value.playlistOrderModes[playlistId]
                             ?: PlaylistSongsOrderMode.Manual
 
+                        val effectivePlaylist = if (playlist.source == "YOUTUBE" && playlist.songIds.isEmpty()) {
+                            withContext(Dispatchers.IO) {
+                                val ytPlaylist = com.unshoo.pixelmusic.data.database.youtube.AppDatabase
+                                    .getInstance(context)
+                                    .playlistRepository()
+                                    .getPlaylistById(playlistId)
+                                ytPlaylist?.takeIf { it.songs.isNotEmpty() }?.let { hydrated ->
+                                    playlist.copy(
+                                        songIds = hydrated.songs.map { "youtube_${it.youtubeId}" },
+                                        displaySongCount = hydrated.info.lastSyncSongCount.takeIf { count -> count > 0 }
+                                            ?: hydrated.songs.size
+                                    )
+                                }
+                            } ?: playlist
+                        } else {
+                            playlist
+                        }
+
                         // Colectar la lista de canciones del Flow devuelto por el repositorio en un hilo de IO
                         val songsList: List<Song> = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                            musicRepository.getSongsByIdsOnce(playlist.songIds)
+                            musicRepository.getSongsByIdsOnce(effectivePlaylist.songIds)
                         }
 
                         val orderedSongs = when (orderMode) {
@@ -314,7 +332,7 @@ class PlaylistViewModel @Inject constructor(
                         // La actualización del UI se hace en el hilo principal
                         _uiState.update {
                             it.copy(
-                                currentPlaylistDetails = playlist,
+                                currentPlaylistDetails = effectivePlaylist,
                                 currentPlaylistSongs = orderedSongs,
                                 currentPlaylistSongsSortOption = (orderMode as? PlaylistSongsOrderMode.Sorted)?.option
                                     ?: it.currentPlaylistSongsSortOption,
