@@ -146,6 +146,7 @@ data class SettingsUiState(
     val performanceModeEnabled: Boolean = false,
     val audioOffloadEnabled: Boolean = false,
     val preferTelegramAlternative: Boolean = false,
+    val telegramUseOnlineAlbumArt: Boolean = false,
     val lastfmSession: String = "",
     val lastfmUsername: String = "",
     val lastfmApiKey: String = "",
@@ -804,6 +805,12 @@ class SettingsViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
+            userPreferencesRepository.telegramUseOnlineAlbumArtFlow.collect { enabled ->
+                _uiState.update { it.copy(telegramUseOnlineAlbumArt = enabled) }
+            }
+        }
+
+        viewModelScope.launch {
             userPreferencesRepository.replayGainEnabledFlow.collect { enabled ->
                 _uiState.update { it.copy(replayGainEnabled = enabled) }
             }
@@ -1060,6 +1067,12 @@ class SettingsViewModel @Inject constructor(
     fun setPreferTelegramAlternative(enabled: Boolean) {
         viewModelScope.launch {
             userPreferencesRepository.setPreferTelegramAlternative(enabled)
+        }
+    }
+
+    fun setTelegramUseOnlineAlbumArt(enabled: Boolean) {
+        viewModelScope.launch {
+            userPreferencesRepository.setTelegramUseOnlineAlbumArt(enabled)
         }
     }
 

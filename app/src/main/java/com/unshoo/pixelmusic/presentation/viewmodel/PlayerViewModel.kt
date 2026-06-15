@@ -1160,7 +1160,7 @@ class PlayerViewModel @Inject constructor(
                     } else {
                         song
                     }
-                    updateSongInStates(safeSong, lyrics)
+                    updateSongInStates(safeSong, lyrics, isLoadingLyrics = false)
                 }
                 if (_selectedSongForInfo.value?.id == song.id) {
                     val currentSelected = _selectedSongForInfo.value

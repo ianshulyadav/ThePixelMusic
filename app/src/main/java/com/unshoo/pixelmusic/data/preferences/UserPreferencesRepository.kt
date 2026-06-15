@@ -318,6 +318,7 @@ constructor(
         val PERFORMANCE_MODE_ENABLED = booleanPreferencesKey("performance_mode_enabled")
         val AUDIO_OFFLOAD_ENABLED = booleanPreferencesKey("audio_offload_enabled")
         val PREFER_TELEGRAM_ALTERNATIVE = booleanPreferencesKey("prefer_telegram_alternative")
+        val TELEGRAM_USE_ONLINE_ALBUM_ART = booleanPreferencesKey("telegram_use_online_album_art")
         val LASTFM_SESSION = stringPreferencesKey("lastfm_session")
         val LASTFM_USERNAME = stringPreferencesKey("lastfm_username")
         val LASTFM_API_KEY = stringPreferencesKey("lastfm_api_key_v1")
@@ -341,6 +342,17 @@ constructor(
     suspend fun setPreferTelegramAlternative(enabled: Boolean) {
         dataStore.edit { preferences ->
             preferences[PreferencesKeys.PREFER_TELEGRAM_ALTERNATIVE] = enabled
+        }
+    }
+
+    val telegramUseOnlineAlbumArtFlow: Flow<Boolean> =
+        dataStore.data.map { preferences ->
+            preferences[PreferencesKeys.TELEGRAM_USE_ONLINE_ALBUM_ART] ?: false
+        }.distinctUntilChanged()
+
+    suspend fun setTelegramUseOnlineAlbumArt(enabled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.TELEGRAM_USE_ONLINE_ALBUM_ART] = enabled
         }
     }
 

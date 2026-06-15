@@ -1065,6 +1065,13 @@ fun SettingsCategoryScreen(
                                     leadingIcon = { Icon(painterResource(R.drawable.rounded_all_inclusive_24), null, tint = MaterialTheme.colorScheme.secondary) }
                                 )
                                 SwitchSettingItem(
+                                    title = "Use online artwork for Telegram songs",
+                                    subtitle = "Match Telegram tracks by title and artist to existing YouTube Music songs and use their high-quality artwork when safe.",
+                                    checked = uiState.telegramUseOnlineAlbumArt,
+                                    onCheckedChange = { settingsViewModel.setTelegramUseOnlineAlbumArt(it) },
+                                    leadingIcon = { Icon(painterResource(R.drawable.rounded_imagesmode_24), null, tint = MaterialTheme.colorScheme.secondary) }
+                                )
+                                SwitchSettingItem(
                                     title = stringResource(R.string.setcat_preload_queue_enabled_title),
                                     subtitle = stringResource(R.string.setcat_preload_queue_enabled_desc),
                                     checked = uiState.preloadQueueEnabled,

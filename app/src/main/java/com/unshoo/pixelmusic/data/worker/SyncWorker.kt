@@ -1463,6 +1463,19 @@ constructor(
             val nextArtistId = AtomicLong((musicDao.getMaxArtistId() ?: 0L) + 1)
             val delimiters = userPreferencesRepository.artistDelimitersFlow.first()
             val wordDelims = userPreferencesRepository.artistWordDelimitersFlow.first()
+            val useOnlineAlbumArtForTelegram = userPreferencesRepository.telegramUseOnlineAlbumArtFlow.first()
+            val youtubeArtworkByKey = if (useOnlineAlbumArtForTelegram) {
+                musicDao.getSongsBySourceType(SourceType.YOUTUBE)
+                    .asSequence()
+                    .mapNotNull { song ->
+                        val key = telegramOnlineArtworkMatchKey(song.title, song.artistName)
+                        val art = song.albumArtUriString?.takeIf { it.isNotBlank() }
+                        if (key != null && art != null) key to art else null
+                    }
+                    .toMap()
+            } else {
+                emptyMap()
+            }
 
             val songsToInsert = mutableListOf<SongEntity>()
             val artistsToInsert = mutableMapOf<Long, ArtistEntity>() // Map to dedup by ID
@@ -1520,6 +1533,12 @@ constructor(
                     }
                 }
                 
+                if (useOnlineAlbumArtForTelegram) {
+                    telegramOnlineArtworkMatchKey(realTitle, realArtistName)
+                        ?.let(youtubeArtworkByKey::get)
+                        ?.let { onlineArt -> resolvedAlbumArtUri = onlineArt }
+                }
+
                 // 3. Multi-Artist Processing
                 val rawArtistName = if (realArtistName.isBlank()) "Unknown Artist" else realArtistName
                 val splitArtists = rawArtistName.splitArtistsByDelimiters(delimiters, wordDelims)
@@ -2050,6 +2069,13 @@ constructor(
         } catch (e: Exception) {
             Log.e(TAG, "Failed to sync YouTube data", e)
         }
+    }
+
+    private fun telegramOnlineArtworkMatchKey(title: String, artist: String): String? {
+        val normalizedTitle = title.normalizeMetadataTextOrEmpty().lowercase().trim()
+        val normalizedArtist = artist.normalizeMetadataTextOrEmpty().lowercase().trim()
+        if (normalizedTitle.isBlank() || normalizedArtist.isBlank()) return null
+        return "$normalizedTitle|$normalizedArtist"
     }
 
     private fun parseYoutubeArtistNames(rawArtist: String): List<String> {
