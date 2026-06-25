@@ -92,14 +92,14 @@ fun AdSupportCard(
                 modifier = Modifier.weight(1f)
             ) {
                 Text(
-                    text = "Support PixelMusic ❤️",
+                    text = "Support PixelMusic❤️",
                     color = textColor,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = "Help us keep the app free! Tap here to watch a quick video ad.",
+                    text = "Love the app? Tap to watch a quick ad & support its development!",
                     color = textColor.copy(alpha = 0.8f),
                     fontSize = 13.sp,
                     lineHeight = 16.sp,
