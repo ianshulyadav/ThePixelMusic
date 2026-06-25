@@ -35,11 +35,11 @@ fun AdSupportCard(
     val context = LocalContext.current
     val activity = context as? Activity
     
-    // Curated warm support colors (peach & brown theme)
-    val backgroundColor = Color(0xFFFCEFE5)
-    val circleBackgroundColor = Color(0xFFECCEB9)
-    val textColor = Color(0xFF703300)
-    val iconColor = Color(0xFF703300)
+    // Dynamic theme-derived support colors
+    val backgroundColor = MaterialTheme.colorScheme.primaryContainer
+    val circleBackgroundColor = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.12f)
+    val textColor = MaterialTheme.colorScheme.onPrimaryContainer
+    val iconColor = MaterialTheme.colorScheme.onPrimaryContainer
 
     Card(
         modifier = modifier.clickable {
@@ -49,6 +49,8 @@ fun AdSupportCard(
                     AdManager.showRewardedAd(activity) { success ->
                         if (success) {
                             Toast.makeText(context, "Thank you for supporting PixelMusic!", Toast.LENGTH_LONG).show()
+                            // Force-refresh local watch state
+                            AdManager.recordAdWatched(context.applicationContext)
                         } else {
                             Toast.makeText(context, "Ad was closed early. Support incomplete.", Toast.LENGTH_SHORT).show()
                         }

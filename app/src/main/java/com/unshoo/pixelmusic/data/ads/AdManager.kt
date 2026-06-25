@@ -19,6 +19,7 @@ object AdManager {
     private const val KEY_APP_OPEN_COUNT = "app_open_count"
     private const val KEY_LAST_POPUP_TIME = "last_popup_time"
     private const val KEY_POPUP_STATUS = "popup_status"
+    private const val KEY_LAST_AD_WATCH_TIME = "last_ad_watch_time"
 
     private var rewardedAd: RewardedAd? = null
     private var isLoading = false
@@ -79,6 +80,9 @@ object AdManager {
                         rewardedAd = null
                         // Load the next ad
                         loadRewardedAd(activity.applicationContext)
+                        if (userEarnedReward) {
+                            recordAdWatched(activity.applicationContext)
+                        }
                         activity.runOnUiThread {
                             onAdCompleted(userEarnedReward)
                         }
@@ -151,6 +155,30 @@ object AdManager {
             prefs.edit().putString(KEY_POPUP_STATUS, status).apply()
         } catch (e: Throwable) {
             Log.e(TAG, "Failed to record popup response", e)
+        }
+    }
+
+    fun recordAdWatched(context: Context) {
+        try {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            prefs.edit().putLong(KEY_LAST_AD_WATCH_TIME, System.currentTimeMillis()).apply()
+        } catch (e: Throwable) {
+            Log.e(TAG, "Failed to record ad watch time", e)
+        }
+    }
+
+    fun hasRecentlySupported(context: Context): Boolean {
+        try {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val lastWatchTime = prefs.getLong(KEY_LAST_AD_WATCH_TIME, 0L)
+            if (lastWatchTime == 0L) return false
+            val elapsedTime = System.currentTimeMillis() - lastWatchTime
+            // 2.5 hours = 2.5 * 60 * 60 * 1000 = 9,000,000 ms
+            val threshold = (2.5 * 60 * 60 * 1000).toLong()
+            return elapsedTime < threshold
+        } catch (e: Throwable) {
+            Log.e(TAG, "Failed to check recently supported status", e)
+            return false
         }
     }
 }
