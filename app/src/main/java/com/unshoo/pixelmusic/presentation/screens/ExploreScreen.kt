@@ -127,6 +127,7 @@ fun ExploreScreen(
     val currentSongId = stablePlayerState.currentSong?.id
     val quickPicksDisplayMode by playerViewModel.quickPicksDisplayMode.collectAsStateWithLifecycle()
     val pullRefreshState = rememberPullToRefreshState()
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     val surfaceColor = MaterialTheme.colorScheme.surface
     val primaryColor = MaterialTheme.colorScheme.primary
@@ -244,7 +245,12 @@ fun ExploreScreen(
                         }
 
 
-                        if (uiState.selectedFilter == "All" || uiState.selectedFilter == "Smart Mix") {
+                        val showSmartMixCard = when (uiState.selectedFilter) {
+                            "Smart Mix" -> true
+                            "All" -> com.unshoo.pixelmusic.data.ads.AdManager.hasRecentlySupported(context)
+                            else -> false
+                        }
+                        if (showSmartMixCard) {
                             item(key = "smart_mix_category") {
                                 Card(
                                     modifier = Modifier
@@ -353,7 +359,8 @@ fun ExploreScreen(
                             }
                         }
 
-                        if (uiState.selectedFilter == "All") {
+                        val showSupportCard = uiState.selectedFilter == "All" && !com.unshoo.pixelmusic.data.ads.AdManager.hasRecentlySupported(context)
+                        if (showSupportCard) {
                             item(key = "explore_ad_support_card") {
                                 Spacer(modifier = Modifier.height(16.dp))
                                 AdSupportCard(

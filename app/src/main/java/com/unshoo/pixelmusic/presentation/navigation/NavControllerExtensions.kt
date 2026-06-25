@@ -19,12 +19,34 @@ fun NavController.navigateSafely(route: String): Boolean {
     if (!isReadyForNavigation()) return false
     val activity = context as? Activity
     try {
-        if (activity != null && (route.contains("settings_category/ai") || route.contains("smart_mix"))) {
+        if (activity != null && route.contains("settings_category/ai")) {
             if (AdManager.isAdLoaded()) {
-                Toast.makeText(activity, "Opening support ad...", Toast.LENGTH_SHORT).show()
-                AdManager.showRewardedAd(activity) { _ ->
-                    navigate(route) {
-                        launchSingleTop = true
+                activity.runOnUiThread {
+                    try {
+                        androidx.appcompat.app.AlertDialog.Builder(activity)
+                            .setTitle("Support PixelMusic❤️")
+                            .setMessage("Unlock AI integration by watching a short video ad to support our work.")
+                            .setPositiveButton("Watch Ad") { dialog, _ ->
+                                dialog.dismiss()
+                                Toast.makeText(activity, "Opening support ad...", Toast.LENGTH_SHORT).show()
+                                AdManager.showRewardedAd(activity) { success ->
+                                    if (success) {
+                                        navigate(route) {
+                                            launchSingleTop = true
+                                        }
+                                    } else {
+                                        Toast.makeText(activity, "Ad not completed. AI features remain locked.", Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            }
+                            .setNegativeButton("Cancel") { dialog, _ ->
+                                dialog.dismiss()
+                            }
+                            .show()
+                    } catch (e: Throwable) {
+                        navigate(route) {
+                            launchSingleTop = true
+                        }
                     }
                 }
                 return true
@@ -48,13 +70,36 @@ fun NavController.navigateSafely(
     if (!isReadyForNavigation()) return false
     val activity = context as? Activity
     try {
-        if (activity != null && (route.contains("settings_category/ai") || route.contains("smart_mix"))) {
+        if (activity != null && route.contains("settings_category/ai")) {
             if (AdManager.isAdLoaded()) {
-                Toast.makeText(activity, "Opening support ad...", Toast.LENGTH_SHORT).show()
-                AdManager.showRewardedAd(activity) { _ ->
-                    navigate(route) {
-                        launchSingleTop = true
-                        builder()
+                activity.runOnUiThread {
+                    try {
+                        androidx.appcompat.app.AlertDialog.Builder(activity)
+                            .setTitle("Support PixelMusic❤️")
+                            .setMessage("Unlock AI integration by watching a short video ad to support our work.")
+                            .setPositiveButton("Watch Ad") { dialog, _ ->
+                                dialog.dismiss()
+                                Toast.makeText(activity, "Opening support ad...", Toast.LENGTH_SHORT).show()
+                                AdManager.showRewardedAd(activity) { success ->
+                                    if (success) {
+                                        navigate(route) {
+                                            launchSingleTop = true
+                                            builder()
+                                        }
+                                    } else {
+                                        Toast.makeText(activity, "Ad not completed. AI features remain locked.", Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            }
+                            .setNegativeButton("Cancel") { dialog, _ ->
+                                dialog.dismiss()
+                            }
+                            .show()
+                    } catch (e: Throwable) {
+                        navigate(route) {
+                            launchSingleTop = true
+                            builder()
+                        }
                     }
                 }
                 return true
@@ -92,16 +137,42 @@ fun NavController.navigateToTopLevelSafely(route: String): Boolean {
     val startDestinationId = runCatching { graph.startDestinationId }.getOrNull() ?: return false
     val activity = context as? Activity
     try {
-        if (activity != null && (route.contains("settings_category/ai") || route.contains("smart_mix"))) {
+        if (activity != null && route.contains("settings_category/ai")) {
             if (AdManager.isAdLoaded()) {
-                Toast.makeText(activity, "Opening support ad...", Toast.LENGTH_SHORT).show()
-                AdManager.showRewardedAd(activity) { _ ->
-                    navigate(route) {
-                        popUpTo(startDestinationId) {
-                            saveState = true
+                activity.runOnUiThread {
+                    try {
+                        androidx.appcompat.app.AlertDialog.Builder(activity)
+                            .setTitle("Support PixelMusic❤️")
+                            .setMessage("Unlock AI integration by watching a short video ad to support our work.")
+                            .setPositiveButton("Watch Ad") { dialog, _ ->
+                                dialog.dismiss()
+                                Toast.makeText(activity, "Opening support ad...", Toast.LENGTH_SHORT).show()
+                                AdManager.showRewardedAd(activity) { success ->
+                                    if (success) {
+                                        navigate(route) {
+                                            popUpTo(startDestinationId) {
+                                                saveState = true
+                                            }
+                                            launchSingleTop = true
+                                            restoreState = true
+                                        }
+                                    } else {
+                                        Toast.makeText(activity, "Ad not completed. AI features remain locked.", Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            }
+                            .setNegativeButton("Cancel") { dialog, _ ->
+                                dialog.dismiss()
+                            }
+                            .show()
+                    } catch (e: Throwable) {
+                        navigate(route) {
+                            popUpTo(startDestinationId) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
                         }
-                        launchSingleTop = true
-                        restoreState = true
                     }
                 }
                 return true
