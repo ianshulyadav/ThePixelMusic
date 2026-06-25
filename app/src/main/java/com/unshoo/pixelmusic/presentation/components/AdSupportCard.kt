@@ -169,7 +169,7 @@ fun SupportPopupDialog(
 
                 // Message
                 Text(
-                    text = "Without your support, development will stop and the app will die. Please watch a short ad to keep us alive.",
+                    text = "Without your support, development will stop. Please watch a short ad to keep us alive.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center
