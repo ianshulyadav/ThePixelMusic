@@ -170,7 +170,6 @@ class YouTubeLibrarySyncManager @Inject constructor(
         }
 
         if (allSongItems.isEmpty()) return@withContext
-
         val songs = allSongItems.map { it.toNativeSong() }
         musicRepository.insertYoutubeSongs(songs)
 

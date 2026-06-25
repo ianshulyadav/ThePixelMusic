@@ -82,10 +82,11 @@ internal fun BoxScope.UnifiedPlayerMiniAndFullLayers(
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .graphicsLayer {
-                            // Compute miniAlpha in the draw phase from the Animatable,
-                            // avoiding per-frame recomposition during gestures.
-                            alpha = (1f - playerContentExpansionFraction.value * 2f)
-                                .coerceIn(0f, 1f)
+                            val exp = playerContentExpansionFraction.value
+                            alpha = (1f - exp * 2.5f).coerceIn(0f, 1f)
+                            val s = lerp(1f, 0.88f, exp)
+                            scaleX = s
+                            scaleY = s
                         }
                         .zIndex(miniPlayerZIndex)
                 ) {
@@ -136,9 +137,6 @@ internal fun BoxScope.UnifiedPlayerMiniAndFullLayers(
                     bottomSheetOpenFraction = bottomSheetOpenFraction
                 )
 
-                // Scoped queue collection: only the FullPlayer subtree observes
-                // the queue. Sibling MiniPlayer composable and the whole
-                // UnifiedPlayerSheetV2 caller are insulated from queue churn.
                 val currentPlaybackQueue by playerViewModel.queueFlow
                     .collectAsStateWithLifecycle()
 
@@ -147,12 +145,12 @@ internal fun BoxScope.UnifiedPlayerMiniAndFullLayers(
                         .fillMaxWidth()
                         .requiredHeight(containerHeight)
                         .graphicsLayer {
-                            // Read from FullPlayerVisualState lazy getters in the draw phase;
-                            // these read Animatable.value internally → re-draw only, no recomposition.
-                            alpha = fullPlayerVisualState.contentAlpha
+                            val ca = fullPlayerVisualState.contentAlpha
+                            alpha = ca
                             translationY = fullPlayerVisualState.translationY
-                            scaleX = fullPlayerScale
-                            scaleY = fullPlayerScale
+                            val cs = fullPlayerVisualState.contentScale * fullPlayerScale
+                            scaleX = cs
+                            scaleY = cs
                         }
                         .zIndex(fullPlayerZIndex)
                         .offset { fullPlayerOffset }
