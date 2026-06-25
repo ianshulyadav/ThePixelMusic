@@ -10,17 +10,37 @@ internal class FullPlayerVisualState(
     private val expansionFraction: Animatable<Float, AnimationVector1D>,
     private val initialOffsetY: Float
 ) {
+    /**
+     * Maps expansion fraction to content alpha using a wider, faster window:
+     *   - Fade-in begins at fraction=0.20 (was 0.18)
+     *   - Alpha reaches 1.0 at fraction=0.88 (was 1.00)
+     *
+     * On COLLAPSE: the full player background clears at 88% instead of 100%,
+     * eliminating the white/colored gradient that lingered until the sheet
+     * fully settled. On EXPAND: content appears marginally earlier for a snappier feel.
+     */
     val contentAlpha: Float
         get() {
             val f = expansionFraction.value
-            return (f - 0.18f).coerceIn(0f, 0.82f) / 0.82f
+            return ((f - 0.20f) / 0.68f).coerceIn(0f, 1f)
         }
 
+    /**
+     * Squared alpha gives an acceleration curve: translationY starts slowly
+     * and arrives fast, matching Material 3 Emphasized Decelerate motion.
+     */
     val translationY: Float
-        get() = lerp(initialOffsetY, 0f, contentAlpha)
+        get() {
+            val a = contentAlpha
+            return lerp(initialOffsetY, 0f, a * a)
+        }
 
+    /**
+     * Deeper scale range (0.88→1.0 vs old 0.92→1.0) for a more immersive
+     * depth effect without being distracting.
+     */
     val contentScale: Float
-        get() = lerp(0.92f, 1f, contentAlpha)
+        get() = lerp(0.88f, 1f, contentAlpha)
 }
 
 @Composable

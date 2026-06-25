@@ -2023,7 +2023,10 @@ private fun PlayerProgressBarSection(
 ) {
     val progressSectionHorizontalInset = 0.dp
     val isVisible by remember(expansionFractionProvider) {
-        derivedStateOf { expansionFractionProvider() > 0.01f }
+        // Start smooth-progress sampling at 40% expansion — not at 1%.
+        // The seekbar is fully transparent below this point, so sampling early
+        // wastes CPU and causes the old stale-jump artifact when realtime updates enable.
+        derivedStateOf { expansionFractionProvider() > 0.40f }
     }
     val isExpanded by remember(currentSheetState, expansionFractionProvider) {
         derivedStateOf {
@@ -2071,7 +2074,9 @@ private fun PlayerProgressBarSection(
         currentPositionProvider = currentPositionProvider,
         totalDuration = displayDurationValue,
         songId = songId,
-        sampleWhilePlayingMs = if (isExpanded) 180L else 320L,
+        // 120ms @ expanded matches the 120Hz display interval for silky smooth motion.
+        // 280ms while collapsing/collapseda — saves battery, seekbar not visible anyway.
+        sampleWhilePlayingMs = if (isExpanded) 120L else 280L,
         sampleWhilePausedMs = 800L,
         isVisible = shouldRunRealtimeUpdates
     )
