@@ -83,8 +83,11 @@ internal fun BoxScope.UnifiedPlayerMiniAndFullLayers(
                         .align(Alignment.TopCenter)
                         .graphicsLayer {
                             val exp = playerContentExpansionFraction.value
-                            alpha = (1f - exp * 2.5f).coerceIn(0f, 1f)
-                            val s = lerp(1f, 0.88f, exp)
+                            // Cubic ease-out: clear the mini player faster and more expressively.
+                            // At exp=0.3 alpha=0, so mini is already gone before full player arrives.
+                            val rawAlpha = (1f - exp * 3.5f).coerceIn(0f, 1f)
+                            alpha = rawAlpha * rawAlpha // squared = cubic-ish curve
+                            val s = lerp(1f, 0.85f, exp)
                             scaleX = s
                             scaleY = s
                         }
