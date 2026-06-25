@@ -657,17 +657,15 @@ private enum class MainRootDirection {
     BACKWARD
 }
 
-// Base duration for bottom-nav switches at 1x — at 0.5x system scale = ~190 ms.
-private const val BOTTOM_NAV_TRANSITION_DURATION = 380
+private const val BOTTOM_NAV_TRANSITION_DURATION = 200
 
-// MD3 Expressive easing for bottom-nav switches
 private val BottomNavEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
 
 private val MAIN_ROOT_TRANSITION_SPEC =
     tween<IntOffset>(durationMillis = BOTTOM_NAV_TRANSITION_DURATION, easing = BottomNavEasing)
 
 private val MAIN_ROOT_FADE_SPEC =
-    tween<Float>(durationMillis = BOTTOM_NAV_TRANSITION_DURATION / 2, easing = BottomNavEasing)
+    tween<Float>(durationMillis = 150, easing = BottomNavEasing)
 
 private fun mainRootDirection(
     fromRoute: String?,
@@ -687,13 +685,13 @@ private fun mainRootEnterTransition(
     MainRootDirection.FORWARD -> {
         slideInHorizontally(
             animationSpec = MAIN_ROOT_TRANSITION_SPEC,
-            initialOffsetX = { (it * 0.5f).toInt() }
+            initialOffsetX = { (it * 0.15f).toInt() }
         ) + fadeIn(animationSpec = MAIN_ROOT_FADE_SPEC)
     }
     MainRootDirection.BACKWARD -> {
         slideInHorizontally(
             animationSpec = MAIN_ROOT_TRANSITION_SPEC,
-            initialOffsetX = { -(it * 0.5f).toInt() }
+            initialOffsetX = { -(it * 0.15f).toInt() }
         ) + fadeIn(animationSpec = MAIN_ROOT_FADE_SPEC)
     }
     null -> fallback
@@ -707,13 +705,13 @@ private fun mainRootExitTransition(
     MainRootDirection.FORWARD -> {
         slideOutHorizontally(
             animationSpec = MAIN_ROOT_TRANSITION_SPEC,
-            targetOffsetX = { -(it * 0.5f).toInt() }
+            targetOffsetX = { -(it * 0.15f).toInt() }
         ) + fadeOut(animationSpec = MAIN_ROOT_FADE_SPEC)
     }
     MainRootDirection.BACKWARD -> {
         slideOutHorizontally(
             animationSpec = MAIN_ROOT_TRANSITION_SPEC,
-            targetOffsetX = { (it * 0.5f).toInt() }
+            targetOffsetX = { (it * 0.15f).toInt() }
         ) + fadeOut(animationSpec = MAIN_ROOT_FADE_SPEC)
     }
     null -> fallback
