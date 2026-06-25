@@ -362,13 +362,11 @@ fun ExploreScreen(
                         val showSupportCard = uiState.selectedFilter == "All" && !com.unshoo.pixelmusic.data.ads.AdManager.hasRecentlySupported(context)
                         if (showSupportCard) {
                             item(key = "explore_ad_support_card") {
-                                Spacer(modifier = Modifier.height(16.dp))
                                 AdSupportCard(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .padding(horizontal = 16.dp)
                                 )
-                                Spacer(modifier = Modifier.height(8.dp))
                             }
                         }
 
