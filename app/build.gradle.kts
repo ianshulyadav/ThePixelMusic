@@ -121,14 +121,14 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            manifestPlaceholders["adMobAppId"] = "ca-app-pub-623520458880294~7929621161" // Production App ID
+            manifestPlaceholders["adMobAppId"] = "ca-app-pub-6235250458880294~7929621161" // Production App ID
         }
 
         create("benchmark") {
             initWith(getByName("release"))
             matchingFallbacks += listOf("release")
             isDebuggable = false
-            manifestPlaceholders["adMobAppId"] = "ca-app-pub-623520458880294~7929621161" // Production App ID
+            manifestPlaceholders["adMobAppId"] = "ca-app-pub-6235250458880294~7929621161" // Production App ID
         }
     }
 
