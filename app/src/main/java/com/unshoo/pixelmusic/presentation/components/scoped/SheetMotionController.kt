@@ -7,10 +7,6 @@ import androidx.compose.foundation.MutatorMutex
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
-/**
- * Centralizes sheet motion updates so animation/snap logic lives in one place.
- * This keeps behavior stable while enabling an incremental V2 rewrite.
- */
 internal class SheetMotionController(
     private val translationY: Animatable<Float, AnimationVector1D>,
     private val expansionFraction: Animatable<Float, AnimationVector1D>,

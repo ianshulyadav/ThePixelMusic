@@ -29,18 +29,10 @@ import com.unshoo.pixelmusic.data.model.ArtistRef
 import com.unshoo.pixelmusic.utils.MediaItemBuilder
 import com.unshoo.pixelmusic.presentation.viewmodel.ConnectivityStateHolder
 
-/**
- * AutoQueueManager — Radio Mode (ArchiveTune 2026 Engine)
- *
- * Maintains a constant upcoming playback queue of 40–50 songs.
- * Automatically appends related songs when the remaining count falls below 40.
- * Supports online related tracks (YouTube Music next) and offline hybrid local fallback.
- */
 object AutoQueueManager {
-
-    private const val TARGET_QUEUE_SIZE = 45 // Targets exactly 45 upcoming songs
-    private const val MAX_HISTORY = 60  // Reduced: avoid over-filtering all candidates
-    private const val DECAY_LAMBDA = 1.15e-9 // 7-day half-life decay parameter
+    private const val TARGET_QUEUE_SIZE = 45
+    private const val MAX_HISTORY = 60
+    private const val DECAY_LAMBDA = 1.15e-9
 
     private var fetchJob: Job? = null
     private var lastFetchedVideoId: String? = null
@@ -342,18 +334,27 @@ object AutoQueueManager {
                     val totalCount = player.mediaItemCount
                     val remaining = totalCount - currentIndex - 1
                     val currentId = player.currentMediaItem?.mediaId
-                    Triple(remaining, currentId, totalCount)
+                    val uriScheme = player.currentMediaItem?.localConfiguration?.uri?.scheme
+                    val isLocalOrFile = uriScheme == "file" || uriScheme == "content"
+                    listOf(remaining, currentId, totalCount, isLocalOrFile)
                 }
             } ?: return@launch
 
-            val (remaining, currentId, _) = playerState
+            val remaining = playerState[0] as Int
+            val currentId = playerState[1] as? String
+            val isLocalOrFile = playerState[3] as Boolean
             if (currentId == null) return@launch
+
+            val ctx = contextRef ?: return@launch
+            val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+            val activeNet = cm?.activeNetwork
+            val caps = cm?.getNetworkCapabilities(activeNet)
+            val hasInternet = caps?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+
+            if (isLocalOrFile || !hasInternet) return@launch
 
             if (forceRefresh) {
                 fetchJob?.cancel()
-                // When force-refreshing, partially prune addedVideoIds to keep
-                // only the current song — this prevents the set from blocking
-                // all future recommendations after a toggle or manual refill.
                 synchronized(addedVideoIds) {
                     val currentClean = normalizeSongId(currentId)
                     addedVideoIds.retainAll { isSameSong(it, currentClean) }

@@ -660,7 +660,7 @@ class DualPlayerEngine @Inject constructor(
                 enableAudioOutputPlaybackParams: Boolean
             ): AudioSink {
                 return DefaultAudioSink.Builder(context)
-                    .setEnableFloatOutput(hiFiModeEnabled)
+                    .setEnableFloatOutput(true)
                     .setEnableAudioOutputPlaybackParameters(enableAudioOutputPlaybackParams)
                     .setAudioProcessorChain(
                         DefaultAudioSink.DefaultAudioProcessorChain(

@@ -293,7 +293,6 @@ class PlaylistViewModel @Inject constructor(
                         }
                     }
                 } else {
-                    // Obtener la playlist de las preferencias del usuario
                     val playlist = playlistPreferencesRepository.userPlaylistsFlow.first()
                         .find { it.id == playlistId }
 
@@ -319,9 +318,47 @@ class PlaylistViewModel @Inject constructor(
                             playlist
                         }
 
-                        // Colectar la lista de canciones del Flow devuelto por el repositorio en un hilo de IO
                         val songsList: List<Song> = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                            musicRepository.getSongsByIdsOnce(effectivePlaylist.songIds)
+                            if (playlistId == com.unshoo.pixelmusic.data.remote.youtube.Constants.Downloads.DOWNLOADED_PLAYLIST_ID) {
+                                val downloaded = com.unshoo.pixelmusic.data.database.youtube.AppDatabase.getInstance(context).songRepository().getDownloadedSongs()
+                                downloaded.map { ySong ->
+                                    val primaryArtistId = toUnifiedYoutubeArtistId(ySong.artist.takeIf { it.isNotBlank() } ?: "Unknown Artist")
+                                    Song(
+                                        id = "youtube_${ySong.youtubeId}",
+                                        title = ySong.title,
+                                        artist = ySong.artist,
+                                        artistId = primaryArtistId,
+                                        artists = listOf(
+                                            com.unshoo.pixelmusic.data.model.ArtistRef(
+                                                id = primaryArtistId,
+                                                name = ySong.artist.takeIf { it.isNotBlank() } ?: "Unknown Artist",
+                                                isPrimary = true
+                                            )
+                                        ),
+                                        album = "YouTube Music",
+                                        albumId = toUnifiedYoutubeAlbumId("YouTube Music"),
+                                        albumArtist = null,
+                                        path = ySong.audioFilePath ?: "",
+                                        contentUriString = "youtube://${ySong.youtubeId}",
+                                        albumArtUriString = ySong.thumbnailPath ?: ySong.thumbnailHref,
+                                        duration = parseDurationMillis(ySong.duration),
+                                        genre = ySong.genre ?: "YouTube Music",
+                                        lyrics = null,
+                                        isFavorite = false,
+                                        trackNumber = 0,
+                                        discNumber = null,
+                                        year = 0,
+                                        dateAdded = ySong.downloadTimestamp,
+                                        dateModified = 0,
+                                        mimeType = "audio/opus",
+                                        bitrate = null,
+                                        sampleRate = null,
+                                        youtubeId = ySong.youtubeId
+                                    )
+                                }
+                            } else {
+                                musicRepository.getSongsByIdsOnce(effectivePlaylist.songIds)
+                            }
                         }
 
                         val orderedSongs = when (orderMode) {
@@ -329,7 +366,6 @@ class PlaylistViewModel @Inject constructor(
                             PlaylistSongsOrderMode.Manual -> songsList
                         }
 
-                        // La actualización del UI se hace en el hilo principal
                         _uiState.update {
                             it.copy(
                                 currentPlaylistDetails = effectivePlaylist,
@@ -2191,5 +2227,22 @@ class PlaylistViewModel @Inject constructor(
         val activeNetwork = connectivityManager?.activeNetwork ?: return false
         val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return false
         return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }
+
+    private fun parseDurationMillis(durationStr: String): Long {
+        if (durationStr.isBlank()) return 0L
+        val parts = durationStr.split(":")
+        var seconds = 0L
+        try {
+            when (parts.size) {
+                1 -> {
+                    val raw = parts[0].toLongOrNull() ?: 0L
+                    seconds = if (raw >= 1000L) raw / 1000L else raw
+                }
+                2 -> seconds = (parts[0].toLongOrNull() ?: 0L) * 60 + (parts[1].toLongOrNull() ?: 0L)
+                3 -> seconds = (parts[0].toLongOrNull() ?: 0L) * 3600 + (parts[1].toLongOrNull() ?: 0L) * 60 + (parts[2].toLongOrNull() ?: 0L)
+            }
+        } catch (_: Exception) {}
+        return seconds * 1000
     }
 }
