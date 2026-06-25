@@ -308,10 +308,11 @@ fun UnifiedPlayerSheetV2(
         sheetMotionController.syncToExpansion(sheetCollapsedTargetY)
     }
 
-    var previousSheetState by remember { mutableStateOf(currentSheetContentState) }
+    var previousSheetState by remember { mutableStateOf<PlayerSheetState?>(null) }
     LaunchedEffect(showPlayerContentArea, currentSheetContentState) {
-        val targetExpanded = showPlayerContentArea && currentSheetContentState == PlayerSheetState.EXPANDED
+        if (currentSheetContentState == previousSheetState && previousSheetState != null) return@LaunchedEffect
         previousSheetState = currentSheetContentState
+        val targetExpanded = showPlayerContentArea && currentSheetContentState == PlayerSheetState.EXPANDED
         animatePlayerSheet(targetExpanded = targetExpanded)
         if (showPlayerContentArea) {
             scope.launch {
