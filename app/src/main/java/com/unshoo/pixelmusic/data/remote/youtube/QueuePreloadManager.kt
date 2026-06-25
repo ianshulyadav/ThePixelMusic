@@ -8,13 +8,9 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultDataSource
-import androidx.media3.datasource.FileDataSource
-import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.CacheWriter
 import com.unshoo.pixelmusic.data.model.youtube.Song
-import com.unshoo.pixelmusic.data.remote.youtube.UmihiHelper.printd
-import com.unshoo.pixelmusic.data.remote.youtube.UmihiHelper.printe
 import com.unshoo.pixelmusic.data.service.player.DualPlayerEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -25,18 +21,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
-/**
- * QueuePreloadManager — Offline-Resilient Playback
- *
- * When the current song changes, proactively:
- *   1. Resolves + caches the stream URL for the next [PRELOAD_AHEAD] songs via
- *      [YoutubeHelper.getSongPlayerUrl] (which saves to the Room DB so the player
- *      finds the URL without a fresh network call on playback).
- *   2. Downloads + saves the album art to the thumbnail directory so the
- *      notification / lock-screen artwork is available immediately on transition.
- *
- * Call [attach] from your playback service's onCreate() and [detach] from onDestroy().
- */
 @OptIn(UnstableApi::class)
 object QueuePreloadManager {
 
@@ -46,7 +30,6 @@ object QueuePreloadManager {
     private var datastoreRepository: DatastoreRepository? = null
     private var playerRef: Player? = null
     private var exoCache: ExoCache? = null
-    // Reference to the engine so we can check if the active URI is already locked.
     private var engineRef: DualPlayerEngine? = null
 
     private val playerListener = object : Player.Listener {
@@ -56,8 +39,6 @@ object QueuePreloadManager {
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             if (isPlaying) {
-                // App may have been paused/idle long enough for googlevideo URLs to expire.
-                // Warm the current item immediately, then the next items, so resume/skip is fast.
                 triggerPreload(includeCurrent = true)
             }
         }
@@ -78,10 +59,10 @@ object QueuePreloadManager {
         exoCache = exoCacheInstance
         engineRef = engine
         player.addListener(playerListener)
-        printd("QueuePreloadManager attached")
     }
 
     fun detach(player: Player?) {
+        playerRef?.removeListener(playerListener)
         player?.removeListener(playerListener)
         playerRef = null
         preloadJob?.cancel()
@@ -89,6 +70,7 @@ object QueuePreloadManager {
         appContext = null
         datastoreRepository = null
         exoCache = null
+        engineRef = null
     }
 
     fun updatePlayer(newPlayer: Player) {
@@ -97,7 +79,6 @@ object QueuePreloadManager {
             oldPlayer?.removeListener(playerListener)
             playerRef = newPlayer
             newPlayer.addListener(playerListener)
-            printd("QueuePreloadManager player updated")
         }
     }
 
@@ -109,7 +90,6 @@ object QueuePreloadManager {
         val currentScope = scope ?: return
         val player = playerRef ?: return
         val ctx = appContext ?: return
-
 
         preloadJob?.cancel()
         preloadJob = currentScope.launch(Dispatchers.IO) {
@@ -136,7 +116,6 @@ object QueuePreloadManager {
 
                 val videoId = resolveYoutubeVideoId(mediaItem) ?: continue
 
-                // Build a minimal Song from the MediaItem for URL resolution
                 val song = Song(
                     youtubeId = videoId,
                     title = mediaItem.mediaMetadata.title?.toString() ?: "",
@@ -144,22 +123,16 @@ object QueuePreloadManager {
                     thumbnailHref = upgradeThumbnailUrlToHighQuality(mediaItem.mediaMetadata.artworkUri?.toString()).orEmpty()
                 )
 
-                // 1. Preload stream URL (saves to DB so next play is instant)
                 var streamUrl: String? = null
                 try {
                     streamUrl = YoutubeHelper.getSongPlayerUrl(ctx, song, allowLocal = false)
-                    printd("QueuePreloadManager: preloaded stream URL for $videoId")
-                } catch (e: Exception) {
-                    printe("QueuePreloadManager: failed to preload stream for $videoId: ${e.message}")
+                } catch (_: Exception) {
                 }
 
-                // 1b. Prefetch audio only for current/next item. Prefetching many 512KB ranges
-                // can heat devices and waste battery, while current+next covers the UX-critical path.
                 if (!streamUrl.isNullOrBlank() && streamUrl.startsWith("http") && i <= currentIndex + 1) {
                     prefetchAudioBytes(ctx, videoId, streamUrl)
                 }
 
-                // 2. Preload album art to thumbnail cache directory
                 val thumbnailUrl = song.thumbnailHref
                 if (thumbnailUrl.isNotBlank()) {
                     try {
@@ -172,15 +145,12 @@ object QueuePreloadManager {
                             val artBytes = UmihiHelper.fetchArtworkBytes(thumbnailUrl)
                             if (artBytes != null && artBytes.isNotEmpty()) {
                                 destFile.writeBytes(artBytes)
-                                printd("QueuePreloadManager: cached thumbnail for $videoId")
                             }
                         }
-                    } catch (e: Exception) {
-                        printe("QueuePreloadManager: failed to cache thumbnail for $videoId: ${e.message}")
+                    } catch (_: Exception) {
                     }
                 }
 
-                // Small delay between preloads to avoid hammering the network
                 delay(if (includeCurrent && i == currentIndex) 120 else 350)
             }
         }
@@ -220,7 +190,7 @@ object QueuePreloadManager {
                 .setLength(512 * 1024)
                 .build()
 
-            val parentJob = kotlin.coroutines.coroutineContext[kotlinx.coroutines.Job]
+            val parentJob = kotlin.coroutines.coroutineContext[Job]
             val progressListener = CacheWriter.ProgressListener { _, _, _ ->
                 if (parentJob != null && !parentJob.isActive) {
                     throw InterruptedException("Prefetch canceled")
@@ -234,19 +204,10 @@ object QueuePreloadManager {
                 progressListener
             )
 
-            printd("QueuePreloadManager: starting audio prefetch (512KB) for $videoId")
             withContext(Dispatchers.IO) {
                 cacheWriter.cache()
             }
-            printd("QueuePreloadManager: completed audio prefetch (512KB) for $videoId")
-        } catch (e: Exception) {
-            // InterruptedException is expected when skipped/canceled, suppress verbose logging
-            if (e !is InterruptedException) {
-                printe("QueuePreloadManager: failed to prefetch audio bytes for $videoId: ${e.message}")
-            } else {
-                printd("QueuePreloadManager: audio prefetch canceled for $videoId")
-            }
+        } catch (_: Exception) {
         }
     }
-
 }

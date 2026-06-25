@@ -1,6 +1,7 @@
 package com.unshoo.pixelmusic.data.worker
 
 import android.content.Context
+import com.unshoo.pixelmusic.data.database.AlbumEntity
 import com.unshoo.pixelmusic.data.database.ArtistEntity
 import com.unshoo.pixelmusic.data.database.FavoritesDao
 import com.unshoo.pixelmusic.data.database.FavoritesEntity
@@ -17,6 +18,7 @@ import kotlinx.coroutines.yield
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import unshoo.ianshulyadav.pixelmusic.innertube.YouTube
+import unshoo.ianshulyadav.pixelmusic.innertube.models.AlbumItem
 import unshoo.ianshulyadav.pixelmusic.innertube.models.ArtistItem
 import unshoo.ianshulyadav.pixelmusic.innertube.models.SongItem
 import javax.inject.Inject
@@ -36,6 +38,7 @@ class YouTubeLibrarySyncManager @Inject constructor(
     companion object {
         private const val LIKED_SONGS_PLAYLIST = "LM"
         private const val BROWSE_SUBSCRIPTIONS = "FEmusic_library_corpus_artists"
+        private const val BROWSE_ALBUMS = "FEmusic_library_corpus_albums"
         private const val MIN_SYNC_INTERVAL_MS = 10 * 60 * 1000L
     }
 
@@ -59,6 +62,10 @@ class YouTubeLibrarySyncManager @Inject constructor(
             }
             try {
                 syncLikedSongs()
+            } catch (_: Exception) {
+            }
+            try {
+                syncLikedAlbums()
             } catch (_: Exception) {
             }
             try {
@@ -109,9 +116,45 @@ class YouTubeLibrarySyncManager @Inject constructor(
         userPreferencesRepository.setSubscribedArtistIds(subscribedIds)
     }
 
+    private suspend fun syncLikedAlbums() {
+        val allAlbumItems = mutableListOf<AlbumItem>()
+
+        val firstPage = YouTube.library(BROWSE_ALBUMS).getOrNull() ?: return
+        allAlbumItems += firstPage.items.filterIsInstance<AlbumItem>()
+
+        var pages = 0
+        var continuation = firstPage.continuation
+        while (continuation != null && pages < 5) {
+            yield()
+            val next = YouTube.libraryContinuation(continuation).getOrNull() ?: break
+            allAlbumItems += next.items.filterIsInstance<AlbumItem>()
+            continuation = next.continuation
+            pages++
+            delay(30L)
+        }
+
+        if (allAlbumItems.isEmpty()) return
+
+        val entities = allAlbumItems.mapNotNull { item ->
+            val id = ytAlbumId(item.title)
+            val primaryArtistName = item.artists?.firstOrNull()?.name ?: "Unknown Artist"
+            val primaryArtistId = ytArtistId(primaryArtistName)
+            AlbumEntity(
+                id = id,
+                title = item.title,
+                artistName = primaryArtistName,
+                artistId = primaryArtistId,
+                songCount = 10,
+                dateAdded = System.currentTimeMillis(),
+                year = item.year ?: 0,
+                albumArtUriString = item.thumbnail
+            )
+        }
+        musicDao.insertAlbumsIgnoreConflicts(entities)
+    }
+
     suspend fun syncLikedSongs() = withContext(Dispatchers.IO) {
         val allSongItems = mutableListOf<SongItem>()
-
         val firstPage = YouTube.playlist(LIKED_SONGS_PLAYLIST).getOrNull() ?: return@withContext
         allSongItems += firstPage.songs
 
@@ -183,6 +226,9 @@ class YouTubeLibrarySyncManager @Inject constructor(
 
     private fun ytSongId(youtubeId: String): Long =
         -(15_000_000_000_000L + youtubeId.hashCode().toLong().absoluteValue)
+
+    private fun ytAlbumId(name: String): Long =
+        -(16_000_000_000_000L + name.lowercase().hashCode().toLong().absoluteValue)
 
     private fun ytArtistId(name: String): Long =
         -(17_000_000_000_000L + name.lowercase().hashCode().toLong().absoluteValue)

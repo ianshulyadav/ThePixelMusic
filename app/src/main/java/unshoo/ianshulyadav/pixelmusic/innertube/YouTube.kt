@@ -1267,6 +1267,17 @@ object YouTube {
         )
     }
 
+    fun sendTelemetryPing(url: String) {
+        try {
+            val request = okhttp3.Request.Builder()
+                .url(url)
+                .header("Cookie", cookie ?: "")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36")
+                .build()
+            okhttp3.OkHttpClient().newCall(request).execute().close()
+        } catch (_: Exception) {}
+    }
+
     suspend fun likeVideo(videoId: String, like: Boolean) = runCatching {
         if (like)
             innerTube.likeVideo(WEB_REMIX, videoId)

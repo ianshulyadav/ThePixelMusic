@@ -19,6 +19,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.material3.Surface
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -219,7 +222,7 @@ fun ExploreScreen(
                                     .padding(horizontal = 16.dp, vertical = 8.dp),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                val categories = listOf("All", "Smart Mix", "For You", "New Releases", "Charts")
+                                val categories = listOf("All", "Recap", "Smart Mix", "For You", "New Releases", "Charts")
                                 categories.forEach { category ->
                                     FilterChip(
                                         selected = uiState.selectedFilter == category,
@@ -238,6 +241,43 @@ fun ExploreScreen(
                             }
                         }
 
+                        if (uiState.selectedFilter == "All" || uiState.selectedFilter == "Recap") {
+                            item(key = "recap_banner") {
+                                Card(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp),
+                                    shape = AbsoluteSmoothCornerShape(24.dp, 60),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(20.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Explore,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                            modifier = Modifier.size(36.dp)
+                                        )
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = "Your Music Recap",
+                                                style = MaterialTheme.typography.titleMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                                            )
+                                            Text(
+                                                text = "Relive your top songs, artists, and listening stats of the season",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         if (uiState.selectedFilter == "All" || uiState.selectedFilter == "Smart Mix") {
                             item(key = "smart_mix_category") {
                                 Card(
@@ -413,39 +453,54 @@ fun ExploreScreen(
                         }
 
                         if (uiState.selectedFilter == "All" || uiState.selectedFilter == "For You") {
+                            item(key = "welcome_banner_greeting") {
+                                WelcomeGreetingBanner(userName = "Connected User")
+                            }
                             homeSectionsFiltered.forEachIndexed { index, section ->
-                                item(key = "home_section_${section.title}_${index}_header") {
-                                    val isSectionQuickPicks = section.title.contains("quick picks", ignoreCase = true)
-                                    val quickPicksSongs = remember(section.items) {
-                                        section.items.filterIsInstance<SongItem>().map { it.toNativeSong() }
+                                val isBento = section.title.contains("mix", ignoreCase = true) && section.items.size >= 5
+                                val isSpeed = section.title.contains("speed dial", ignoreCase = true) || section.title.contains("quick picks", ignoreCase = true)
+                                if (isBento) {
+                                    item(key = "bento_${section.title}_$index") {
+                                        BentoGridSection(section, navController, playerViewModel)
                                     }
-                                    SectionHeader(
-                                        title = section.title,
-                                        onActionClick = if (isSectionQuickPicks && quickPicksSongs.isNotEmpty()) {
-                                            {
-                                                playerViewModel.playSongs(
-                                                    quickPicksSongs,
-                                                    quickPicksSongs.first(),
-                                                    section.title
-                                                )
-                                            }
-                                        } else null,
-                                        actionLabel = if (isSectionQuickPicks && quickPicksSongs.isNotEmpty()) "Play All" else null
-                                    )
-                                }
-                                item(key = "home_section_${section.title}_${index}_carousel") {
-                                    if (section.title.startsWith("Similar to", ignoreCase = true) || section.title.contains("Fans also like", ignoreCase = true)) {
-                                        SimilarArtistsCarousel(
-                                            artists = section.items.filterIsInstance<ArtistItem>(),
-                                            navController = navController
+                                } else if (isSpeed && section.items.isNotEmpty()) {
+                                    item(key = "speed_${section.title}_$index") {
+                                        SpeedDialSection(section, navController, playerViewModel)
+                                    }
+                                } else {
+                                    item(key = "home_section_${section.title}_${index}_header") {
+                                        val isSectionQuickPicks = section.title.contains("quick picks", ignoreCase = true)
+                                        val quickPicksSongs = remember(section.items) {
+                                            section.items.filterIsInstance<SongItem>().map { it.toNativeSong() }
+                                        }
+                                        SectionHeader(
+                                            title = section.title,
+                                            onActionClick = if (isSectionQuickPicks && quickPicksSongs.isNotEmpty()) {
+                                                {
+                                                    playerViewModel.playSongs(
+                                                        quickPicksSongs,
+                                                        quickPicksSongs.first(),
+                                                        section.title
+                                                    )
+                                                }
+                                            } else null,
+                                            actionLabel = if (isSectionQuickPicks && quickPicksSongs.isNotEmpty()) "Play All" else null
                                         )
-                                    } else {
-                                        YTItemCarousel(
-                                            items = section.items,
-                                            navController = navController,
-                                            playerViewModel = playerViewModel,
-                                            sectionTitle = section.title
-                                        )
+                                    }
+                                    item(key = "home_section_${section.title}_${index}_carousel") {
+                                        if (section.title.startsWith("Similar to", ignoreCase = true) || section.title.contains("Fans also like", ignoreCase = true)) {
+                                            SimilarArtistsCarousel(
+                                                artists = section.items.filterIsInstance<ArtistItem>(),
+                                                navController = navController
+                                            )
+                                        } else {
+                                            YTItemCarousel(
+                                                items = section.items,
+                                                navController = navController,
+                                                playerViewModel = playerViewModel,
+                                                sectionTitle = section.title
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -998,6 +1053,241 @@ fun SimilarArtistCardItem(
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 modifier = Modifier.fillMaxWidth()
             )
+        }
+    }
+}
+
+@Composable
+private fun WelcomeGreetingBanner(userName: String?) {
+    val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+    val greeting = when (hour) {
+        in 5..11 -> "Good morning"
+        in 12..16 -> "Good afternoon"
+        else -> "Good evening"
+    }
+    val name = userName?.takeIf { it.isNotBlank() } ?: "Music Lover"
+    Text(
+        text = "$greeting, $name",
+        style = MaterialTheme.typography.headlineMedium,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.onSurface,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+    )
+}
+
+@Composable
+private fun BentoGridSection(
+    section: unshoo.ianshulyadav.pixelmusic.innertube.pages.HomePage.Section,
+    navController: NavController,
+    playerViewModel: PlayerViewModel
+) {
+    val items = section.items
+    if (items.size < 5) return
+    Column(
+        modifier = Modifier.padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        SectionHeader(title = section.title)
+        Row(modifier = Modifier.height(310.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            CollageTile(
+                item = items[0],
+                modifier = Modifier.weight(1.35f).fillMaxHeight(),
+                shape = AbsoluteSmoothCornerShape(
+                    cornerRadiusTL = 52.dp,
+                    smoothnessAsPercentTR = 60,
+                    cornerRadiusTR = 16.dp,
+                    smoothnessAsPercentTL = 60,
+                    cornerRadiusBL = 16.dp,
+                    smoothnessAsPercentBR = 60,
+                    cornerRadiusBR = 52.dp,
+                    smoothnessAsPercentBL = 60
+                ),
+                badgeLabel = "FEATURED MIX",
+                isHero = true,
+                navController = navController,
+                playerViewModel = playerViewModel,
+                queueName = section.title
+            )
+            Column(modifier = Modifier.weight(0.75f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                CollageTile(
+                    item = items[1],
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    shape = AbsoluteSmoothCornerShape(32.dp, 60),
+                    badgeLabel = null,
+                    isHero = false,
+                    navController = navController,
+                    playerViewModel = playerViewModel,
+                    queueName = section.title
+                )
+                CollageTile(
+                    item = items[2],
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    shape = AbsoluteSmoothCornerShape(
+                        cornerRadiusTL = 14.dp,
+                        smoothnessAsPercentTR = 60,
+                        cornerRadiusTR = 40.dp,
+                        smoothnessAsPercentTL = 60,
+                        cornerRadiusBL = 40.dp,
+                        smoothnessAsPercentBR = 60,
+                        cornerRadiusBR = 14.dp,
+                        smoothnessAsPercentBL = 60
+                    ),
+                    badgeLabel = null,
+                    isHero = false,
+                    navController = navController,
+                    playerViewModel = playerViewModel,
+                    queueName = section.title
+                )
+            }
+        }
+        Row(modifier = Modifier.height(154.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            CollageTile(
+                item = items[3],
+                modifier = Modifier.weight(1f).fillMaxHeight(),
+                shape = AbsoluteSmoothCornerShape(
+                    cornerRadiusTL = 36.dp,
+                    smoothnessAsPercentTR = 60,
+                    cornerRadiusTR = 14.dp,
+                    smoothnessAsPercentTL = 60,
+                    cornerRadiusBL = 14.dp,
+                    smoothnessAsPercentBR = 60,
+                    cornerRadiusBR = 36.dp,
+                    smoothnessAsPercentBL = 60
+                ),
+                badgeLabel = null,
+                isHero = false,
+                navController = navController,
+                playerViewModel = playerViewModel,
+                queueName = section.title
+            )
+            CollageTile(
+                item = items[4],
+                modifier = Modifier.weight(1.2f).fillMaxHeight(),
+                shape = AbsoluteSmoothCornerShape(44.dp, 60),
+                badgeLabel = "HIT MIX",
+                isHero = false,
+                navController = navController,
+                playerViewModel = playerViewModel,
+                queueName = section.title
+            )
+        }
+    }
+}
+
+@Composable
+private fun CollageTile(
+    item: YTItem,
+    modifier: Modifier,
+    shape: androidx.compose.ui.graphics.Shape,
+    badgeLabel: String?,
+    isHero: Boolean,
+    navController: NavController,
+    playerViewModel: PlayerViewModel,
+    queueName: String
+) {
+    val title = when (item) {
+        is SongItem -> item.title
+        is AlbumItem -> item.title
+        is ArtistItem -> item.title
+        is PlaylistItem -> item.title
+        else -> ""
+    }
+    val thumbnail = when (item) {
+        is SongItem -> item.thumbnail
+        is AlbumItem -> item.thumbnail
+        is ArtistItem -> item.thumbnail
+        is PlaylistItem -> item.thumbnail
+        else -> ""
+    }
+    Surface(
+        modifier = modifier.clip(shape).clickable {
+            when (item) {
+                is SongItem -> playerViewModel.showAndPlaySong(item.toNativeSong(), listOf(item.toNativeSong()), queueName)
+                is AlbumItem -> navController.navigateSafely(Screen.AlbumDetail.createRoute(item.browseId))
+                is ArtistItem -> navController.navigateSafely(Screen.ArtistDetail.createRoute(item.id))
+                is PlaylistItem -> navController.navigateSafely(Screen.PlaylistDetail.createRoute(item.id))
+            }
+        },
+        shape = shape,
+        tonalElevation = if (isHero) 6.dp else 2.dp,
+        shadowElevation = if (isHero) 4.dp else 1.dp
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            SmartImage(model = thumbnail, contentDescription = title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            Box(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.82f)), startY = if (isHero) 80f else 30f)))
+            if (badgeLabel != null) {
+                Surface(
+                    modifier = Modifier.align(Alignment.TopStart).padding(12.dp),
+                    shape = AbsoluteSmoothCornerShape(12.dp, 60),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f)
+                ) {
+                    Text(
+                        text = badgeLabel,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                    )
+                }
+            }
+            Text(
+                text = title,
+                style = if (isHero) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                maxLines = if (isHero) 3 else 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.align(Alignment.BottomStart).padding(16.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun SpeedDialSection(
+    section: unshoo.ianshulyadav.pixelmusic.innertube.pages.HomePage.Section,
+    navController: NavController,
+    playerViewModel: PlayerViewModel
+) {
+    val rows = section.items.take(9).chunked(3)
+    Column(
+        modifier = Modifier.padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        SectionHeader(title = section.title)
+        rows.forEach { rowItems ->
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                rowItems.forEach { item ->
+                    val title = when (item) {
+                        is SongItem -> item.title
+                        is AlbumItem -> item.title
+                        is ArtistItem -> item.title
+                        is PlaylistItem -> item.title
+                        else -> ""
+                    }
+                    val thumbnail = when (item) {
+                        is SongItem -> item.thumbnail
+                        is AlbumItem -> item.thumbnail
+                        is ArtistItem -> item.thumbnail
+                        is PlaylistItem -> item.thumbnail
+                        else -> ""
+                    }
+                    Box(
+                        modifier = Modifier.weight(1f).aspectRatio(1f).clip(AbsoluteSmoothCornerShape(18.dp, 60)).clickable {
+                            when (item) {
+                                is SongItem -> playerViewModel.showAndPlaySong(item.toNativeSong(), listOf(item.toNativeSong()), section.title)
+                                is AlbumItem -> navController.navigateSafely(Screen.AlbumDetail.createRoute(item.browseId))
+                                is ArtistItem -> navController.navigateSafely(Screen.ArtistDetail.createRoute(item.id))
+                                is PlaylistItem -> navController.navigateSafely(Screen.PlaylistDetail.createRoute(item.id))
+                            }
+                        }
+                    ) {
+                        SmartImage(model = thumbnail, contentDescription = title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                        Box(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.72f)))))
+                        Text(text = title, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.align(Alignment.BottomStart).padding(8.dp))
+                    }
+                }
+            }
         }
     }
 }

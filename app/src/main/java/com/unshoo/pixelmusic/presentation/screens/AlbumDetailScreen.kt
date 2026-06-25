@@ -27,8 +27,10 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ContainedLoadingIndicator
@@ -356,6 +358,21 @@ fun AlbumDetailScreen(
                         )
                     }
 
+                    val context = androidx.compose.ui.platform.LocalContext.current
+                    val onDownloadAction = {
+                        songs.forEach { song ->
+                            val ytId = song.youtubeId ?: if (song.id.startsWith("youtube_")) song.id.removePrefix("youtube_") else null
+                            if (ytId != null) {
+                                val req = androidx.work.OneTimeWorkRequestBuilder<com.unshoo.pixelmusic.data.remote.youtube.SongDownloadWorker>()
+                                    .setInputData(androidx.work.workDataOf(com.unshoo.pixelmusic.data.remote.youtube.SongDownloadWorker.SONG_KEY to ytId))
+                                    .addTag("album_dl")
+                                    .build()
+                                androidx.work.WorkManager.getInstance(context).enqueueUniqueWork("dl_$ytId", androidx.work.ExistingWorkPolicy.KEEP, req)
+                            }
+                        }
+                        android.widget.Toast.makeText(context, "Downloading album songs...", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+
                     if (UseSharedCollapsibleTopBarProbe) {
                         SharedAlbumTopBarProbe(
                             album = album,
@@ -373,7 +390,8 @@ fun AlbumDetailScreen(
                                 if (songs.isNotEmpty()) {
                                     playerViewModel.playSongsShuffled(songs, album.title)
                                 }
-                            }
+                            },
+                            onDownloadClick = { onDownloadAction() }
                         )
                     } else {
                         CollapsingAlbumTopBar(
@@ -392,7 +410,8 @@ fun AlbumDetailScreen(
                                 if (songs.isNotEmpty()) {
                                     playerViewModel.playSongsShuffled(songs, album.title)
                                 }
-                            }
+                            },
+                            onDownloadClick = { onDownloadAction() }
                         )
                     }
                 }
@@ -505,7 +524,8 @@ private fun SharedAlbumTopBarProbe(
     headerImageRequestSize: Size,
     onHeaderArtworkState: ((AsyncImagePainter.State) -> Unit)? = null,
     onBackPressed: () -> Unit,
-    onPlayClick: () -> Unit
+    onPlayClick: () -> Unit,
+    onDownloadClick: () -> Unit = {}
 ) {
     val surfaceColor = MaterialTheme.colorScheme.surface
     val statusBarColor =
@@ -613,6 +633,24 @@ private fun SharedAlbumTopBarProbe(
         ) {
             Icon(Icons.Rounded.Shuffle, contentDescription = stringResource(R.string.cd_shuffle_play_album))
         }
+
+        LargeExtendedFloatingActionButton(
+            onClick = onDownloadClick,
+            shape = CircleShape,
+            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+            modifier = Modifier
+                .align(shuffleAlignment)
+                .statusBarsPadding()
+                .padding(end = 88.dp)
+                .graphicsLayer {
+                    scaleX = expandedContentAlpha
+                    scaleY = expandedContentAlpha
+                    alpha = expandedContentAlpha
+                }
+        ) {
+            Icon(Icons.Rounded.Download, contentDescription = "Download Album")
+        }
     }
 }
 
@@ -626,7 +664,8 @@ private fun CollapsingAlbumTopBar(
     headerImageRequestSize: Size,
     onHeaderArtworkState: ((AsyncImagePainter.State) -> Unit)? = null,
     onBackPressed: () -> Unit,
-    onPlayClick: () -> Unit
+    onPlayClick: () -> Unit,
+    onDownloadClick: () -> Unit = {}
 ) {
     val surfaceColor = MaterialTheme.colorScheme.surface
     val statusBarColor =
@@ -786,6 +825,23 @@ private fun CollapsingAlbumTopBar(
                         }
                 ) {
                     Icon(Icons.Rounded.Shuffle, contentDescription = stringResource(R.string.cd_shuffle_play_album))
+                }
+
+                LargeExtendedFloatingActionButton(
+                    onClick = onDownloadClick,
+                    shape = CircleShape,
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 88.dp, bottom = 16.dp)
+                        .graphicsLayer {
+                            scaleX = fabScale
+                            scaleY = fabScale
+                            alpha = fabScale
+                        }
+                ) {
+                    Icon(Icons.Rounded.Download, contentDescription = "Download Album")
                 }
             }
         }

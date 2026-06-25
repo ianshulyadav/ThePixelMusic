@@ -14,14 +14,14 @@ object Constants {
                 const val API =
                     "https://api.github.com/repos/ianshulyadav/PixelMusic/commits/main"
                 const val DOWNLOAD =
-                    "https://github.com/ianshulyadav/PixelMusic/releases/download/beta/PixelPlayer.apk"
+                    "https://github.com/ianshulyadav/PixelMusic/releases/download/beta/PixelMusic.apk"
             }
 
             object Release {
                 const val API =
                     "https://api.github.com/repos/ianshulyadav/PixelMusic/releases/latest"
                 const val DOWNLOAD =
-                    "https://github.com/ianshulyadav/PixelMusic/releases/latest/download/PixelPlayer.apk"
+                    "https://github.com/ianshulyadav/PixelMusic/releases/latest/download/PixelMusic.apk"
             }
         }
     }
