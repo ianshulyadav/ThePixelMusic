@@ -396,8 +396,17 @@ class ListeningStatsTracker @Inject constructor(
             genre = genre,
             album = album
         )
-        // Optional: cache most played YouTube songs. Disabled by default to avoid
-        // unexpected downloads, storage use, heat, and battery drain.
+        val ytId = if (songId.startsWith("youtube_")) songId.removePrefix("youtube_") else null
+        if (ytId != null) {
+            persistenceScope.launch(Dispatchers.IO) {
+                runCatching {
+                    val cpn = (1..16).map { "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_".random() }.joinToString("")
+                    val lengthSec = listened / 1000
+                    val pingUrl = "https://music.youtube.com/api/stats/watchtime?ns=yt&el=detailpage&docid=$ytId&ver=2&c=WEB_REMIX&cver=1.20260531.05.00&cplayer=UNIPLAYER&cpn=$cpn&state=ended&st=0&et=$lengthSec&cmt=$lengthSec&rt=$lengthSec&lact=1&len=$lengthSec"
+                    unshoo.ianshulyadav.pixelmusic.innertube.YouTube.sendTelemetryPing(pingUrl)
+                }
+            }
+        }
         if (userPreferencesRepository.cacheMostPlayedSongsOfflineFlow.first()) {
             triggerAutoCacheIfNeeded(songId)
         }

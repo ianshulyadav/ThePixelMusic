@@ -178,8 +178,6 @@
     <string name="no_genres_available">No genres available.</string>
 
     <!-- About -->
-    <string name="about_credits_title">Original Creator</string>
-    <string name="about_credits_description">This application is built upon and inspired by the open-source PixelPlayer project created by Theo Vilardo under the Proprietary License.</string>
     <string name="about_no_contributors">No contributors found right now. Please try again later.</string>
     <string name="about_app_name">PixelMusic</string>
     <string name="about_tagline">Open source music player built with its community.</string>
