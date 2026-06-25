@@ -12,7 +12,7 @@ import com.unshoo.pixelmusic.BuildConfig
 
 object AdManager {
     private const val TAG = "AdManager"
-    private const val AD_UNIT_ID = "ca-app-pub-623520458880294/664124376"
+    private const val AD_UNIT_ID = "ca-app-pub-6235250458880294/6641424376"
     private const val TEST_AD_UNIT_ID = "ca-app-pub-3940256099942544/5224354917"
 
     private const val PREFS_NAME = "ad_manager_prefs"
