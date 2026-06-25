@@ -46,15 +46,22 @@ class YouTubeLibrarySyncManager @Inject constructor(
     @Volatile private var lastSuccessfulSyncAtMs: Long = 0L
 
     suspend fun syncNow(force: Boolean = false) = withContext(Dispatchers.IO) {
+        val lastTimestamp = userPreferencesRepository.getLastSyncTimestamp()
         val now = System.currentTimeMillis()
-        if (!force && now - lastSuccessfulSyncAtMs < MIN_SYNC_INTERVAL_MS) {
+        if (!force && now - lastTimestamp < 6L * 60L * 60L * 1000L) {
             return@withContext
         }
 
         syncMutex.withLock {
             val lockedNow = System.currentTimeMillis()
-            if (!force && lockedNow - lastSuccessfulSyncAtMs < MIN_SYNC_INTERVAL_MS) {
+            if (!force && lockedNow - userPreferencesRepository.getLastSyncTimestamp() < 6L * 60L * 60L * 1000L) {
                 return@withLock
+            }
+            if (!YouTube.hasLoginCookie()) {
+                return@withLock
+            }
+            if (!force) {
+                delay(2500L)
             }
             try {
                 syncSubscribedArtists()
@@ -72,7 +79,7 @@ class YouTubeLibrarySyncManager @Inject constructor(
                 syncListeningHistory()
             } catch (_: Exception) {
             }
-            lastSuccessfulSyncAtMs = System.currentTimeMillis()
+            userPreferencesRepository.setLastSyncTimestamp(System.currentTimeMillis())
         }
     }
 

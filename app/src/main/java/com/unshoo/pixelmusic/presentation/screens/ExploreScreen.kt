@@ -505,7 +505,6 @@ fun ExploreScreen(
                                 }
                             }
 
-                            // Load More Continuation Trigger
                             if (uiState.homePageContinuation != null) {
                                 item(key = "load_more_trigger") {
                                     LaunchedEffect(Unit) {
