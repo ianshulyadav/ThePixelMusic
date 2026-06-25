@@ -110,6 +110,13 @@ class SongDownloadWorker(
                     val mainId = -(15_000_000_000_000L + song.youtubeId.hashCode().toLong().absoluteValue)
                     val parentDir = File(audioPath).parentFile?.absolutePath ?: ""
                     musicDao.updateSongFilePathAndParent(mainId, audioPath, parentDir)
+                    playlistRepository.insertCrossRef(
+                        com.unshoo.pixelmusic.data.model.youtube.PlaylistSongCrossRef(
+                            playlistId = Constants.Downloads.DOWNLOADED_PLAYLIST_ID,
+                            songId = song.youtubeId,
+                            position = 0
+                        )
+                    )
                 }
 
                 UmihiNotificationManager.showSongDownloadSuccess(appContext, song)

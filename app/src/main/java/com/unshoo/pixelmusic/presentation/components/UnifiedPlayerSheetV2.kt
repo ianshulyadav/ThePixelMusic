@@ -6,6 +6,8 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.keyframes
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.MutatorMutex
 import androidx.compose.foundation.background
@@ -241,7 +243,7 @@ fun UnifiedPlayerSheetV2(
     val visualOvershootScaleY = remember { Animatable(1f) }
     val initialFullPlayerOffsetY = remember(density) { with(density) { 24.dp.toPx() } }
     val sheetAnimationSpec = remember {
-        tween<Float>(durationMillis = ANIMATION_DURATION_MS, easing = FastOutSlowInEasing)
+        spring<Float>(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow)
     }
     val sheetAnimationMutex = remember { MutatorMutex() }
     val sheetExpandedTargetY = 0f
@@ -277,8 +279,6 @@ fun UnifiedPlayerSheetV2(
         playerViewModel = playerViewModel
     )
 
-    // FullPlayerVisualState now holds lazy getters that read from the Animatable
-    // inside graphicsLayer (draw-phase), avoiding per-frame recomposition.
     val fullPlayerVisualState = rememberFullPlayerVisualState(
         expansionFraction = playerContentExpansionFraction,
         initialOffsetY = initialFullPlayerOffsetY
@@ -305,8 +305,6 @@ fun UnifiedPlayerSheetV2(
     }
 
     LaunchedEffect(sheetCollapsedTargetY, sheetMotionController) {
-        // Keep the mini player anchored to the latest collapsed target whenever
-        // the navbar height/visibility changes under it.
         sheetMotionController.syncToExpansion(sheetCollapsedTargetY)
     }
 
@@ -323,18 +321,16 @@ fun UnifiedPlayerSheetV2(
                     visualOvershootScaleY.animateTo(
                         targetValue = 1f,
                         animationSpec = keyframes {
-                            durationMillis = 50
+                            durationMillis = 200
                             1.0f at 0
-                            1.05f at 125
-                            1.0f at 250
+                            1.03f at 100
+                            1.0f at 200
                         }
                     )
                 } else {
-                    // No bounce on close: deterministic collapse feels smoother and avoids
-                    // visible jank when the user dismisses while a list/page is still scrolling.
                     visualOvershootScaleY.animateTo(
                         targetValue = 1f,
-                        animationSpec = tween(durationMillis = 120, easing = FastOutSlowInEasing)
+                        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium)
                     )
                 }
             }

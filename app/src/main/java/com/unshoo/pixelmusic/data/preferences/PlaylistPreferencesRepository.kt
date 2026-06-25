@@ -122,12 +122,11 @@ class PlaylistPreferencesRepository @Inject constructor(
             val detail4 = if (coverPrefs.contains("${pId}_coverShapeDetail4")) coverPrefs.getFloat("${pId}_coverShapeDetail4", 0f) else null
 
             val playlistTitle = if (ytPlaylistInfo.id == "_downloaded_") "Downloaded Songs" else ytPlaylistInfo.title
-            val storedSongCount = ytSongCounts[pId] ?: ytPlaylistInfo.lastSyncSongCount
+            val actualDownloaded = if (ytPlaylistInfo.id == "_downloaded_") downloadedSongs.filter { it.downloaded } else emptyList()
+            val storedSongCount = if (ytPlaylistInfo.id == "_downloaded_") actualDownloaded.size else (ytSongCounts[pId] ?: ytPlaylistInfo.lastSyncSongCount)
             val playlistSongIds = if (ytPlaylistInfo.id == "_downloaded_") {
-                downloadedSongs.filter { it.downloaded }.map { "youtube_${it.youtubeId}" }
+                actualDownloaded.map { "youtube_${it.youtubeId}" }
             } else {
-                // Keep library playlist cards lightweight. Song IDs are loaded on demand in
-                // PlaylistDetailScreen; otherwise 10k-song playlists make every library update huge.
                 emptyList()
             }
             val (cTime, mTime) = getOrCreatePlaylistTimestamps(pId, ytPlaylistInfo.lastSyncTimestamp, playlistTitle, playlistSongIds)
