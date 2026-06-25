@@ -3,7 +3,6 @@ package com.unshoo.pixelmusic.presentation.components.scoped
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.AnimationVector1D
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.ui.Modifier
@@ -129,23 +128,16 @@ internal class SheetVerticalDragGestureHandler(
             } else {
                 val closeSpec = tween<Float>(
                     durationMillis = collapseAnimationDurationForFraction(currentFraction),
-                    easing = FastOutSlowInEasing
+                    easing = androidx.compose.animation.core.FastOutSlowInEasing
                 )
                 val clampedVelocity = verticalVelocity.coerceIn(-2600f, 2600f)
-                val scaleJob = launch {
-                    val initialSquash = collapseInitialSquashForFraction(currentFraction)
-                    visualOvershootScaleY.snapTo(initialSquash)
-                    visualOvershootScaleY.animateTo(
-                        targetValue = 1f,
-                        animationSpec = tween(durationMillis = 140, easing = FastOutSlowInEasing)
-                    )
-                }
+                // No scale squash — keep it at 1f to avoid any secondary bounce.
+                visualOvershootScaleY.snapTo(1f)
                 onAnimateSheet(
                     false,
                     closeSpec,
                     clampedVelocity
                 )
-                scaleJob.join()
                 onCollapseSheetState()
             }
         }
@@ -162,14 +154,11 @@ internal class SheetVerticalDragGestureHandler(
 
         val restoreExpanded = currentSheetStateProvider() == PlayerSheetState.EXPANDED
         scope.launch {
+            visualOvershootScaleY.snapTo(1f)
             onAnimateSheet(
                 restoreExpanded,
-                tween(durationMillis = 180, easing = FastOutSlowInEasing),
+                tween(durationMillis = 180, easing = androidx.compose.animation.core.FastOutSlowInEasing),
                 0f
-            )
-            visualOvershootScaleY.animateTo(
-                targetValue = 1f,
-                animationSpec = tween(durationMillis = 120, easing = FastOutSlowInEasing)
             )
         }
     }
