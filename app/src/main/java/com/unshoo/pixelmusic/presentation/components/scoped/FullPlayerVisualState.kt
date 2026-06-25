@@ -13,11 +13,14 @@ internal class FullPlayerVisualState(
     val contentAlpha: Float
         get() {
             val f = expansionFraction.value
-            return (f - 0.25f).coerceIn(0f, 0.75f) / 0.75f
+            return (f - 0.18f).coerceIn(0f, 0.82f) / 0.82f
         }
 
     val translationY: Float
         get() = lerp(initialOffsetY, 0f, contentAlpha)
+
+    val contentScale: Float
+        get() = lerp(0.92f, 1f, contentAlpha)
 }
 
 @Composable
