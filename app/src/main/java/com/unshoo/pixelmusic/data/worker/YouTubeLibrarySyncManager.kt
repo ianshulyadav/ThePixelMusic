@@ -184,10 +184,7 @@ class YouTubeLibrarySyncManager @Inject constructor(
             )
         }
         if (favoriteEntities.isNotEmpty()) {
-            favoriteEntities.chunked(500).forEach { chunk ->
-                favoritesDao.insertAll(chunk)
-                yield()
-            }
+            favoritesDao.insertAllBatched(favoriteEntities)
         }
     }
 

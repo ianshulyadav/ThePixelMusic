@@ -1761,6 +1761,13 @@ class MusicRepositoryImpl @Inject constructor(
 
     override suspend fun insertYoutubeSongs(songs: List<Song>): Unit = withContext(Dispatchers.IO) {
         if (songs.isEmpty()) return@withContext
+        if (songs.size > 250) {
+            songs.chunked(250).forEach { batch ->
+                insertYoutubeSongs(batch)
+                kotlinx.coroutines.yield()
+            }
+            return@withContext
+        }
         val ytSongs = mutableListOf<com.unshoo.pixelmusic.data.model.youtube.Song>()
         val songsToInsert = ArrayList<SongEntity>(songs.size)
         val artistsToInsert = LinkedHashMap<Long, ArtistEntity>()
