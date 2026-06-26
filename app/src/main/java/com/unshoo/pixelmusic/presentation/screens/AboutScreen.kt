@@ -764,18 +764,20 @@ private fun PrivacyPolicyCard(
 private fun PrivacyPolicyDialog(
     onDismiss: () -> Unit
 ) {
-    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+    ) {
         Surface(
-            shape = AbsoluteSmoothCornerShape(28.dp, 60),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            tonalElevation = 6.dp,
-            modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.85f)
-                .padding(16.dp)
+            color = MaterialTheme.colorScheme.background,
+            modifier = Modifier.fillMaxSize()
         ) {
             Column(
-                modifier = Modifier.padding(24.dp),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
+                    .padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Surface(
@@ -800,13 +802,13 @@ private fun PrivacyPolicyDialog(
 
                 Text(
                     text = "Privacy Policy",
-                    style = MaterialTheme.typography.titleLarge.copy(fontSize = 20.sp),
+                    style = MaterialTheme.typography.titleLarge.copy(fontSize = 22.sp),
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                 )
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(6.dp))
                 
                 Text(
                     text = "Last Updated: May 2026",
@@ -814,7 +816,7 @@ private fun PrivacyPolicyDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                 )
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(20.dp))
 
                 Box(
                     modifier = Modifier
@@ -830,32 +832,77 @@ private fun PrivacyPolicyDialog(
                     ) {
                         PrivacySection(
                             title = "1. Introduction",
-                            body = "Privacy Policy for PixelMusic is an independent open-source music player application designed for music streaming, local audio playback, and media sharing features. This Privacy Policy explains how PixelMusic handles user information, permissions, and third-party integrations. By using PixelMusic, you agree to the practices described in this policy."
+                            body = "PixelMusic is an independent open-source music player application designed for music streaming, local audio playback, and media sharing features. This Privacy Policy explains how PixelMusic handles user information, permissions, and third-party integrations.\n\nBy using PixelMusic, you agree to the practices described in this Privacy Policy."
                         )
 
                         PrivacySection(
                             title = "2. Information We Collect",
-                            body = "PixelMusic is designed with a privacy-focused approach. We do not sell personal data or collect unnecessary personal information. The application may temporarily process device information required for playback compatibility, audio metadata for local music organization, cache files for media playback, and crash logs for app stability. This data remains on your device."
+                            body = "PixelMusic is designed with a privacy-focused approach. We do not sell personal data or collect unnecessary personal information.\n\nInformation Collected Automatically:\n• Device information required for playback compatibility\n• Audio metadata for local music organization\n• Cache files for media playback and sharing\n• Crash logs for debugging and app stability improvements\n\nThis information is processed locally on the user's device whenever possible."
                         )
 
                         PrivacySection(
                             title = "3. Local Media Access",
-                            body = "PixelMusic may request permission to access music and audio files, images used for album artwork, and storage or media libraries. These permissions are used solely to play local music files, display album artwork, generate shareable story cards, and cache playback resources. PixelMusic does not upload local media files to external servers."
+                            body = "PixelMusic may request permission to access music and audio files, images used for album artwork, and storage or media libraries. These permissions are used solely to play local music files, display album artwork, generate shareable story cards, and cache playback resources. PixelMusic does not upload local media files to external servers without explicit user action."
                         )
 
                         PrivacySection(
-                            title = "4. Third-Party Integrations",
-                            body = "PixelMusic may interact with third-party platforms or publicly available services. Snapchat Creative Kit integration allows users to share music story cards directly to Snapchat; story cards are generated locally, and no login details are accessed. Ads are served via third-party partners (such as AdMob) to support development; these partners may collect device identifiers to serve ads."
+                            title = "4. Snapchat Creative Kit Integration",
+                            body = "PixelMusic may integrate with Snapchat Creative Kit to allow users to share music story cards and media previews directly to Snapchat.\n\nSnapchat Sharing Features:\n• Story card images are generated locally on-device\n• Sharing is initiated only after explicit user interaction\n• PixelMusic does not access private Snapchat messages or account credentials\n• PixelMusic does not collect Snapchat login information\n\nAny content shared to Snapchat is governed by Snapchat's own Terms of Service and Privacy Policy. PixelMusic is not affiliated with, endorsed by, or sponsored by Snap Inc."
                         )
 
                         PrivacySection(
-                            title = "5. Data Storage & Security",
-                            body = "Playback history, cached media, and user preferences are stored locally on your device. You may clear app storage or uninstall the application at any time to remove locally stored data. We take reasonable measures to protect user data, but no method of electronic storage or transmission is completely secure."
+                            title = "5. Third-Party Services",
+                            body = "PixelMusic may interact with third-party platforms or publicly available services for music playback and content access. Third-party services may have separate privacy policies and terms. Users are encouraged to review those policies independently. Examples include Snapchat, GitHub, and public media content providers."
+                        )
+
+                        PrivacySection(
+                            title = "6. Data Storage",
+                            body = "PixelMusic primarily stores data locally on the user's device, including playback history, cached media, user preferences, and generated share images. Users may clear app storage or uninstall the application at any time to remove locally stored data."
+                        )
+
+                        PrivacySection(
+                            title = "7. Data Sharing",
+                            body = "PixelMusic does not sell user data. We do not share personal information with advertisers or data brokers. Data is only shared externally when the user explicitly initiates sharing actions, when required for requested third-party integrations, or when necessary to comply with legal obligations."
+                        )
+
+                        PrivacySection(
+                            title = "8. Security",
+                            body = "PixelMusic takes reasonable measures to protect user information and locally stored data. However, no method of electronic storage or transmission is completely secure. Users are responsible for securing their own devices and accounts."
+                        )
+
+                        PrivacySection(
+                            title = "9. Children's Privacy",
+                            body = "PixelMusic is not directed toward children under the age required by local digital consent laws. We do not knowingly collect personal information from children."
+                        )
+
+                        PrivacySection(
+                            title = "10. Open Source Transparency",
+                            body = "PixelMusic is an open-source project. Portions of the source code may be publicly available through GitHub repositories to support transparency, collaboration, and community development."
+                        )
+
+                        PrivacySection(
+                            title = "11. Your Rights",
+                            body = "Depending on your jurisdiction, users may have rights related to accessing personal data, requesting deletion of stored information, or restricting certain processing activities. Since most data is stored locally on-device, users can generally manage or delete their information directly through device settings or app storage controls."
+                        )
+
+                        PrivacySection(
+                            title = "12. Changes to This Privacy Policy",
+                            body = "This Privacy Policy may be updated periodically. Changes will be reflected by updating the \"Last Updated\" date. Continued use of PixelMusic after changes constitutes acceptance of the revised policy."
+                        )
+
+                        PrivacySection(
+                            title = "13. Contact & Support",
+                            body = "For support, copyright concerns, or privacy-related questions:\nGitHub Repository: https://github.com/ianshulyadav/PixelMusic\nEmail: ianshul.yadavv@gmail.com"
+                        )
+
+                        PrivacySection(
+                            title = "14. Disclaimer",
+                            body = "PixelMusic is an independent project and is not affiliated with, endorsed by, or sponsored by Snap Inc., Snapchat, YouTube, YouTube Music, Spotify, Google, or any other third-party platform or trademark owner."
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(20.dp))
 
                 androidx.compose.material3.Button(
                     onClick = onDismiss,
