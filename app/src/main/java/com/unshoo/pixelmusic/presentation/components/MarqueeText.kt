@@ -76,115 +76,42 @@ fun AutoScrollingText(
     gradientWidth: Dp = 24.dp,
     canScroll: Boolean = true
 ) {
-    SubcomposeLayout(modifier = modifier.clipToBounds()) { constraints ->
-        val textPlaceable = subcompose("text") {
-            Text(text = text, style = style, maxLines = 1)
-        }[0].measure(constraints.copy(maxWidth = Int.MAX_VALUE))
-
-        val isOverflowing = textPlaceable.width > constraints.maxWidth
-
-        val content = @Composable {
-            if (isOverflowing && canScroll) {
-                val initialDelayMillis = 2000
-                val fadeAnimationDuration = 500
-
-                var isScrolling by remember(text, canScroll) { mutableStateOf(false) }
-                LaunchedEffect(text, canScroll) {
-                    isScrolling = false // Ensure initial state
-                    kotlinx.coroutines.delay(initialDelayMillis.toLong())
-                    isScrolling = true
-                }
-
-                val animatedLeftGradientStartColor by animateColorAsState(
-                    targetValue = if (isScrolling) Color.Transparent else gradientEdgeColor,
-                    animationSpec = tween(durationMillis = fadeAnimationDuration),
-                    label = "LeftGradientStartColor"
+    Box(
+        modifier = modifier
+            .clipToBounds()
+            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+            .drawWithContent {
+                drawContent()
+                val gradientWidthPx = gradientWidth.toPx()
+                // Right fade-out: Always visible for overflow
+                drawRect(
+                    brush = Brush.horizontalGradient(
+                        colors = listOf(gradientEdgeColor, Color.Transparent),
+                        startX = size.width - gradientWidthPx,
+                        endX = size.width
+                    ),
+                    blendMode = BlendMode.DstIn
                 )
-
-                Box(
-                    modifier = Modifier
-                        .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-                        .drawWithContent {
-                            drawContent()
-                            val gradientWidthPx = gradientWidth.toPx()
-
-                            // Left fade-in: Animates its color from opaque to transparent
-                            drawRect(
-                                brush = Brush.horizontalGradient(
-                                    colors = listOf(animatedLeftGradientStartColor, gradientEdgeColor),
-                                    startX = 0f,
-                                    endX = gradientWidthPx
-                                ),
-                                blendMode = BlendMode.DstIn
-                            )
-                            // Right fade-out: Always visible for overflow
-                            drawRect(
-                                brush = Brush.horizontalGradient(
-                                    colors = listOf(gradientEdgeColor, Color.Transparent),
-                                    startX = size.width - gradientWidthPx,
-                                    endX = size.width
-                                ),
-                                blendMode = BlendMode.DstIn
-                            )
-                        }
-                ) {
-                    Text(
-                        text = text,
-                        style = style,
-                        textAlign = textAlign,
-                        maxLines = 1,
-                        modifier = Modifier.basicMarquee(
+            }
+    ) {
+        Text(
+            text = text,
+            style = style,
+            textAlign = textAlign,
+            maxLines = 1,
+            softWrap = false,
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(
+                    if (canScroll) {
+                        Modifier.basicMarquee(
                             iterations = Int.MAX_VALUE,
                             spacing = MarqueeSpacing(gradientWidth + 6.dp),
                             velocity = 25.dp,
-                            initialDelayMillis = initialDelayMillis
+                            initialDelayMillis = 2000
                         )
-                    )
-                }
-            } else if (isOverflowing) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-                        .drawWithContent {
-                            drawContent()
-                            val gradientWidthPx = gradientWidth.toPx()
-                            // Right fade-out: Always visible for overflow
-                            drawRect(
-                                brush = Brush.horizontalGradient(
-                                    colors = listOf(gradientEdgeColor, Color.Transparent),
-                                    startX = size.width - gradientWidthPx,
-                                    endX = size.width
-                                ),
-                                blendMode = BlendMode.DstIn
-                            )
-                        }
-                ) {
-                    Text(
-                        text = text,
-                        style = style,
-                        textAlign = textAlign,
-                        maxLines = 1,
-                        softWrap = false,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            } else {
-                Text(
-                    text = text,
-                    style = style,
-                    textAlign = textAlign,
-                    maxLines = 1,
-                    softWrap = false
+                    } else Modifier
                 )
-            }
-        }
-
-        val contentPlaceable = subcompose("content", content)[0].measure(constraints)
-        val targetWidth = constraints.maxWidth.takeIf { it != Constraints.Infinity } ?: contentPlaceable.width
-
-        layout(targetWidth, contentPlaceable.height) {
-            contentPlaceable.place(0, 0)
-        }
+        )
     }
 }

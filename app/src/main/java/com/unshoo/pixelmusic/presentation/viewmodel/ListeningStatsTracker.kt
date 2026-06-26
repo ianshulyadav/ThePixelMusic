@@ -150,6 +150,23 @@ class ListeningStatsTracker @Inject constructor(
             genre = genre,
             album = album
         )
+        persistenceScope.launch(Dispatchers.IO) {
+            runCatching {
+                val ytId = if (safeSongId.startsWith("youtube_")) safeSongId.removePrefix("youtube_")
+                else {
+                    val numericId = safeSongId.toLongOrNull()
+                    if (numericId != null && numericId < 0) {
+                        val entity = musicDao.getSongByIdOnce(numericId)
+                        if (entity?.contentUriString?.startsWith("youtube://") == true) entity.contentUriString.removePrefix("youtube://") else null
+                    } else null
+                }
+                if (ytId != null) {
+                    val cpn = (1..16).map { "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_".random() }.joinToString("")
+                    val startUrl = "https://music.youtube.com/api/stats/playback?ns=yt&el=detailpage&docid=$ytId&ver=2&c=WEB_REMIX&cver=1.20260531.05.00&cplayer=UNIPLAYER&cpn=$cpn&rt=0"
+                    unshoo.ianshulyadav.pixelmusic.innertube.YouTube.sendTelemetryPing(startUrl)
+                }
+            }
+        }
         if (pendingVoluntarySongId == safeSongId) {
             pendingVoluntarySongId = null
         }
@@ -396,7 +413,17 @@ class ListeningStatsTracker @Inject constructor(
             genre = genre,
             album = album
         )
-        val ytId = if (songId.startsWith("youtube_")) songId.removePrefix("youtube_") else null
+        val ytId = if (songId.startsWith("youtube_")) {
+            songId.removePrefix("youtube_")
+        } else {
+            val numericId = songId.toLongOrNull()
+            if (numericId != null && numericId < 0) {
+                val songEntity = musicDao.getSongByIdOnce(numericId)
+                if (songEntity?.contentUriString?.startsWith("youtube://") == true) {
+                    songEntity.contentUriString.removePrefix("youtube://")
+                } else null
+            } else null
+        }
         if (ytId != null) {
             persistenceScope.launch(Dispatchers.IO) {
                 runCatching {
