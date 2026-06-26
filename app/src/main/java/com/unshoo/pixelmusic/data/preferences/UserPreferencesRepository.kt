@@ -171,6 +171,7 @@ constructor(
         val NAV_BAR_CORNER_RADIUS = intPreferencesKey("nav_bar_corner_radius")
         val NAV_BAR_STYLE = stringPreferencesKey("nav_bar_style")
         val NAV_BAR_COMPACT_MODE = booleanPreferencesKey("nav_bar_compact_mode")
+        val NAV_BAR_HEIGHT_OFFSET = intPreferencesKey("nav_bar_height_offset")
         val CAROUSEL_STYLE = stringPreferencesKey("carousel_style")
         val LIBRARY_NAVIGATION_MODE = stringPreferencesKey("library_navigation_mode")
         val LAUNCH_TAB = stringPreferencesKey("launch_tab")
@@ -1578,6 +1579,17 @@ constructor(
     suspend fun setNavBarCompactMode(enabled: Boolean) {
         dataStore.edit { preferences ->
             preferences[PreferencesKeys.NAV_BAR_COMPACT_MODE] = enabled
+        }
+    }
+
+    val navBarHeightOffsetFlow: Flow<Int> =
+            dataStore.data.map { preferences ->
+                preferences[PreferencesKeys.NAV_BAR_HEIGHT_OFFSET] ?: 0
+            }
+
+    suspend fun setNavBarHeightOffset(offset: Int) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.NAV_BAR_HEIGHT_OFFSET] = offset.coerceIn(-20, 20)
         }
     }
 

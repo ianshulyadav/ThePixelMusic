@@ -157,8 +157,11 @@ fun SearchScreen(
     val statusBarTopInset = WindowInsets.systemBars.asPaddingValues().calculateTopPadding()
     val systemNavBarInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val navBarCompactMode by playerViewModel.navBarCompactMode.collectAsStateWithLifecycle()
-    val bottomBarHeightDp = resolveNavBarOccupiedHeight(systemNavBarInset, navBarCompactMode)
-    val bottomGradientHeight = resolveMainScreenBottomGradientHeight(navBarCompactMode)
+    val navBarStyle by playerViewModel.navBarStyle.collectAsStateWithLifecycle()
+    val navBarHeightOffsetRaw by playerViewModel.navBarHeightOffset.collectAsStateWithLifecycle()
+    val navBarHeightOffset = navBarHeightOffsetRaw.dp
+    val bottomBarHeightDp = resolveNavBarOccupiedHeight(navBarStyle, systemNavBarInset, navBarCompactMode, navBarHeightOffset)
+    val bottomGradientHeight = resolveMainScreenBottomGradientHeight(navBarCompactMode, navBarHeightOffset)
     var showPlaylistBottomSheet by remember { mutableStateOf(false) }
     var playlistSheetSongs by remember { mutableStateOf<List<Song>>(emptyList()) }
     val searchUiState by remember(playerViewModel) {

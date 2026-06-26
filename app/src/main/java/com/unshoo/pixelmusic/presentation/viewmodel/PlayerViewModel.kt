@@ -625,6 +625,13 @@ class PlayerViewModel @Inject constructor(
             initialValue = NavBarStyle.DEFAULT
         )
 
+    val navBarHeightOffset: StateFlow<Int> = userPreferencesRepository.navBarHeightOffsetFlow
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = 0
+        )
+
     val navBarCompactMode: StateFlow<Boolean> = userPreferencesRepository.navBarCompactModeFlow
         .stateIn(
             scope = viewModelScope,

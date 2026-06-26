@@ -62,18 +62,19 @@ internal fun calculatePlayerSheetCollapsedTargetY(
         .coerceIn(0f, maxTargetY)
 }
 
-internal fun resolveNavBarContentHeight(compactMode: Boolean): Dp =
-    if (compactMode) NavBarCompactContentHeight else NavBarContentHeight
+internal fun resolveNavBarContentHeight(compactMode: Boolean, heightOffset: Dp = 0.dp): Dp =
+    (if (compactMode) NavBarCompactContentHeight else NavBarContentHeight) + heightOffset
 
-internal fun resolveMainScreenBottomGradientHeight(compactMode: Boolean): Dp =
-    resolveNavBarContentHeight(compactMode) + MainScreenBottomGradientExtraHeight
+internal fun resolveMainScreenBottomGradientHeight(compactMode: Boolean, heightOffset: Dp = 0.dp): Dp =
+    resolveNavBarContentHeight(compactMode, heightOffset) + MainScreenBottomGradientExtraHeight
 
 internal fun resolveNavBarSurfaceHeight(
     navBarStyle: String,
     systemNavBarInset: Dp,
-    compactMode: Boolean
+    compactMode: Boolean,
+    heightOffset: Dp = 0.dp
 ): Dp {
-    val contentHeight = resolveNavBarContentHeight(compactMode)
+    val contentHeight = resolveNavBarContentHeight(compactMode, heightOffset)
     return if (navBarStyle == NavBarStyle.FULL_WIDTH) {
         contentHeight + systemNavBarInset
     } else {
@@ -84,7 +85,22 @@ internal fun resolveNavBarSurfaceHeight(
 internal fun resolveNavBarOccupiedHeight(
     systemNavBarInset: Dp,
     compactMode: Boolean
-): Dp = resolveNavBarContentHeight(compactMode) + systemNavBarInset
+): Dp = resolveNavBarOccupiedHeight(NavBarStyle.DEFAULT, systemNavBarInset, compactMode, 0.dp)
+
+internal fun resolveNavBarOccupiedHeight(
+    navBarStyle: String,
+    systemNavBarInset: Dp,
+    compactMode: Boolean,
+    heightOffset: Dp = 0.dp
+): Dp {
+    val contentHeight = resolveNavBarContentHeight(compactMode, heightOffset)
+    return if (navBarStyle == NavBarStyle.FULL_WIDTH) {
+        contentHeight + systemNavBarInset
+    } else {
+        val bottomMargin = if (systemNavBarInset > 0.dp) systemNavBarInset else 14.dp
+        contentHeight + bottomMargin
+    }
+}
 
 @Composable
 private fun PlayerInternalNavigationItemsRow(

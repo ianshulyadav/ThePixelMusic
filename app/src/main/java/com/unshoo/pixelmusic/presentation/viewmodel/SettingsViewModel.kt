@@ -74,6 +74,7 @@ data class SettingsUiState(
     val navBarCornerRadius: Int = 32,
     val navBarStyle: String = NavBarStyle.DEFAULT,
     val navBarCompactMode: Boolean = false,
+    val navBarHeightOffset: Int = 0,
     val carouselStyle: String = CarouselStyle.NO_PEEK,
     val libraryNavigationMode: String = LibraryNavigationMode.TAB_ROW,
     val launchTab: String = LaunchTab.HOME,
@@ -196,6 +197,7 @@ private sealed interface SettingsUiUpdate {
         val navBarCornerRadius: Int,
         val navBarStyle: String,
         val navBarCompactMode: Boolean,
+        val navBarHeightOffset: Int,
         val libraryNavigationMode: String,
         val carouselStyle: String,
         val launchTab: String,
@@ -578,6 +580,7 @@ class SettingsViewModel @Inject constructor(
                 userPreferencesRepository.navBarCornerRadiusFlow,
                 userPreferencesRepository.navBarStyleFlow,
                 userPreferencesRepository.navBarCompactModeFlow,
+                userPreferencesRepository.navBarHeightOffsetFlow,
                 userPreferencesRepository.libraryNavigationModeFlow,
                 userPreferencesRepository.carouselStyleFlow,
                 userPreferencesRepository.launchTabFlow,
@@ -595,11 +598,12 @@ class SettingsViewModel @Inject constructor(
                     navBarCornerRadius = values[7] as Int,
                     navBarStyle = values[8] as String,
                     navBarCompactMode = values[9] as Boolean,
-                    libraryNavigationMode = values[10] as String,
-                    carouselStyle = values[11] as String,
-                    launchTab = values[12] as String,
-                    showPlayerFileInfo = values[13] as Boolean,
-                    appFontMode = values[14] as String
+                    navBarHeightOffset = values[10] as Int,
+                    libraryNavigationMode = values[11] as String,
+                    carouselStyle = values[12] as String,
+                    launchTab = values[13] as String,
+                    showPlayerFileInfo = values[14] as Boolean,
+                    appFontMode = values[15] as String
                 )
             }.collect { update ->
                 _uiState.update { state ->
@@ -615,6 +619,7 @@ class SettingsViewModel @Inject constructor(
                         navBarCornerRadius = update.navBarCornerRadius,
                         navBarStyle = update.navBarStyle,
                         navBarCompactMode = update.navBarCompactMode,
+                        navBarHeightOffset = update.navBarHeightOffset,
                         libraryNavigationMode = update.libraryNavigationMode,
                         carouselStyle = update.carouselStyle,
                         launchTab = update.launchTab,
@@ -1171,6 +1176,12 @@ class SettingsViewModel @Inject constructor(
     fun setNavBarCompactMode(enabled: Boolean) {
         viewModelScope.launch {
             userPreferencesRepository.setNavBarCompactMode(enabled)
+        }
+    }
+
+    fun setNavBarHeightOffset(offset: Int) {
+        viewModelScope.launch {
+            userPreferencesRepository.setNavBarHeightOffset(offset)
         }
     }
 

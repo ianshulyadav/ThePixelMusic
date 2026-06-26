@@ -282,7 +282,9 @@ fun HomeScreen(
     // Padding inferior si hay canción en reproducción
     val bottomPadding = if (currentSong != null) MiniPlayerHeight else 0.dp
     val navBarCompactMode by playerViewModel.navBarCompactMode.collectAsStateWithLifecycle()
-    val bottomGradientHeight = resolveMainScreenBottomGradientHeight(navBarCompactMode)
+    val navBarHeightOffsetRaw by playerViewModel.navBarHeightOffset.collectAsStateWithLifecycle()
+    val navBarHeightOffset = navBarHeightOffsetRaw.dp
+    val bottomGradientHeight = resolveMainScreenBottomGradientHeight(navBarCompactMode, navBarHeightOffset)
 
     var showOptionsBottomSheet by remember { mutableStateOf(false) }
     var showChangelogBottomSheet by remember { mutableStateOf(false) }
