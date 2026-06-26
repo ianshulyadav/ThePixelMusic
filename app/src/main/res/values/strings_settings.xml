@@ -141,6 +141,7 @@
     <string name="setcat_compact_mode_subtitle">Show only icons and reduce the navbar height.</string>
     <string name="setcat_navbar_corner_title">NavBar Corner Radius</string>
     <string name="setcat_navbar_corner_subtitle">Adjust the corner radius of the navigation bar.</string>
+    <string name="setcat_navbar_height_adjustment">NavBar Height Adjustment</string>
     <string name="setcat_lyrics_screen">Lyrics Screen</string>
     <string name="setcat_immersive_lyrics_title">Immersive Lyrics</string>
     <string name="setcat_immersive_lyrics_subtitle">Auto-hide controls and enlarge text.</string>

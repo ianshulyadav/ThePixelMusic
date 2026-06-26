@@ -774,6 +774,8 @@ class MainActivity : ComponentActivity() {
 
         val navBarStyle by playerViewModel.navBarStyle.collectAsStateWithLifecycle()
         val navBarCompactMode by playerViewModel.navBarCompactMode.collectAsStateWithLifecycle()
+        val navBarHeightOffsetRaw by playerViewModel.navBarHeightOffset.collectAsStateWithLifecycle()
+        val navBarHeightOffset = navBarHeightOffsetRaw.dp
         val navBarCornerRadiusRaw by playerViewModel.navBarCornerRadius.collectAsStateWithLifecycle()
         val navBarCornerRadius = sanitizeNavBarCornerRadius(navBarCornerRadiusRaw)
         val isMiniPlayerDismissing by playerViewModel.isMiniPlayerDismissing.collectAsStateWithLifecycle()
@@ -797,19 +799,28 @@ class MainActivity : ComponentActivity() {
         }
 
         val horizontalPadding = if (navBarStyle == NavBarStyle.DEFAULT) {
-            if (systemNavBarInset > 30.dp) 14.dp else systemNavBarInset
+            if (systemNavBarInset > 0.dp) {
+                if (systemNavBarInset > 30.dp) 14.dp else systemNavBarInset
+            } else {
+                14.dp
+            }
         } else {
             0.dp
         }
+        val targetBottomBarPadding = if (navBarStyle == NavBarStyle.FULL_WIDTH) {
+            0.dp
+        } else {
+            if (systemNavBarInset > 0.dp) systemNavBarInset else 14.dp
+        }
         val animatedBottomBarPadding by animateDpAsState(
-            targetValue = if (navBarStyle == NavBarStyle.FULL_WIDTH) 0.dp else systemNavBarInset,
+            targetValue = targetBottomBarPadding,
             animationSpec = tween(400),
             label = "BottomBarPadding"
         )
         val bottomBarPadding = animatedBottomBarPadding
-        val navBarHeight = resolveNavBarSurfaceHeight(navBarStyle, systemNavBarInset, navBarCompactMode)
-        val navBarOccupiedHeight by remember(systemNavBarInset, navBarCompactMode) {
-            derivedStateOf { resolveNavBarOccupiedHeight(systemNavBarInset, navBarCompactMode) }
+        val navBarHeight = resolveNavBarSurfaceHeight(navBarStyle, systemNavBarInset, navBarCompactMode, navBarHeightOffset)
+        val navBarOccupiedHeight by remember(systemNavBarInset, navBarCompactMode, navBarStyle, navBarHeightOffset) {
+            derivedStateOf { resolveNavBarOccupiedHeight(navBarStyle, systemNavBarInset, navBarCompactMode, navBarHeightOffset) }
         }
         val navBarVisibilityProgress by animateFloatAsState(
             targetValue = if (shouldHideNavigationBar) 0f else 1f,

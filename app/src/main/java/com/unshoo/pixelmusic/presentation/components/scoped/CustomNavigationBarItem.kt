@@ -72,30 +72,30 @@ fun RowScope.CustomNavigationBarItem(
     // Colores animados - Solo se recomponen cuando 'selected' cambia
     val iconColor by animateColorAsState(
         targetValue = if (selected) selectedIconColor else unselectedIconColor,
-        animationSpec = tween(durationMillis = 150),
+        animationSpec = tween(durationMillis = 200),
         label = "iconColor"
     )
 
     val textColor by animateColorAsState(
         targetValue = if (selected) selectedTextColor else unselectedTextColor,
-        animationSpec = tween(durationMillis = 150),
+        animationSpec = tween(durationMillis = 200),
         label = "textColor"
     )
 
     val iconScale by animateFloatAsState(
-        targetValue = if (selected) 1.12f else 1f,
+        targetValue = if (selected) 1.15f else 1f,
         animationSpec = spring(
-            dampingRatio = Spring.DampingRatioNoBouncy,
-            stiffness = Spring.StiffnessMedium
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMediumLow
         ),
         label = "iconScale"
     )
 
     val iconOffsetY by animateFloatAsState(
-        targetValue = if (selected) -3f else 0f,
+        targetValue = if (selected) -4f else 0f,
         animationSpec = spring(
-            dampingRatio = Spring.DampingRatioNoBouncy,
-            stiffness = Spring.StiffnessMedium
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMediumLow
         ),
         label = "iconOffsetY"
     )
@@ -109,10 +109,28 @@ fun RowScope.CustomNavigationBarItem(
         label = "labelScale"
     )
 
-    val density = LocalDensity.current.density
+    val indicatorProgress by animateFloatAsState(
+        targetValue = if (selected) 1f else 0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "indicatorProgress"
+    )
 
     // Determinar si mostrar la etiqueta
     val showLabel = label != null && (alwaysShowLabel || selected)
+
+    val labelProgress by animateFloatAsState(
+        targetValue = if (showLabel) 1f else 0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "labelProgress"
+    )
+
+    val density = LocalDensity.current.density
     val indicatorWidth = 64.dp
     val indicatorHeight = 32.dp
     val iconWidth = 48.dp
@@ -147,26 +165,16 @@ fun RowScope.CustomNavigationBarItem(
             modifier = Modifier
                 .size(indicatorWidth, indicatorHeight)
         ) {
-            androidx.compose.animation.AnimatedVisibility(
-                visible = selected,
-                enter = fadeIn(animationSpec = tween(150)) +
-                        scaleIn(
-                            animationSpec = spring(
-                                dampingRatio = Spring.DampingRatioNoBouncy,
-                                stiffness = Spring.StiffnessMedium
-                            ),
-                            initialScale = 0.8f
-                        ),
-                exit = fadeOut(animationSpec = tween(150)) +
-                        scaleOut(
-                            animationSpec = tween(150, easing = EaseInQuart),
-                            targetScale = 0.8f
-                        )
-            ) {
+            if (indicatorProgress > 0.01f) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(horizontal = indicatorPadding)
+                        .graphicsLayer {
+                            scaleX = indicatorProgress
+                            scaleY = indicatorProgress
+                            alpha = indicatorProgress
+                        }
                         .background(
                             color = indicatorColor,
                             shape = indicatorShape
@@ -202,18 +210,15 @@ fun RowScope.CustomNavigationBarItem(
         }
 
         // Etiqueta con animación
-        androidx.compose.animation.AnimatedVisibility(
-            visible = showLabel,
-            enter = fadeIn(animationSpec = tween(200, delayMillis = 50)),
-            exit = fadeOut(animationSpec = tween(100))
-        ) {
+        if (labelProgress > 0.01f) {
             Spacer(modifier = Modifier.height(4.dp))
             Box(
                 modifier = Modifier
                     .padding(top = 4.dp)
                     .graphicsLayer {
-                        scaleX = labelScale
-                        scaleY = labelScale
+                        scaleX = labelScale * labelProgress
+                        scaleY = labelScale * labelProgress
+                        alpha = labelProgress
                     }
             ) {
                 ProvideTextStyle(

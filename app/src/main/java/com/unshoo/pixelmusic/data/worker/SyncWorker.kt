@@ -1235,35 +1235,18 @@ constructor(
     ): List<File> {
         val candidates = linkedSetOf<File>()
 
-        // 1) Explicitly allowed roots always get priority.
-        explicitAllowedRoots.forEach { candidates.add(it) }
-
-        // 2) Common user-facing media directories.
-        listOf(
-            Environment.DIRECTORY_MUSIC,
-            Environment.DIRECTORY_DOWNLOADS,
-            Environment.DIRECTORY_PODCASTS,
-            Environment.DIRECTORY_AUDIOBOOKS,
-            Environment.DIRECTORY_RINGTONES,
-            Environment.DIRECTORY_NOTIFICATIONS
-        ).forEach { dirName ->
-            candidates.add(Environment.getExternalStoragePublicDirectory(dirName))
-        }
-
-        // 3) Top-level buckets already used by current MediaStore entries.
-        mediaStorePaths.forEach { mediaPath ->
-            val parent = File(mediaPath).parentFile ?: return@forEach
-            val parentPath = parent.absolutePath
-            if (parentPath.startsWith("${externalRoot.absolutePath}/")) {
-                val relative = parentPath.removePrefix(externalRoot.absolutePath).trimStart('/')
-                if (relative.isNotEmpty()) {
-                    val topLevel = relative.substringBefore('/')
-                    if (topLevel.isNotEmpty()) {
-                        candidates.add(File(externalRoot, topLevel))
-                    }
-                }
-            } else {
-                candidates.add(parent)
+        if (explicitAllowedRoots.isNotEmpty()) {
+            // 1) Explicitly allowed roots always get priority and restrict scanning to ONLY these.
+            explicitAllowedRoots.forEach { candidates.add(it) }
+        } else {
+            // 2) Default back to common user-facing music/audio directories only.
+            listOf(
+                Environment.DIRECTORY_MUSIC,
+                Environment.DIRECTORY_DOWNLOADS,
+                Environment.DIRECTORY_PODCASTS,
+                Environment.DIRECTORY_AUDIOBOOKS
+            ).forEach { dirName ->
+                candidates.add(Environment.getExternalStoragePublicDirectory(dirName))
             }
         }
 
