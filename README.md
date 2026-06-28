@@ -10,6 +10,18 @@
 </p>
 
 <p align="center">
+# Pixel Music 🎵
+
+<p align="center">
+  <img src="assets/LauncherIcon.png" alt="Pixel Music App Icon" width="128"/>
+</p>
+
+<p align="center">
+  <strong>The Ultimate Hybrid Local, Streaming, and Cloud Music Powerhouse for Android</strong><br>
+  An elegant, feature-rich audio system built using Jetpack Compose, Material Design 3, and Media3 ExoPlayer.
+</p>
+
+<p align="center">
   <img src="assets/screenshot1.jpg" alt="Pixel Music Library View" width="150" style="border-radius:26px; margin: 4px;"/>
   <img src="assets/screenshot2.jpg" alt="Pixel Music Player Sheet" width="150" style="border-radius:26px; margin: 4px;"/>
   <img src="assets/screenshot3.jpg" alt="Pixel Music Equalizer" width="150" style="border-radius:26px; margin: 4px;"/>
@@ -17,14 +29,24 @@
 </p>
 
 <p align="center">
-  <a href="https://android.com"><img src="https://img.shields.io/badge/Android-11%2B-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android 11+"></a>
-  <a href="https://kotlinlang.org"><img src="https://img.shields.io/badge/Kotlin-100%25-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white" alt="Kotlin 100%"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Proprietary-red?style=for-the-badge" alt="Proprietary License"></a>
-  <a href="https://t.me/PixelMusicApp"><img src="https://img.shields.io/badge/Telegram-Join%20Channel-229ED9?style=for-the-badge&logo=telegram&logoColor=white" alt="Telegram Channel"></a>
-  <a href="https://github.com/ianshulyadav/PixelMusic"><img src="https://img.shields.io/badge/PRs-Welcome-brightgreen?style=for-the-badge" alt="PRs Welcome"></a>
+  <a href="https://android.com">
+    <img src="https://img.shields.io/badge/Android-11%2B-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android 11+">
+  </a>
+  <a href="https://kotlinlang.org">
+    <img src="https://img.shields.io/badge/Kotlin-100%25-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white" alt="Kotlin 100%">
+  </a>
+  <a href="LICENSE">
+    <img src="https://img.shields.io/badge/License-Proprietary-red?style=for-the-badge" alt="Proprietary License">
+  </a>
+  <a href="https://t.me/PixelMusicApp">
+    <img src="https://img.shields.io/badge/Telegram-Join%20Channel-229ED9?style=for-the-badge&logo=telegram&logoColor=white" alt="Telegram Channel">
+  </a>
+  <a href="https://github.com/ianshulyadav/PixelMusic">
+    <img src="https://img.shields.io/badge/PRs-Welcome-brightgreen?style=for-the-badge" alt="PRs Welcome">
+  </a>
 </p>
 
-> **Attribution Notice:** Portions of this project are based on **[PixelPlayer](https://github.com/theovilardo/PixelPlayer)**, licensed under the MIT License. Original copyright notices are retained in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md). Pixel Music modifications from May 27, 2026 onward are proprietary under the [`LICENSE`](LICENSE) file.
+> **Attribution Notice:** Portions of this project are based on **[PixelPlayer](https://github.com/theovilardo/PixelPlayer)**, originally made available under the MIT License. Original MIT copyright and permission notices are retained in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md). Pixel Music modifications from May 27, 2026 onward are proprietary under the [`LICENSE`](LICENSE) file.
 
 ---
 
@@ -130,10 +152,10 @@ graph TD
 
 ## 🎨 UI/UX Excellence: A Tribute to PixelPlayer
 
-Pixel Music's high-fidelity interface is proudly inspired by and built upon the open-source aesthetic foundation of **[PixelPlayer](https://github.com/theovilardo)**. 
+Pixel Music's high-fidelity interface is inspired by and built upon portions of the MIT-licensed foundation of **[PixelPlayer](https://github.com/theovilardo/PixelPlayer)**.
 
 > [!NOTE]
-> We extend our deepest credit and gratitude to **[PixelPlayer](https://github.com/theovilardo/PixelPlayer)** (crafted by **Theo Vilardo**) for redefining what a native Android application can look like. 
+> Credit and gratitude to **[PixelPlayer](https://github.com/theovilardo/PixelPlayer)**, crafted by **Theo Vilardo**, for its original Android UI/UX foundation.
 
 Key UI/UX visual paradigms adopted from PixelPlayer include:
 * **Dynamic Material You Theming:** High-precision HSL color extraction from album artwork that smoothly updates the player, bottom sheets, sliders, and navigation bar to match the mood of the current track.
@@ -253,8 +275,8 @@ Pixel Music is an independent, community-driven third-party audio player and cli
 
 Pixel Music uses a mixed licensing model.
 
-Portions of this project are based on **[PixelPlayer](https://github.com/theovilardo/PixelPlayer)**, which is licensed under the MIT License. The original MIT copyright and permission notices are retained in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+Portions of this project are based on **[PixelPlayer](https://github.com/theovilardo/PixelPlayer)**, originally made available under the MIT License. The original MIT copyright and permission notices are retained in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 Modifications, additions, integrations, branding, artwork, documentation, configuration, and other original work by **ianshulyadav** from **May 27, 2026 onward** are proprietary and governed by the [`LICENSE`](LICENSE) file.
 
-Nothing in Pixel Music's proprietary license removes or restricts rights granted by the MIT License for the original MIT-licensed PixelPlayer portions.
+Nothing in Pixel Music's proprietary license removes, limits, or overrides rights granted by the MIT License for the original MIT-licensed PixelPlayer portions.

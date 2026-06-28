@@ -1,13 +1,19 @@
 # Third-Party Notices
 
-This project includes portions derived from PixelPlayer:
+This project includes portions derived from PixelPlayer.
 
-Project: PixelPlayer
-Repository: https://github.com/theovilardo/PixelPlayer
-License: MIT License
+Project: PixelPlayer  
+Repository: https://github.com/theovilardo/PixelPlayer  
+Original author/maintainer: Theo Vilardo / theovilardo  
+License: MIT License, for the portions used from the MIT-licensed version of PixelPlayer
 
 The original MIT-licensed portions remain subject to the MIT License. The
 original copyright notice and permission notice are retained below.
+
+Important: Pixel Music should only include PixelPlayer code that was obtained
+while that code/version was available under the MIT License. PixelPlayer code
+released only under a later proprietary license should not be imported without
+written permission from the applicable rights holder.
 
 -------------------------------------------------------------------------------
 
