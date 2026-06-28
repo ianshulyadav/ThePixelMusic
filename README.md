@@ -24,7 +24,7 @@
   <a href="https://github.com/ianshulyadav/PixelMusic"><img src="https://img.shields.io/badge/PRs-Welcome-brightgreen?style=for-the-badge" alt="PRs Welcome"></a>
 </p>
 
-> **Attribution Notice:** Portions of this project are based on **[PixelPlayer](https://github.com/theovilardo/PixelPlayer)**, licensed under the MIT License. Original copyright notices are retained. Modifications from May 27, 2026 onward are proprietary.
+> **Attribution Notice:** Portions of this project are based on **[PixelPlayer](https://github.com/theovilardo/PixelPlayer)**, licensed under the MIT License. Original copyright notices are retained in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md). Pixel Music modifications from May 27, 2026 onward are proprietary under the [`LICENSE`](LICENSE) file.
 
 ---
 
@@ -32,13 +32,14 @@
 
 **Pixel Music** is not just another music player. It is a unified, privacy-first audio powerhouse engineered for audiophiles, cloud hoarders, and streaming enthusiasts alike. By bridging local offline library indexing, unofficial YouTube Music streaming, Telegram channel integration, Google Drive personal cloud libraries (WIP), and next-generation Generative AI capabilities, Pixel Music creates a flawless hybrid music ecosystem under a single, gorgeous user experience.
 
-**Pixel Music** is the ultimate hybrid local and yt music client built for Android. It represents a gorgeous, open-source Spotify and YT Premium alternative. This application brings all of your music sources under a single, beautiful roof.
+**Pixel Music** is the ultimate hybrid local and yt music client built for Android. It represents a gorgeous, source-available Spotify and YT Premium alternative. This application brings all of your music sources under a single, beautiful roof.
 
-You can scan and play high-resolution local files like FLAC, ALAC, WAV, and MP3. At the same time, you can stream the entire YouTube Music catalog without advertisements. Additionally, you can connect your Telegram account to stream audio directly from channels, chats, and saved files.
+Pixel Music is an independent third-party Android music client that supports local playback and user-accessed streaming sources. You can scan and play high-resolution local files like FLAC, ALAC, WAV, and MP3. Additionally, you can connect your Telegram account to stream audio directly from channels, chats, and saved files. YouTube Music-related functionality is unofficial and intended only for personal use with content the user is authorized to access.
 
-Beautifully styled on the state-of-the-art **PixelPlayer** UI/UX, the interface adapts dynamically to the colors of your album artwork. The app is loaded with advanced features. You can follow along with synchronized LRC lyrics (complete with manual timing offset adjustments). You can customize your sound with a professional 10-band equalizer. You can also connect to other systems using built-in Chromecast, full Android Auto driving support, and a Wear OS watch companion.
+Beautifully styled with a state-of-the-art UI/UX, the interface adapts dynamically to the colors of your album artwork. The app is loaded with advanced features. You can follow along with synchronized LRC lyrics (complete with manual timing offset adjustments). You can customize your sound with a professional 10-band equalizer. You can also connect to other systems using built-in Chromecast, full Android Auto driving support, and a Wear OS watch companion.
+Backporting and enhancing features on top of the MIT-licensed foundation, the system delivers unmatched performance.
 
-The app even includes custom generative AI playlist creation. You can simply describe a mood or style, and the built-in Gemini assistant will instantly curate the perfect queue for you. Released under the MIT License, Pixel Music provides a highly premium, privacy-focused, and completely unrestricted audio experience.
+The app even includes custom generative AI playlist creation. You can simply describe a mood or style, and the built-in Gemini assistant will instantly curate the perfect queue for you. Pixel Music contains MIT-licensed portions derived from PixelPlayer, while modifications from May 27, 2026 onward are proprietary.
 
 ---
 
@@ -244,13 +245,16 @@ Pixel Music is an independent, community-driven third-party audio player and cli
 * **No Media Hosting:** Pixel Music does not host, upload, or store copyrighted music files. It operates strictly as an interface to scan local device storage or stream media directly from public, public-facing, or user-authenticated APIs (such as YouTube Music's InnerTube API and Telegram's channels).
 * **Fair Use & API Usage:** This software is created solely for personal research, educational, and fair-use purposes. The user is entirely responsible for ensuring their usage aligns with their local copyright laws and YouTube/Telegram Terms of Service.
 * **No Ad-Blocking Guarantee:** While Pixel Music focuses on providing a clean listening environment, it does not guarantee permanent bypasses or modifications to commercial third-party platform conditions.
-* **No Commercialization:** Pixel Music is fully open-source and non-commercial. Selling, distributing, or publishing this application on commercial marketplaces (like the Google Play Store) is strictly prohibited by upstream licensing constraints and fair-use limitations.
+* **No Commercialization:** Pixel Music is source-available for personal, non-commercial use. Proprietary modifications, branding, artwork, and project-specific additions may not be redistributed, sold, or commercially published without permission. Selling, redistributing, or commercially publishing Pixel Music proprietary modifications, branding, or compiled builds is prohibited without written permission from the project owner.
 
 ---
 
 ## 📄 License
 
-Portions of this project are based on **PixelPlayer**, licensed under the MIT License. Original copyright notices are retained. Modifications from May 27, 2026 onward are proprietary.
+Pixel Music uses a mixed licensing model.
 
-To review the full license stipulations and terms, please check the [LICENSE](LICENSE) file.
+Portions of this project are based on **[PixelPlayer](https://github.com/theovilardo/PixelPlayer)**, which is licensed under the MIT License. The original MIT copyright and permission notices are retained in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
+Modifications, additions, integrations, branding, artwork, documentation, configuration, and other original work by **ianshulyadav** from **May 27, 2026 onward** are proprietary and governed by the [`LICENSE`](LICENSE) file.
+
+Nothing in Pixel Music's proprietary license removes or restricts rights granted by the MIT License for the original MIT-licensed PixelPlayer portions.

@@ -1,32 +1,35 @@
-Pixel Music License Notice
+Pixel Music Proprietary License
 
-Modifications from May 27, 2026 onward are proprietary to ianshulyadav. All rights reserved. 
-Personal, non-commercial use of these modifications is permitted, but redistribution, sale, or commercial publishing of these modifications is strictly prohibited.
+Copyright (c) 2026 ianshulyadav. All rights reserved.
 
----
+This license applies only to Pixel Music modifications, additions, integrations,
+branding, artwork, documentation, configuration, and other original work authored
+by ianshulyadav on or after May 27, 2026, except where a file or portion of the
+project states otherwise.
 
-Portions of this project are based on PixelPlayer, licensed under the MIT License. 
-Original copyright notices are retained. The original MIT License for these portions is included below:
+Personal, non-commercial use of these proprietary portions is permitted.
 
-MIT License
+You may not, without prior written permission from ianshulyadav:
 
-Copyright (c) 2024 [Full Name]
-Copyright (c) 2026 ianshulyadav
+1. redistribute, publish, sell, sublicense, or commercially exploit the proprietary
+   portions of this project;
+2. distribute modified versions of the proprietary portions;
+3. remove or alter copyright, license, attribution, or third-party notices;
+4. use Pixel Music names, logos, icons, screenshots, branding, or other project
+   assets for commercial purposes.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+This software is provided "as is", without warranty of any kind, express or
+implied, including but not limited to the warranties of merchantability, fitness
+for a particular purpose, and non-infringement. In no event shall the authors or
+copyright holders be liable for any claim, damages, or other liability arising
+from the use of this software.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+Third-Party and MIT-Licensed Portions
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+Portions of this project are based on PixelPlayer, originally licensed under the
+MIT License. Those portions remain subject to the original MIT License terms.
+The original copyright notice and MIT License text are provided in
+THIRD_PARTY_NOTICES.md.
+
+Nothing in this proprietary license removes, limits, or overrides rights granted
+under the MIT License for the original MIT-licensed portions.
