@@ -19,12 +19,12 @@
 <p align="center">
   <a href="https://android.com"><img src="https://img.shields.io/badge/Android-11%2B-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android 11+"></a>
   <a href="https://kotlinlang.org"><img src="https://img.shields.io/badge/Kotlin-100%25-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white" alt="Kotlin 100%"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="MIT License"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Proprietary-red?style=for-the-badge" alt="Proprietary License"></a>
   <a href="https://t.me/PixelMusicApp"><img src="https://img.shields.io/badge/Telegram-Join%20Channel-229ED9?style=for-the-badge&logo=telegram&logoColor=white" alt="Telegram Channel"></a>
   <a href="https://github.com/ianshulyadav/PixelMusic"><img src="https://img.shields.io/badge/PRs-Welcome-brightgreen?style=for-the-badge" alt="PRs Welcome"></a>
 </p>
 
-> [Slim] **Attribution Notice:** This repository is maintained by **[ianshulyadav](https://github.com/ianshulyadav)**. It is modified and distributed under the terms of the [MIT License](LICENSE).
+> **Attribution Notice:** Portions of this project are based on **[PixelPlayer](https://github.com/theovilardo/PixelPlayer)**, licensed under the MIT License. Original copyright notices are retained. Modifications from May 27, 2026 onward are proprietary.
 
 ---
 
@@ -55,7 +55,7 @@ Pixel Music incorporates the best concepts of open-source streaming clients and 
 | **Lyrics Pipeline** | LRCLIB (Sync) | LRCLIB + Romanization | LRCLIB + Translation | **LRCLIB + Dynamic Offset Sync + Offline caching + manual search** |
 | **AI & Smart Mixes** | None | None | None | **Generative AI & Last.fm Smart Mix** (8 generation modes, retention pruning) |
 | **Connectivity** | Background Play | Cast, Sleep Timer | Scrobble, Cast | **Android Auto, Chromecast, Wear OS, Last.fm & ListenBrainz** |
-| **Legal/License Safety** | GPL-3.0 | GPL-3.0 | GPL-3.0 | **MIT License** |
+| **Legal/License Safety** | GPL-3.0 | GPL-3.0 | GPL-3.0 | **Proprietary (Modifications from May 27, 2026 onward)** |
 
 ---
 
@@ -250,7 +250,7 @@ Pixel Music is an independent, community-driven third-party audio player and cli
 
 ## 📄 License
 
-This project is licensed under the **MIT License**.
+Portions of this project are based on **PixelPlayer**, licensed under the MIT License. Original copyright notices are retained. Modifications from May 27, 2026 onward are proprietary.
 
-To review the full license stipulations, please check the [LICENSE](LICENSE) file.
+To review the full license stipulations and terms, please check the [LICENSE](LICENSE) file.
 
