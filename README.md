@@ -37,10 +37,10 @@
 ---
 
 > [!IMPORTANT]
-> **PixelMusic is an independent, unofficial open-source fork of [PixelPlayer](https://github.com/theovilardo/PixelPlayer).**
-> It is **not** affiliated with, endorsed by, or sponsored by the PixelPlayer project or its authors.
+> **PixelMusic is an independent, unofficial open-source fork of [PixelPlayerOSS](https://github.com/PixelPlayerHQ/PixelPlayerOSS).**
+> It is **not** affiliated with, endorsed by, or sponsored by the PixelPlayerOSS project or its authors.
 >
-> **Original authors of PixelPlayer:** [Theo Vilardo](https://github.com/theovilardo) & Duhan Yağmur Delikkulak
+> **Original authors of PixelPlayerOSS:** [Theo Vilardo](https://github.com/theovilardo) & Duhan Yağmur Delikkulak
 >
 > This fork is licensed under the **GNU General Public License v3.0 (GPL-3.0)**. The original upstream MIT License notice is retained in [`LICENSE`](LICENSE) and [`PROVENANCE.md`](PROVENANCE.md) as required.
 
@@ -58,14 +58,14 @@ Beautifully styled with a state-of-the-art UI/UX, the interface adapts dynamical
 
 ---
 
-## 🎨 UI/UX Excellence: Based on PixelPlayer
+## 🎨 UI/UX Excellence: Based on PixelPlayerOSS
 
-PixelMusic's high-fidelity interface is built upon the MIT-licensed foundation of **[PixelPlayer](https://github.com/theovilardo/PixelPlayer)**.
+PixelMusic's high-fidelity interface is built upon the GPL-3.0-licensed foundation of **[PixelPlayerOSS](https://github.com/PixelPlayerHQ/PixelPlayerOSS)**.
 
 > [!NOTE]
-> Credit and gratitude to **[PixelPlayer](https://github.com/theovilardo/PixelPlayer)**, crafted by **Theo Vilardo** and **Duhan Yağmur Delikkulak**, for its original Android UI/UX foundation.
+> Credit and gratitude to **[PixelPlayerOSS](https://github.com/PixelPlayerHQ/PixelPlayerOSS)**, crafted by **Theo Vilardo** and **Duhan Yağmur Delikkulak**, for its original Android UI/UX foundation.
 
-Key UI/UX visual paradigms adopted from PixelPlayer include:
+Key UI/UX visual paradigms adopted from PixelPlayerOSS include:
 
 * **Dynamic Material You Theming:** High-precision HSL color extraction from album artwork that smoothly updates the player, bottom sheets, sliders, and navigation bar to match the mood of the current track.
 * **Fluid Micro-Animations:** Seamless screen transitions, predictive back-swipe handling, physics-based scroll bars, and springy gesture-driven mini-players.
@@ -168,7 +168,7 @@ Key UI/UX visual paradigms adopted from PixelPlayer include:
 
 PixelMusic is an independent, community-driven third-party audio player. It is **not** associated with Google LLC, YouTube Music, Deezer, Telegram, Snapchat, Last.fm, ListenBrainz, or any of their parent companies.
 
-PixelMusic is **not** affiliated with, endorsed by, or sponsored by the upstream **[PixelPlayer](https://github.com/theovilardo/PixelPlayer)** project or its authors (Theo Vilardo, Duhan Yağmur Delikkulak).
+PixelMusic is **not** affiliated with, endorsed by, or sponsored by the upstream **[PixelPlayerOSS](https://github.com/PixelPlayerHQ/PixelPlayerOSS)** project or its authors (Theo Vilardo, Duhan Yağmur Delikkulak).
 
 * **No Media Hosting:** PixelMusic does not host, upload, or store copyrighted music files.
 * **User Responsibility:** Users are responsible for ensuring that their usage complies with applicable laws, copyright rules, and platform terms.
@@ -180,4 +180,4 @@ PixelMusic is **not** affiliated with, endorsed by, or sponsored by the upstream
 
 PixelMusic is licensed under the **GNU General Public License v3.0 (GPL-3.0)**. See [`LICENSE`](LICENSE) for the full text.
 
-Portions of this project are based on **[PixelPlayer](https://github.com/theovilardo/PixelPlayer)** by **Theo Vilardo** and **Duhan Yağmur Delikkulak**, originally made available under the MIT License. The original MIT copyright and permission notice is retained in [`LICENSE`](LICENSE) and [`PROVENANCE.md`](PROVENANCE.md) as required.
+Portions of this project are based on **[PixelPlayerOSS](https://github.com/PixelPlayerHQ/PixelPlayerOSS)** by **Theo Vilardo** and **Duhan Yağmur Delikkulak**, originally made available under the GNU General Public License v3.0 (GPL-3.0). The original upstream copyright notice is retained in [`LICENSE`](LICENSE) and [`PROVENANCE.md`](PROVENANCE.md) as required.
