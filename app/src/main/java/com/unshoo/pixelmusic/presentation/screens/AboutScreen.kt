@@ -598,7 +598,7 @@ private fun SocialLinksColumn() {
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable {
-                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/ianshulyadav/PixelMusicApp"))
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/ianshulyadav/ThePixelMusic"))
                     try { context.startActivity(intent) } catch (_: ActivityNotFoundException) { }
                 },
             shape = RoundedCornerShape(20.dp),
@@ -636,7 +636,7 @@ private fun SocialLinksColumn() {
                         maxLines = 1,
                     )
                     Text(
-                        text = "ianshulyadav/PixelMusicApp",
+                        text = "ianshulyadav/ThePixelMusic",
                         style = MaterialTheme.typography.bodySmall,
                         color = Color.White.copy(alpha = 0.7f),
                         maxLines = 1,
@@ -767,7 +767,7 @@ private fun RateAppCard() {
         modifier = Modifier
             .fillMaxWidth()
             .clickable {
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/ianshulyadav/PixelMusicApp"))
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/ianshulyadav/ThePixelMusic"))
                 try { context.startActivity(intent) } catch (_: ActivityNotFoundException) { }
             },
         shape = RoundedCornerShape(20.dp),
@@ -828,7 +828,7 @@ private fun ShareAppCard() {
                     putExtra(Intent.EXTRA_SUBJECT, "PixelMusic")
                     putExtra(
                         Intent.EXTRA_TEXT,
-                        "Check out PixelMusic - the privacy-first audio player: https://github.com/ianshulyadav/PixelMusicApp"
+                        "Check out PixelMusic - the privacy-first audio player: https://github.com/ianshulyadav/ThePixelMusic"
                     )
                 }
                 val chooser = Intent.createChooser(shareIntent, "Share PixelMusic via")
@@ -1075,7 +1075,7 @@ private fun PrivacyPolicyDialog(
 
                         PrivacySection(
                             title = "13. Contact & Support",
-                            body = "For support, copyright concerns, or privacy-related questions:\nGitHub Repository: https://github.com/ianshulyadav/PixelMusicApp\nEmail: ianshul.yadavv@gmail.com"
+                            body = "For support, copyright concerns, or privacy-related questions:\nGitHub Repository: https://github.com/ianshulyadav/ThePixelMusic\nEmail: ianshul.yadavv@gmail.com"
                         )
 
                         PrivacySection(
