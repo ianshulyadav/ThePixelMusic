@@ -1,18 +1,26 @@
 # Provenance
 
-Pixel Music includes portions derived from PixelPlayer.
+PixelMusic is an independent, unofficial open-source fork of PixelPlayer.
 
-Original project: https://github.com/theovilardo/PixelPlayer  
-Original author/maintainer: Theo Vilardo / theovilardo  
+## Upstream Project
 
-Base source used: PixelPlayer source code as available under the MIT License before the later proprietary license change.  
-Base integration cutoff: May 26, 2026.  
-Pixel Music proprietary modifications begin: May 27, 2026.
+- **Name:** PixelPlayer
+- **Repository:** https://github.com/theovilardo/PixelPlayer
+- **Authors:** Theo Vilardo, Duhan Yağmur Delikkulak
+- **Original License:** MIT License
+- **Base commit:** `39030156fb6999b23f69076ae135e55832bb6d81`
+- **Base snapshot URL:** https://github.com/theovilardo/PixelPlayer/tree/39030156fb6999b23f69076ae135e55832bb6d81
 
-Base commit hash: `39030156fb6999b23f69076ae135e55832bb6d81`  
-Base commit/source URL: https://github.com/theovilardo/PixelPlayer/tree/39030156fb6999b23f69076ae135e55832bb6d81  
-Base license URL: https://github.com/theovilardo/PixelPlayer/blob/39030156fb6999b23f69076ae135e55832bb6d81/LICENSE
+## This Fork
 
-No PixelPlayer code licensed only under a later proprietary license should be imported into this repository without written permission from the PixelPlayer rights holder.
+- **Name:** PixelMusic
+- **Repository:** https://github.com/ianshulyadav/ThePixelMusic
+- **Maintainer:** Anshul Yadav (ianshulyadav)
+- **Fork License:** GNU General Public License v3.0 (GPL-3.0)
+- **Fork started:** June 2026
 
-For audit purposes, it is recommended to preserve evidence of the MIT-licensed base snapshot, such as a source archive, local backup, dated repository export, or checksum.
+## Disclaimer
+
+PixelMusic is **not** affiliated with, endorsed by, or sponsored by the upstream PixelPlayer project or its authors.
+
+All original upstream code retains its MIT License notice as required. New work added in this fork is licensed under GPL-3.0.
