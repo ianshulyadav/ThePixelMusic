@@ -435,7 +435,7 @@ private fun UpstreamCreditCard(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     Surface(
         modifier = modifier.clickable {
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/theovilardo/PixelPlayer"))
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/PixelPlayerHQ/PixelPlayerOSS"))
             try { context.startActivity(intent) } catch (_: ActivityNotFoundException) { }
         },
         shape = AbsoluteSmoothCornerShape(24.dp, 60),
@@ -476,7 +476,7 @@ private fun UpstreamCreditCard(modifier: Modifier = Modifier) {
                         maxLines = 1,
                     )
                     Text(
-                        text = "theovilardo/PixelPlayer",
+                        text = "PixelPlayerHQ/PixelPlayerOSS",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
@@ -658,7 +658,7 @@ private fun SocialLinksColumn() {
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable {
-                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/theovilardo/PixelPlayer"))
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/PixelPlayerHQ/PixelPlayerOSS"))
                     try { context.startActivity(intent) } catch (_: ActivityNotFoundException) { }
                 },
             shape = RoundedCornerShape(20.dp),
@@ -696,7 +696,7 @@ private fun SocialLinksColumn() {
                         maxLines = 1,
                     )
                     Text(
-                        text = "theovilardo/PixelPlayer",
+                        text = "PixelPlayerHQ/PixelPlayerOSS",
                         style = MaterialTheme.typography.bodySmall,
                         color = Color.White.copy(alpha = 0.6f),
                         maxLines = 1,

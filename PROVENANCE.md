@@ -1,26 +1,37 @@
 # Provenance
 
-PixelMusic is an independent, unofficial open-source fork of PixelPlayer.
+PixelMusic is an independent, unofficial open-source fork of PixelPlayerOSS.
 
 ## Upstream Project
 
-- **Name:** PixelPlayer
-- **Repository:** https://github.com/theovilardo/PixelPlayer
-- **Authors:** Theo Vilardo, Duhan Yağmur Delikkulak
-- **Original License:** MIT License
-- **Base commit:** `39030156fb6999b23f69076ae135e55832bb6d81`
-- **Base snapshot URL:** https://github.com/theovilardo/PixelPlayer/tree/39030156fb6999b23f69076ae135e55832bb6d81
+| Field | Value |
+|---|---|
+| **Name** | PixelPlayerOSS |
+| **Repository** | https://github.com/PixelPlayerHQ/PixelPlayerOSS |
+| **Authors** | Theo Vilardo, Duhan Yağmur Delikkulak |
+| **License** | GNU General Public License v3.0 (GPL-3.0) |
 
 ## This Fork
 
-- **Name:** PixelMusic
-- **Repository:** https://github.com/ianshulyadav/ThePixelMusic
-- **Maintainer:** Anshul Yadav (ianshulyadav)
-- **Fork License:** GNU General Public License v3.0 (GPL-3.0)
-- **Fork started:** June 2026
+| Field | Value |
+|---|---|
+| **Name** | PixelMusic |
+| **Repository** | https://github.com/ianshulyadav/ThePixelMusic |
+| **Maintainer** | Anshul Yadav (ianshulyadav) |
+| **License** | GNU General Public License v3.0 (GPL-3.0) — same as upstream |
+| **Fork started** | June 2026 |
+
+## Terms Compliance
+
+This fork complies with the terms agreed between Anshul Yadav and Theo Vilardo:
+
+- ✅ Started from the clean OSS (GPL) repository `PixelPlayerHQ/PixelPlayerOSS`
+- ✅ No code or assets from any proprietary repository included
+- ✅ GPL-3.0 license retained with original upstream copyright notice intact
+- ✅ README prominently states the fork relationship and credits upstream authors
+- ✅ About screen credits Theo Vilardo and Duhan Yağmur Delikkulak by name
+- ✅ All source code is open and publicly available
 
 ## Disclaimer
 
-PixelMusic is **not** affiliated with, endorsed by, or sponsored by the upstream PixelPlayer project or its authors.
-
-All original upstream code retains its MIT License notice as required. New work added in this fork is licensed under GPL-3.0.
+PixelMusic is **not** affiliated with, endorsed by, or sponsored by the upstream PixelPlayerOSS project or its authors.
