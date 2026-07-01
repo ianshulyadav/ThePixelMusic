@@ -56,7 +56,9 @@ class AlbumDetailViewModel @Inject constructor(
         val albumIdString: String? = savedStateHandle.get("albumId")
         if (albumIdString != null) {
             val albumId = albumIdString.toLongOrNull()
-            val mappedBrowseId = albumId?.let { SearchStateHolder.albumIdMap[it] }
+            val mappedBrowseId = albumId?.let {
+                SearchStateHolder.albumIdMap[it] ?: AlbumIdMapper.getBrowseId(context, it)
+            }
             if (mappedBrowseId != null) {
                 loadOnlineAlbumData(mappedBrowseId)
             } else if (albumId != null) {
@@ -70,10 +72,15 @@ class AlbumDetailViewModel @Inject constructor(
         }
     }
 
-    private fun observeLikedState(albumId: String) {
+    private fun observeLikedState(albumIdString: String) {
+        val albumId = albumIdString.toLongOrNull()
+        val browseId = albumId?.let {
+            SearchStateHolder.albumIdMap[it] ?: AlbumIdMapper.getBrowseId(context, it)
+        } ?: albumIdString
+
         viewModelScope.launch {
             userPreferencesRepository.likedAlbumIdsFlow.collect { likedSet ->
-                val isLikedNow = likedSet.contains(albumId)
+                val isLikedNow = likedSet.contains(browseId)
                 _uiState.update { it.copy(isLiked = isLikedNow) }
             }
         }
@@ -85,19 +92,25 @@ class AlbumDetailViewModel @Inject constructor(
             val isCurrentlyLiked = _uiState.value.isLiked
             val newLikedState = !isCurrentlyLiked
 
+            val albumId = albumIdString.toLongOrNull()
+            val browseId = albumId?.let {
+                SearchStateHolder.albumIdMap[it] ?: AlbumIdMapper.getBrowseId(context, it)
+            } ?: albumIdString
+
             // 1. Update local preferences
-            userPreferencesRepository.setLikedAlbum(albumIdString, newLikedState)
+            userPreferencesRepository.setLikedAlbum(browseId, newLikedState)
 
             // 2. Sync with YouTube if it is a YouTube album and logged in
-            if (albumIdString.toLongOrNull() == null && InnerTubeYouTube.hasLoginCookie()) {
+            if (browseId.toLongOrNull() == null && InnerTubeYouTube.hasLoginCookie()) {
                 withContext(Dispatchers.IO) {
-                    InnerTubeYouTube.likePlaylist(albumIdString, newLikedState)
+                    InnerTubeYouTube.likePlaylist(browseId, newLikedState)
                 }
             }
 
             // 3. Update local database cache
             withContext(Dispatchers.IO) {
                 if (newLikedState) {
+                    AlbumIdMapper.putMapping(context, album.id, browseId)
                     val albumEntity = album.toEntity(artistIdForAlbum = album.artist.lowercase().hashCode().toLong().absoluteValue)
                     musicRepository.insertAlbums(listOf(albumEntity))
                 } else {
@@ -201,5 +214,19 @@ class AlbumDetailViewModel @Inject constructor(
                 _uiState.update { it.copy(error = e.localizedMessage, isLoading = false) }
             }
         }
+    }
+}
+
+object AlbumIdMapper {
+    private const val PREFS_NAME = "album_id_mapping"
+
+    fun getBrowseId(context: android.content.Context, albumId: Long): String? {
+        val prefs = context.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
+        return prefs.getString(albumId.toString(), null)
+    }
+
+    fun putMapping(context: android.content.Context, albumId: Long, browseId: String) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
+        prefs.edit().putString(albumId.toString(), browseId).apply()
     }
 }
