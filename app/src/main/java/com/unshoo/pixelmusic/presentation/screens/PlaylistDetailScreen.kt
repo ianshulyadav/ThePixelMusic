@@ -1,5 +1,16 @@
 package com.unshoo.pixelmusic.presentation.screens
 
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.geometry.center
+
 import com.unshoo.pixelmusic.presentation.navigation.navigateSafely
 import com.unshoo.pixelmusic.presentation.navigation.navigateSafelyReplacing
 import android.widget.Toast
@@ -225,8 +236,11 @@ fun PlaylistDetailScreen(
         }
     }
 
+    var transitionCompleted by remember { mutableStateOf(false) }
     LaunchedEffect(playlistId) {
         playlistViewModel.loadPlaylistDetails(playlistId)
+        kotlinx.coroutines.delay(260)
+        transitionCompleted = true
     }
 
     var showAddSongsSheet by remember { mutableStateOf(false) }
@@ -351,19 +365,19 @@ fun PlaylistDetailScreen(
     }
 
     when {
-        uiState.isLoading && currentPlaylist == null -> {
-            Box(Modifier.fillMaxSize(), Alignment.Center) {
-                CircularProgressIndicator()
-            }
-        }
         uiState.playlistNotFound -> {
             Box(Modifier.fillMaxSize(), Alignment.Center) {
                 Text(stringResource(id = R.string.playlist_not_found))
             }
         }
-        currentPlaylist == null -> {
-            Box(Modifier.fillMaxSize(), Alignment.Center) {
-                CircularProgressIndicator()
+        currentPlaylist == null || !transitionCompleted -> {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.background),
+                contentAlignment = Alignment.Center
+            ) {
+                M3MicroAnimatedLoader(color = MaterialTheme.colorScheme.primary)
             }
         }
         else -> {
@@ -1593,3 +1607,63 @@ private fun CollapsingPlaylistTopBar(
         )
     }
 }
+
+@Composable
+fun M3MicroAnimatedLoader(
+    modifier: Modifier = Modifier,
+    color: Color = MaterialTheme.colorScheme.primary
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "m3_loader")
+    
+    val rotation by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1400, easing = LinearEasing)
+        ),
+        label = "rotation"
+    )
+    
+    val scale1 by infiniteTransition.animateFloat(
+        initialValue = 0.6f,
+        targetValue = 1.1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(700, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "scale1"
+    )
+    val scale2 by infiniteTransition.animateFloat(
+        initialValue = 1.1f,
+        targetValue = 0.6f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(700, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "scale2"
+    )
+
+    Canvas(modifier = modifier.size(48.dp)) {
+        val center = size.center
+        val radius = size.minDimension / 4
+        
+        rotate(rotation) {
+            drawCircle(
+                color = color.copy(alpha = 0.85f),
+                radius = radius * scale1,
+                center = Offset(center.x - radius, center.y - radius)
+            )
+            drawCircle(
+                color = color.copy(alpha = 0.5f),
+                radius = radius * scale2,
+                center = Offset(center.x + radius, center.y - radius)
+            )
+            drawCircle(
+                color = color.copy(alpha = 0.3f),
+                radius = radius * scale1,
+                center = Offset(center.x, center.y + radius)
+            )
+        }
+    }
+}
+
