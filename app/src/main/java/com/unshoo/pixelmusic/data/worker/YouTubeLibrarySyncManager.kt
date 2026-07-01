@@ -137,7 +137,8 @@ class YouTubeLibrarySyncManager @Inject constructor(
         if (allAlbumItems.isEmpty()) return
 
         val entities = allAlbumItems.mapNotNull { item ->
-            val id = ytAlbumId(item.title)
+            val id = item.browseId.hashCode().toLong()
+            com.unshoo.pixelmusic.presentation.viewmodel.AlbumIdMapper.putMapping(context, id, item.browseId)
             val primaryArtistName = item.artists?.firstOrNull()?.name ?: "Unknown Artist"
             val primaryArtistId = ytArtistId(primaryArtistName)
             AlbumEntity(

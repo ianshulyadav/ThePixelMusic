@@ -41,7 +41,15 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LargeExtendedFloatingActionButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilledTonalButton
+import racra.compose.smooth_corner_rect_library.AbsoluteSmoothCornerShape
 import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.rounded.SelectAll
+import androidx.compose.material.icons.rounded.Deselect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -182,6 +190,11 @@ fun AlbumDetailScreen(
         if (!themeRequestIssued && headerArtworkLoaded && albumArtUri != null) {
             themeRequestIssued = true
             playerViewModel.themeStateHolder.ensureAlbumColorScheme(albumArtUri)
+        }
+    }
+    androidx.compose.runtime.DisposableEffect(albumId) {
+        onDispose {
+            multiSelectionState.clearSelection()
         }
     }
     val configuration = LocalConfiguration.current
@@ -484,17 +497,31 @@ fun AlbumDetailScreen(
                                     headerArtworkLoaded = true
                                 }
                             },
-                            onBackPressed = { navController.popBackStack() },
+                            onBackPressed = {
+                                if (isSelectionMode) {
+                                    multiSelectionState.clearSelection()
+                                } else {
+                                    navController.popBackStack()
+                                }
+                            },
                             onPlayClick = {
                                 if (songs.isNotEmpty()) {
                                     playerViewModel.playSongsShuffled(songs, album.title)
                                 }
                             },
                             actions = {
-                                IconButton(onClick = { showActionsMenu = true }) {
-                                    Icon(Icons.Rounded.MoreVert, contentDescription = "Album options")
+                                IconButton(onClick = {
+                                    if (isSelectionMode) {
+                                        showMultiSelectionSheet = true
+                                    } else {
+                                        showActionsMenu = true
+                                    }
+                                }) {
+                                    Icon(Icons.Rounded.MoreVert, contentDescription = "Options")
                                 }
-                                albumDropdownMenu()
+                                if (!isSelectionMode) {
+                                    albumDropdownMenu()
+                                }
                             }
                         )
                     } else {
@@ -509,17 +536,31 @@ fun AlbumDetailScreen(
                                     headerArtworkLoaded = true
                                 }
                             },
-                            onBackPressed = { navController.popBackStack() },
+                            onBackPressed = {
+                                if (isSelectionMode) {
+                                    multiSelectionState.clearSelection()
+                                } else {
+                                    navController.popBackStack()
+                                }
+                            },
                             onPlayClick = {
                                 if (songs.isNotEmpty()) {
                                     playerViewModel.playSongsShuffled(songs, album.title)
                                 }
                             },
                             actions = {
-                                IconButton(onClick = { showActionsMenu = true }) {
-                                    Icon(Icons.Rounded.MoreVert, contentDescription = "Album options")
+                                IconButton(onClick = {
+                                    if (isSelectionMode) {
+                                        showMultiSelectionSheet = true
+                                    } else {
+                                        showActionsMenu = true
+                                    }
+                                }) {
+                                    Icon(Icons.Rounded.MoreVert, contentDescription = "Options")
                                 }
-                                albumDropdownMenu()
+                                if (!isSelectionMode) {
+                                    albumDropdownMenu()
+                                }
                             }
                         )
                     }
@@ -687,23 +728,90 @@ fun AlbumDetailScreen(
             )
         }
 
-        // Selection action bar overlay
+        // Selection action bar overlay (moved next to the back arrow)
         AnimatedVisibility(
             visible = isSelectionMode,
-            enter = slideInVertically { -it } + fadeIn(),
-            exit = slideOutVertically { -it } + fadeOut(),
+            enter = fadeIn(),
+            exit = fadeOut(),
             modifier = Modifier
                 .zIndex(10f)
-                .align(Alignment.TopCenter)
+                .align(Alignment.TopStart)
                 .statusBarsPadding()
-                .padding(top = 68.dp, start = 8.dp, end = 8.dp)
+                .padding(start = 64.dp, top = 4.dp)
         ) {
-            SelectionActionRow(
-                selectedCount = selectedSongs.size,
-                onSelectAll = { multiSelectionState.selectAll(uiState.songs) },
-                onDeselect = { multiSelectionState.clearSelection() },
-                onOptionsClick = { showMultiSelectionSheet = true }
-            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                val leftSegmentShape = AbsoluteSmoothCornerShape(
+                    cornerRadiusTL = 26.dp,
+                    cornerRadiusBL = 26.dp,
+                    cornerRadiusTR = 8.dp,
+                    cornerRadiusBR = 8.dp,
+                    smoothnessAsPercentTL = 60,
+                    smoothnessAsPercentBL = 60,
+                    smoothnessAsPercentTR = 60,
+                    smoothnessAsPercentBR = 60
+                )
+                val rightSegmentShape = AbsoluteSmoothCornerShape(
+                    cornerRadiusTL = 8.dp,
+                    cornerRadiusBL = 8.dp,
+                    cornerRadiusTR = 26.dp,
+                    cornerRadiusBR = 26.dp,
+                    smoothnessAsPercentTL = 60,
+                    smoothnessAsPercentBL = 60,
+                    smoothnessAsPercentTR = 60,
+                    smoothnessAsPercentBR = 60
+                )
+
+                FilledTonalButton(
+                    onClick = { multiSelectionState.selectAll(uiState.songs) },
+                    shape = leftSegmentShape,
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                    ),
+                    contentPadding = PaddingValues(horizontal = 12.dp),
+                    modifier = Modifier.height(40.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.SelectAll,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = stringResource(R.string.presentation_batch_g_selection_all),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Medium,
+                        fontFamily = GoogleSansRounded
+                    )
+                }
+
+                FilledTonalButton(
+                    onClick = { multiSelectionState.clearSelection() },
+                    shape = rightSegmentShape,
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = MaterialTheme.colorScheme.secondary,
+                        contentColor = MaterialTheme.colorScheme.onSecondary
+                    ),
+                    contentPadding = PaddingValues(horizontal = 12.dp),
+                    modifier = Modifier.height(40.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Deselect,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = stringResource(R.string.presentation_batch_g_selection_deselect),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Medium,
+                        fontFamily = GoogleSansRounded
+                    )
+                }
+            }
         }
         }
     }

@@ -206,8 +206,9 @@ class SearchStateHolder @Inject constructor(
                                 Artist(id = ytArtistId(item.title), name = item.title, songCount = 0, imageUrl = item.thumbnail, channelId = item.id)
                             ))
                             is AlbumItem -> {
-                                val longId = ytAlbumId(item.title)
+                                val longId = item.browseId.hashCode().toLong()
                                 albumIdMap[longId] = item.browseId
+                                AlbumIdMapper.putMapping(appContext, longId, item.browseId)
                                 newItems.add(SearchResultItem.AlbumItem(
                                     Album(id = longId, title = item.title,
                                         artist = item.artists?.joinToString { it.name }.orEmpty(),
@@ -285,8 +286,9 @@ class SearchStateHolder @Inject constructor(
                     }
                     if (albumIterator.hasNext()) {
                         val album = albumIterator.next()
-                        val longId = ytAlbumId(album.title)
+                        val longId = album.browseId.hashCode().toLong()
                         albumIdMap[longId] = album.browseId
+                        AlbumIdMapper.putMapping(appContext, longId, album.browseId)
                         mixedItems.add(SearchResultItem.AlbumItem(
                             Album(id = longId, title = album.title,
                                 artist = album.artists?.joinToString { it.name }.orEmpty(),
@@ -319,8 +321,9 @@ class SearchStateHolder @Inject constructor(
                 val result = YouTube.search(query, YouTube.SearchFilter.FILTER_ALBUM).getOrNull()
                 lastContinuationToken = result?.continuation
                 result?.items?.filterIsInstance<AlbumItem>()?.forEach { a ->
-                    val longId = ytAlbumId(a.title)
+                    val longId = a.browseId.hashCode().toLong()
                     albumIdMap[longId] = a.browseId
+                    AlbumIdMapper.putMapping(appContext, longId, a.browseId)
                     items.add(SearchResultItem.AlbumItem(Album(id = longId, title = a.title,
                         artist = a.artists?.joinToString { it.name }.orEmpty(), year = a.year ?: 0,
                         dateAdded = System.currentTimeMillis(), albumArtUriString = a.thumbnail, songCount = 0)))
