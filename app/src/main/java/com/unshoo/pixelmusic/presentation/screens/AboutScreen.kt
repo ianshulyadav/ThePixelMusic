@@ -480,13 +480,13 @@ private fun UpstreamCreditCard(modifier: Modifier = Modifier) {
                 lineHeight = 18.sp,
             )
 
-            FlowRow(
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Surface(
                     modifier = Modifier
+                        .weight(1f)
                         .clickable {
                             val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/theovilardo"))
                             try { context.startActivity(intent) } catch (_: ActivityNotFoundException) { }
@@ -511,12 +511,15 @@ private fun UpstreamCreditCard(modifier: Modifier = Modifier) {
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
 
                 Surface(
                     modifier = Modifier
+                        .weight(1f)
                         .clickable {
                             val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/lostf1sh"))
                             try { context.startActivity(intent) } catch (_: ActivityNotFoundException) { }
@@ -541,12 +544,15 @@ private fun UpstreamCreditCard(modifier: Modifier = Modifier) {
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
 
                 Surface(
                     modifier = Modifier
+                        .weight(1f)
                         .clickable {
                             val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/PixelPlayerHQ/PixelPlayerOSS"))
                             try { context.startActivity(intent) } catch (_: ActivityNotFoundException) { }
@@ -571,54 +577,14 @@ private fun UpstreamCreditCard(modifier: Modifier = Modifier) {
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
             }
 
-            // Colored indicator block 1: This App (PixelMusic)
-            Surface(
-                shape = AbsoluteSmoothCornerShape(12.dp, 60),
-                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.12f),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "This App (PixelMusic)",
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                        Text(
-                            text = "Online Music Streaming App",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "Stream your favorite songs, playlists and more from online sources.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            lineHeight = 14.sp
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Icon(
-                        imageVector = Icons.Rounded.Public,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-            }
-
-            // Colored indicator block 2: Inspired App (PixelPlayer)
+            // Colored indicator block 1: Inspired App (PixelPlayer)
             Surface(
                 shape = AbsoluteSmoothCornerShape(12.dp, 60),
                 color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.12f),
@@ -655,6 +621,48 @@ private fun UpstreamCreditCard(modifier: Modifier = Modifier) {
                         imageVector = Icons.Rounded.MusicNote,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            }
+
+            // Colored indicator block 2: This App (PixelMusic)
+            Surface(
+                shape = AbsoluteSmoothCornerShape(12.dp, 60),
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.12f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "This App (PixelMusic)",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Text(
+                            text = "Online Music Streaming App",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Stream your favorite songs, playlists and more from online sources.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            lineHeight = 14.sp
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Icon(
+                        imageVector = Icons.Rounded.Public,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(24.dp)
                     )
                 }
@@ -794,47 +802,62 @@ private fun SocialLinksColumn() {
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun CommunitySignalsRow() {
-    val labels = listOf(
-        stringResource(R.string.about_signal_open_source) to Icons.Rounded.Public,
-        stringResource(R.string.about_signal_community_first) to Icons.Rounded.AutoAwesome,
-        stringResource(R.string.about_signal_material3) to Icons.Rounded.Palette,
-    )
-
-    FlowRow(
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        labels.forEach { (label, icon) ->
-            Surface(
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(14.dp),
-                    )
-                    Text(
-                        text = label,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            SignalChip(
+                label = stringResource(R.string.about_signal_open_source),
+                icon = Icons.Rounded.Public
+            )
+            SignalChip(
+                label = stringResource(R.string.about_signal_community_first),
+                icon = Icons.Rounded.AutoAwesome
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            SignalChip(
+                label = stringResource(R.string.about_signal_material3),
+                icon = Icons.Rounded.Palette
+            )
+        }
+    }
+}
+
+@Composable
+private fun SignalChip(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector) {
+    Surface(
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(14.dp),
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
