@@ -125,8 +125,8 @@ async def publish():
         api_hash=api_hash,
         bot_token=bot_token,
         in_memory=True,
-        workers=8,
-        max_concurrent_transmissions=8,
+        workers=1,
+        max_concurrent_transmissions=1,
     ) as app:
         # Get changelog from environment, fallback to commit message if empty
         changelog = os.environ.get("CHANGELOG", "").strip()
@@ -204,16 +204,25 @@ async def publish():
                 size_mb = os.path.getsize(apk_path) / (1024 * 1024)
                 print(f"Uploading {display_name} ({size_mb:.1f} MB)...", flush=True)
 
-                await app.send_document(
-                    chat_id=chat_id,
-                    document=apk_path,
-                    file_name=display_name,
-                    caption=None,
-                    parse_mode=ParseMode.HTML,
-                    reply_to_message_id=reply_to,
-                    force_document=True,
-                )
-                print(f"  OK — sent {display_name}", flush=True)
+                max_retries = 3
+                for attempt in range(1, max_retries + 1):
+                    try:
+                        await app.send_document(
+                            chat_id=chat_id,
+                            document=apk_path,
+                            file_name=display_name,
+                            caption=None,
+                            parse_mode=ParseMode.HTML,
+                            reply_to_message_id=reply_to,
+                            force_document=True,
+                        )
+                        print(f"  OK — sent {display_name}", flush=True)
+                        break
+                    except Exception as e:
+                        print(f"  [Attempt {attempt}/{max_retries}] Failed to upload {display_name}: {e}", flush=True)
+                        if attempt == max_retries:
+                            raise e
+                        await asyncio.sleep(5 * attempt)
 
         else:
            
@@ -247,16 +256,25 @@ async def publish():
                 size_mb = os.path.getsize(apk_path) / (1024 * 1024)
                 print(f"Uploading nightly build {display_name} ({size_mb:.1f} MB)...", flush=True)
 
-                await app.send_document(
-                    chat_id=chat_id,
-                    document=apk_path,
-                    file_name=display_name,
-                    caption=None,
-                    parse_mode=ParseMode.HTML,
-                    reply_to_message_id=reply_to,
-                    force_document=True,
-                )
-                print(f"  OK — sent {display_name}", flush=True)
+                max_retries = 3
+                for attempt in range(1, max_retries + 1):
+                    try:
+                        await app.send_document(
+                            chat_id=chat_id,
+                            document=apk_path,
+                            file_name=display_name,
+                            caption=None,
+                            parse_mode=ParseMode.HTML,
+                            reply_to_message_id=reply_to,
+                            force_document=True,
+                        )
+                        print(f"  OK — sent {display_name}", flush=True)
+                        break
+                    except Exception as e:
+                        print(f"  [Attempt {attempt}/{max_retries}] Failed to upload {display_name}: {e}", flush=True)
+                        if attempt == max_retries:
+                            raise e
+                        await asyncio.sleep(5 * attempt)
 
     print("All APKs published successfully.", flush=True)
 
