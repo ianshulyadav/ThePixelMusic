@@ -816,7 +816,7 @@ fun LibraryPlaylistCard(
     
     Card(
         modifier = Modifier
-            .width(220.dp)
+            .width(280.dp)
             .height(130.dp)
             .clip(shape)
             .clickable(onClick = onClick),
