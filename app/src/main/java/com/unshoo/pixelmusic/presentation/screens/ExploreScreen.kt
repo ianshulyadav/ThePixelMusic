@@ -1491,9 +1491,8 @@ private fun LibraryCarouselCard(
                             Brush.horizontalGradient(
                                 colorStops = arrayOf(
                                     0.0f to animatedBgColor,
-                                    0.35f to animatedBgColor,
-                                    0.50f to animatedBgColor.copy(alpha = 0.75f),
-                                    0.75f to Color.Transparent
+                                    0.25f to animatedBgColor,
+                                    0.80f to Color.Transparent
                                 )
                             )
                         )
