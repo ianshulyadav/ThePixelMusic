@@ -10,6 +10,7 @@ import androidx.compose.material.icons.rounded.Radio
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
@@ -816,8 +817,10 @@ fun LibraryPlaylistCard(
 
     val dominantColor = playlist.coverColorArgb?.let { Color(it) } ?: MaterialTheme.colorScheme.secondaryContainer
     val cardBgColor = MaterialTheme.colorScheme.surfaceContainerHigh
-    val blendedBgColor = remember(dominantColor, cardBgColor) {
-        dominantColor.copy(alpha = 0.14f).compositeOver(cardBgColor)
+    val isDarkTheme = isSystemInDarkTheme()
+    val blendedBgColor = remember(dominantColor, cardBgColor, isDarkTheme) {
+        val blendFraction = if (isDarkTheme) 0.18f else 0.35f
+        androidx.compose.ui.graphics.lerp(cardBgColor, dominantColor, blendFraction)
     }
     
     Card(
@@ -1299,8 +1302,9 @@ fun SimilarArtistBentoCard(
     }
 
     // Dynamic color extraction
+    val isDarkTheme = isSystemInDarkTheme()
     var tintColor by remember(artistThumbnail, colorScheme.surfaceContainer) { mutableStateOf(colorScheme.surfaceContainer) }
-    LaunchedEffect(artistThumbnail, colorScheme.surfaceContainer) {
+    LaunchedEffect(artistThumbnail, colorScheme.surfaceContainer, isDarkTheme) {
         if (!artistThumbnail.isNullOrBlank()) {
             runCatching {
                 val loader = ImageLoader(context)
@@ -1319,8 +1323,10 @@ fun SimilarArtistBentoCard(
                             ?: palette.darkMutedSwatch
                             ?: palette.dominantSwatch
                         if (swatch != null) {
-                            tintColor = Color(swatch.rgb).copy(alpha = 0.36f)
-                                .compositeOver(colorScheme.surfaceContainer)
+                            val blendFraction = if (isDarkTheme) 0.35f else 0.52f
+                            tintColor = androidx.compose.ui.graphics.lerp(
+                                colorScheme.surfaceContainer, Color(swatch.rgb), blendFraction
+                            )
                         }
                     }
                 }
@@ -1642,11 +1648,12 @@ private fun LibraryCarouselCard(
     }
 
     // Dynamic color: extract Palette dominant color from album art thumbnail.
-    // Blended at low alpha so it tints the M3 surface without overpowering it.
+    // Blended with theme-adaptive ratio — stronger in light theme for vibrancy.
     val context = LocalContext.current
     val colorScheme = MaterialTheme.colorScheme
+    val isDarkTheme = isSystemInDarkTheme()
     var tintColor by remember(thumbnail, colorScheme.surfaceContainer) { mutableStateOf(colorScheme.surfaceContainer) }
-    LaunchedEffect(thumbnail, colorScheme.surfaceContainer) {
+    LaunchedEffect(thumbnail, colorScheme.surfaceContainer, isDarkTheme) {
         if (!thumbnail.isNullOrBlank()) {
             runCatching {
                 val loader = ImageLoader(context)
@@ -1665,8 +1672,10 @@ private fun LibraryCarouselCard(
                             ?: palette.darkMutedSwatch
                             ?: palette.dominantSwatch
                         if (swatch != null) {
-                            tintColor = Color(swatch.rgb).copy(alpha = 0.36f)
-                                .compositeOver(colorScheme.surfaceContainer)
+                            val blendFraction = if (isDarkTheme) 0.35f else 0.52f
+                            tintColor = androidx.compose.ui.graphics.lerp(
+                                colorScheme.surfaceContainer, Color(swatch.rgb), blendFraction
+                            )
                         }
                     }
                 }
@@ -1938,9 +1947,10 @@ fun MixedForYouCard(
     }
     val context = LocalContext.current
     val colors = MaterialTheme.colorScheme
+    val isDarkTheme = isSystemInDarkTheme()
     var tintColor by remember(cardThumbnail, colors.surfaceContainerHigh) { mutableStateOf(colors.surfaceContainerHigh) }
     
-    LaunchedEffect(cardThumbnail, colors.surfaceContainerHigh) {
+    LaunchedEffect(cardThumbnail, colors.surfaceContainerHigh, isDarkTheme) {
         if (!cardThumbnail.isNullOrBlank()) {
             runCatching {
                 val loader = ImageLoader(context)
@@ -1962,8 +1972,10 @@ fun MixedForYouCard(
                             ?: palette.darkMutedSwatch
                             ?: palette.dominantSwatch
                         if (swatch != null) {
-                            tintColor = Color(swatch.rgb).copy(alpha = 0.28f)
-                                .compositeOver(colors.surfaceContainerHigh)
+                            val blendFraction = if (isDarkTheme) 0.28f else 0.45f
+                            tintColor = androidx.compose.ui.graphics.lerp(
+                                colors.surfaceContainerHigh, Color(swatch.rgb), blendFraction
+                            )
                         }
                     }
                 }
