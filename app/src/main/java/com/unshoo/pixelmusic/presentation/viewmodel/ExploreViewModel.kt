@@ -303,25 +303,7 @@ class ExploreViewModel @Inject constructor(
                             ).getOrNull()
                         }
 
-                        val cachedArtistBrowseId = explorePrefs.getString("artist_id_${userActivityQuery}", null)
-                        val resolvedArtistId = candidateArtistId ?: cachedArtistBrowseId
 
-                        val similarArtistPageDeferred = if (resolvedArtistId != null) {
-                            async { YouTube.artist(resolvedArtistId).getOrNull() }
-                        } else null
-
-                        val searchArtistPageDeferred = if (resolvedArtistId == null && userActivityQuery != "Bollywood") {
-                            async {
-                                val searchResult = YouTube.search(userActivityQuery, YouTube.SearchFilter.FILTER_ARTIST).getOrNull()
-                                val artistItem = searchResult?.items?.find { it is ArtistItem } as? ArtistItem
-                                val id = artistItem?.id
-                                if (id != null) {
-                                    explorePrefs.edit().putString("artist_id_${userActivityQuery}", id).apply()
-                                    val artistPage = YouTube.artist(id).getOrNull()
-                                    Pair(artistItem.title, artistPage)
-                                } else null
-                            }
-                        } else null
 
                         val likedAlbums = likedAlbumsDeferred?.await() ?: emptyList()
                         val likedArtists = likedArtistsDeferred?.await() ?: emptyList()
@@ -329,51 +311,7 @@ class ExploreViewModel @Inject constructor(
                         val personalPlaylists = personalPlaylistsDeferred?.await() ?: emptyList()
                         val communityPlaylistsResult = communityPlaylistsDeferred.await()
 
-                        var similarSection: HomePage.Section? = null
-                        var artistNameForSection = ""
 
-                        if (similarArtistPageDeferred != null) {
-                            val artistPage = similarArtistPageDeferred.await()
-                            if (artistPage != null) {
-                                artistNameForSection = artistPage.artist.title
-                                val rawSimilarSection = artistPage.sections.find {
-                                    it.title.contains("fans", ignoreCase = true) ||
-                                    it.title.contains("similar", ignoreCase = true) ||
-                                    it.title.contains("like", ignoreCase = true)
-                                }
-                                if (rawSimilarSection != null && rawSimilarSection.items.isNotEmpty()) {
-                                    similarSection = HomePage.Section(
-                                        title = "Similar to $artistNameForSection",
-                                        label = "Based on your activity",
-                                        thumbnail = null,
-                                        endpoint = null,
-                                        items = rawSimilarSection.items.filterIsInstance<ArtistItem>()
-                                    )
-                                }
-                            }
-                        } else if (searchArtistPageDeferred != null) {
-                            val pair = searchArtistPageDeferred.await()
-                            if (pair != null) {
-                                artistNameForSection = pair.first
-                                val artistPage = pair.second
-                                if (artistPage != null) {
-                                    val rawSimilarSection = artistPage.sections.find {
-                                        it.title.contains("fans", ignoreCase = true) ||
-                                        it.title.contains("similar", ignoreCase = true) ||
-                                        it.title.contains("like", ignoreCase = true)
-                                    }
-                                    if (rawSimilarSection != null && rawSimilarSection.items.isNotEmpty()) {
-                                        similarSection = HomePage.Section(
-                                            title = "Similar to $artistNameForSection",
-                                            label = "Based on your activity",
-                                            thumbnail = null,
-                                            endpoint = null,
-                                            items = rawSimilarSection.items.filterIsInstance<ArtistItem>()
-                                        )
-                                    }
-                                }
-                            }
-                        }
 
                         val communityPlaylists = communityPlaylistsResult?.items?.filterIsInstance<PlaylistItem>() ?: emptyList()
 
@@ -391,9 +329,6 @@ class ExploreViewModel @Inject constructor(
                                 ))
                             }
 
-                            if (similarSection != null) {
-                                updatedSections.add(0, similarSection)
-                            }
 
                             if (likedAlbums.isNotEmpty()) {
                                 updatedSections.add(HomePage.Section(
