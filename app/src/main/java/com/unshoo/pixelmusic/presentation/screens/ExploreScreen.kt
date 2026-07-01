@@ -601,6 +601,7 @@ fun ExploreScreen(
                                                 navController = navController,
                                                 playerViewModel = playerViewModel
                                             )
+                                        } else {
                                             YTItemCarousel(
                                                 items = section.items,
                                                 navController = navController,
