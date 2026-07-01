@@ -777,14 +777,30 @@ object YouTube {
         )
     }
 
-    suspend fun explore(): Result<ExplorePage> = runCatching {
-        val response = innerTube.browse(WEB_REMIX, browseId = "FEmusic_explore").body<BrowseResponse>()
-        ExplorePage(
-            newReleaseAlbums = response.contents?.singleColumnBrowseResultsRenderer?.tabs?.firstOrNull()?.tabRenderer?.content?.sectionListRenderer?.contents?.find {
+    suspend fun explore(browseId: String? = null, params: String? = null): Result<ExplorePage> = runCatching {
+        val targetBrowseId = browseId ?: "FEmusic_explore"
+        val response = innerTube.browse(WEB_REMIX, browseId = targetBrowseId, params = params).body<BrowseResponse>()
+        val sectionListRender = response.contents?.singleColumnBrowseResultsRenderer?.tabs?.firstOrNull()
+            ?.tabRenderer?.content?.sectionListRenderer
+        val sections = sectionListRender?.contents
+            ?.mapNotNull { it.musicCarouselShelfRenderer }
+            ?.mapNotNull {
+                HomePage.Section.fromMusicCarouselShelfRenderer(it)
+            }.orEmpty()
+        val chips = sectionListRender?.header?.chipCloudRenderer?.chips?.mapNotNull { HomePage.Chip.fromChipCloudChipRenderer(it) }
+
+        val newReleases = if (targetBrowseId == "FEmusic_explore") {
+            response.contents?.singleColumnBrowseResultsRenderer?.tabs?.firstOrNull()?.tabRenderer?.content?.sectionListRenderer?.contents?.find {
                 it.musicCarouselShelfRenderer?.header?.musicCarouselShelfBasicHeaderRenderer?.moreContentButton?.buttonRenderer?.navigationEndpoint?.browseEndpoint?.browseId == "FEmusic_new_releases_albums"
             }?.musicCarouselShelfRenderer?.contents
                 ?.mapNotNull { it.musicTwoRowItemRenderer }
                 ?.mapNotNull(NewReleaseAlbumPage::fromMusicTwoRowItemRenderer).orEmpty()
+        } else emptyList()
+
+        ExplorePage(
+            chips = chips,
+            sections = sections,
+            newReleaseAlbums = newReleases
         )
     }
 

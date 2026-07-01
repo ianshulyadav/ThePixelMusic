@@ -219,7 +219,11 @@ fun ExploreScreen(
                         }
                     }
                 } else {
-                    val homeSectionsFiltered = uiState.homePageSections
+                    val homeSectionsFiltered = if (uiState.selectedFilter == "All") {
+                        uiState.explorePageSections.ifEmpty { uiState.homePageSections }
+                    } else {
+                        uiState.homePageSections
+                    }
                     val bottomPadding = if (currentSongId != null) MiniPlayerHeight else 0.dp
                     LazyColumn(
                         state = listState,
@@ -231,28 +235,65 @@ fun ExploreScreen(
                         verticalArrangement = Arrangement.spacedBy(24.dp)
                     ) {
                         item(key = "explore_filters") {
-                            Row(
+                            Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .horizontalScroll(rememberScrollState())
-                                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    .padding(vertical = 4.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                val categories = listOf("All", "Smart Mix", "For You", "New Releases", "Charts", "Recap")
-                                categories.forEach { category ->
-                                    FilterChip(
-                                        selected = uiState.selectedFilter == category,
-                                        onClick = { exploreViewModel.setSelectedFilter(category) },
-                                        label = { Text(category) },
-                                        colors = FilterChipDefaults.filterChipColors(
-                                            selectedContainerColor = MaterialTheme.colorScheme.primary,
-                                            selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
-                                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                            labelColor = MaterialTheme.colorScheme.onSurface
-                                        ),
-                                        shape = RoundedCornerShape(16.dp),
-                                        border = null
-                                    )
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState())
+                                        .padding(horizontal = 16.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    val categories = listOf("All", "Smart Mix", "For You", "New Releases", "Charts", "Recap")
+                                    categories.forEach { category ->
+                                        FilterChip(
+                                            selected = uiState.selectedFilter == category,
+                                            onClick = { exploreViewModel.setSelectedFilter(category) },
+                                            label = { Text(category) },
+                                            colors = FilterChipDefaults.filterChipColors(
+                                                selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                                selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                                labelColor = MaterialTheme.colorScheme.onSurface
+                                            ),
+                                            shape = RoundedCornerShape(16.dp),
+                                            border = null
+                                        )
+                                    }
+                                }
+
+                                if (uiState.selectedFilter == "All" && uiState.moodChips.isNotEmpty()) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .horizontalScroll(rememberScrollState())
+                                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        uiState.moodChips.forEach { chip ->
+                                            val isSelected = uiState.activeMoodChip == chip
+                                            FilterChip(
+                                                selected = isSelected,
+                                                onClick = {
+                                                    val newChip = if (isSelected) null else chip
+                                                    exploreViewModel.selectMoodChip(newChip)
+                                                },
+                                                label = { Text(chip.title) },
+                                                colors = FilterChipDefaults.filterChipColors(
+                                                    selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                                    selectedLabelColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                                                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                                                    labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                                ),
+                                                shape = RoundedCornerShape(12.dp),
+                                                border = null
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -450,13 +491,8 @@ fun ExploreScreen(
 
                         if (uiState.selectedFilter == "All" || uiState.selectedFilter == "For You") {
                             homeSectionsFiltered.forEachIndexed { index, section ->
-                                val isBento = section.title.contains("mix", ignoreCase = true) && section.items.size >= 5
                                 val isSpeed = section.title.contains("speed dial", ignoreCase = true) || section.title.contains("quick picks", ignoreCase = true)
-                                if (isBento) {
-                                    item(key = "bento_${section.title}_$index") {
-                                        BentoGridSection(section, navController, playerViewModel)
-                                    }
-                                } else if (isSpeed && section.items.isNotEmpty()) {
+                                if (isSpeed && section.items.isNotEmpty()) {
                                     item(key = "speed_${section.title}_$index") {
                                         SpeedDialSection(section, navController, playerViewModel)
                                     }

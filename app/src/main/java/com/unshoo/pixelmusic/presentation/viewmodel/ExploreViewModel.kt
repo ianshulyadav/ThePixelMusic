@@ -40,7 +40,10 @@ data class ExploreUiState(
     val chartsPage: ChartsPage? = null,
     val error: String? = null,
     val selectedFilter: String = "All",
-    val recentMixes: List<Playlist> = emptyList()
+    val recentMixes: List<Playlist> = emptyList(),
+    val moodChips: List<unshoo.ianshulyadav.pixelmusic.innertube.pages.HomePage.Chip> = emptyList(),
+    val explorePageSections: List<unshoo.ianshulyadav.pixelmusic.innertube.pages.HomePage.Section> = emptyList(),
+    val activeMoodChip: unshoo.ianshulyadav.pixelmusic.innertube.pages.HomePage.Chip? = null
 )
 
 @HiltViewModel
@@ -271,7 +274,9 @@ class ExploreViewModel @Inject constructor(
                                 currentState.copy(
                                     isLoading = false,
                                     isRefreshing = false,
-                                    newReleaseAlbums = merged
+                                    newReleaseAlbums = merged,
+                                    moodChips = exp.chips.orEmpty().distinctBy { it.title },
+                                    explorePageSections = exp.sections
                                 )
                             }
                         }
@@ -518,7 +523,42 @@ class ExploreViewModel @Inject constructor(
     }
 
     fun setSelectedFilter(filter: String) {
-        _uiState.update { it.copy(selectedFilter = filter) }
+        _uiState.update { it.copy(selectedFilter = filter, activeMoodChip = null) }
+        if (filter == "All") {
+            loadData(forceRefresh = false)
+        }
+    }
+
+    fun selectMoodChip(chip: unshoo.ianshulyadav.pixelmusic.innertube.pages.HomePage.Chip?) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(activeMoodChip = chip, isLoading = true, error = null) }
+            if (chip == null) {
+                loadDataInternal(false)
+            } else {
+                withContext(Dispatchers.IO) {
+                    val endpoint = chip.endpoint
+                    if (endpoint != null) {
+                        YouTube.explore(browseId = endpoint.browseId, params = endpoint.params).onSuccess { exp ->
+                            _uiState.update {
+                                it.copy(
+                                    isLoading = false,
+                                    explorePageSections = exp.sections
+                                )
+                            }
+                        }.onFailure { e ->
+                            _uiState.update {
+                                it.copy(
+                                    isLoading = false,
+                                    error = "Failed to fetch mood feed: ${e.message}"
+                                )
+                            }
+                        }
+                    } else {
+                        _uiState.update { it.copy(isLoading = false) }
+                    }
+                }
+            }
+        }
     }
 }
 
