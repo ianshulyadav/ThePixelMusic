@@ -597,7 +597,7 @@ fun ExploreScreen(
                                     item(key = "home_section_${section.title}_${index}_carousel") {
                                         if (section.title.startsWith("Similar to", ignoreCase = true) || section.title.contains("Fans also like", ignoreCase = true)) {
                                             SimilarArtistsCarousel(
-                                                artists = section.items,
+                                                artists = section.items.filterIsInstance<ArtistItem>(),
                                                 navController = navController,
                                                 playerViewModel = playerViewModel
                                             )
