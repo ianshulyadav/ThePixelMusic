@@ -144,6 +144,9 @@ import coil.request.SuccessResult
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.graphics.compositeOver
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
+import androidx.compose.runtime.snapshotFlow
 
 @UnstableApi
 @Composable
@@ -612,10 +615,36 @@ fun ExploreScreen(
                                 }
                             }
 
+                            if (uiState.homePageContinuation != null && uiState.isContinuationLoading) {
+                                item(key = "load_more_indicator_inline") {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(16.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                                    }
+                                }
+                            }
+                        }
+
+                        // Infinite scroll: load more when user scrolls near the bottom
+                        if (uiState.selectedFilter == "All" || uiState.selectedFilter == "For You") {
                             if (uiState.homePageContinuation != null) {
                                 item(key = "load_more_trigger") {
-                                    LaunchedEffect(uiState.homePageContinuation) {
-                                        exploreViewModel.loadMore()
+                                    LaunchedEffect(listState) {
+                                        snapshotFlow {
+                                            val layoutInfo = listState.layoutInfo
+                                            val lastVisibleIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                                            val totalItems = layoutInfo.totalItemsCount
+                                            lastVisibleIndex >= totalItems - 3
+                                        }
+                                            .distinctUntilChanged()
+                                            .filter { it }
+                                            .collect {
+                                                exploreViewModel.loadMore()
+                                            }
                                     }
                                     if (uiState.isContinuationLoading) {
                                         Box(
