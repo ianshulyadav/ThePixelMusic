@@ -6248,6 +6248,44 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
+    fun refreshLibraryTab(tabId: LibraryTabId) {
+        viewModelScope.launch(Dispatchers.IO) {
+            if (tabId == LibraryTabId.FOLDERS) {
+                syncManager.sync()
+                return@launch
+            }
+            if (!unshoo.ianshulyadav.pixelmusic.innertube.YouTube.hasLoginCookie()) {
+                syncManager.sync()
+                return@launch
+            }
+            try {
+                when (tabId) {
+                    LibraryTabId.SONGS -> {
+                        youTubeLibrarySyncManager.syncLikedSongs()
+                        syncManager.sync()
+                    }
+                    LibraryTabId.LIKED -> {
+                        youTubeLibrarySyncManager.syncLikedSongs()
+                    }
+                    LibraryTabId.ALBUMS -> {
+                        youTubeLibrarySyncManager.syncLikedAlbums()
+                    }
+                    LibraryTabId.ARTISTS -> {
+                        youTubeLibrarySyncManager.syncSubscribedArtists()
+                    }
+                    LibraryTabId.PLAYLISTS -> {
+                        youTubeLibrarySyncManager.syncLikedPlaylists()
+                    }
+                    else -> {
+                        syncManager.sync()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("PlayerViewModel", "Failed to sync YouTube tab: $tabId", e)
+            }
+        }
+    }
+
     fun selectSongForInfo(song: Song) {
         _selectedSongForInfo.value = song
         viewModelScope.launch {
