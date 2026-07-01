@@ -657,20 +657,7 @@ fun LibraryScreen(
     var isMinDelayActive by remember { mutableStateOf(false) }
     var refreshGeneration by remember { mutableStateOf(0) }
 
-    val onRefresh: () -> Unit = remember(scope) {
-        {
-            val currentRefreshGeneration = refreshGeneration + 1
-            refreshGeneration = currentRefreshGeneration
-            isMinDelayActive = true
-            isRefreshing = true
-            scope.launch {
-                kotlinx.coroutines.delay(PULL_REFRESH_MIN_VISIBLE_MS)
-                if (currentRefreshGeneration != refreshGeneration) return@launch
-                isMinDelayActive = false
-                isRefreshing = false
-            }
-        }
-    }
+
 
     LaunchedEffect(isFetchingChanges) {
         if (!isFetchingChanges && !isMinDelayActive) {
@@ -867,6 +854,22 @@ fun LibraryScreen(
 
     val currentTab = tabTitles.getOrNull(currentTabIndex)?.toLibraryTabIdOrNull() ?: currentTabId
     val currentTabTitle = currentTab.displayTitle()
+
+    val onRefresh: () -> Unit = remember(scope, playerViewModel, currentTab) {
+        {
+            val currentRefreshGeneration = refreshGeneration + 1
+            refreshGeneration = currentRefreshGeneration
+            isMinDelayActive = true
+            isRefreshing = true
+            playerViewModel.refreshLibraryTab(currentTab)
+            scope.launch {
+                kotlinx.coroutines.delay(PULL_REFRESH_MIN_VISIBLE_MS)
+                if (currentRefreshGeneration != refreshGeneration) return@launch
+                isMinDelayActive = false
+                isRefreshing = false
+            }
+        }
+    }
 
     val headerContainerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
 

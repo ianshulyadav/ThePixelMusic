@@ -21,6 +21,8 @@ import unshoo.ianshulyadav.pixelmusic.innertube.YouTube
 import unshoo.ianshulyadav.pixelmusic.innertube.models.AlbumItem
 import unshoo.ianshulyadav.pixelmusic.innertube.models.ArtistItem
 import unshoo.ianshulyadav.pixelmusic.innertube.models.SongItem
+import unshoo.ianshulyadav.pixelmusic.innertube.models.PlaylistItem
+import com.unshoo.pixelmusic.data.model.youtube.PlaylistInfo
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.absoluteValue
@@ -76,6 +78,10 @@ class YouTubeLibrarySyncManager @Inject constructor(
             } catch (_: Exception) {
             }
             try {
+                syncLikedPlaylists()
+            } catch (_: Exception) {
+            }
+            try {
                 syncListeningHistory()
             } catch (_: Exception) {
             }
@@ -83,7 +89,7 @@ class YouTubeLibrarySyncManager @Inject constructor(
         }
     }
 
-    private suspend fun syncSubscribedArtists() {
+    suspend fun syncSubscribedArtists() {
         val allArtistItems = mutableListOf<ArtistItem>()
 
         val firstPage = YouTube.library(BROWSE_SUBSCRIPTIONS).getOrNull() ?: return
@@ -117,7 +123,7 @@ class YouTubeLibrarySyncManager @Inject constructor(
         userPreferencesRepository.setSubscribedArtistIds(subscribedIds)
     }
 
-    private suspend fun syncLikedAlbums() {
+    suspend fun syncLikedAlbums() {
         val allAlbumItems = mutableListOf<AlbumItem>()
 
         val firstPage = YouTube.library(BROWSE_ALBUMS).getOrNull() ?: return
@@ -220,6 +226,43 @@ class YouTubeLibrarySyncManager @Inject constructor(
             )
         }
         playbackStatsRepository.recordPlaybackBatch(events)
+    }
+
+    suspend fun syncLikedPlaylists() = withContext(Dispatchers.IO) {
+        val allPlaylists = mutableListOf<PlaylistItem>()
+
+        val firstPage = YouTube.library("FEmusic_liked_playlists").getOrNull() ?: return@withContext
+        allPlaylists += firstPage.items.filterIsInstance<PlaylistItem>()
+
+        var pages = 0
+        var continuation = firstPage.continuation
+        while (continuation != null && pages < 5) {
+            yield()
+            val next = YouTube.libraryContinuation(continuation).getOrNull() ?: break
+            allPlaylists += next.items.filterIsInstance<PlaylistItem>()
+            continuation = next.continuation
+            pages++
+            delay(30L)
+        }
+
+        if (allPlaylists.isEmpty()) return@withContext
+
+        val appDatabase = com.unshoo.pixelmusic.data.database.youtube.AppDatabase.getInstance(context)
+        allPlaylists.forEach { item ->
+            val existingPlaylist = appDatabase.playlistRepository().getPlaylistById(item.id)
+            val count = item.songCountText?.split(" ")?.firstOrNull()?.toIntOrNull() ?: 0
+            appDatabase.playlistRepository().insertPlaylist(
+                PlaylistInfo(
+                    id = item.id,
+                    title = item.title,
+                    coverHref = com.unshoo.pixelmusic.data.remote.youtube.upgradeThumbnailUrlToHighQuality(
+                        item.thumbnail
+                    ) ?: item.thumbnail ?: "",
+                    lastSyncSongCount = count,
+                    lastSyncTimestamp = existingPlaylist?.info?.lastSyncTimestamp ?: 0L
+                )
+            )
+        }
     }
 
     private fun ytSongId(youtubeId: String): Long =
