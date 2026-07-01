@@ -4,6 +4,11 @@
 )
 package com.unshoo.pixelmusic.presentation.screens
 
+import androidx.compose.material3.IconButton
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.material.icons.rounded.Radio
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+
 import com.unshoo.pixelmusic.presentation.components.AdSupportCard
 
 import androidx.compose.animation.AnimatedVisibility
@@ -543,14 +548,16 @@ fun ExploreScreen(
                         }
 
                         if (uiState.selectedFilter == "All" || uiState.selectedFilter == "For You") {
-                            var carouselRendered = false
+                        var carouselRendered = false
 
                             homeSectionsFiltered.forEachIndexed { index, section ->
                                 val isSpeed = section.title.contains("speed dial", ignoreCase = true) || 
                                               section.title.contains("quick picks", ignoreCase = true)
-                                val isBento = section.title.contains("featured", ignoreCase = true) || 
+                                val isBento = (section.title.contains("featured", ignoreCase = true) || 
                                               section.title.contains("mixed for you", ignoreCase = true) ||
-                                              (index % 4 == 0 && section.items.size >= 5)
+                                              (index % 4 == 0 && section.items.size >= 5)) &&
+                                              !section.title.startsWith("Similar to", ignoreCase = true) &&
+                                              !section.title.contains("Fans also like", ignoreCase = true)
                                               
                                 if (isBento && section.items.size >= 5) {
                                     item(key = "bento_${section.title}_$index") {
@@ -590,10 +597,10 @@ fun ExploreScreen(
                                     item(key = "home_section_${section.title}_${index}_carousel") {
                                         if (section.title.startsWith("Similar to", ignoreCase = true) || section.title.contains("Fans also like", ignoreCase = true)) {
                                             SimilarArtistsCarousel(
-                                                artists = section.items.filterIsInstance<ArtistItem>(),
-                                                navController = navController
+                                                artists = section.items,
+                                                navController = navController,
+                                                playerViewModel = playerViewModel
                                             )
-                                        } else {
                                             YTItemCarousel(
                                                 items = section.items,
                                                 navController = navController,
@@ -1234,88 +1241,294 @@ fun PlaylistCardItem(
 
 @Composable
 fun SimilarArtistsCarousel(
-    artists: List<ArtistItem>,
-    navController: NavController
+    artists: List<YTItem>,
+    navController: NavController,
+    playerViewModel: PlayerViewModel
 ) {
     LazyRow(
         contentPadding = PaddingValues(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         items(artists) { artist ->
-            SimilarArtistCardItem(
+            SimilarArtistBentoCard(
                 artist = artist,
                 onClick = {
                     navController.navigateSafely(Screen.ArtistDetail.createRoute(artist.id))
-                }
+                },
+                playerViewModel = playerViewModel,
+                navController = navController
             )
         }
     }
 }
 
 @Composable
-fun SimilarArtistCardItem(
-    artist: ArtistItem,
-    onClick: () -> Unit
+fun SimilarArtistBentoCard(
+    artist: YTItem,
+    onClick: () -> Unit,
+    playerViewModel: PlayerViewModel,
+    navController: NavController
 ) {
-    val shape = remember { AbsoluteSmoothCornerShape(20.dp, 60) }
-    val primaryColor = MaterialTheme.colorScheme.primary
+    val context = LocalContext.current
+    val colorScheme = MaterialTheme.colorScheme
+    val playerStableState by playerViewModel.stablePlayerState.collectAsStateWithLifecycle()
+    
+    val artistId = artist.id
+    val artistName = artist.title
+    val artistThumbnail = artist.thumbnail
+
+    // Fetch the top 2 songs of the artist
+    var artistSongs by remember(artistId) { mutableStateOf<List<SongItem>>(emptyList()) }
+    var isSongsLoading by remember(artistId) { mutableStateOf(false) }
+
+    LaunchedEffect(artistId) {
+        isSongsLoading = true
+        runCatching {
+            unshoo.ianshulyadav.pixelmusic.innertube.YouTube.artist(artistId).getOrNull()?.let { artistPage ->
+                val songsSection = artistPage.sections.find {
+                    it.title.lowercase().contains("song") || it.title.lowercase().contains("popular")
+                }
+                val songs = songsSection?.items?.filterIsInstance<SongItem>() ?: emptyList()
+                artistSongs = if (songs.isNotEmpty()) {
+                    songs.take(2)
+                } else {
+                    artistPage.sections.flatMap { it.items }.filterIsInstance<SongItem>().take(2)
+                }
+            }
+        }
+        isSongsLoading = false
+    }
+
+    // Dynamic color extraction
+    var tintColor by remember(artistThumbnail, colorScheme.surfaceContainer) { mutableStateOf(colorScheme.surfaceContainer) }
+    LaunchedEffect(artistThumbnail, colorScheme.surfaceContainer) {
+        if (!artistThumbnail.isNullOrBlank()) {
+            runCatching {
+                val loader = ImageLoader(context)
+                val req = ImageRequest.Builder(context)
+                    .data(artistThumbnail).allowHardware(false).size(96).build()
+                val result = loader.execute(req)
+                if (result is SuccessResult) {
+                    val bmp = (result.drawable as? BitmapDrawable)?.bitmap
+                    if (bmp != null) {
+                        val palette = Palette.from(bmp).generate()
+                        val swatch = palette.vibrantSwatch
+                            ?: palette.lightVibrantSwatch
+                            ?: palette.darkVibrantSwatch
+                            ?: palette.mutedSwatch
+                            ?: palette.lightMutedSwatch
+                            ?: palette.darkMutedSwatch
+                            ?: palette.dominantSwatch
+                        if (swatch != null) {
+                            tintColor = Color(swatch.rgb).copy(alpha = 0.36f)
+                                .compositeOver(colorScheme.surfaceContainer)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    val animatedBgColor by animateColorAsState(
+        targetValue = tintColor,
+        animationSpec = tween(450),
+        label = "similar_artist_bg_${artistName}"
+    )
+
+    val cardShape = remember { AbsoluteSmoothCornerShape(28.dp, 60) }
+
     Card(
         modifier = Modifier
-            .width(140.dp)
-            .clickable(onClick = onClick),
-        shape = shape,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.5f)
-        )
+            .width(300.dp)
+            .height(240.dp),
+        shape = cardShape,
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        colors = CardDefaults.cardColors(containerColor = animatedBgColor)
     ) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(110.dp)
-                    .background(
-                        color = primaryColor.copy(alpha = 0.12f),
-                        shape = CircleShape
-                    )
-                    .padding(4.dp),
-                contentAlignment = Alignment.Center
-            ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            // Artist photo on the right of the top half
+            if (!artistThumbnail.isNullOrBlank()) {
                 SmartImage(
-                    model = artist.thumbnail,
-                    contentDescription = artist.title,
+                    model = artistThumbnail,
+                    contentDescription = artistName,
                     modifier = Modifier
-                        .fillMaxSize()
-                        .clip(CircleShape),
+                        .fillMaxHeight(0.5f)
+                        .width(130.dp)
+                        .align(Alignment.TopEnd),
                     contentScale = ContentScale.Crop
                 )
+                // Horizontal scrim for top half text readability
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .fillMaxHeight(0.5f)
+                        .background(
+                            Brush.horizontalGradient(
+                                colorStops = arrayOf(
+                                    0.0f to animatedBgColor,
+                                    0.45f to animatedBgColor,
+                                    0.85f to Color.Transparent
+                                )
+                            )
+                        )
+                )
             }
-            Spacer(modifier = Modifier.height(10.dp))
-            Text(
-                text = artist.title,
-                style = MaterialTheme.typography.bodyMedium.copy(
+
+            // Text/info top half
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth(0.65f)
+                    .fillMaxHeight(0.5f)
+                    .clickable(onClick = onClick)
+                    .padding(start = 16.dp, top = 16.dp, end = 8.dp),
+                verticalArrangement = Arrangement.Center
+            ) {
+                Text(
+                    text = artistName,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontFamily = GoogleSansRounded,
                     fontWeight = FontWeight.Bold,
-                    fontFamily = GoogleSansRounded
-                ),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                color = MaterialTheme.colorScheme.onSurface,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                modifier = Modifier.fillMaxWidth()
+                    color = colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "Similar Artist",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            // Radio button on the top right
+            IconButton(
+                onClick = {
+                    val endpoint = (artist as? ArtistItem)?.radioEndpoint
+                        ?: (artist as? ArtistItem)?.shuffleEndpoint
+                        ?: unshoo.ianshulyadav.pixelmusic.innertube.models.WatchEndpoint(
+                            playlistId = "RDAMVM$artistId",
+                            videoId = null
+                        )
+                    playerViewModel.playRadio(
+                        endpoint = endpoint,
+                        title = "${artistName} Radio",
+                        artistName = artistName
+                    )
+                },
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 12.dp, end = 12.dp)
+                    .background(colorScheme.primaryContainer.copy(alpha = 0.85f), CircleShape)
+                    .size(36.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Radio,
+                    contentDescription = "Start Artist Radio",
+                    tint = colorScheme.onPrimaryContainer,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            // Horizontal divider line
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .padding(horizontal = 16.dp)
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(colorScheme.onSurface.copy(alpha = 0.08f))
             )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = "Similar Artist",
-                style = MaterialTheme.typography.bodySmall.copy(
-                    fontWeight = FontWeight.Medium
-                ),
-                color = primaryColor.copy(alpha = 0.8f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                modifier = Modifier.fillMaxWidth()
-            )
+
+            // Song list on the bottom half
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.5f)
+                    .align(Alignment.BottomStart)
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (isSongsLoading && artistSongs.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    }
+                } else if (artistSongs.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(
+                            text = "No songs found",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    artistSongs.forEach { songItem ->
+                        val nativeSong = songItem.toNativeSong()
+                        val isPlaying = playerStableState.currentSong?.id == nativeSong.id
+                        
+                        val cornerRadius by animateDpAsState(
+                            targetValue = if (isPlaying) 18.dp else 6.dp,
+                            label = "playing_thumb_radius"
+                        )
+                        val thumbShape = RoundedCornerShape(cornerRadius)
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(38.dp)
+                                .clickable {
+                                    playerViewModel.playSongs(
+                                        songsToPlay = listOf(nativeSong),
+                                        startSong = nativeSong,
+                                        queueName = "Artist: ${artistName}"
+                                    )
+                                },
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            SmartImage(
+                                model = nativeSong.albumArtUriString,
+                                shape = thumbShape,
+                                contentDescription = nativeSong.title,
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(thumbShape),
+                                contentScale = ContentScale.Crop
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Text(
+                                    text = nativeSong.title,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontFamily = GoogleSansRounded,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (isPlaying) colorScheme.primary else colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = nativeSong.artist,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            if (isPlaying) {
+                                Icon(
+                                    imageVector = Icons.Rounded.PlayArrow,
+                                    contentDescription = "Playing",
+                                    tint = colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
