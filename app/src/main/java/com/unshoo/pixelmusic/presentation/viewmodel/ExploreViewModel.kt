@@ -194,7 +194,8 @@ class ExploreViewModel @Inject constructor(
                                     isLoading = false,
                                     isRefreshing = false,
                                     homePageSections = h.sections,
-                                    homePageContinuation = h.continuation
+                                    homePageContinuation = h.continuation,
+                                    moodChips = (h.chips.orEmpty() + currentState.moodChips).distinctBy { it.title }
                                 )
                             }
                         }

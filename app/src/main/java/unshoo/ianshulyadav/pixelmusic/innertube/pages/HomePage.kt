@@ -24,6 +24,8 @@ import unshoo.ianshulyadav.pixelmusic.innertube.models.SongItem
 import unshoo.ianshulyadav.pixelmusic.innertube.models.YTItem
 import unshoo.ianshulyadav.pixelmusic.innertube.models.oddElements
 import unshoo.ianshulyadav.pixelmusic.innertube.models.filterExplicit
+import unshoo.ianshulyadav.pixelmusic.innertube.models.MusicCardShelfRenderer
+import unshoo.ianshulyadav.pixelmusic.innertube.models.MusicShelfRenderer
 
 data class HomePage(
     val chips: List<Chip>?,
@@ -54,6 +56,43 @@ data class HomePage(
         val items: List<YTItem>,
     ) {
         companion object {
+            fun fromSectionListContent(content: SectionListRenderer.Content): Section? {
+                return when {
+                    content.musicCarouselShelfRenderer != null -> {
+                        fromMusicCarouselShelfRenderer(content.musicCarouselShelfRenderer)
+                    }
+                    content.musicCardShelfRenderer != null -> {
+                        val renderer = content.musicCardShelfRenderer
+                        val title = renderer.header?.musicCardShelfHeaderBasicRenderer?.title?.runs?.firstOrNull()?.text
+                            ?: renderer.title.runs?.firstOrNull()?.text
+                            ?: ""
+                        val items = renderer.contents?.mapNotNull { it.musicResponsiveListItemRenderer?.let { SearchPage.toYTItem(it) } }.orEmpty()
+                        if (items.isEmpty()) return null
+                        Section(
+                            title = title,
+                            label = renderer.subtitle.runs?.firstOrNull()?.text,
+                            thumbnail = renderer.thumbnail.musicThumbnailRenderer?.getThumbnailUrl(),
+                            endpoint = renderer.onTap.browseEndpoint,
+                            items = items
+                        )
+                    }
+                    content.musicShelfRenderer != null -> {
+                        val renderer = content.musicShelfRenderer
+                        val title = renderer.title?.runs?.firstOrNull()?.text ?: ""
+                        val items = renderer.contents?.mapNotNull { it.musicResponsiveListItemRenderer?.let { SearchPage.toYTItem(it) } }.orEmpty()
+                        if (items.isEmpty()) return null
+                        Section(
+                            title = title,
+                            label = null,
+                            thumbnail = null,
+                            endpoint = renderer.bottomEndpoint?.browseEndpoint,
+                            items = items
+                        )
+                    }
+                    else -> null
+                }
+            }
+
             fun fromMusicCarouselShelfRenderer(renderer: MusicCarouselShelfRenderer): Section? {
                 return Section(
                     title = renderer.header?.musicCarouselShelfBasicHeaderRenderer?.title?.runs?.firstOrNull()?.text ?: return null,

@@ -48,6 +48,10 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Shuffle
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -220,7 +224,11 @@ fun ExploreScreen(
                     }
                 } else {
                     val homeSectionsFiltered = if (uiState.selectedFilter == "All") {
-                        uiState.explorePageSections.ifEmpty { uiState.homePageSections }
+                        if (uiState.activeMoodChip != null) {
+                            uiState.explorePageSections
+                        } else {
+                            uiState.homePageSections.ifEmpty { uiState.explorePageSections }
+                        }
                     } else {
                         uiState.homePageSections
                     }
@@ -495,6 +503,10 @@ fun ExploreScreen(
                                 if (isSpeed && section.items.isNotEmpty()) {
                                     item(key = "speed_${section.title}_$index") {
                                         SpeedDialSection(section, navController, playerViewModel)
+                                    }
+                                } else if (section.thumbnail != null && section.items.filterIsInstance<SongItem>().isNotEmpty()) {
+                                    item(key = "card_shelf_${section.title}_$index") {
+                                        MusicCardShelf(section, playerViewModel, navController)
                                     }
                                 } else {
                                     item(key = "home_section_${section.title}_${index}_header") {
@@ -1325,6 +1337,178 @@ private fun SpeedDialSection(
                         SmartImage(model = thumbnail, contentDescription = title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
                         Box(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.72f)))))
                         Text(text = title, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.align(Alignment.BottomStart).padding(8.dp))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun MusicCardShelf(
+    section: HomePage.Section,
+    playerViewModel: PlayerViewModel,
+    navController: NavController
+) {
+    val shape = remember { AbsoluteSmoothCornerShape(24.dp, 60) }
+    val colors = MaterialTheme.colorScheme
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = shape,
+        colors = CardDefaults.cardColors(
+            containerColor = colors.surfaceContainerHigh
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // Header Row: Title & Subtitle
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = section.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.onSurface
+                    )
+                    if (!section.label.isNullOrBlank()) {
+                        Text(
+                            text = section.label,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            // Body: Large Thumbnail and List of Songs side-by-side or stacked on smaller screens
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (!section.thumbnail.isNullOrBlank()) {
+                    SmartImage(
+                        model = section.thumbnail,
+                        contentDescription = section.title,
+                        modifier = Modifier
+                            .size(100.dp)
+                            .clip(RoundedCornerShape(16.dp)),
+                        contentScale = ContentScale.Crop
+                    )
+                }
+
+                // List of items (songs)
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val songs = section.items.filterIsInstance<SongItem>().take(3)
+                    val nativeSongs = remember(songs) { songs.map { it.toNativeSong() } }
+                    songs.forEachIndexed { index, songItem ->
+                        val nativeSong = nativeSongs[index]
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable {
+                                    playerViewModel.showAndPlaySong(
+                                        song = nativeSong,
+                                        contextSongs = nativeSongs,
+                                        queueName = section.title
+                                    )
+                                }
+                                .padding(vertical = 4.dp, horizontal = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "${index + 1}",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                color = colors.onSurfaceVariant
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = songItem.title,
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    color = colors.onSurface
+                                )
+                                Text(
+                                    text = songItem.artists.joinToString { it.name },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    color = colors.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Bottom Buttons: Play and Radio
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                val songs = section.items.filterIsInstance<SongItem>()
+                val nativeSongs = remember(songs) { songs.map { it.toNativeSong() } }
+                if (nativeSongs.isNotEmpty()) {
+                    Button(
+                        onClick = {
+                            playerViewModel.showAndPlaySong(
+                                song = nativeSongs.first(),
+                                contextSongs = nativeSongs,
+                                queueName = section.title
+                            )
+                        },
+                        shape = CircleShape,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = colors.primary,
+                            contentColor = colors.onPrimary
+                        ),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.PlayArrow,
+                            contentDescription = "Play"
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Play")
+                    }
+
+                    FilledTonalButton(
+                        onClick = {
+                            playerViewModel.playSongs(
+                                nativeSongs.shuffled(),
+                                nativeSongs.random(),
+                                section.title
+                            )
+                        },
+                        shape = CircleShape,
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = colors.secondaryContainer,
+                            contentColor = colors.onSecondaryContainer
+                        ),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Shuffle,
+                            contentDescription = "Radio"
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Radio")
                     }
                 }
             }
