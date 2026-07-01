@@ -271,7 +271,22 @@ fun PlaylistDetailScreen(
     val bottomBarHeightDp = resolveNavBarOccupiedHeight(systemNavBarInset, navBarCompactMode)
     var showPlaylistBottomSheet by remember { mutableStateOf(false) }
     var playlistSheetSongs by remember { mutableStateOf<List<Song>>(emptyList()) }
-    var localReorderableSongs by remember(songsInPlaylist) { mutableStateOf(songsInPlaylist) }
+    var localReorderableSongs by remember(songsInPlaylist) {
+        mutableStateOf(
+            if (currentPlaylist?.source == "YOUTUBE" && songsInPlaylist.size > 15) {
+                songsInPlaylist.take(15)
+            } else {
+                songsInPlaylist
+            }
+        )
+    }
+
+    LaunchedEffect(songsInPlaylist) {
+        if (currentPlaylist?.source == "YOUTUBE" && songsInPlaylist.size > 15) {
+            kotlinx.coroutines.delay(120)
+            localReorderableSongs = songsInPlaylist
+        }
+    }
 
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()

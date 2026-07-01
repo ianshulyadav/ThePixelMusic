@@ -155,13 +155,31 @@ fun SmartImage(
         allowHardware,
         requestTargetSize
     ) {
-        if (model is ImageRequest) {
-            model.newBuilder(context)
+        val optimizedModel = if (model is String && (model.contains("googleusercontent.com") || model.contains("ggpht.com"))) {
+            val widthPx = (requestTargetSize.width as? coil.size.Dimension.Pixels)?.px ?: 300
+            val heightPx = (requestTargetSize.height as? coil.size.Dimension.Pixels)?.px ?: 300
+            val sizeParamRegex = Regex("=[ws]\\d+.*")
+            val sizeParamRegex2 = Regex("/[ws]\\d+.*")
+            if (sizeParamRegex.containsMatchIn(model)) {
+                model.replace(sizeParamRegex, "=w$widthPx-h$heightPx-c-rj")
+            } else if (sizeParamRegex2.containsMatchIn(model)) {
+                model.replace(sizeParamRegex2, "/w$widthPx-h$heightPx-c-rj")
+            } else if (model.contains("=")) {
+                model.substringBeforeLast("=") + "=w$widthPx-h$heightPx-c-rj"
+            } else {
+                "$model=w$widthPx-h$heightPx-c-rj"
+            }
+        } else {
+            model
+        }
+
+        if (optimizedModel is ImageRequest) {
+            optimizedModel.newBuilder(context)
                 .size(requestTargetSize)
                 .build()
         } else {
             ImageRequest.Builder(context)
-                .data(model)
+                .data(optimizedModel)
                 .crossfade(crossfadeDurationMillis)
                 .diskCachePolicy(if (useDiskCache) CachePolicy.ENABLED else CachePolicy.DISABLED)
                 .memoryCachePolicy(if (useMemoryCache) CachePolicy.ENABLED else CachePolicy.DISABLED)
