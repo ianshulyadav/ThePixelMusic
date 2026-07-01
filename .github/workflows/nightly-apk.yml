@@ -25,7 +25,7 @@ jobs:
       short-sha: ${{ steps.nightly-changes.outputs.short-sha }}
 
     steps:
-      - name: Check for new master changes
+      - name: Check for new main changes
         id: nightly-changes
         uses: actions/github-script@v9
         with:
@@ -52,7 +52,7 @@ jobs:
               owner,
               repo,
               workflow_id,
-              branch: 'master',
+              branch: 'main',
               status: 'success',
               per_page: 20,
             });
@@ -70,11 +70,11 @@ jobs:
             if (shouldBuild) {
               summary.addRaw(
                 previousSha
-                  ? `master moved from ${previousSha} to ${currentSha}. Building APKs.`
+                  ? `main moved from ${previousSha} to ${currentSha}. Building APKs.`
                   : `No previous successful nightly was found. Building APKs for ${currentSha}.`
               );
             } else {
-              summary.addRaw(`master is still at ${currentSha}. Skipping APK build.`);
+              summary.addRaw(`main is still at ${currentSha}. Skipping APK build.`);
             }
             await summary.write();
 
