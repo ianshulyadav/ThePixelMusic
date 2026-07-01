@@ -218,7 +218,7 @@ fun PlaylistDetailScreen(
     val isFolderPlaylist = currentPlaylist?.id?.startsWith(FOLDER_PLAYLIST_PREFIX) == true
     val songsInPlaylist = uiState.currentPlaylistSongs
     val playlistDisplaySongCount = currentPlaylist?.displaySongCount ?: songsInPlaylist.size
-    val isYoutubePlaylistHydrating = currentPlaylist?.source == "YOUTUBE" && songsInPlaylist.isEmpty()
+    val isYoutubePlaylistHydrating = currentPlaylist?.source == "YOUTUBE" && currentPlaylist.songIds.isEmpty() && songsInPlaylist.isEmpty()
     val isPlaylistFullyDownloaded by remember(songsInPlaylist) {
         derivedStateOf {
             songsInPlaylist.isNotEmpty() && songsInPlaylist.all { it.path.isNotBlank() }

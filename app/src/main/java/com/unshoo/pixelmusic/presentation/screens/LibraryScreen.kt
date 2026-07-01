@@ -4651,10 +4651,9 @@ private fun LazyPage(
     var hasBeenLoaded by remember { mutableStateOf(false) }
 
     val isCurrent = pagerState.currentPage == page
-    val isScrollInProgress = pagerState.isScrollInProgress
 
-    LaunchedEffect(isCurrent, isScrollInProgress) {
-        if (isCurrent && !isScrollInProgress) {
+    LaunchedEffect(isCurrent) {
+        if (isCurrent) {
             hasBeenLoaded = true
         }
     }
