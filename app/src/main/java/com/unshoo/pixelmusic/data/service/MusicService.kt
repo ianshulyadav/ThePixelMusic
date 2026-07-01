@@ -68,6 +68,7 @@ import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -1228,6 +1229,29 @@ class MusicService : MediaLibraryService() {
     private fun startNavidromePlaybackReporting() {}
     private fun stopNavidromePlaybackReporting() {}
 
+    private var telemetryJob: Job? = null
+
+    private fun startTelemetryReporting() {
+        telemetryJob?.cancel()
+        telemetryJob = serviceScope.launch {
+            while (isActive) {
+                val player = mediaSession?.player ?: engine.masterPlayer
+                if (player.isPlaying) {
+                    val positionMs = player.currentPosition.coerceAtLeast(0L)
+                    listeningStatsTracker.onProgress(positionMs, player.isPlaying)
+                }
+                delay(1000L)
+            }
+        }
+    }
+
+    private fun stopTelemetryReporting() {
+        telemetryJob?.cancel()
+        telemetryJob = null
+        val player = mediaSession?.player ?: engine.masterPlayer
+        listeningStatsTracker.onPlayStateChanged(false, player.currentPosition.coerceAtLeast(0L))
+    }
+
     private val playerListener = object : Player.Listener {
         override fun onVolumeChanged(volume: Float) {
             if (engine.isTransitionRunning()) return
@@ -1255,10 +1279,12 @@ class MusicService : MediaLibraryService() {
             if (isPlaying) {
                 reportNavidromePlayback("playing")
                 startNavidromePlaybackReporting()
+                startTelemetryReporting()
             } else {
                 val state = if (player.playbackState == Player.STATE_ENDED) "stopped" else "paused"
                 reportNavidromePlayback(state)
                 stopNavidromePlaybackReporting()
+                stopTelemetryReporting()
             }
 
             // Re-apply the last known RG volume immediately when resuming playback.

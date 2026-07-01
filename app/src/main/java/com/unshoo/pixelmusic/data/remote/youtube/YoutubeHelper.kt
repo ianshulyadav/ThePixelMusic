@@ -87,6 +87,7 @@ object YoutubeHelper {
 
     private val failedStreamClientsUntil = ConcurrentHashMap<String, Long>()
     val playbackTrackingCache = ConcurrentHashMap<String, String>()
+    val watchtimeTrackingCache = ConcurrentHashMap<String, String>()
     private const val FAILED_CLIENT_BACKOFF_MS = 10 * 60 * 1000L
     @Volatile private var lastSuccessfulClientKey: String? = null
 
@@ -1213,6 +1214,9 @@ object YoutubeHelper {
                 if (resolvedUrl != null) {
                     playerResponse.playbackTracking?.videostatsPlaybackUrl?.baseUrl?.let { baseUrl ->
                         playbackTrackingCache[videoId] = baseUrl
+                    }
+                    playerResponse.playbackTracking?.videostatsWatchtimeUrl?.baseUrl?.let { baseUrl ->
+                        watchtimeTrackingCache[videoId] = baseUrl
                     }
                     return Triple(resolvedUrl, resolvedMimeType, resolvedBitrate)
                 }
