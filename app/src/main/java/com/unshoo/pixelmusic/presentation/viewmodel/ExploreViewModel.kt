@@ -445,10 +445,6 @@ class ExploreViewModel @Inject constructor(
                                 val enrichedReleases = mutableListOf<AlbumItem>()
                                 enrichedReleases.addAll(globalFiltered)
                                 
-                                if (enrichedReleases.isEmpty()) {
-                                    enrichedReleases.addAll(globalReleases)
-                                }
-                                
                                 val topArtistNames = history
                                     .mapNotNull { it.artist }
                                     .filter { it.isNotBlank() }
