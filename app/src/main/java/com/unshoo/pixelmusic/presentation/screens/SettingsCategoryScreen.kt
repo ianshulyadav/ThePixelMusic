@@ -60,6 +60,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.clickable
@@ -81,6 +82,7 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.MusicNote
@@ -171,7 +173,6 @@ import com.unshoo.pixelmusic.data.backup.model.ModuleRestoreDetail
 import com.unshoo.pixelmusic.data.backup.model.RestorePlan
 import com.unshoo.pixelmusic.data.preferences.AppLanguage
 import com.unshoo.pixelmusic.data.preferences.AppThemeMode
-import com.unshoo.pixelmusic.data.preferences.PlayerThemeMode
 import com.unshoo.pixelmusic.data.preferences.AppFontMode
 import com.unshoo.pixelmusic.data.preferences.CollagePattern
 import com.unshoo.pixelmusic.data.preferences.CarouselStyle
@@ -729,13 +730,26 @@ fun SettingsCategoryScreen(
                                     options = mapOf(
                                         AppThemeMode.LIGHT to stringResource(R.string.setcat_theme_light),
                                         AppThemeMode.DARK to stringResource(R.string.setcat_theme_dark),
-                                        AppThemeMode.PITCH_BLACK to "Pitch Black",
                                         AppThemeMode.FOLLOW_SYSTEM to stringResource(R.string.setcat_theme_follow_system)
                                     ),
                                     selectedKey = uiState.appThemeMode,
                                     onSelectionChanged = { settingsViewModel.setAppThemeMode(it) },
                                     leadingIcon = { Icon(Icons.Outlined.LightMode, null, tint = MaterialTheme.colorScheme.secondary) }
                                 )
+                                val isSystemInDarkTheme = isSystemInDarkTheme()
+                                val isDarkActive = remember(uiState.appThemeMode, isSystemInDarkTheme) {
+                                    uiState.appThemeMode == AppThemeMode.DARK ||
+                                            (uiState.appThemeMode == AppThemeMode.FOLLOW_SYSTEM && isSystemInDarkTheme)
+                                }
+                                if (isDarkActive) {
+                                    SwitchSettingItem(
+                                        title = "Pitch Black",
+                                        subtitle = "Pure black theme to save battery on OLED screens",
+                                        checked = uiState.pitchBlackEnabled,
+                                        onCheckedChange = { settingsViewModel.setPitchBlackEnabled(it) },
+                                        leadingIcon = { Icon(Icons.Rounded.DarkMode, null, tint = MaterialTheme.colorScheme.secondary) }
+                                    )
+                                }
                                 ThemeSelectorItem(
                                     label = stringResource(R.string.setcat_app_font_label),
                                     description = stringResource(R.string.setcat_app_font_desc),
@@ -778,36 +792,13 @@ fun SettingsCategoryScreen(
                                     options = mapOf(
                                         ThemePreference.ALBUM_ART to stringResource(R.string.setcat_player_theme_album_art),
                                         ThemePreference.GLOBAL to stringResource(R.string.setcat_player_theme_global),
-                                        ThemePreference.DYNAMIC to stringResource(R.string.setcat_player_theme_dynamic)
+                                        ThemePreference.DYNAMIC to stringResource(R.string.setcat_player_theme_dynamic),
+                                        ThemePreference.LIGHT to "Light Mode",
+                                        ThemePreference.DARK to "Dark Mode",
+                                        ThemePreference.LIGHT_GREY to "Grey Light"
                                     ),
                                     selectedKey = uiState.playerThemePreference,
                                     onSelectionChanged = { settingsViewModel.setPlayerThemePreference(it) },
-                                    leadingIcon = { Icon(Icons.Outlined.PlayCircle, null, tint = MaterialTheme.colorScheme.secondary) }
-                                )
-                                ThemeSelectorItem(
-                                    label = "Full Player Theme Mode",
-                                    description = "Override the color mode of the full player",
-                                    options = mapOf(
-                                        PlayerThemeMode.FOLLOW_APP to "Follow App Theme",
-                                        PlayerThemeMode.LIGHT to "Light Mode",
-                                        PlayerThemeMode.DARK to "Dark Mode",
-                                        PlayerThemeMode.LIGHT_GREY to "Grey Light"
-                                    ),
-                                    selectedKey = uiState.playerThemeMode,
-                                    onSelectionChanged = { settingsViewModel.setPlayerThemeMode(it) },
-                                    leadingIcon = { Icon(Icons.Outlined.PlayCircle, null, tint = MaterialTheme.colorScheme.secondary) }
-                                )
-                                ThemeSelectorItem(
-                                    label = "Miniplayer Theme Mode",
-                                    description = "Override the color mode of the miniplayer",
-                                    options = mapOf(
-                                        PlayerThemeMode.FOLLOW_APP to "Follow App Theme",
-                                        PlayerThemeMode.LIGHT to "Light Mode",
-                                        PlayerThemeMode.DARK to "Dark Mode",
-                                        PlayerThemeMode.LIGHT_GREY to "Grey Light"
-                                    ),
-                                    selectedKey = uiState.miniplayerThemeMode,
-                                    onSelectionChanged = { settingsViewModel.setMiniplayerThemeMode(it) },
                                     leadingIcon = { Icon(Icons.Outlined.PlayCircle, null, tint = MaterialTheme.colorScheme.secondary) }
                                 )
                                 SwitchSettingItem(

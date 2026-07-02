@@ -382,7 +382,8 @@ fun SetupScreen(
                     )
                     SetupPage.ThemeSelection -> ThemeSelectionPage(
                         uiState = uiState,
-                        onModeSelected = setupViewModel::setAppThemeMode
+                        onModeSelected = setupViewModel::setAppThemeMode,
+                        onPitchBlackToggle = setupViewModel::setPitchBlackEnabled
                     )
                     SetupPage.Finish -> FinishPage()
                     SetupPage.LibraryLayout -> LibraryLayoutPage(
@@ -977,7 +978,8 @@ private data class ThemeOptionItem(
 @Composable
 fun ThemeSelectionPage(
     uiState: SetupUiState,
-    onModeSelected: (String) -> Unit
+    onModeSelected: (String) -> Unit,
+    onPitchBlackToggle: (Boolean) -> Unit
 ) {
     val themeOptions = listOf(
         ThemeOptionItem(
@@ -986,12 +988,6 @@ fun ThemeSelectionPage(
             description = stringResource(R.string.setup_theme_dark_description),
             icon = Icons.Rounded.DarkMode,
             recommended = true
-        ),
-        ThemeOptionItem(
-            mode = AppThemeMode.PITCH_BLACK,
-            title = "Pitch Black",
-            description = "True black theme to save battery on OLED screens",
-            icon = Icons.Rounded.DarkMode
         ),
         ThemeOptionItem(
             mode = AppThemeMode.LIGHT,
@@ -1043,6 +1039,42 @@ fun ThemeSelectionPage(
                     selected = uiState.appThemeMode == option.mode,
                     onClick = { onModeSelected(option.mode) }
                 )
+            }
+
+            val isDarkSelected = uiState.appThemeMode == AppThemeMode.DARK || uiState.appThemeMode == AppThemeMode.FOLLOW_SYSTEM
+            if (isDarkSelected) {
+                Card(
+                    shape = RoundedCornerShape(24.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Pitch Black",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Enable pure black backgrounds on dark theme",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = uiState.pitchBlackEnabled,
+                            onCheckedChange = onPitchBlackToggle
+                        )
+                    }
+                }
             }
 
             Text(

@@ -44,6 +44,7 @@ data class SetupUiState(
     val navBarCornerRadius: Int = 28,
     val alarmsPermissionGranted: Boolean = false,
     val appThemeMode: String = AppThemeMode.DARK,
+    val pitchBlackEnabled: Boolean = false,
     val isInspectingBackup: Boolean = false,
     val isRestoringBackup: Boolean = false,
     val restorePlan: RestorePlan? = null,
@@ -80,9 +81,6 @@ class SetupViewModel @Inject constructor(
     /**
      * Expose sync progress for UI to show during initial setup
      */
-    /**
-     * Expose sync progress for UI to show during initial setup
-     */
     val isSyncing = syncManager.isSyncing
 
     private val fileExplorerStateHolder = FileExplorerStateHolder(userPreferencesRepository, viewModelScope, context)
@@ -108,14 +106,22 @@ class SetupViewModel @Inject constructor(
 
         // Consolidated collectors using combine() to reduce coroutine overhead
         viewModelScope.launch {
-            combine(
+            combine<Any?, SetupPrefsUpdate>(
                 userPreferencesRepository.blockedDirectoriesFlow,
                 userPreferencesRepository.libraryNavigationModeFlow,
                 userPreferencesRepository.navBarStyleFlow,
                 userPreferencesRepository.navBarCornerRadiusFlow,
-                themePreferencesRepository.appThemeModeFlow
-            ) { blocked, mode, style, radius, appThemeMode ->
-                SetupPrefsUpdate(blocked, mode, style, radius, appThemeMode)
+                themePreferencesRepository.appThemeModeFlow,
+                themePreferencesRepository.pitchBlackEnabledFlow
+            ) { values ->
+                SetupPrefsUpdate(
+                    blocked = values[0] as Set<String>,
+                    mode = values[1] as String,
+                    style = values[2] as String,
+                    radius = values[3] as Int,
+                    appThemeMode = values[4] as String,
+                    pitchBlackEnabled = values[5] as Boolean
+                )
             }.collect { update ->
                 _uiState.update { state ->
                     state.copy(
@@ -123,7 +129,8 @@ class SetupViewModel @Inject constructor(
                         libraryNavigationMode = update.mode,
                         navBarStyle = update.style,
                         navBarCornerRadius = update.radius,
-                        appThemeMode = update.appThemeMode
+                        appThemeMode = update.appThemeMode,
+                        pitchBlackEnabled = update.pitchBlackEnabled
                     )
                 }
             }
@@ -141,7 +148,8 @@ class SetupViewModel @Inject constructor(
         val mode: String,
         val style: String,
         val radius: Int,
-        val appThemeMode: String
+        val appThemeMode: String,
+        val pitchBlackEnabled: Boolean
     )
 
     fun checkPermissions(context: Context) {
@@ -255,6 +263,12 @@ class SetupViewModel @Inject constructor(
     fun setAppThemeMode(mode: String) {
         viewModelScope.launch {
             themePreferencesRepository.setAppThemeMode(mode)
+        }
+    }
+
+    fun setPitchBlackEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            themePreferencesRepository.setPitchBlackEnabled(enabled)
         }
     }
 

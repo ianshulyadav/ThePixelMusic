@@ -54,19 +54,19 @@ internal fun resolvePlayerSheetTargetScheme(
 
 private fun ColorScheme.toLightGrey(): ColorScheme {
     return this.copy(
-        background = Color(0xFFF4F4F6),
-        surface = Color.White,
-        surfaceVariant = Color(0xFFEBEBF0),
-        surfaceContainer = Color(0xFFF4F4F6),
-        surfaceContainerHigh = Color(0xFFEBEBF0),
-        surfaceContainerHighest = Color(0xFFE3E3E8),
-        surfaceContainerLow = Color(0xFFFAFAFC),
-        surfaceContainerLowest = Color.White,
-        surfaceDim = Color(0xFFE3E3E8),
-        surfaceBright = Color.White,
+        background = Color(0xFFE8E8EC),
+        surface = Color(0xFFF2F2F7),
+        surfaceVariant = Color(0xFFE0E0E6),
+        surfaceContainer = Color(0xFFE8E8EC),
+        surfaceContainerHigh = Color(0xFFDFDFE5),
+        surfaceContainerHighest = Color(0xFFD5D5DF),
+        surfaceContainerLow = Color(0xFFEFEFF4),
+        surfaceContainerLowest = Color(0xFFF4F4F8),
+        surfaceDim = Color(0xFFD5D5DF),
+        surfaceBright = Color(0xFFF2F2F7),
         onBackground = Color(0xFF1C1C1E),
         onSurface = Color(0xFF1C1C1E),
-        onSurfaceVariant = Color(0xFF3C3C43)
+        onSurfaceVariant = Color(0xFF48484A)
     )
 }
 
@@ -75,31 +75,34 @@ internal fun rememberSheetThemeState(
     activePlayerSchemePair: ColorSchemePair?,
     isDarkTheme: Boolean,
     playerThemePreference: String,
-    playerThemeMode: String,
-    miniplayerThemeMode: String,
     currentSong: Song?,
     themedAlbumArtUri: String?,
     preparingSongId: String?,
     systemColorScheme: ColorScheme,
     colorPalette: String = "SAGE"
 ): SheetThemeState {
-    val isAlbumArtTheme = playerThemePreference == ThemePreference.ALBUM_ART
+    val isAlbumArtTheme = remember(playerThemePreference) {
+        playerThemePreference == ThemePreference.ALBUM_ART ||
+                playerThemePreference == ThemePreference.LIGHT ||
+                playerThemePreference == ThemePreference.DARK ||
+                playerThemePreference == ThemePreference.LIGHT_GREY
+    }
     val hasAlbumArt = !currentSong?.albumArtUriString.isNullOrBlank()
 
-    val resolveIsDarkForFull = remember(playerThemeMode, isDarkTheme) {
-        when (playerThemeMode) {
-            "dark" -> true
-            "light" -> false
-            "light_grey" -> false
+    val resolveIsDarkForFull = remember(playerThemePreference, isDarkTheme) {
+        when (playerThemePreference) {
+            ThemePreference.DARK -> true
+            ThemePreference.LIGHT -> false
+            ThemePreference.LIGHT_GREY -> false
             else -> isDarkTheme
         }
     }
 
-    val resolveIsDarkForMini = remember(miniplayerThemeMode, isDarkTheme) {
-        when (miniplayerThemeMode) {
-            "dark" -> true
-            "light" -> false
-            "light_grey" -> false
+    val resolveIsDarkForMini = remember(playerThemePreference, isDarkTheme) {
+        when (playerThemePreference) {
+            ThemePreference.DARK -> true
+            ThemePreference.LIGHT -> false
+            ThemePreference.LIGHT_GREY -> false
             else -> isDarkTheme
         }
     }
@@ -208,10 +211,8 @@ internal fun rememberSheetThemeState(
         systemColorScheme = systemColorSchemeForMini
     )
 
-    if (playerThemeMode == "light_grey") {
+    if (playerThemePreference == ThemePreference.LIGHT_GREY) {
         rawAlbumColorScheme = rawAlbumColorScheme.toLightGrey()
-    }
-    if (miniplayerThemeMode == "light_grey") {
         rawMiniPlayerScheme = rawMiniPlayerScheme.toLightGrey()
     }
 

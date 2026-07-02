@@ -495,15 +495,15 @@ fun PixelMusicTheme(
     val finalColorScheme = if (darkTheme && pitchBlack) {
         baseColorScheme.copy(
             background = Color.Black,
-            surface = Color.Black,
-            surfaceVariant = Color(0xFF101010),
-            surfaceContainer = Color(0xFF080808),
-            surfaceContainerHigh = Color(0xFF121212),
-            surfaceContainerHighest = Color(0xFF1A1A1A),
-            surfaceContainerLow = Color(0xFF040404),
-            surfaceContainerLowest = Color.Black,
-            surfaceDim = Color.Black,
-            surfaceBright = Color(0xFF121212)
+            surface = Color(0xFF121212),
+            surfaceVariant = Color(0xFF1A1A1A),
+            surfaceContainer = Color(0xFF121212),
+            surfaceContainerHigh = Color(0xFF161616),
+            surfaceContainerHighest = Color(0xFF1E1E1E),
+            surfaceContainerLow = Color(0xFF0F0F0F),
+            surfaceContainerLowest = Color(0xFF0A0A0A),
+            surfaceDim = Color(0xFF0A0A0A),
+            surfaceBright = Color(0xFF181818)
         )
     } else {
         baseColorScheme
