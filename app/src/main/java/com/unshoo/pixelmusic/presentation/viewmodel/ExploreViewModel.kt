@@ -205,15 +205,24 @@ class ExploreViewModel @Inject constructor(
                 newReleasesResult = newReleasesDeferred.await()
                 explore = exploreDeferred.await()
 
-                _uiState.update { currentState ->
-                    val mergedSections = ((home?.sections.orEmpty()) + (explore?.sections.orEmpty()) + currentState.homePageSections).distinctBy { it.title }
+                 _uiState.update { currentState ->
+                    val filterSections = { sections: List<unshoo.ianshulyadav.pixelmusic.innertube.pages.HomePage.Section> ->
+                        sections.filter { section ->
+                            val title = section.title.lowercase()
+                            !title.contains("new music videos") && !title.contains("new albums & singles")
+                        }
+                    }
+                    val filteredHomeSections = filterSections(home?.sections.orEmpty())
+                    val filteredExploreSections = filterSections(explore?.sections.orEmpty())
+                    
+                    val mergedSections = (filteredHomeSections + filteredExploreSections + currentState.homePageSections).distinctBy { it.title }
                     val mergedChips = ((home?.chips.orEmpty()) + (explore?.chips.orEmpty()) + currentState.moodChips).distinctBy { it.title }
                     currentState.copy(
                         isLoading = false,
                         isRefreshing = false,
                         homePageSections = mergedSections,
                         homePageContinuation = home?.continuation ?: currentState.homePageContinuation,
-                        explorePageSections = explore?.sections ?: currentState.explorePageSections,
+                        explorePageSections = filteredExploreSections,
                         chartsPage = charts ?: currentState.chartsPage,
                         newReleaseAlbums = newReleasesResult ?: currentState.newReleaseAlbums,
                         moodChips = mergedChips
@@ -614,9 +623,13 @@ class ExploreViewModel @Inject constructor(
                 }
                 if (result != null) {
                     _uiState.update {
+                        val filteredNewSections = result.sections.filter { section ->
+                            val title = section.title.lowercase()
+                            !title.contains("new music videos") && !title.contains("new albums & singles")
+                        }
                         val newState = it.copy(
                             isContinuationLoading = false,
-                            homePageSections = it.homePageSections + result.sections,
+                            homePageSections = it.homePageSections + filteredNewSections,
                             homePageContinuation = result.continuation
                         )
                         persistToCache(newState)
