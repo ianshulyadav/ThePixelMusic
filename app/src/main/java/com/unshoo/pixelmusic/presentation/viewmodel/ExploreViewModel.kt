@@ -431,14 +431,23 @@ class ExploreViewModel @Inject constructor(
                             }
 
                             val finalNewReleases = if (YouTube.hasLoginCookie()) {
-                                val localArtistNames = allLocalSongs.map { it.artistName.lowercase().trim() }.filter { it.isNotBlank() }.toSet()
-                                val globalReleases = YouTube.newReleaseAlbums().getOrNull()
-                                val globalFiltered = globalReleases?.filter { album ->
+                                val localArtistNames = (
+                                    allLocalSongs.map { it.artistName.lowercase().trim() } +
+                                    dbArtists.map { it.name.lowercase().trim() } +
+                                    history.mapNotNull { it.artist?.lowercase()?.trim() }
+                                ).filter { it.isNotBlank() }.toSet()
+                                
+                                val globalReleases = YouTube.newReleaseAlbums().getOrNull().orEmpty()
+                                val globalFiltered = globalReleases.filter { album ->
                                     album.artists?.any { it.name.lowercase().trim() in localArtistNames } == true
-                                }.orEmpty()
+                                }
                                 
                                 val enrichedReleases = mutableListOf<AlbumItem>()
                                 enrichedReleases.addAll(globalFiltered)
+                                
+                                if (enrichedReleases.isEmpty()) {
+                                    enrichedReleases.addAll(globalReleases)
+                                }
                                 
                                 val topArtistNames = history
                                     .mapNotNull { it.artist }
