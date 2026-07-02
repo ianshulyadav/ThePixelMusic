@@ -269,7 +269,10 @@ fun ExploreScreen(
                     val homeSectionsFiltered = remember(homeSectionsRaw) {
                         homeSectionsRaw.filter { section ->
                             val title = section.title.lowercase()
-                            !title.contains("cover") && !title.contains("remix")
+                            !title.contains("cover") && 
+                            !title.contains("remix") &&
+                            !title.contains("new music videos") &&
+                            !title.contains("new albums & singles")
                         }
                     }
                     val cardShelfSections = remember(homeSectionsFiltered) {
