@@ -792,10 +792,7 @@ fun SettingsCategoryScreen(
                                     options = mapOf(
                                         ThemePreference.ALBUM_ART to stringResource(R.string.setcat_player_theme_album_art),
                                         ThemePreference.GLOBAL to stringResource(R.string.setcat_player_theme_global),
-                                        ThemePreference.DYNAMIC to stringResource(R.string.setcat_player_theme_dynamic),
-                                        ThemePreference.LIGHT to "Light Mode",
-                                        ThemePreference.DARK to "Dark Mode",
-                                        ThemePreference.LIGHT_GREY to "Grey Light"
+                                        ThemePreference.DYNAMIC to stringResource(R.string.setcat_player_theme_dynamic)
                                     ),
                                     selectedKey = uiState.playerThemePreference,
                                     onSelectionChanged = { settingsViewModel.setPlayerThemePreference(it) },

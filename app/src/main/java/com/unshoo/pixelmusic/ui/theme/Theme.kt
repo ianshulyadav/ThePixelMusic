@@ -503,7 +503,9 @@ fun PixelMusicTheme(
             surfaceContainerLow = Color(0xFF0F0F0F),
             surfaceContainerLowest = Color(0xFF0A0A0A),
             surfaceDim = Color(0xFF0A0A0A),
-            surfaceBright = Color(0xFF181818)
+            surfaceBright = Color(0xFF181818),
+            outlineVariant = Color(0xFF2C2C2E),
+            outline = Color(0xFF4A4A4A)
         )
     } else {
         baseColorScheme
