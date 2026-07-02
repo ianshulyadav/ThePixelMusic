@@ -73,9 +73,12 @@ class ExploreViewModel @Inject constructor(
         }
         viewModelScope.launch {
             playlistPreferencesRepository.userPlaylistsFlow.collect { playlists ->
-                val mixes = playlists.filter { it.source == "LASTFM_MIX" }
-                    .sortedByDescending { it.lastModified }
-                val libPlaylists = playlists.filter { !it.isQueueGenerated && it.id != "_downloaded_" && it.source != "LASTFM_MIX" }
+                val mixes = playlists.filter {
+                    (it.source == "LASTFM_MIX" || it.source == "AI" || it.isAiGenerated) &&
+                            it.songIds.isNotEmpty() &&
+                            !it.name.contains("deleted", ignoreCase = true)
+                }.sortedByDescending { it.lastModified }
+                val libPlaylists = playlists.filter { !it.isQueueGenerated && it.id != "_downloaded_" && it.source != "LASTFM_MIX" && it.source != "AI" && !it.isAiGenerated }
                     .sortedByDescending { it.lastModified }
                 _uiState.update { it.copy(recentMixes = mixes, libraryPlaylists = libPlaylists) }
             }
@@ -193,10 +196,11 @@ class ExploreViewModel @Inject constructor(
                         home = h
                         if (h != null) {
                             _uiState.update { currentState ->
+                                val merged = (h.sections + currentState.explorePageSections).distinctBy { it.title }
                                 currentState.copy(
                                     isLoading = false,
                                     isRefreshing = false,
-                                    homePageSections = h.sections,
+                                    homePageSections = merged,
                                     homePageContinuation = h.continuation,
                                     moodChips = (h.chips.orEmpty() + currentState.moodChips).distinctBy { it.title }
                                 )
@@ -246,11 +250,13 @@ class ExploreViewModel @Inject constructor(
                         explore = exp
                         if (exp != null) {
                             _uiState.update { currentState ->
+                                val merged = (currentState.homePageSections + exp.sections).distinctBy { it.title }
                                 currentState.copy(
                                     isLoading = false,
                                     isRefreshing = false,
                                     moodChips = exp.chips.orEmpty().distinctBy { it.title },
-                                    explorePageSections = exp.sections
+                                    explorePageSections = exp.sections,
+                                    homePageSections = merged
                                 )
                             }
                         }
@@ -280,22 +286,6 @@ class ExploreViewModel @Inject constructor(
             stage2Job = viewModelScope.launch(Dispatchers.IO) {
                 try {
                     coroutineScope {
-                        val likedAlbumsDeferred = if (hasLogin) {
-                            async { YouTube.library("FEmusic_liked_albums").getOrNull()?.items?.filterIsInstance<AlbumItem>() ?: emptyList() }
-                        } else null
-
-                        val likedArtistsDeferred = if (hasLogin) {
-                            async { YouTube.library("FEmusic_liked_artists").getOrNull()?.items?.filterIsInstance<ArtistItem>() ?: emptyList() }
-                        } else null
-
-                        val recentActivityDeferred = if (hasLogin) {
-                            async { YouTube.libraryRecentActivity().getOrNull()?.items ?: emptyList() }
-                        } else null
-
-                        val personalPlaylistsDeferred = if (hasLogin) {
-                            async { YouTube.library("FEmusic_liked_playlists").getOrNull()?.items?.filterIsInstance<PlaylistItem>() ?: emptyList() }
-                        } else null
-
                         val communityPlaylistsDeferred = async {
                             YouTube.search(
                                 query = "$userActivityQuery playlist",
@@ -303,23 +293,13 @@ class ExploreViewModel @Inject constructor(
                             ).getOrNull()
                         }
 
-
-
-                        val likedAlbums = likedAlbumsDeferred?.await() ?: emptyList()
-                        val likedArtists = likedArtistsDeferred?.await() ?: emptyList()
-                        val recentActivityItems = recentActivityDeferred?.await() ?: emptyList()
-                        val personalPlaylists = personalPlaylistsDeferred?.await() ?: emptyList()
                         val communityPlaylistsResult = communityPlaylistsDeferred.await()
-
-
-
                         val communityPlaylists = communityPlaylistsResult?.items?.filterIsInstance<PlaylistItem>() ?: emptyList()
 
                         _uiState.update { currentState ->
-                            val updatedSections = (home?.sections ?: currentState.homePageSections).toMutableList()
+                            val updatedSections = currentState.homePageSections.toMutableList()
 
-                            if (personalPlaylists.isEmpty() && communityPlaylists.isNotEmpty()) {
-                                updatedSections.removeAll { it.title.contains("trending", ignoreCase = true) }
+                            if (communityPlaylists.isNotEmpty()) {
                                 updatedSections.add(HomePage.Section(
                                     title = "Community Playlists",
                                     label = "Based on your activity for $userActivityQuery",
@@ -329,28 +309,7 @@ class ExploreViewModel @Inject constructor(
                                 ))
                             }
 
-
-                            if (likedAlbums.isNotEmpty()) {
-                                updatedSections.add(HomePage.Section(
-                                    title = "Your Liked Albums",
-                                    label = "From your YouTube Music Account",
-                                    thumbnail = null,
-                                    endpoint = null,
-                                    items = likedAlbums
-                                ))
-                            }
-
-                            if (likedArtists.isNotEmpty()) {
-                                updatedSections.add(HomePage.Section(
-                                    title = "Your Favorite Artists",
-                                    label = "From your YouTube Music Account",
-                                    thumbnail = null,
-                                    endpoint = null,
-                                    items = likedArtists
-                                ))
-                            }
-
-                            currentState.copy(homePageSections = updatedSections)
+                            currentState.copy(homePageSections = updatedSections.distinctBy { it.title })
                         }
                     }
                 } catch (e: Exception) {
@@ -384,7 +343,107 @@ class ExploreViewModel @Inject constructor(
     fun loadMore() {
         val currentState = _uiState.value
         val continuation = currentState.homePageContinuation
-        if (currentState.isContinuationLoading || continuation == null) return
+        if (currentState.isContinuationLoading) return
+
+        if (continuation == null) {
+            val hasLocalSections = currentState.homePageSections.any { it.title == "Recently Played (Local)" }
+            if (hasLocalSections) return
+
+            viewModelScope.launch {
+                _uiState.update { it.copy(isContinuationLoading = true) }
+                try {
+                    val recentSongs = withContext(Dispatchers.IO) {
+                        playbackStatsRepository.loadPlaybackHistory(limit = 20)
+                    }
+                    val dbArtists = withContext(Dispatchers.IO) {
+                        try {
+                            musicDao.getAllArtistsListRaw().sortedByDescending { it.trackCount }.take(15)
+                        } catch (e: Exception) {
+                            emptyList()
+                        }
+                    }
+
+                    val localSections = mutableListOf<HomePage.Section>()
+
+                    if (recentSongs.isNotEmpty()) {
+                        val songItems = recentSongs.map { entry ->
+                            SongItem(
+                                id = entry.songId,
+                                title = entry.title ?: "",
+                                artists = listOf(unshoo.ianshulyadav.pixelmusic.innertube.models.Artist(entry.artist ?: "Unknown Artist", null)),
+                                album = null,
+                                duration = null,
+                                thumbnail = entry.thumbnail ?: "",
+                                explicit = false,
+                                endpoint = null
+                            )
+                        }
+                        localSections.add(HomePage.Section(
+                            title = "Recently Played (Local)",
+                            label = "From your history",
+                            thumbnail = null,
+                            endpoint = null,
+                            items = songItems
+                        ))
+                    }
+
+                    if (dbArtists.isNotEmpty()) {
+                        val artistItems = dbArtists.map { entity ->
+                            ArtistItem(
+                                id = entity.channelId ?: entity.id.toString(),
+                                title = entity.name,
+                                thumbnail = entity.customImageUri ?: entity.imageUrl,
+                                channelId = entity.channelId,
+                                shuffleEndpoint = null,
+                                radioEndpoint = null
+                            )
+                        }
+                        localSections.add(HomePage.Section(
+                            title = "Top Library Artists",
+                            label = "Based on your local library",
+                            thumbnail = null,
+                            endpoint = null,
+                            items = artistItems
+                        ))
+                    }
+
+                    val libraryPlaylists = currentState.libraryPlaylists
+                    if (libraryPlaylists.isNotEmpty()) {
+                        val playlistItems = libraryPlaylists.take(10).map { playlist ->
+                            PlaylistItem(
+                                id = playlist.id,
+                                title = playlist.name,
+                                author = unshoo.ianshulyadav.pixelmusic.innertube.models.Artist("You", null),
+                                songCountText = "${playlist.songIds.size} songs",
+                                thumbnail = playlist.coverImageUri,
+                                playEndpoint = null,
+                                shuffleEndpoint = null,
+                                radioEndpoint = null,
+                                isEditable = true
+                            )
+                        }
+                        localSections.add(HomePage.Section(
+                            title = "Your Custom Playlists",
+                            label = "Created by you",
+                            thumbnail = null,
+                            endpoint = null,
+                            items = playlistItems
+                        ))
+                    }
+
+                    _uiState.update { state ->
+                        state.copy(
+                            isContinuationLoading = false,
+                            homePageSections = state.homePageSections + localSections
+                        )
+                    }
+                } catch (e: Exception) {
+                    Timber.e(e, "Error loading local sections for Explore")
+                    _uiState.update { it.copy(isContinuationLoading = false) }
+                }
+            }
+            return
+        }
 
         viewModelScope.launch {
             _uiState.update { it.copy(isContinuationLoading = true) }

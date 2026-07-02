@@ -4650,10 +4650,12 @@ private fun LazyPage(
 ) {
     var hasBeenLoaded by remember { mutableStateOf(false) }
 
-    val isCurrent = pagerState.currentPage == page
+    val shouldLoad = remember(pagerState.currentPage, page) {
+        abs(pagerState.currentPage - page) <= 1
+    }
 
-    LaunchedEffect(isCurrent) {
-        if (isCurrent) {
+    LaunchedEffect(shouldLoad) {
+        if (shouldLoad) {
             hasBeenLoaded = true
         }
     }
