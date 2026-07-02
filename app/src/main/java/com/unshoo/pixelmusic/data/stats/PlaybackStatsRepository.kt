@@ -522,6 +522,27 @@ class PlaybackStatsRepository @Inject constructor(
             .toList()
     }
 
+    data class SongPlayCountEntry(
+        val songId: String,
+        val playCount: Int,
+        val lastPlayedMs: Long
+    )
+
+    suspend fun loadSongPlayCounts(limit: Int = 50): List<SongPlayCountEntry> = withContext(Dispatchers.IO) {
+        if (limit <= 0) return@withContext emptyList()
+        readEvents()
+            .groupBy { it.songId }
+            .map { (songId, events) ->
+                SongPlayCountEntry(
+                    songId = songId,
+                    playCount = events.size,
+                    lastPlayedMs = events.maxOfOrNull { it.timestamp } ?: 0L
+                )
+            }
+            .sortedByDescending { it.playCount }
+            .take(limit)
+    }
+
     suspend fun importEventsFromBackup(
         events: List<PlaybackEvent>,
         clearExisting: Boolean = true
