@@ -293,6 +293,111 @@ class ExploreViewModel @Inject constructor(
                             ).getOrNull()
                         }
 
+                        // Liked and Cached local songs
+                        val allLocalSongs = try {
+                            musicDao.getAllSongsList()
+                        } catch (e: Exception) {
+                            emptyList()
+                        }
+
+                        val likedSongs = allLocalSongs.filter { it.isFavorite }
+                        val cachedSongs = allLocalSongs.filter { it.filePath.isNotBlank() }
+
+                        val likedSongItems = likedSongs.take(15).map { entity ->
+                            SongItem(
+                                id = entity.id.toString(),
+                                title = entity.title,
+                                artists = listOf(unshoo.ianshulyadav.pixelmusic.innertube.models.Artist(entity.artistName, null)),
+                                album = if (entity.albumName.isNotBlank()) unshoo.ianshulyadav.pixelmusic.innertube.models.Album(entity.albumName, "") else null,
+                                duration = (entity.duration / 1000).toInt(),
+                                thumbnail = entity.albumArtUriString ?: "",
+                                explicit = false,
+                                endpoint = null
+                            )
+                        }
+
+                        val cachedSongItems = cachedSongs.take(15).map { entity ->
+                            SongItem(
+                                id = entity.id.toString(),
+                                title = entity.title,
+                                artists = listOf(unshoo.ianshulyadav.pixelmusic.innertube.models.Artist(entity.artistName, null)),
+                                album = if (entity.albumName.isNotBlank()) unshoo.ianshulyadav.pixelmusic.innertube.models.Album(entity.albumName, "") else null,
+                                duration = (entity.duration / 1000).toInt(),
+                                thumbnail = entity.albumArtUriString ?: "",
+                                explicit = false,
+                                endpoint = null
+                            )
+                        }
+
+                        // You Might Like (Recommendations based on top 3 most-played artists in history)
+                        val topArtists = history
+                            .mapNotNull { it.artist }
+                            .filter { it.isNotBlank() }
+                            .groupingBy { it }
+                            .eachCount()
+                            .entries
+                            .sortedByDescending { it.value }
+                            .take(3)
+                            .map { it.key }
+
+                        val searchJobs = topArtists.map { artistName ->
+                            async {
+                                YouTube.search(query = artistName, filter = YouTube.SearchFilter.FILTER_SONG)
+                                    .getOrNull()?.items?.filterIsInstance<SongItem>() ?: emptyList()
+                            }
+                        }
+                        val searchResults = searchJobs.flatMap { it.await() }
+
+                        val playedSongIds = (history.mapNotNull { it.songId } + allLocalSongs.map { it.id.toString() }).toSet()
+                        val youMightLikeItems = searchResults
+                            .distinctBy { it.id }
+                            .filter { it.id !in playedSongIds }
+                            .take(10)
+
+                        // Recently Played and Most Played local history auto-shelves
+                        val localSongsMap = allLocalSongs.associateBy { it.id.toString() }
+                        val historyMap = history.associateBy { it.songId }
+
+                        val recentSongItems = history.take(15).map { entry ->
+                            val local = localSongsMap[entry.songId]
+                            val title = local?.title ?: entry.title ?: "Unknown"
+                            val artistName = local?.artistName ?: entry.artist ?: "Unknown Artist"
+                            val thumb = local?.albumArtUriString ?: entry.thumbnail ?: ""
+                            val dur = local?.duration?.div(1000)
+                            SongItem(
+                                id = entry.songId,
+                                title = title,
+                                artists = listOf(unshoo.ianshulyadav.pixelmusic.innertube.models.Artist(artistName, null)),
+                                album = if (local?.albumName?.isNotBlank() == true) unshoo.ianshulyadav.pixelmusic.innertube.models.Album(local.albumName, "") else null,
+                                duration = dur?.toInt(),
+                                thumbnail = thumb,
+                                explicit = false,
+                                endpoint = null
+                            )
+                        }
+
+                        val mostPlayedSongs = playbackStatsRepository.loadSongPlayCounts(limit = 15)
+                        val mostPlayedSongItems = mostPlayedSongs.mapNotNull { entry ->
+                            val local = localSongsMap[entry.songId]
+                            val hist = historyMap[entry.songId]
+                            val title = local?.title ?: hist?.title
+                            val artistName = local?.artistName ?: hist?.artist ?: "Unknown Artist"
+                            val thumb = local?.albumArtUriString ?: hist?.thumbnail ?: ""
+                            val dur = local?.duration?.div(1000)
+                            if (title != null) {
+                                SongItem(
+                                    id = entry.songId,
+                                    title = title,
+                                    artists = listOf(unshoo.ianshulyadav.pixelmusic.innertube.models.Artist(artistName, null)),
+                                    album = if (local?.albumName?.isNotBlank() == true) unshoo.ianshulyadav.pixelmusic.innertube.models.Album(local.albumName, "") else null,
+                                    duration = dur?.toInt(),
+                                    thumbnail = thumb,
+                                    explicit = false,
+                                    endpoint = null
+                                )
+                            } else null
+                        }
+
                         val communityPlaylistsResult = communityPlaylistsDeferred.await()
                         val communityPlaylists = communityPlaylistsResult?.items?.filterIsInstance<PlaylistItem>() ?: emptyList()
 
@@ -306,6 +411,56 @@ class ExploreViewModel @Inject constructor(
                                     thumbnail = null,
                                     endpoint = null,
                                     items = communityPlaylists
+                                ))
+                            }
+
+                            if (likedSongItems.size >= 3) {
+                                updatedSections.add(HomePage.Section(
+                                    title = "Your Liked Songs",
+                                    label = "Favorites from your library",
+                                    thumbnail = likedSongItems.firstOrNull()?.thumbnail,
+                                    endpoint = null,
+                                    items = likedSongItems
+                                ))
+                            }
+
+                            if (cachedSongItems.size >= 3) {
+                                updatedSections.add(HomePage.Section(
+                                    title = "Cached & Downloaded",
+                                    label = "Offline playback ready",
+                                    thumbnail = cachedSongItems.firstOrNull()?.thumbnail,
+                                    endpoint = null,
+                                    items = cachedSongItems
+                                ))
+                            }
+
+                            if (youMightLikeItems.isNotEmpty()) {
+                                updatedSections.add(HomePage.Section(
+                                    title = "You Might Like",
+                                    label = "Recommended songs based on your top artists",
+                                    thumbnail = youMightLikeItems.firstOrNull()?.thumbnail,
+                                    endpoint = null,
+                                    items = youMightLikeItems
+                                ))
+                            }
+
+                            if (recentSongItems.size >= 5) {
+                                updatedSections.add(HomePage.Section(
+                                    title = "Your Recently Played",
+                                    label = "Auto-curated from your listening history",
+                                    thumbnail = recentSongItems.firstOrNull()?.thumbnail,
+                                    endpoint = null,
+                                    items = recentSongItems
+                                ))
+                            }
+
+                            if (mostPlayedSongItems.size >= 5) {
+                                updatedSections.add(HomePage.Section(
+                                    title = "Your Most Played On Heavy Rotation",
+                                    label = "Your all-time top tracks",
+                                    thumbnail = mostPlayedSongItems.firstOrNull()?.thumbnail,
+                                    endpoint = null,
+                                    items = mostPlayedSongItems
                                 ))
                             }
 

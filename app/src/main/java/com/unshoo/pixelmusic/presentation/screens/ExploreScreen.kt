@@ -80,6 +80,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.Alignment
@@ -365,6 +366,15 @@ fun ExploreScreen(
                             }
                         }
 
+                        if (uiState.selectedFilter == "Recap") {
+                            item(key = "explore_recap_view") {
+                                RecapScreen(
+                                    navController = navController,
+                                    playerViewModel = playerViewModel
+                                )
+                            }
+                        }
+
                         // 3. AI Smart Mix Studio Card (Hero CTA)
                         val showSmartMixCard = when (uiState.selectedFilter) {
                             "Smart Mix" -> true
@@ -608,13 +618,39 @@ fun ExploreScreen(
                         if (uiState.selectedFilter == "All" || uiState.selectedFilter == "For You") {
 
                             remainingSections.forEachIndexed { index, section ->
-                                val isBento = (section.title.contains("featured", ignoreCase = true) || 
-                                              section.title.contains("mixed for you", ignoreCase = true) ||
-                                              (index % 4 == 0 && section.items.size >= 5)) &&
-                                              !section.title.startsWith("Similar to", ignoreCase = true) &&
-                                              !section.title.contains("Fans also like", ignoreCase = true)
-                                              
-                                if (isBento && section.items.size >= 5) {
+                                val isShelf = section.title.contains("recently played", ignoreCase = true) ||
+                                              section.title.contains("most played", ignoreCase = true) ||
+                                              section.title.contains("heavy rotation", ignoreCase = true) ||
+                                              section.title.contains("liked", ignoreCase = true) ||
+                                              section.title.contains("cached", ignoreCase = true) ||
+                                              section.title.contains("you might like", ignoreCase = true)
+
+                                val isBento = !isShelf && 
+                                              (section.title.contains("featured", ignoreCase = true) || 
+                                               section.title.contains("supermix", ignoreCase = true) ||
+                                               section.title.contains("curated", ignoreCase = true) ||
+                                               section.title.contains("mixed for you", ignoreCase = true)) &&
+                                               section.items.size >= 4
+
+                                val isSimilar = !isShelf && !isBento && 
+                                                (section.title.startsWith("Similar to", ignoreCase = true) || 
+                                                 section.title.contains("Fans also like", ignoreCase = true))
+
+                                if (isShelf && section.items.isNotEmpty()) {
+                                    item(key = "shelf_${section.title}_$index") {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 20.dp, vertical = 4.dp)
+                                        ) {
+                                            MixedForYouCard(
+                                                section = section,
+                                                playerViewModel = playerViewModel,
+                                                navController = navController
+                                            )
+                                        }
+                                    }
+                                } else if (isBento) {
                                     item(key = "bento_${section.title}_$index") {
                                         LibrarySwipeableCarousel(section, navController, playerViewModel)
                                     }
@@ -639,7 +675,7 @@ fun ExploreScreen(
                                         )
                                     }
                                     item(key = "home_section_${section.title}_${index}_carousel") {
-                                        if (section.title.startsWith("Similar to", ignoreCase = true) || section.title.contains("Fans also like", ignoreCase = true)) {
+                                        if (isSimilar) {
                                             SimilarArtistsCarousel(
                                                 artists = section.items.filterIsInstance<ArtistItem>(),
                                                 navController = navController,
@@ -1344,38 +1380,16 @@ fun SimilarArtistBentoCard(
 ) {
     val context = LocalContext.current
     val colorScheme = MaterialTheme.colorScheme
-    val playerStableState by playerViewModel.stablePlayerState.collectAsStateWithLifecycle()
     
     val artistId = artist.id
     val artistName = artist.title
     val artistThumbnail = artist.thumbnail
 
-    // Fetch the top 2 songs of the artist
-    var artistSongs by remember(artistId) { mutableStateOf<List<SongItem>>(emptyList()) }
-    var isSongsLoading by remember(artistId) { mutableStateOf(false) }
-
-    LaunchedEffect(artistId) {
-        isSongsLoading = true
-        runCatching {
-            unshoo.ianshulyadav.pixelmusic.innertube.YouTube.artist(artistId).getOrNull()?.let { artistPage ->
-                val songsSection = artistPage.sections.find {
-                    it.title.lowercase().contains("song") || it.title.lowercase().contains("popular")
-                }
-                val songs = songsSection?.items?.filterIsInstance<SongItem>() ?: emptyList()
-                artistSongs = if (songs.isNotEmpty()) {
-                    songs.take(2)
-                } else {
-                    artistPage.sections.flatMap { it.items }.filterIsInstance<SongItem>().take(2)
-                }
-            }
-        }
-        isSongsLoading = false
-    }
-
     // Dynamic color extraction
     val isDarkTheme = isSystemInDarkTheme()
-    var tintColor by remember(artistThumbnail, colorScheme.surfaceContainer) { mutableStateOf(colorScheme.surfaceContainer) }
-    LaunchedEffect(artistThumbnail, colorScheme.surfaceContainer, isDarkTheme) {
+    val baseSurface = colorScheme.surfaceContainerHigh
+    var tintColor by remember(artistThumbnail, baseSurface) { mutableStateOf(baseSurface) }
+    LaunchedEffect(artistThumbnail, baseSurface, isDarkTheme) {
         if (!artistThumbnail.isNullOrBlank()) {
             runCatching {
                 val loader = ImageLoader(context)
@@ -1394,9 +1408,9 @@ fun SimilarArtistBentoCard(
                             ?: palette.darkMutedSwatch
                             ?: palette.dominantSwatch
                         if (swatch != null) {
-                            val blendFraction = if (isDarkTheme) 0.35f else 0.52f
+                            val blendFraction = if (isDarkTheme) 0.35f else 0.50f
                             tintColor = androidx.compose.ui.graphics.lerp(
-                                colorScheme.surfaceContainer, Color(swatch.rgb), blendFraction
+                                baseSurface, Color(swatch.rgb), blendFraction
                             )
                         }
                     }
@@ -1415,99 +1429,59 @@ fun SimilarArtistBentoCard(
 
     Card(
         modifier = Modifier
-            .width(300.dp)
-            .height(240.dp),
+            .width(290.dp)
+            .height(220.dp),
         shape = cardShape,
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         colors = CardDefaults.cardColors(containerColor = animatedBgColor)
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
-            // Artist photo on the right of the top half
-            if (!artistThumbnail.isNullOrBlank()) {
-                SmartImage(
-                    model = artistThumbnail,
-                    contentDescription = artistName,
-                    modifier = Modifier
-                        .fillMaxHeight(0.5f)
-                        .width(130.dp)
-                        .align(Alignment.TopEnd),
-                    contentScale = ContentScale.Crop
-                )
-                // Horizontal scrim for top half text readability
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .fillMaxHeight(0.5f)
-                        .background(
-                            Brush.horizontalGradient(
-                                colorStops = arrayOf(
-                                    0.0f to animatedBgColor,
-                                    0.45f to animatedBgColor,
-                                    0.85f to Color.Transparent
-                                )
-                            )
-                        )
-                )
-            }
-
-            // Text/info top half
-            Column(
+            // Top half content: Left text column, Right circular artist avatar
+            Row(
                 modifier = Modifier
-                    .fillMaxWidth(0.65f)
-                    .fillMaxHeight(0.5f)
-                    .clickable(onClick = onClick)
-                    .padding(start = 16.dp, top = 16.dp, end = 8.dp),
-                verticalArrangement = Arrangement.Center
+                    .fillMaxWidth()
+                    .height(110.dp)
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = artistName,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontFamily = GoogleSansRounded,
-                    fontWeight = FontWeight.Bold,
-                    color = colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = "Similar Artist",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-
-            // Radio button on the top right
-            IconButton(
-                onClick = {
-                    val endpoint = artist.radioEndpoint
-                        ?: artist.shuffleEndpoint
-                        ?: unshoo.ianshulyadav.pixelmusic.innertube.models.WatchEndpoint(
-                            playlistId = "RDAMVM$artistId",
-                            videoId = null
-                        )
-                    playerViewModel.playRadio(
-                        endpoint = endpoint,
-                        title = "${artistName} Radio",
-                        artistName = artistName
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 8.dp)
+                ) {
+                    Text(
+                        text = artistName,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontFamily = GoogleSansRounded,
+                        fontWeight = FontWeight.Bold,
+                        color = colorScheme.onSurface,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
                     )
-                },
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(top = 12.dp, end = 12.dp)
-                    .background(colorScheme.primaryContainer.copy(alpha = 0.85f), CircleShape)
-                    .size(36.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.Radio,
-                    contentDescription = "Start Artist Radio",
-                    tint = colorScheme.onPrimaryContainer,
-                    modifier = Modifier.size(20.dp)
-                )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Similar Artist",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                if (!artistThumbnail.isNullOrBlank()) {
+                    SmartImage(
+                        model = artistThumbnail,
+                        contentDescription = artistName,
+                        modifier = Modifier
+                            .size(80.dp)
+                            .clip(CircleShape),
+                        contentScale = ContentScale.Crop
+                    )
+                }
             }
 
-            // Horizontal divider line
+            // Divider
             Box(
                 modifier = Modifier
                     .align(Alignment.CenterStart)
@@ -1517,94 +1491,68 @@ fun SimilarArtistBentoCard(
                     .background(colorScheme.onSurface.copy(alpha = 0.08f))
             )
 
-            // Song list on the bottom half
+            // Bottom half content: Actions (Radio button and explore link)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .fillMaxHeight(0.5f)
-                    .align(Alignment.BottomStart)
+                    .height(110.dp)
+                    .align(Alignment.BottomCenter)
                     .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                if (isSongsLoading && artistSongs.isEmpty()) {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                    }
-                } else if (artistSongs.isEmpty()) {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(
-                            text = "No songs found",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = colorScheme.onSurfaceVariant
-                        )
-                    }
-                } else {
-                    artistSongs.forEach { songItem ->
-                        val nativeSong = songItem.toNativeSong()
-                        val isPlaying = playerStableState.currentSong?.id == nativeSong.id
-                        
-                        val cornerRadius by animateDpAsState(
-                            targetValue = if (isPlaying) 18.dp else 6.dp,
-                            label = "playing_thumb_radius"
-                        )
-                        val thumbShape = RoundedCornerShape(cornerRadius)
-
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(38.dp)
-                                .clickable {
-                                    val allNativeSongs = artistSongs.map { it.toNativeSong() }
-                                    playerViewModel.playSongs(
-                                        songsToPlay = allNativeSongs,
-                                        startSong = nativeSong,
-                                        queueName = "Artist: ${artistName}"
-                                    )
-                                },
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            SmartImage(
-                                model = nativeSong.albumArtUriString,
-                                shape = thumbShape,
-                                contentDescription = nativeSong.title,
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(thumbShape),
-                                contentScale = ContentScale.Crop
+                // Radio Pill Button
+                Button(
+                    onClick = {
+                        val endpoint = artist.radioEndpoint
+                            ?: artist.shuffleEndpoint
+                            ?: unshoo.ianshulyadav.pixelmusic.innertube.models.WatchEndpoint(
+                                playlistId = "RDAMVM$artistId",
+                                videoId = null
                             )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column(
-                                modifier = Modifier.weight(1f),
-                                verticalArrangement = Arrangement.Center
-                            ) {
-                                Text(
-                                    text = nativeSong.title,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontFamily = GoogleSansRounded,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = if (isPlaying) colorScheme.primary else colorScheme.onSurface,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = nativeSong.artist,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                            if (isPlaying) {
-                                Icon(
-                                    imageVector = Icons.Rounded.PlayArrow,
-                                    contentDescription = "Playing",
-                                    tint = colorScheme.primary,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                        }
-                    }
+                        playerViewModel.playRadio(
+                            endpoint = endpoint,
+                            title = "${artistName} Radio",
+                            artistName = artistName
+                        )
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp),
+                    shape = RoundedCornerShape(22.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = colorScheme.primary,
+                        contentColor = colorScheme.onPrimary
+                    ),
+                    contentPadding = PaddingValues(horizontal = 16.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Radio,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Start Artist Radio",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = GoogleSansRounded
+                    )
                 }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Explore Catalog Text Link
+                Text(
+                    text = "Explore Artist Catalog →",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    fontFamily = GoogleSansRounded,
+                    color = colorScheme.primary,
+                    modifier = Modifier
+                        .clickable(onClick = onClick)
+                        .padding(vertical = 4.dp)
+                )
             }
         }
     }
@@ -1621,6 +1569,18 @@ private fun LibrarySwipeableCarousel(
     if (items.isEmpty()) return
     val pagerState = rememberPagerState(pageCount = { items.size })
     val scope = rememberCoroutineScope()
+
+    val isDragged by pagerState.interactionSource.collectIsDraggedAsState()
+    LaunchedEffect(pagerState, isDragged) {
+        while (!isDragged && items.size > 1) {
+            kotlinx.coroutines.delay(3000L)
+            val nextPage = (pagerState.currentPage + 1) % items.size
+            pagerState.animateScrollToPage(
+                page = nextPage,
+                animationSpec = spring(stiffness = androidx.compose.animation.core.Spring.StiffnessLow)
+            )
+        }
+    }
 
     Column(
         modifier = Modifier.fillMaxWidth(),
