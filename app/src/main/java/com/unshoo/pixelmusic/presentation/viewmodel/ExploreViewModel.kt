@@ -447,7 +447,7 @@ class ExploreViewModel @Inject constructor(
                             if (recentSongItems.size >= 5) {
                                 updatedSections.add(HomePage.Section(
                                     title = "Your Recently Played",
-                                    label = "Auto-curated from your listening history",
+                                    label = "Recent history",
                                     thumbnail = recentSongItems.firstOrNull()?.thumbnail,
                                     endpoint = null,
                                     items = recentSongItems
@@ -457,7 +457,7 @@ class ExploreViewModel @Inject constructor(
                             if (mostPlayedSongItems.size >= 5) {
                                 updatedSections.add(HomePage.Section(
                                     title = "Your Most Played",
-                                    label = "Your all-time top tracks",
+                                    label = "All-time top tracks",
                                     thumbnail = mostPlayedSongItems.firstOrNull()?.thumbnail,
                                     endpoint = null,
                                     items = mostPlayedSongItems
