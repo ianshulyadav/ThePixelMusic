@@ -39,9 +39,6 @@ object ThemePreference {
     const val DYNAMIC = "dynamic"
     const val ALBUM_ART = "album_art"
     const val GLOBAL = "global"
-    const val LIGHT = "light"
-    const val DARK = "dark"
-    const val LIGHT_GREY = "light_grey"
 }
 
 object AppThemeMode {

@@ -9,6 +9,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -101,6 +102,7 @@ fun SettingsItem(
 ) {
     Surface(
             color = MaterialTheme.colorScheme.surfaceContainer,
+            border = getSettingsCardBorder(),
             modifier =
                     Modifier.fillMaxWidth()
                             .clip(RoundedCornerShape(10.dp))
@@ -152,6 +154,7 @@ fun SwitchSettingItem(
 
     Surface(
             color = MaterialTheme.colorScheme.surfaceContainer,
+            border = getSettingsCardBorder(),
             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
     ) {
         Row(
@@ -240,6 +243,7 @@ fun ThemeSelectorItem(
 
     Surface(
             color = MaterialTheme.colorScheme.surfaceContainer,
+            border = getSettingsCardBorder(),
             modifier =
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable {
                         showSheet = true
@@ -381,6 +385,7 @@ fun SliderSettingsItem(
 ) {
     Surface(
             color = MaterialTheme.colorScheme.surfaceContainer,
+            border = getSettingsCardBorder(),
             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -425,6 +430,7 @@ fun RefreshLibraryItem(
 ) {
     Surface(
             color = MaterialTheme.colorScheme.surfaceContainer,
+            border = getSettingsCardBorder(),
             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -575,6 +581,7 @@ fun RefreshLyricsItem(
 ) {
     Surface(
             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+            border = getSettingsCardBorder(),
             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -659,6 +666,7 @@ fun ActionSettingsItem(
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer,
+        border = getSettingsCardBorder(),
         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -736,6 +744,7 @@ fun AiApiKeyItem(
 
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer,
+        border = getSettingsCardBorder(),
         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -823,6 +832,7 @@ fun AiSystemPromptItem(
 
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer,
+        border = getSettingsCardBorder(),
         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -901,3 +911,18 @@ fun AiSystemPromptItem(
         }
     }
 }
+
+@Composable
+fun getSettingsCardBorder(): BorderStroke? {
+    val colorScheme = MaterialTheme.colorScheme
+    val isDark = isSystemInDarkTheme()
+    val isPitchBlack = colorScheme.background == Color.Black
+    val isGreyPalette = !isDark && colorScheme.surfaceVariant == Color(0xFFE5E5EA)
+
+    return when {
+        isPitchBlack -> BorderStroke(1.dp, colorScheme.outlineVariant.copy(alpha = 0.25f))
+        isGreyPalette -> BorderStroke(1.dp, colorScheme.outline.copy(alpha = 0.2f))
+        else -> null
+    }
+}
+

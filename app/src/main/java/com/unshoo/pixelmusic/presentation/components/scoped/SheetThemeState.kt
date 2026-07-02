@@ -52,23 +52,6 @@ internal fun resolvePlayerSheetTargetScheme(
     }
 }
 
-private fun ColorScheme.toLightGrey(): ColorScheme {
-    return this.copy(
-        background = Color(0xFFE8E8EC),
-        surface = Color(0xFFF2F2F7),
-        surfaceVariant = Color(0xFFE0E0E6),
-        surfaceContainer = Color(0xFFE8E8EC),
-        surfaceContainerHigh = Color(0xFFDFDFE5),
-        surfaceContainerHighest = Color(0xFFD5D5DF),
-        surfaceContainerLow = Color(0xFFEFEFF4),
-        surfaceContainerLowest = Color(0xFFF4F4F8),
-        surfaceDim = Color(0xFFD5D5DF),
-        surfaceBright = Color(0xFFF2F2F7),
-        onBackground = Color(0xFF1C1C1E),
-        onSurface = Color(0xFF1C1C1E),
-        onSurfaceVariant = Color(0xFF48484A)
-    )
-}
 
 @Composable
 internal fun rememberSheetThemeState(
@@ -82,29 +65,16 @@ internal fun rememberSheetThemeState(
     colorPalette: String = "SAGE"
 ): SheetThemeState {
     val isAlbumArtTheme = remember(playerThemePreference) {
-        playerThemePreference == ThemePreference.ALBUM_ART ||
-                playerThemePreference == ThemePreference.LIGHT ||
-                playerThemePreference == ThemePreference.DARK ||
-                playerThemePreference == ThemePreference.LIGHT_GREY
+        playerThemePreference == ThemePreference.ALBUM_ART
     }
     val hasAlbumArt = !currentSong?.albumArtUriString.isNullOrBlank()
 
     val resolveIsDarkForFull = remember(playerThemePreference, isDarkTheme) {
-        when (playerThemePreference) {
-            ThemePreference.DARK -> true
-            ThemePreference.LIGHT -> false
-            ThemePreference.LIGHT_GREY -> false
-            else -> isDarkTheme
-        }
+        isDarkTheme
     }
 
     val resolveIsDarkForMini = remember(playerThemePreference, isDarkTheme) {
-        when (playerThemePreference) {
-            ThemePreference.DARK -> true
-            ThemePreference.LIGHT -> false
-            ThemePreference.LIGHT_GREY -> false
-            else -> isDarkTheme
-        }
+        isDarkTheme
     }
 
     val activePlayerSchemeForFull = remember(activePlayerSchemePair, resolveIsDarkForFull) {
@@ -211,10 +181,6 @@ internal fun rememberSheetThemeState(
         systemColorScheme = systemColorSchemeForMini
     )
 
-    if (playerThemePreference == ThemePreference.LIGHT_GREY) {
-        rawAlbumColorScheme = rawAlbumColorScheme.toLightGrey()
-        rawMiniPlayerScheme = rawMiniPlayerScheme.toLightGrey()
-    }
 
     // --- Batch Color Animation ---
     // Instead of 34×2 = 68 independent animateColorAsState (one Spring coroutine each),
