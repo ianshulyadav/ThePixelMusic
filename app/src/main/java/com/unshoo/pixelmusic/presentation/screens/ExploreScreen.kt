@@ -281,6 +281,16 @@ fun ExploreScreen(
                             isSug && hasSongs
                         }
                     }
+                    val fromYourLibraryAlbums = remember(homeSectionsFiltered) {
+                        val section = homeSectionsFiltered.find { it.title.lowercase().contains("from your library") }
+                        section?.items?.filterIsInstance<AlbumItem>().orEmpty()
+                    }
+                    val remainingSections = remember(homeSectionsFiltered, cardShelfSections) {
+                        homeSectionsFiltered.filter { section ->
+                            !cardShelfSections.contains(section) &&
+                            !section.title.lowercase().contains("from your library")
+                        }
+                    }
                     val bottomPadding = if (currentSongId != null) MiniPlayerHeight else 0.dp
                     LazyColumn(
                         state = listState,
@@ -408,7 +418,15 @@ fun ExploreScreen(
                                             contentPadding = PaddingValues(horizontal = 16.dp),
                                             horizontalArrangement = Arrangement.spacedBy(16.dp)
                                         ) {
-                                            items(chartSection.items) { item ->
+                                            items(items = chartSection.items, key = { item ->
+                                                when (item) {
+                                                    is SongItem -> "chart_song_${item.id}"
+                                                    is AlbumItem -> "chart_album_${item.browseId}"
+                                                    is ArtistItem -> "chart_artist_${item.id}"
+                                                    is PlaylistItem -> "chart_playlist_${item.id}"
+                                                    else -> "chart_item_${item.hashCode()}"
+                                                }
+                                            }) { item ->
                                                 when (item) {
                                                     is AlbumItem -> {
                                                         AlbumCarouselItem(
@@ -465,7 +483,7 @@ fun ExploreScreen(
                                     contentPadding = PaddingValues(horizontal = 16.dp),
                                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                                 ) {
-                                    items(uiState.newReleaseAlbums) { album ->
+                                    items(items = uiState.newReleaseAlbums, key = { album -> "new_release_${album.browseId}" }) { album ->
                                         AlbumCarouselItem(
                                             album = album,
                                             onClick = {
@@ -506,7 +524,7 @@ fun ExploreScreen(
                                     contentPadding = PaddingValues(horizontal = 16.dp),
                                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                                 ) {
-                                    items(uiState.recentMixes) { playlist ->
+                                    items(items = uiState.recentMixes, key = { playlist -> "recent_mix_${playlist.id}" }) { playlist ->
                                         RecentMixCardItem(
                                             playlist = playlist,
                                             playerViewModel = playerViewModel,
@@ -519,9 +537,8 @@ fun ExploreScreen(
                             }
                         }
 
-                        if ((uiState.selectedFilter == "All" || uiState.selectedFilter == "For You") &&
-                            uiState.libraryPlaylists.isNotEmpty()
-                        ) {
+                        val hasLibraryContent = uiState.libraryPlaylists.isNotEmpty() || fromYourLibraryAlbums.isNotEmpty()
+                        if ((uiState.selectedFilter == "All" || uiState.selectedFilter == "For You") && hasLibraryContent) {
                             item(key = "your_library_header") {
                                 SectionHeader(
                                     title = "Your Library",
@@ -534,9 +551,18 @@ fun ExploreScreen(
                             item(key = "your_library_carousel") {
                                 LazyRow(
                                     contentPadding = PaddingValues(horizontal = 16.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    items(uiState.libraryPlaylists) { playlist ->
+                                    items(items = fromYourLibraryAlbums, key = { album -> "library_album_${album.browseId}" }) { album ->
+                                        AlbumCarouselItem(
+                                            album = album,
+                                            onClick = {
+                                                navController.navigateSafely(Screen.AlbumDetail.createRoute(album.browseId))
+                                            }
+                                        )
+                                    }
+                                    items(items = uiState.libraryPlaylists, key = { playlist -> "library_playlist_${playlist.id}" }) { playlist ->
                                         LibraryPlaylistCard(
                                             playlist = playlist,
                                             playerViewModel = playerViewModel,
@@ -549,12 +575,39 @@ fun ExploreScreen(
                             }
                         }
 
-                        if (uiState.selectedFilter == "All" || uiState.selectedFilter == "For You") {
-                            var carouselRendered = false
+                        // Standalone Mixed For You Section (Rendered once)
+                        if ((uiState.selectedFilter == "All" || uiState.selectedFilter == "For You") && cardShelfSections.isNotEmpty()) {
+                            item(key = "mixed_for_you_section") {
+                                MixedForYouSection(cardShelfSections, playerViewModel, navController)
+                            }
+                        }
 
-                            homeSectionsFiltered.forEachIndexed { index, section ->
-                                val isSpeed = section.title.contains("speed dial", ignoreCase = true) || 
-                                              section.title.contains("quick picks", ignoreCase = true)
+                        // Smart Mix Horizontal List for Smart Mix Filter
+                        if (uiState.selectedFilter == "Smart Mix" && uiState.recentMixes.isNotEmpty()) {
+                            item(key = "smart_mix_header") {
+                                SectionHeader(title = "Your Smart Mixes")
+                            }
+                            item(key = "smart_mix_carousel") {
+                                LazyRow(
+                                    contentPadding = PaddingValues(horizontal = 16.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                ) {
+                                    items(items = uiState.recentMixes, key = { playlist -> "smart_mix_${playlist.id}" }) { playlist ->
+                                        RecentMixCardItem(
+                                            playlist = playlist,
+                                            playerViewModel = playerViewModel,
+                                            onClick = {
+                                                navController.navigateSafely(Screen.PlaylistDetail.createRoute(playlist.id))
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        if (uiState.selectedFilter == "All" || uiState.selectedFilter == "For You") {
+
+                            remainingSections.forEachIndexed { index, section ->
                                 val isBento = (section.title.contains("featured", ignoreCase = true) || 
                                               section.title.contains("mixed for you", ignoreCase = true) ||
                                               (index % 4 == 0 && section.items.size >= 5)) &&
@@ -564,17 +617,6 @@ fun ExploreScreen(
                                 if (isBento && section.items.size >= 5) {
                                     item(key = "bento_${section.title}_$index") {
                                         LibrarySwipeableCarousel(section, navController, playerViewModel)
-                                    }
-                                } else if (isSpeed && section.items.isNotEmpty()) {
-                                    item(key = "speed_${section.title}_$index") {
-                                        SpeedDialSection(section, navController, playerViewModel)
-                                    }
-                                } else if (cardShelfSections.contains(section)) {
-                                    if (!carouselRendered && cardShelfSections.isNotEmpty()) {
-                                        item(key = "mixed_for_you_section") {
-                                            MixedForYouSection(cardShelfSections, playerViewModel, navController)
-                                        }
-                                        carouselRendered = true
                                     }
                                 } else {
                                     item(key = "home_section_${section.title}_${index}_header") {
@@ -631,7 +673,7 @@ fun ExploreScreen(
 
                         // Infinite scroll: load more when user scrolls near the bottom
                         if (uiState.selectedFilter == "All" || uiState.selectedFilter == "For You") {
-                            if (uiState.homePageContinuation != null) {
+                            if (uiState.homePageContinuation != null || !uiState.homePageSections.any { it.title == "Recently Played (Local)" }) {
                                 item(key = "load_more_trigger") {
                                     LaunchedEffect(listState) {
                                         snapshotFlow {
@@ -854,7 +896,7 @@ fun LibraryPlaylistCard(
     
     Card(
         modifier = Modifier
-            .width(300.dp)
+            .width(290.dp)
             .height(130.dp)
             .clip(shape)
             .clickable(onClick = onClick),
@@ -1809,123 +1851,6 @@ private fun LibraryCarouselCard(
     }
 }
 
-@Composable
-private fun CollageTile(
-    item: YTItem,
-    modifier: Modifier,
-    shape: androidx.compose.ui.graphics.Shape,
-    badgeLabel: String?,
-    isHero: Boolean,
-    navController: NavController,
-    playerViewModel: PlayerViewModel,
-    queueName: String
-) {
-    val title = when (item) {
-        is SongItem -> item.title
-        is AlbumItem -> item.title
-        is ArtistItem -> item.title
-        is PlaylistItem -> item.title
-        else -> ""
-    }
-    val thumbnail = when (item) {
-        is SongItem -> item.thumbnail
-        is AlbumItem -> item.thumbnail
-        is ArtistItem -> item.thumbnail
-        is PlaylistItem -> item.thumbnail
-        else -> ""
-    }
-    Surface(
-        modifier = modifier.clip(shape).clickable {
-            when (item) {
-                is SongItem -> playerViewModel.showAndPlaySong(item.toNativeSong(), listOf(item.toNativeSong()), queueName)
-                is AlbumItem -> navController.navigateSafely(Screen.AlbumDetail.createRoute(item.browseId))
-                is ArtistItem -> navController.navigateSafely(Screen.ArtistDetail.createRoute(item.id))
-                is PlaylistItem -> navController.navigateSafely(Screen.PlaylistDetail.createRoute(item.id))
-            }
-        },
-        shape = shape,
-        tonalElevation = if (isHero) 6.dp else 2.dp,
-        shadowElevation = if (isHero) 4.dp else 1.dp
-    ) {
-        Box(modifier = Modifier.fillMaxSize()) {
-            SmartImage(model = thumbnail, contentDescription = title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-            Box(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.82f)), startY = if (isHero) 80f else 30f)))
-            if (badgeLabel != null) {
-                Surface(
-                    modifier = Modifier.align(Alignment.TopStart).padding(12.dp),
-                    shape = AbsoluteSmoothCornerShape(12.dp, 60),
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f)
-                ) {
-                    Text(
-                        text = badgeLabel,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                    )
-                }
-            }
-            Text(
-                text = title,
-                style = if (isHero) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = Color.White,
-                maxLines = if (isHero) 3 else 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.align(Alignment.BottomStart).padding(16.dp)
-            )
-        }
-    }
-}
-
-@Composable
-private fun SpeedDialSection(
-    section: unshoo.ianshulyadav.pixelmusic.innertube.pages.HomePage.Section,
-    navController: NavController,
-    playerViewModel: PlayerViewModel
-) {
-    val rows = section.items.take(9).chunked(3)
-    Column(
-        modifier = Modifier.padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        SectionHeader(title = section.title)
-        rows.forEach { rowItems ->
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                rowItems.forEach { item ->
-                    val title = when (item) {
-                        is SongItem -> item.title
-                        is AlbumItem -> item.title
-                        is ArtistItem -> item.title
-                        is PlaylistItem -> item.title
-                        else -> ""
-                    }
-                    val thumbnail = when (item) {
-                        is SongItem -> item.thumbnail
-                        is AlbumItem -> item.thumbnail
-                        is ArtistItem -> item.thumbnail
-                        is PlaylistItem -> item.thumbnail
-                        else -> ""
-                    }
-                    Box(
-                        modifier = Modifier.weight(1f).aspectRatio(1f).clip(AbsoluteSmoothCornerShape(18.dp, 60)).clickable {
-                            when (item) {
-                                is SongItem -> playerViewModel.showAndPlaySong(item.toNativeSong(), listOf(item.toNativeSong()), section.title)
-                                is AlbumItem -> navController.navigateSafely(Screen.AlbumDetail.createRoute(item.browseId))
-                                is ArtistItem -> navController.navigateSafely(Screen.ArtistDetail.createRoute(item.id))
-                                is PlaylistItem -> navController.navigateSafely(Screen.PlaylistDetail.createRoute(item.id))
-                            }
-                        }
-                    ) {
-                        SmartImage(model = thumbnail, contentDescription = title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                        Box(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.72f)))))
-                        Text(text = title, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.align(Alignment.BottomStart).padding(8.dp))
-                    }
-                }
-            }
-        }
-    }
-}
 
 @Composable
 fun MixedForYouSection(

@@ -110,12 +110,13 @@ fun EnhancedSongListItem(
 
     val albumArtTargetSizePx = with(LocalDensity.current) { albumArtSize.roundToPx() }
     val isHighlighted = isCurrentSong && !isLoading
+    val isNormalStaticRow = !isHighlighted && !isSelected && !isSelectionMode
 
     val highlightProgress: Float
     val selectionVisualProgress: Float
     val selectionScaleProgress: Float
 
-    if (performanceModeEnabled) {
+    if (performanceModeEnabled || isNormalStaticRow) {
         highlightProgress = if (isHighlighted) 1f else 0f
         selectionVisualProgress = if (isSelected) 1f else 0f
         selectionScaleProgress = if (isSelected) 1f else 0f
@@ -152,10 +153,10 @@ fun EnhancedSongListItem(
         }.value
     }
 
-    val animatedCornerRadius = lerpDp(22.dp, 50.dp, highlightProgress)
-    val animatedAlbumCornerRadius = lerpDp(10.dp, 50.dp, highlightProgress)
-    val selectionScale = lerpFloat(1f, 0.98f, selectionScaleProgress)
-    val selectionBorderWidth = lerpDp(0.dp, 2.5.dp, selectionVisualProgress)
+    val animatedCornerRadius = if (isNormalStaticRow) 22.dp else lerpDp(22.dp, 50.dp, highlightProgress)
+    val animatedAlbumCornerRadius = if (isNormalStaticRow) 10.dp else lerpDp(10.dp, 50.dp, highlightProgress)
+    val selectionScale = if (isNormalStaticRow) 1f else lerpFloat(1f, 0.98f, selectionScaleProgress)
+    val selectionBorderWidth = if (isNormalStaticRow) 0.dp else lerpDp(0.dp, 2.5.dp, selectionVisualProgress)
 
     val surfaceShape = remember(animatedCornerRadius, customShape, isHighlighted) {
         if (customShape != null && !isHighlighted) {
@@ -171,22 +172,28 @@ fun EnhancedSongListItem(
 
     val colors = MaterialTheme.colorScheme
     val baseContainerColor = containerColorOverride ?: colors.surfaceContainerLow
-    val playbackContainerColor = lerpColor(baseContainerColor, colors.primaryContainer, highlightProgress)
-    val containerColor = lerpColor(playbackContainerColor, colors.secondaryContainer, selectionVisualProgress)
+    
+    val containerColor = if (isNormalStaticRow) baseContainerColor else {
+        val playbackContainerColor = lerpColor(baseContainerColor, colors.primaryContainer, highlightProgress)
+        lerpColor(playbackContainerColor, colors.secondaryContainer, selectionVisualProgress)
+    }
 
     val baseContentColor = colors.onSurface
-    val playbackContentColor = lerpColor(baseContentColor, colors.onPrimaryContainer, highlightProgress)
-    val contentColor = lerpColor(playbackContentColor, colors.onSecondaryContainer, selectionVisualProgress)
+    
+    val contentColor = if (isNormalStaticRow) baseContentColor else {
+        val playbackContentColor = lerpColor(baseContentColor, colors.onPrimaryContainer, highlightProgress)
+        lerpColor(playbackContentColor, colors.onSecondaryContainer, selectionVisualProgress)
+    }
 
-    val selectionBorderColor = lerpColor(colors.primary.copy(alpha = 0f), colors.primary, selectionVisualProgress)
-    val mvContainerColor = lerpColor(colors.onSurface, colors.primaryContainer, highlightProgress)
-    val mvContentColor = lerpColor(colors.surfaceContainerHigh, colors.onPrimaryContainer, highlightProgress)
-    val selectionOverlayColor = lerpColor(
+    val selectionBorderColor = if (isNormalStaticRow) colors.primary.copy(alpha = 0f) else lerpColor(colors.primary.copy(alpha = 0f), colors.primary, selectionVisualProgress)
+    val mvContainerColor = if (isNormalStaticRow) colors.onSurface else lerpColor(colors.onSurface, colors.primaryContainer, highlightProgress)
+    val mvContentColor = if (isNormalStaticRow) colors.surfaceContainerHigh else lerpColor(colors.surfaceContainerHigh, colors.onPrimaryContainer, highlightProgress)
+    val selectionOverlayColor = if (isNormalStaticRow) Color.Transparent else lerpColor(
         Color.Transparent,
         colors.primary.copy(alpha = 0.7f),
         selectionVisualProgress
     )
-    val selectionOverlayContentColor = lerpColor(
+    val selectionOverlayContentColor = if (isNormalStaticRow) Color.Transparent else lerpColor(
         Color.Transparent,
         colors.onPrimary,
         selectionVisualProgress
