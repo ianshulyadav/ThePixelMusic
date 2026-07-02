@@ -506,11 +506,19 @@ class ExploreViewModel @Inject constructor(
                                 null
                             }
 
-                            val allLocalSongsMapped = allLocalSongs.toSongs()
-                            val localSongsMap = allLocalSongsMapped.associateBy { it.id }
+                            val renderedLocalEntities = (
+                                likedSongs.take(15) + 
+                                cachedSongs.take(15) + 
+                                history.take(15).mapNotNull { entry -> localSongsMap[entry.songId] } + 
+                                mostPlayedSongs.mapNotNull { entry -> localSongsMap[entry.songId] }
+                            ).distinctBy { it.id }
+
+                            val renderedSongsMapped = renderedLocalEntities.toSongs()
+                            val localSongsMapFiltered = renderedSongsMapped.associateBy { it.id }
+
                             currentState.copy(
                                 homePageSections = updatedSections.distinctBy { it.title },
-                                localSongs = localSongsMap,
+                                localSongs = localSongsMapFiltered,
                                 newReleaseAlbums = finalNewReleases ?: currentState.newReleaseAlbums
                             )
                         }
