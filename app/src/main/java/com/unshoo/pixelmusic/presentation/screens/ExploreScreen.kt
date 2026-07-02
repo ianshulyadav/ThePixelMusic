@@ -569,7 +569,7 @@ fun ExploreScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     items(items = fromYourLibraryAlbums, key = { album -> "library_album_${album.browseId}" }) { album ->
-                                        AlbumCarouselItem(
+                                        LibraryAlbumCard(
                                             album = album,
                                             onClick = {
                                                 navController.navigateSafely(Screen.AlbumDetail.createRoute(album.browseId))
@@ -1053,6 +1053,105 @@ fun LibraryPlaylistCard(
                             text = sourceLabel,
                             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                             color = badgeText
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun LibraryAlbumCard(
+    album: AlbumItem,
+    onClick: () -> Unit
+) {
+    val shape = remember { AbsoluteSmoothCornerShape(24.dp, 80) }
+    val colors = MaterialTheme.colorScheme
+    val isDarkTheme = isSystemInDarkTheme()
+
+    val blendedBgColor = rememberDominantCardColor(
+        imageUrl = album.thumbnail,
+        baseColor = colors.surfaceContainerHigh,
+        isDarkTheme = isDarkTheme,
+        darkBlendFraction = 0.18f,
+        lightBlendFraction = 0.35f
+    )
+
+    Card(
+        modifier = Modifier
+            .width(290.dp)
+            .height(130.dp)
+            .clip(shape)
+            .clickable(onClick = onClick),
+        colors = CardDefaults.cardColors(containerColor = blendedBgColor),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.horizontalGradient(
+                            colors = listOf(
+                                blendedBgColor.copy(alpha = 0.3f),
+                                Color.Transparent
+                            )
+                        )
+                    )
+            )
+
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                SmartImage(
+                    model = album.thumbnail,
+                    contentDescription = album.title,
+                    modifier = Modifier
+                        .size(106.dp)
+                        .clip(AbsoluteSmoothCornerShape(16.dp, 80)),
+                    contentScale = ContentScale.Crop
+                )
+
+                Spacer(modifier = Modifier.width(12.dp))
+
+                Column(
+                    modifier = Modifier.fillMaxHeight(),
+                    verticalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text(
+                            text = album.title,
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.SemiBold,
+                                letterSpacing = (-0.2).sp
+                            ),
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            color = colors.onSurface
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = album.artists?.joinToString { it.name } ?: "",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.onSurfaceVariant.copy(alpha = 0.8f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .background(colors.secondaryContainer.copy(alpha = 0.6f), shape = RoundedCornerShape(8.dp))
+                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "Album",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                            color = colors.onSecondaryContainer
                         )
                     }
                 }
