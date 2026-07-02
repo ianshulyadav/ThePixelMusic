@@ -437,7 +437,7 @@ class ExploreViewModel @Inject constructor(
                             if (youMightLikeItems.isNotEmpty()) {
                                 updatedSections.add(HomePage.Section(
                                     title = "You Might Like",
-                                    label = "Recommended songs based on your top artists",
+                                    label = "Recommended for you",
                                     thumbnail = youMightLikeItems.firstOrNull()?.thumbnail,
                                     endpoint = null,
                                     items = youMightLikeItems
