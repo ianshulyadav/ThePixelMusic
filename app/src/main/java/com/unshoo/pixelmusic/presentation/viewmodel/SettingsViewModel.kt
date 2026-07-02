@@ -66,10 +66,9 @@ data class SettingsUiState(
     val isLoadingDirectories: Boolean = false,
     val appLanguageTag: String = AppLanguage.SYSTEM.tag,
     val appThemeMode: String = AppThemeMode.FOLLOW_SYSTEM,
+    val pitchBlackEnabled: Boolean = false,
     val appFontMode: String = AppFontMode.APP_DEFAULT,
     val playerThemePreference: String = ThemePreference.ALBUM_ART,
-    val playerThemeMode: String = PlayerThemeMode.FOLLOW_APP,
-    val miniplayerThemeMode: String = PlayerThemeMode.FOLLOW_APP,
     val colorPalette: String = "SAGE",
     val albumArtPaletteStyle: AlbumArtPaletteStyle = AlbumArtPaletteStyle.default,
     val albumArtColorAccuracy: Int = AlbumArtColorAccuracy.DEFAULT,
@@ -191,10 +190,9 @@ private sealed interface SettingsUiUpdate {
     data class Group1(
         val appRebrandDialogShown: Boolean,
         val appThemeMode: String,
+        val pitchBlackEnabled: Boolean,
         val appFontMode: String,
         val playerThemePreference: String,
-        val playerThemeMode: String,
-        val miniplayerThemeMode: String,
         val colorPalette: String,
         val albumArtPaletteStyle: AlbumArtPaletteStyle,
         val albumArtColorAccuracy: Int,
@@ -591,8 +589,7 @@ class SettingsViewModel @Inject constructor(
                 userPreferencesRepository.launchTabFlow,
                 userPreferencesRepository.showPlayerFileInfoFlow,
                 themePreferencesRepository.appFontModeFlow,
-                themePreferencesRepository.playerThemeModeFlow,
-                themePreferencesRepository.miniplayerThemeModeFlow
+                themePreferencesRepository.pitchBlackEnabledFlow
             ) { values ->
                 SettingsUiUpdate.Group1(
                     appRebrandDialogShown = values[0] as Boolean,
@@ -611,18 +608,16 @@ class SettingsViewModel @Inject constructor(
                     launchTab = values[13] as String,
                     showPlayerFileInfo = values[14] as Boolean,
                     appFontMode = values[15] as String,
-                    playerThemeMode = values[16] as String,
-                    miniplayerThemeMode = values[17] as String
+                    pitchBlackEnabled = values[16] as Boolean
                 )
             }.collect { update ->
                 _uiState.update { state ->
                     state.copy(
                         appRebrandDialogShown = update.appRebrandDialogShown,
                         appThemeMode = update.appThemeMode,
+                        pitchBlackEnabled = update.pitchBlackEnabled,
                         appFontMode = update.appFontMode,
                         playerThemePreference = update.playerThemePreference,
-                        playerThemeMode = update.playerThemeMode,
-                        miniplayerThemeMode = update.miniplayerThemeMode,
                         colorPalette = update.colorPalette,
                         albumArtPaletteStyle = update.albumArtPaletteStyle,
                         albumArtColorAccuracy = update.albumArtColorAccuracy,
@@ -1115,17 +1110,15 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun setPlayerThemeMode(mode: String) {
+
+
+    fun setPitchBlackEnabled(enabled: Boolean) {
         viewModelScope.launch {
-            themePreferencesRepository.setPlayerThemeMode(mode)
+            themePreferencesRepository.setPitchBlackEnabled(enabled)
         }
     }
 
-    fun setMiniplayerThemeMode(mode: String) {
-        viewModelScope.launch {
-            themePreferencesRepository.setMiniplayerThemeMode(mode)
-        }
-    }
+
 
     fun setColorPalette(palette: String) {
         viewModelScope.launch {

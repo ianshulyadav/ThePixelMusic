@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
@@ -21,12 +22,15 @@ class ThemePreferencesRepository @Inject constructor(
         val APP_THEME_MODE = stringPreferencesKey("app_theme_mode")
         val COLOR_PALETTE_PREFERENCE = stringPreferencesKey("color_palette_preference")
         val APP_FONT_PREFERENCE = stringPreferencesKey("app_font_preference")
-        val PLAYER_THEME_MODE = stringPreferencesKey("player_theme_mode")
-        val MINIPLAYER_THEME_MODE = stringPreferencesKey("miniplayer_theme_mode")
+        val PITCH_BLACK_ENABLED = booleanPreferencesKey("pitch_black_enabled")
     }
 
     val appThemeModeFlow: Flow<String> = dataStore.data.map { preferences ->
         preferences[Keys.APP_THEME_MODE] ?: AppThemeMode.FOLLOW_SYSTEM
+    }
+
+    val pitchBlackEnabledFlow: Flow<Boolean> = dataStore.data.map { preferences ->
+        preferences[Keys.PITCH_BLACK_ENABLED] ?: false
     }
 
     val appFontModeFlow: Flow<String> = dataStore.data.map { preferences ->
@@ -49,13 +53,7 @@ class ThemePreferencesRepository @Inject constructor(
         AlbumArtColorAccuracy.clamp(preferences[Keys.ALBUM_ART_COLOR_ACCURACY] ?: AlbumArtColorAccuracy.DEFAULT)
     }
 
-    val playerThemeModeFlow: Flow<String> = dataStore.data.map { preferences ->
-        preferences[Keys.PLAYER_THEME_MODE] ?: PlayerThemeMode.FOLLOW_APP
-    }
 
-    val miniplayerThemeModeFlow: Flow<String> = dataStore.data.map { preferences ->
-        preferences[Keys.MINIPLAYER_THEME_MODE] ?: PlayerThemeMode.FOLLOW_APP
-    }
 
     suspend fun setAppFontMode(fontMode: String) =
         dataStore.edit { preferences ->
@@ -102,13 +100,10 @@ class ThemePreferencesRepository @Inject constructor(
         preferences[Keys.ALBUM_ART_COLOR_ACCURACY] = AlbumArtColorAccuracy.clamp(accuracyLevel)
     }
 
-    suspend fun setPlayerThemeMode(mode: String) =
-        dataStore.edit { preferences ->
-            preferences[Keys.PLAYER_THEME_MODE] = mode
-        }
 
-    suspend fun setMiniplayerThemeMode(mode: String) =
+
+    suspend fun setPitchBlackEnabled(enabled: Boolean) =
         dataStore.edit { preferences ->
-            preferences[Keys.MINIPLAYER_THEME_MODE] = mode
+            preferences[Keys.PITCH_BLACK_ENABLED] = enabled
         }
 }

@@ -129,17 +129,17 @@ class TelegramLoginActivity : ComponentActivity() {
         setContent {
             val appFontMode by themePreferencesRepository.appFontModeFlow.collectAsStateWithLifecycle(initialValue = com.unshoo.pixelmusic.data.preferences.AppFontMode.APP_DEFAULT)
             val appThemeMode by themePreferencesRepository.appThemeModeFlow.collectAsStateWithLifecycle(initialValue = com.unshoo.pixelmusic.data.preferences.AppThemeMode.FOLLOW_SYSTEM)
+            val pitchBlackEnabled by themePreferencesRepository.pitchBlackEnabledFlow.collectAsStateWithLifecycle(initialValue = false)
             val systemDarkTheme = androidx.compose.foundation.isSystemInDarkTheme()
             val useDarkTheme = when (appThemeMode) {
                 com.unshoo.pixelmusic.data.preferences.AppThemeMode.DARK -> true
-                com.unshoo.pixelmusic.data.preferences.AppThemeMode.PITCH_BLACK -> true
                 com.unshoo.pixelmusic.data.preferences.AppThemeMode.LIGHT -> false
                 else -> systemDarkTheme
             }
             PixelMusicTheme(
                 darkTheme = useDarkTheme,
                 useSystemFont = (appFontMode == com.unshoo.pixelmusic.data.preferences.AppFontMode.SYSTEM),
-                pitchBlack = (appThemeMode == com.unshoo.pixelmusic.data.preferences.AppThemeMode.PITCH_BLACK)
+                pitchBlack = (useDarkTheme && pitchBlackEnabled)
             ) {
                 TelegramLoginScreen(onFinish = { finish() })
             }

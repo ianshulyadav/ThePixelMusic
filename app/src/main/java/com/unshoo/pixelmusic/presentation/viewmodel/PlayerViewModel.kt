@@ -623,19 +623,7 @@ class PlayerViewModel @Inject constructor(
             initialValue = "SAGE"
         )
 
-    val playerThemeMode: StateFlow<String> = themePreferencesRepository.playerThemeModeFlow
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = com.unshoo.pixelmusic.data.preferences.PlayerThemeMode.FOLLOW_APP
-        )
 
-    val miniplayerThemeMode: StateFlow<String> = themePreferencesRepository.miniplayerThemeModeFlow
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = com.unshoo.pixelmusic.data.preferences.PlayerThemeMode.FOLLOW_APP
-        )
 
     val navBarCornerRadius: StateFlow<Int> = userPreferencesRepository.navBarCornerRadiusFlow.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 32)
 

@@ -237,9 +237,9 @@ class MainActivity : ComponentActivity() {
         setContent {
             val systemDarkTheme = isSystemInDarkTheme()
             val appThemeMode by themePreferencesRepository.appThemeModeFlow.collectAsStateWithLifecycle(initialValue = AppThemeMode.FOLLOW_SYSTEM)
+            val pitchBlackEnabled by themePreferencesRepository.pitchBlackEnabledFlow.collectAsStateWithLifecycle(initialValue = false)
             val useDarkTheme = when (appThemeMode) {
                 AppThemeMode.DARK -> true
-                AppThemeMode.PITCH_BLACK -> true
                 AppThemeMode.LIGHT -> false
                 else -> systemDarkTheme
             }
@@ -307,7 +307,7 @@ class MainActivity : ComponentActivity() {
                 dynamicColor = dynamicColorEnabled,
                 colorPalette = colorPalette,
                 useSystemFont = (appFontMode == AppFontMode.SYSTEM),
-                pitchBlack = (appThemeMode == AppThemeMode.PITCH_BLACK)
+                pitchBlack = (useDarkTheme && pitchBlackEnabled)
             ) {
                 var contentVisible by remember { mutableStateOf(false) }
                 val contentAlpha by animateFloatAsState(
