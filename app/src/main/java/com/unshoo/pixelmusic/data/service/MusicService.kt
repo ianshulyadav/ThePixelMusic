@@ -1900,23 +1900,29 @@ class MusicService : MediaLibraryService() {
 
                 serviceScope.launch {
                     try {
-                        if (streamRecoveryAttempts >= 3) {
-                            Timber.tag(TAG).w("Stream recovery exhausted for %s; skipping", mediaId)
+                        val position = player.currentPosition.coerceAtLeast(0L)
+                        val isMidTrack = position > 3_000L
+                        val maxAttempts = if (isMidTrack) 6 else 3
+
+                        if (streamRecoveryAttempts >= maxAttempts) {
+                            Timber.tag(TAG).w("Stream recovery exhausted for %s (midTrack=%b); handling gracefully", mediaId, isMidTrack)
                             withContext(Dispatchers.Main.immediate) {
                                 streamRecoveryAttempts = 0
                                 lastStreamRecoveryMediaId = null
-                                if (player.hasNextMediaItem()) {
+                                if (!isMidTrack && player.hasNextMediaItem()) {
+                                    // Only skip if track failed to start from position 0
                                     player.seekToNextMediaItem()
                                     player.prepare()
                                     player.play()
+                                } else {
+                                    // Mid-track: Keep player at current position, do not discard user's song
+                                    player.playWhenReady = false
+                                    player.prepare()
                                 }
-                                // BUGFIX: last track in queue used to silently halt.
-                                // Now we at least prepare() so the user can retry manually.
                             }
                             return@launch
                         }
 
-                        val position = player.currentPosition.coerceAtLeast(0L)
                         val rawItem = currentItem ?: return@launch
                         val rawUriString = rawItem.localConfiguration?.uri?.toString().orEmpty()
                         // BUGFIX: also handle bare 11-char mediaIds for googlevideo remap
@@ -1927,6 +1933,11 @@ class MusicService : MediaLibraryService() {
                             ?: rawItem.mediaId.takeIf {
                                 (rawUriString.contains("googlevideo.com") || rawIsLossless) && it.length == 11 && !it.contains("_")
                             }
+
+                        if (!ytVideoId.isNullOrBlank()) {
+                            com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.markStreamStalledOrThrottled(ytVideoId)
+                        }
+
                         val item = if (
                             (rawUriString.contains("googlevideo.com") || rawIsLossless) && !ytVideoId.isNullOrBlank()
                         ) {
@@ -1957,13 +1968,16 @@ class MusicService : MediaLibraryService() {
                                 master.play()
                             }
                         }
-                        Timber.tag(TAG).i("Recovered from player error by re-resolving stream")
+                        Timber.tag(TAG).i("Recovered from player error by re-resolving stream at position %d ms", position)
                     } catch (recover: Exception) {
                         Timber.tag(TAG).e(recover, "In-place stream recovery failed (attempt $streamRecoveryAttempts)")
                         withContext(Dispatchers.Main.immediate) {
                             try {
-                                if (streamRecoveryAttempts >= 2) {
-                                    Timber.tag(TAG).w("Recovery exhausted after $streamRecoveryAttempts attempts; skipping to next")
+                                val position = player.currentPosition.coerceAtLeast(0L)
+                                val isMidTrack = position > 3_000L
+                                val maxAttempts = if (isMidTrack) 5 else 2
+                                if (!isMidTrack && streamRecoveryAttempts >= maxAttempts) {
+                                    Timber.tag(TAG).w("Recovery exhausted after $streamRecoveryAttempts attempts for startup; skipping to next")
                                     streamRecoveryAttempts = 0
                                     lastStreamRecoveryMediaId = null
                                     if (player.hasNextMediaItem()) {
@@ -1972,11 +1986,8 @@ class MusicService : MediaLibraryService() {
                                         player.play()
                                     }
                                 } else {
-                                    // BUGFIX: "will retry on next error" was a dead end because
-                                    // nothing called prepare(). ExoPlayer in STATE_IDLE never
-                                    // fires another error. Call prepare() so the retry cycle works.
                                     streamRecoveryAttempts++
-                                    Timber.tag(TAG).w("Recovery attempt $streamRecoveryAttempts failed; preparing for retry")
+                                    Timber.tag(TAG).w("Recovery attempt $streamRecoveryAttempts failed; preparing for retry (midTrack=%b)", isMidTrack)
                                     player.prepare()
                                     player.playWhenReady = true
                                 }
@@ -2614,7 +2625,7 @@ class MusicService : MediaLibraryService() {
         if (player == null || player.mediaItemCount == 0 || player.playbackState == Player.STATE_ENDED || player.playbackState == Player.STATE_IDLE) {
             stopPlaybackAndUnload(
                 reason = "task_removed_idle_or_ended",
-                preservePlaybackSnapshot = false
+                preservePlaybackSnapshot = true
             )
             return
         }
@@ -3794,11 +3805,13 @@ class MusicService : MediaLibraryService() {
     override fun onUpdateNotification(session: MediaSession, startInForegroundRequired: Boolean) {
         val playWhenReady = session.player.playWhenReady
         val playbackState = session.player.playbackState
+        val isFocusPaused = engine.isFocusLossPaused
 
-        // Android 12+ (API 31+): Only request foreground when actively playing.
-        // This prevents requesting foreground start when player is idle/ended.
+        // Android 12+ (API 31+): Keep foreground when actively playing OR when transiently paused
+        // by audio focus (e.g. phone call). This prevents Android 12+ runtime from rejecting
+        // startForeground when the call ends while the app is in the background.
         val shouldStartInForeground = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            startInForegroundRequired && playWhenReady
+            startInForegroundRequired && (playWhenReady || isFocusPaused)
                     && playbackState != Player.STATE_IDLE
                     && playbackState != Player.STATE_ENDED
         } else {
@@ -3925,9 +3938,9 @@ class MusicService : MediaLibraryService() {
         val snapshot = capturePlaybackSnapshotFromPlayer(playWhenReadyOverride = false)
         if (snapshot != null && snapshot.items.isNotEmpty()) {
             writePlaybackSnapshotBlocking(snapshot)
-        } else {
-            clearPlaybackSnapshotBlocking()
         }
+        // Do NOT call clearPlaybackSnapshotBlocking() when player is already empty or idle;
+        // doing so destroys the user's saved last-played track and queue on process teardown.
     }
 
     private fun clearPlaybackSnapshotBlocking() {

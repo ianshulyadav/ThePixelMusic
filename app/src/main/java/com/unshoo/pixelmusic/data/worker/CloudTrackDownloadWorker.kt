@@ -54,10 +54,10 @@ class CloudTrackDownloadWorker @AssistedInject constructor(
 
     private val client = baseOkHttpClient.newBuilder()
         .dispatcher(okhttp3.Dispatcher().apply {
-            maxRequests = 64
-            maxRequestsPerHost = 32
+            maxRequests = 6
+            maxRequestsPerHost = 3
         })
-        .connectionPool(okhttp3.ConnectionPool(32, 5, TimeUnit.MINUTES))
+        .connectionPool(okhttp3.ConnectionPool(8, 5, TimeUnit.MINUTES))
         .readTimeout(2, TimeUnit.MINUTES)
         .writeTimeout(30, TimeUnit.SECONDS)
         .build()

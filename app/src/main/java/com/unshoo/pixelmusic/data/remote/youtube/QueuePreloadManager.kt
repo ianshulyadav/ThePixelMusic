@@ -110,6 +110,15 @@ object QueuePreloadManager {
             val indicesAhead = startIndex..endIndex
 
             for (i in indicesAhead) {
+                // Yield network priority to currently playing track if it is buffering or low on buffer cushion (<20s)
+                if (i > currentIndex) {
+                    val bufferAhead = engineRef?.bufferedAheadMs ?: 30_000L
+                    val isBuffering = engineRef?.isPlaybackBuffering ?: false
+                    if (isBuffering || bufferAhead < 20_000L) {
+                        delay(2_000L)
+                    }
+                }
+
                 val mediaItem = withContext(Dispatchers.Main) {
                     if (playerRef != null && i < player.mediaItemCount) player.getMediaItemAt(i) else null
                 } ?: continue

@@ -112,9 +112,10 @@ class DualPlayerEngine @Inject constructor(
          * retry back-off (1s → 2s → 4s), which was the multi-second audio-start regression.
          */
         private const val LOAD_THREAD_RESOLVE_AWAIT_MS = 12_000L
-        // SpatialFlow uses 5s HTTP timeouts for snappy fail/retry on weak links.
-        private const val HTTP_CONNECT_TIMEOUT_MS = 5_000
-        private const val HTTP_READ_TIMEOUT_MS = 5_000
+        // Upgraded HTTP timeouts (InnerTune/ViMusic parity): 15s connect / 20s read to prevent
+        // premature SocketTimeoutException on weak connections or during concurrent downloads.
+        private const val HTTP_CONNECT_TIMEOUT_MS = 15_000
+        private const val HTTP_READ_TIMEOUT_MS = 20_000
         private const val FIRST_CHUNK_PRECACHE_BYTES = 256L * 1024L // 256KB — enough for instant start
         private val LOCAL_MEDIA_SCHEMES = setOf("content", "file", "android.resource")
         private val REMOTE_MEDIA_SCHEMES = setOf("http", "https", "telegram", "gdrive", "youtube", "monochrome")
@@ -170,10 +171,66 @@ class DualPlayerEngine @Inject constructor(
     private val _hiFiModeEnabledState = MutableStateFlow(false)
     val hiFiModeEnabledState: StateFlow<Boolean> = _hiFiModeEnabledState.asStateFlow()
 
+    private val _isPlaybackBufferingState = MutableStateFlow(false)
+    val isPlaybackBufferingState: StateFlow<Boolean> = _isPlaybackBufferingState.asStateFlow()
+
+    val isPlaybackBuffering: Boolean
+        get() = ::playerA.isInitialized && playerA.playbackState == Player.STATE_BUFFERING
+
+    val bufferedAheadMs: Long
+        get() = if (::playerA.isInitialized) {
+            (playerA.bufferedPosition - playerA.currentPosition).coerceAtLeast(0L)
+        } else 0L
+
     // Audio Focus Management
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private var audioFocusRequest: AudioFocusRequest? = null
     private var isFocusLossPause = false
+    val isFocusLossPaused: Boolean
+        get() = isFocusLossPause
+
+    private val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? android.net.wifi.WifiManager
+    private var wifiLock: android.net.wifi.WifiManager.WifiLock? = null
+
+    private fun acquireWifiLockIfNeeded() {
+        try {
+            if (wifiLock == null) {
+                wifiLock = wifiManager?.createWifiLock(
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        android.net.wifi.WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+                    } else {
+                        @Suppress("DEPRECATION")
+                        android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF
+                    },
+                    "PixelMusic:PlaybackWifiLock"
+                )?.apply {
+                    setReferenceCounted(false)
+                }
+            }
+            wifiLock?.let {
+                if (!it.isHeld) {
+                    it.acquire()
+                    Timber.tag("DualPlayerEngine").d("WifiLock acquired for playback")
+                }
+            }
+        } catch (e: Exception) {
+            Timber.tag("DualPlayerEngine").w(e, "Failed to acquire WifiLock")
+        }
+    }
+
+    private fun releaseWifiLock() {
+        try {
+            wifiLock?.let {
+                if (it.isHeld) {
+                    it.release()
+                    Timber.tag("DualPlayerEngine").d("WifiLock released")
+                }
+            }
+        } catch (e: Exception) {
+            Timber.tag("DualPlayerEngine").w(e, "Failed to release WifiLock")
+        }
+    }
+
     private var lastPlayWhenReadyAtMs: Long = 0L
     private var lastPlayingAtMs: Long = 0L
     // Used to distinguish a STATE_BUFFERING caused by a user seek from a real HAL offload
@@ -198,10 +255,12 @@ class DualPlayerEngine @Inject constructor(
                 isFocusLossPause = false
                 playerA.playWhenReady = false
                 playerB.playWhenReady = false
+                releaseWifiLock()
                 abandonAudioFocus()
             }
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
-                Timber.tag("TransitionDebug").d("AudioFocus LOSS_TRANSIENT. Pausing.")
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                Timber.tag("TransitionDebug").d("AudioFocus LOSS_TRANSIENT (%d). Pausing.", focusChange)
                 isFocusLossPause = playerA.playWhenReady || (transitionRunning && playerB.playWhenReady)
                 playerA.playWhenReady = false
                 playerB.playWhenReady = false
@@ -210,8 +269,24 @@ class DualPlayerEngine @Inject constructor(
                 Timber.tag("TransitionDebug").d("AudioFocus GAIN. Resuming if paused by loss.")
                 if (isFocusLossPause) {
                     isFocusLossPause = false
-                    playerA.playWhenReady = true
-                    if (transitionRunning) playerB.playWhenReady = true
+                    if (::playerA.isInitialized) {
+                        playerA.volume = 1f
+                        if (playerA.playbackState == Player.STATE_IDLE || playerA.playbackState == Player.STATE_ENDED) {
+                            playerA.prepare()
+                        } else {
+                            // Re-route AudioTrack after telephony switch by issuing a micro-seek
+                            // to force ExoPlayer to reconfigure AudioSink with active normal output
+                            val currentPos = playerA.currentPosition
+                            if (currentPos >= 0L) {
+                                playerA.seekTo(currentPos)
+                            }
+                        }
+                        playerA.playWhenReady = true
+                    }
+                    if (transitionRunning && ::playerB.isInitialized) {
+                        playerB.volume = incomingTrackReplayGainVolume ?: 1f
+                        playerB.playWhenReady = true
+                    }
                 }
             }
         }
@@ -236,6 +311,13 @@ class DualPlayerEngine @Inject constructor(
             if (isPlaying) {
                 lastPlayingAtMs = SystemClock.elapsedRealtime()
                 cancelAudioOffloadFallback()
+                if (!isLikelyLocalMedia(playerA.currentMediaItem)) {
+                    acquireWifiLockIfNeeded()
+                }
+            } else {
+                if (!transitionRunning) {
+                    releaseWifiLock()
+                }
             }
         }
 
@@ -346,6 +428,7 @@ class DualPlayerEngine @Inject constructor(
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
+            _isPlaybackBufferingState.value = (playbackState == Player.STATE_BUFFERING)
             when (playbackState) {
                 Player.STATE_BUFFERING -> {
                     val now = SystemClock.elapsedRealtime()
@@ -807,6 +890,7 @@ class DualPlayerEngine @Inject constructor(
         val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
             .setAudioAttributes(attributes)
             .setOnAudioFocusChangeListener(focusChangeListener)
+            .setWillPauseWhenDucked(true)
             // Let the system queue our request behind a transient holder instead of failing.
             // Pairs with the AUDIOFOCUS_GAIN handler below: on DELAYED we pause and mark the
             // pause as focus-driven so the eventual GAIN callback resumes playback.
@@ -883,7 +967,8 @@ class DualPlayerEngine @Inject constructor(
 
     private fun applyWakeModeForCurrentItem() {
         if (!::playerA.isInitialized) return
-        val mode = if (isSleepingForOffload) {
+        val isRemote = !isLikelyLocalMedia(playerA.currentMediaItem)
+        val mode = if (isSleepingForOffload && !isRemote) {
             C.WAKE_MODE_NONE
         } else {
             wakeModeFor(playerA.currentMediaItem)
@@ -1228,21 +1313,21 @@ class DualPlayerEngine @Inject constructor(
         val bandwidthKbps = connectivityStateHolder.linkDownstreamBandwidthKbps.value
         val isRecentlyUnstable = connectivityStateHolder.isNetworkRecentlyUnstable.value
         data class BufferProfile(val minMs: Int, val maxMs: Int, val forPlaybackMs: Int, val afterRebufferMs: Int)
-        // Startup-latency-first profiles: forPlaybackMs is the amount of audio REQUIRED before
-        // first sound. The earlier revision raised this to 1.2–3s (over-eager startup buffering),
-        // directly adding that latency to every tap-to-play. Keep startup buffers tight (the
-        // stream cache + pre-resolved URL make underruns rare) and only grow buffers for links
-        // that have ACTUALLY rebuffed recently or are genuinely slow.
+        // Industry-standard audio streaming buffer window (ViMusic/InnerTune/ArchiveTune parity):
+        // Previous maxMs of 25s–40s caused ExoPlayer to halt downloads after 25s, so playback ran
+        // completely out of buffer at ~30s on weak links or during concurrent downloads.
+        // Expanding maxMs to 90s–120s lets the player continuously bank up to 2 minutes of audio,
+        // while minMs (20s–30s) starts fetching the next chunk long before the buffer is endangered.
         val profile = when {
-            isRecentlyUnstable -> BufferProfile(20_000, 40_000, 800, 2_000)
-            bandwidthKbps < 1_000 -> BufferProfile(15_000, 35_000, 500, 1_500)
-            bandwidthKbps < 5_000 -> BufferProfile(12_000, 30_000, 300, 1_000)
-            else -> BufferProfile(10_000, 25_000, 180, 800)
+            isRecentlyUnstable -> BufferProfile(30_000, 120_000, 1_000, 3_000)
+            bandwidthKbps < 1_000 -> BufferProfile(25_000, 90_000, 800, 2_500)
+            bandwidthKbps < 5_000 -> BufferProfile(20_000, 90_000, 500, 2_000)
+            else -> BufferProfile(15_000, 120_000, 300, 1_500)
         }
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(profile.minMs, profile.maxMs, profile.forPlaybackMs, profile.afterRebufferMs)
             .setPrioritizeTimeOverSizeThresholds(true)
-            .setBackBuffer(15_000, /* retainBackBufferFromKeyframe = */ true)
+            .setBackBuffer(30_000, /* retainBackBufferFromKeyframe = */ true)
             .build()
 
         return ExoPlayer.Builder(context, renderersFactory)
@@ -1342,7 +1427,37 @@ class DualPlayerEngine @Inject constructor(
         val currentUriStr = currentUri.toString()
         val originalUriStr = currentItem.mediaMetadata.extras?.getString("com.unshoo.pixelmusic.external.CONTENT_URI") ?: currentUriStr
 
-        if (currentUri.scheme == "http" || currentUri.scheme == "https") {
+        val isHttp = currentUri.scheme == "http" || currentUri.scheme == "https"
+        val isRemoteScheme = currentUri.scheme in REMOTE_MEDIA_SCHEMES
+
+        if (!isHttp && isRemoteScheme) {
+            Timber.tag("DualPlayerEngine").i("Stream URL needs initial resolution on resume for %s", originalUriStr)
+            val sourceUri = Uri.parse(originalUriStr)
+            val freshItem = withContext(Dispatchers.IO) {
+                val resolved = resolveMediaItem(currentItem.buildUpon().setUri(sourceUri).build())
+                resolved.localConfiguration?.uri?.toString()?.let { u ->
+                    val key = currentItem.mediaId.removePrefix("youtube_").takeIf { it.isNotBlank() }
+                    if (u.startsWith("http")) preCacheFirstChunk(u, key)
+                }
+                resolved
+            }
+            withContext(Dispatchers.Main.immediate) {
+                if (::playerA.isInitialized && playerA.currentMediaItem?.mediaId == currentItem.mediaId) {
+                    val pos = playerA.currentPosition
+                    val idx = playerA.currentMediaItemIndex
+                    val playWhenReady = playerA.playWhenReady
+                    playerA.replaceMediaItem(idx, freshItem)
+                    playerA.seekTo(idx, pos)
+                    playerA.playWhenReady = playWhenReady
+                    if (playerA.playbackState == Player.STATE_IDLE || playerA.playbackState == Player.STATE_ENDED) {
+                        playerA.prepare()
+                    }
+                }
+            }
+            return
+        }
+
+        if (isHttp) {
             if (isResolvedUriFresh(originalUriStr, currentUri)) {
                 return // Fast path: already fresh
             }
@@ -2083,6 +2198,7 @@ class DualPlayerEngine @Inject constructor(
         preResolutionJob?.cancel()
         cancelAudioOffloadFallback()
         scope.coroutineContext[Job]?.cancel()
+        releaseWifiLock()
         abandonAudioFocus()
         if (::playerA.isInitialized) {
             playerA.removeListener(masterPlayerListener)

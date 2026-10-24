@@ -1446,6 +1446,9 @@ class PlayerViewModel @Inject constructor(
                     if (state.currentSong == null) {
                         state.copy(
                             currentSong = currentSongResolved,
+                            currentMediaItemIndex = snapshot.currentIndex,
+                            repeatMode = snapshot.repeatMode,
+                            isShuffleEnabled = snapshot.shuffleEnabled,
                             totalDuration = currentItem.durationMs ?: 0L
                         )
                     } else {
@@ -5515,16 +5518,20 @@ class PlayerViewModel @Inject constructor(
                 // buffering (before song is fully cached in allSongsById), do NOT overwrite currentSong
                 // with null if a media item is actively loaded in the player. Keep last-known song.
                 if (_playerUiState.value.preparingSongId == null && playerCtrl.currentMediaItem == null) {
-                    playbackStateHolder.updateStablePlayerState {
-                        it.copy(
-                            currentSong = null,
-                            isPlaying = false,
-                            playWhenReady = false
-                        )
+                    if (_playerUiState.value.currentPlaybackQueue.isEmpty() &&
+                        playbackStateHolder.stablePlayerState.value.currentSong == null
+                    ) {
+                        playbackStateHolder.updateStablePlayerState {
+                            it.copy(
+                                currentSong = null,
+                                isPlaying = false,
+                                playWhenReady = false
+                            )
+                        }
+                        playbackStateHolder.clearCurrentPositionHints()
+                        playbackStateHolder.setCurrentPosition(0L)
+                        resetPlaybackAudioMetadata()
                     }
-                    playbackStateHolder.clearCurrentPositionHints()
-                    playbackStateHolder.setCurrentPosition(0L)
-                    resetPlaybackAudioMetadata()
                 }
             }
         }

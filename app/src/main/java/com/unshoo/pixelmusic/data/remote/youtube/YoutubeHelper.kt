@@ -120,6 +120,22 @@ object YoutubeHelper {
     @Volatile private var lastSuccessfulClientKey: String? = null
     @Volatile private var lastSuccessfulClientKeyLoaded: Boolean = false
 
+    private val throttledVideoIds = ConcurrentHashMap<String, Long>()
+
+    fun markStreamStalledOrThrottled(videoId: String) {
+        throttledVideoIds[videoId] = System.currentTimeMillis() + 10 * 60 * 1000L // 10 min quarantine
+        invalidateStreamCache(videoId)
+    }
+
+    fun isVideoThrottled(videoId: String): Boolean {
+        val expiry = throttledVideoIds[videoId] ?: return false
+        if (System.currentTimeMillis() > expiry) {
+            throttledVideoIds.remove(videoId)
+            return false
+        }
+        return true
+    }
+
     /**
      * ArchiveTune STREAM_FALLBACK_CLIENTS order: ANDROID_VR variants first (plain URLs = zero
      * decipher work), then the Web/TV family, then native mobile clients.
@@ -1438,6 +1454,40 @@ object YoutubeHelper {
         }
     }
 
+    /**
+     * Resolves an emergency adaptive stream URL for in-flight recovery on network stalls.
+     * Bypasses throttled clients and picks an attested, resilient format (e.g. WEB_REMIX with POT or IOS).
+     */
+    suspend fun getAdaptiveRecoveryUrl(
+        context: Context,
+        song: Song,
+        allowLowerBitrate: Boolean = true
+    ): String? {
+        val videoId = song.youtubeId
+        markStreamStalledOrThrottled(videoId)
+        return try {
+            val res = getSongUrlFromYoutube(
+                context = context,
+                song = song,
+                retries = 2,
+                lowQuality = allowLowerBitrate,
+                maxBitrateKbps = if (allowLowerBitrate) 128 else 0,
+                forceAttestedClient = true
+            )
+            val url = res.first
+            if (url.isNotBlank()) {
+                val cacheKey = if (allowLowerBitrate) "${videoId}_low" else "${videoId}_high"
+                streamUrlLruCache.put(cacheKey, url)
+                res.second?.let { streamMimeTypeLruCache.put(cacheKey, it) }
+                res.third?.let { streamBitrateLruCache.put(cacheKey, it) }
+            }
+            url
+        } catch (e: Exception) {
+            PixelMusicHelper.printe("getAdaptiveRecoveryUrl failed for $videoId: ${e.message}")
+            null
+        }
+    }
+
     private const val MAX_TRACKING_CACHE_ENTRIES = 300
 
     /**
@@ -1534,17 +1584,21 @@ object YoutubeHelper {
         song: Song,
         retries: Int = Constants.YoutubeApi.RETRY_COUNT,
         lowQuality: Boolean = false,
-        maxBitrateKbps: Int = 0
+        maxBitrateKbps: Int = 0,
+        forceAttestedClient: Boolean = false
     ): Triple<String, String?, Int?> {
         val videoId = song.youtubeId
         var lastError: Throwable? = null
 
-        // Stage 1 — umihi pure: single ANDROID_VR shot.
-        resolveAndroidVrStreamUrl(videoId, lowQuality, maxBitrateKbps, retries)?.let { return it }
+        // Stage 1 — Fast ANDROID_VR shot only if NOT throttled and not explicitly requesting attested client.
+        // YouTube recently throttles raw ANDROID_VR streams without PoToken after ~30s on mobile data.
+        if (!forceAttestedClient && !isVideoThrottled(videoId)) {
+            resolveAndroidVrStreamUrl(videoId, lowQuality, maxBitrateKbps, retries)?.let { return it }
+        }
 
         // Stage 2 — ArchiveTune: full multi-client Innertube resolution as the ROBUST middle
-        // layer (only runs when the umihi fast path fails — bot-throttles, region/age gates,
-        // premium formats). Direct-url candidates first, zero validation probes.
+        // layer (runs when ANDROID_VR is skipped/throttled/fails — uses WEB_REMIX with BotGuard PoToken,
+        // IOS, TVHTML5, etc.). Direct-url candidates first, zero validation probes.
         resolveArchiveTuneStreamUrl(context, videoId, lowQuality, maxBitrateKbps)?.let { return it }
 
         // Stage 3 — NewPipe extractor (both apps' final fallback).
