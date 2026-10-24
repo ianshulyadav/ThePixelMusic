@@ -33,6 +33,8 @@ baselineprofile/build/
 
 misc.xml
 CLAUDE.md
+AGENTS.md
+agents.md
 markdown.xml
 .vscode/
 .agents/
