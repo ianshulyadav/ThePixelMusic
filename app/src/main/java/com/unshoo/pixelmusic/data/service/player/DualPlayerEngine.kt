@@ -266,7 +266,8 @@ class DualPlayerEngine @Inject constructor(
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
                 Timber.tag("TransitionDebug").d("AudioFocus LOSS_TRANSIENT (%d). Pausing.", focusChange)
-                isFocusLossPause = playerA.playWhenReady || (transitionRunning && playerB.playWhenReady)
+                isFocusLossPause = playerA.playWhenReady || playerA.isPlaying ||
+                    (transitionRunning && (playerB.playWhenReady || playerB.isPlaying))
                 playerA.playWhenReady = false
                 playerB.playWhenReady = false
             }
@@ -278,13 +279,6 @@ class DualPlayerEngine @Inject constructor(
                         playerA.volume = 1f
                         if (playerA.playbackState == Player.STATE_IDLE || playerA.playbackState == Player.STATE_ENDED) {
                             playerA.prepare()
-                        } else {
-                            // Re-route AudioTrack after telephony switch by issuing a micro-seek
-                            // to force ExoPlayer to reconfigure AudioSink with active normal output
-                            val currentPos = playerA.currentPosition
-                            if (currentPos >= 0L) {
-                                playerA.seekTo(currentPos)
-                            }
                         }
                         playerA.playWhenReady = true
                     }
@@ -895,7 +889,6 @@ class DualPlayerEngine @Inject constructor(
         val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
             .setAudioAttributes(attributes)
             .setOnAudioFocusChangeListener(focusChangeListener)
-            .setWillPauseWhenDucked(true)
             // Let the system queue our request behind a transient holder instead of failing.
             // Pairs with the AUDIOFOCUS_GAIN handler below: on DELAYED we pause and mark the
             // pause as focus-driven so the eventual GAIN callback resumes playback.
