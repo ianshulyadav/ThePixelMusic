@@ -1976,17 +1976,19 @@ class MusicService : MediaLibraryService() {
                                 val position = player.currentPosition.coerceAtLeast(0L)
                                 val isMidTrack = position > 3_000L
                                 val maxAttempts = if (isMidTrack) 5 else 2
-                                if (!isMidTrack && streamRecoveryAttempts >= maxAttempts) {
-                                    Timber.tag(TAG).w("Recovery exhausted after $streamRecoveryAttempts attempts for startup; skipping to next")
+                                if (streamRecoveryAttempts >= maxAttempts) {
+                                    Timber.tag(TAG).w("Recovery exhausted after $streamRecoveryAttempts attempts (midTrack=%b); handling gracefully", isMidTrack)
                                     streamRecoveryAttempts = 0
                                     lastStreamRecoveryMediaId = null
-                                    if (player.hasNextMediaItem()) {
+                                    if (!isMidTrack && player.hasNextMediaItem()) {
                                         player.seekToNextMediaItem()
                                         player.prepare()
                                         player.play()
+                                    } else {
+                                        player.playWhenReady = false
+                                        player.prepare()
                                     }
                                 } else {
-                                    streamRecoveryAttempts++
                                     Timber.tag(TAG).w("Recovery attempt $streamRecoveryAttempts failed; preparing for retry (midTrack=%b)", isMidTrack)
                                     player.prepare()
                                     player.playWhenReady = true

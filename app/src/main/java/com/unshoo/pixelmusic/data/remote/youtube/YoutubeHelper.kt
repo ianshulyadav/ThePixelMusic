@@ -1454,39 +1454,6 @@ object YoutubeHelper {
         }
     }
 
-    /**
-     * Resolves an emergency adaptive stream URL for in-flight recovery on network stalls.
-     * Bypasses throttled clients and picks an attested, resilient format (e.g. WEB_REMIX with POT or IOS).
-     */
-    suspend fun getAdaptiveRecoveryUrl(
-        context: Context,
-        song: Song,
-        allowLowerBitrate: Boolean = true
-    ): String? {
-        val videoId = song.youtubeId
-        markStreamStalledOrThrottled(videoId)
-        return try {
-            val res = getSongUrlFromYoutube(
-                context = context,
-                song = song,
-                retries = 2,
-                lowQuality = allowLowerBitrate,
-                maxBitrateKbps = if (allowLowerBitrate) 128 else 0,
-                forceAttestedClient = true
-            )
-            val url = res.first
-            if (url.isNotBlank()) {
-                val cacheKey = if (allowLowerBitrate) "${videoId}_low" else "${videoId}_high"
-                streamUrlLruCache.put(cacheKey, url)
-                res.second?.let { streamMimeTypeLruCache.put(cacheKey, it) }
-                res.third?.let { streamBitrateLruCache.put(cacheKey, it) }
-            }
-            url
-        } catch (e: Exception) {
-            PixelMusicHelper.printe("getAdaptiveRecoveryUrl failed for $videoId: ${e.message}")
-            null
-        }
-    }
 
     private const val MAX_TRACKING_CACHE_ENTRIES = 300
 

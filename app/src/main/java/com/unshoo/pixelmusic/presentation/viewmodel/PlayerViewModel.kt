@@ -1472,6 +1472,12 @@ class PlayerViewModel @Inject constructor(
                             _playerUiState.update { it.copy(currentPlaybackQueue = updatedQueue.toPlaybackQueue()) }
                         }
                     }
+                    val currentSong = playbackStateHolder.stablePlayerState.value.currentSong
+                    if (currentSong != null && currentSong.artistId == -1L && songsMap.containsKey(currentSong.id)) {
+                        songsMap[currentSong.id]?.let { richSong ->
+                            playbackStateHolder.updateStablePlayerState { it.copy(currentSong = richSong) }
+                        }
+                    }
                 }
         }
 
