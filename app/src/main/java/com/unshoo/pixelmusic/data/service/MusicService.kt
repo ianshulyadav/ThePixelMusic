@@ -2613,31 +2613,26 @@ class MusicService : MediaLibraryService() {
         castSessionManager = null
     }
 
+    private fun Player.hasForegroundPlaybackIntent(): Boolean {
+        return playWhenReady &&
+            mediaItemCount > 0 &&
+            playbackState != Player.STATE_IDLE &&
+            playbackState != Player.STATE_ENDED
+    }
+
     override fun onTaskRemoved(rootIntent: Intent?) {
-        val player = mediaSession?.player
-        val allowBackground = keepPlayingInBackground
-
-        if (!allowBackground) {
-            stopPlaybackAndUnload(
-                reason = "task_removed_background_disabled"
-            )
+        val session = mediaSession
+        val continuePlayback = session?.player?.hasForegroundPlaybackIntent() == true && keepPlayingInBackground
+        if (continuePlayback && session != null) {
+            if (!isPlaybackOngoing()) {
+                Timber.tag(TAG).w(
+                    "Task removed while playing without foreground state; re-promoting."
+                )
+                onUpdateNotification(session, startInForegroundRequired = true)
+            }
             return
         }
-
-        if (player == null || player.mediaItemCount == 0 || player.playbackState == Player.STATE_ENDED || player.playbackState == Player.STATE_IDLE) {
-            stopPlaybackAndUnload(
-                reason = "task_removed_idle_or_ended",
-                preservePlaybackSnapshot = true
-            )
-            return
-        }
-
-        //keep playback service and notification retained when paused with items in queue
-        Timber.tag(TAG).i(
-            "Task removed with active media items (count=%d, playWhenReady=%b). Preserving background service.",
-            player.mediaItemCount,
-            player.playWhenReady
-        )
+        stopPlaybackAndUnload(reason = "task_removed", preservePlaybackSnapshot = true)
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? =
@@ -2967,7 +2962,8 @@ class MusicService : MediaLibraryService() {
             else -> 0
         }
 
-        val latestItem = restoredItems.getOrNull(resolvedIndex) ?: return
+        val preparedItems = restoredItems.toMutableList()
+        val latestItem = preparedItems.getOrNull(resolvedIndex) ?: return
 
         // Do not block player restoration on resolving the track's streaming URI from network.
         // Instead, restore immediately with the unresolved media item so the UI displays the song instantly.
@@ -2991,11 +2987,10 @@ class MusicService : MediaLibraryService() {
 
             isRestoringPlaybackSnapshot = true
             try {
-                // PixelPlayer OSS pattern: Restore only the latest played song rather than
-                // resurrecting a stale, obsolete multi-item queue from a past session.
+                // PixelPlayer OSS pattern: Restore entire multi-item queue into ExoPlayer
                 player.setMediaItems(
-                    listOf(latestItem),
-                    0,
+                    preparedItems,
+                    resolvedIndex,
                     snapshot.currentPositionMs.coerceAtLeast(0L)
                 )
                 player.repeatMode = safeRepeatMode
@@ -3012,8 +3007,9 @@ class MusicService : MediaLibraryService() {
         }
 
         Timber.tag(TAG).i(
-            "Restored latest played song: id=%s position=%d",
-            latestItem.mediaId,
+            "Restored playback queue snapshot: items=%d index=%d position=%d",
+            preparedItems.size,
+            resolvedIndex,
             snapshot.currentPositionMs
         )
         schedulePlaybackSnapshotPersist(immediate = true)

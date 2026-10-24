@@ -1378,8 +1378,8 @@ class PlayerViewModel @Inject constructor(
             }
 
             val allSongsById = libraryStateHolder.allSongsById.value
-            val songFromItem = currentItem?.let { itemSnapshot ->
-                allSongsById[itemSnapshot.mediaId] ?: Song(
+            fun mapSnapshotItemToSong(itemSnapshot: PlaybackQueueItemSnapshot): Song {
+                return allSongsById[itemSnapshot.mediaId] ?: Song(
                     id = itemSnapshot.mediaId,
                     title = itemSnapshot.title?.takeIf { it.isNotBlank() } ?: context.getString(R.string.unknown_song_title),
                     artist = itemSnapshot.artist?.takeIf { it.isNotBlank() } ?: context.getString(R.string.unknown_artist),
@@ -1406,14 +1406,28 @@ class PlayerViewModel @Inject constructor(
                 )
             }
 
-            val latestSongResolved: Song = songFromItem
+            val restoredQueueList: List<Song> = snapshot?.items?.map(::mapSnapshotItemToSong).orEmpty()
+            val resolvedIndex = when {
+                snapshot != null && snapshot.currentIndex in restoredQueueList.indices -> snapshot.currentIndex
+                !snapshot?.currentMediaId.isNullOrBlank() -> {
+                    restoredQueueList.indexOfFirst { it.id == snapshot?.currentMediaId }.takeIf { it >= 0 } ?: 0
+                }
+                else -> 0
+            }
+
+            val latestSongResolved: Song = restoredQueueList.getOrNull(resolvedIndex)
                 ?: runCatching { musicRepository.getLastPlayedSong() }.getOrNull()
                 ?: return@launch
 
-            val singleSongQueue = persistentListOf(latestSongResolved)
+            val fullQueue = if (restoredQueueList.isNotEmpty()) {
+                restoredQueueList.toPersistentList()
+            } else {
+                persistentListOf(latestSongResolved)
+            }
+
             _playerUiState.update { currentState ->
                 if (currentState.currentPlaybackQueue.isEmpty()) {
-                    currentState.copy(currentPlaybackQueue = singleSongQueue)
+                    currentState.copy(currentPlaybackQueue = fullQueue)
                 } else {
                     currentState
                 }
@@ -1425,7 +1439,7 @@ class PlayerViewModel @Inject constructor(
                     if (state.currentSong == null) {
                         state.copy(
                             currentSong = latestSongResolved,
-                            currentMediaItemIndex = 0,
+                            currentMediaItemIndex = resolvedIndex,
                             repeatMode = snapshot?.repeatMode ?: Player.REPEAT_MODE_OFF,
                             isShuffleEnabled = snapshot?.shuffleEnabled ?: false,
                             totalDuration = latestSongResolved.duration
