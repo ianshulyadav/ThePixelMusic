@@ -1069,6 +1069,10 @@ fun LibraryScreen(
                                 }
                             }
                         }
+                        val allSongsLazyPagingItems = libraryViewModel.songsPagingFlow.collectAsLazyPagingItems()
+                        val albumsLazyPagingItems = libraryViewModel.albumsPagingFlow.collectAsLazyPagingItems()
+                        val artistsLazyPagingItems = libraryViewModel.artistsPagingFlow.collectAsLazyPagingItems()
+                        val favoritePagingItems = libraryViewModel.favoritesPagingFlow.collectAsLazyPagingItems()
                         val isLibraryLoading by libraryViewModel.isLoadingLibrary.collectAsStateWithLifecycle()
                         LaunchedEffect(Unit) {
                             com.unshoo.pixelmusic.utils.AppReadinessSignal.markInitialFetchFinished()
@@ -1481,7 +1485,6 @@ fun LibraryScreen(
                                 // spinner or latch.
                                 when (tabTitles.getOrNull(tabIndex)?.toLibraryTabIdOrNull()) {
                                     LibraryTabId.SONGS -> {
-                                        val allSongsLazyPagingItems = libraryViewModel.songsPagingFlow.collectAsLazyPagingItems()
                                         LibrarySongsTab(
                                             songs = allSongsLazyPagingItems,
                                             isLoading = isLibraryLoading,
@@ -1506,7 +1509,6 @@ fun LibraryScreen(
                                         )
                                     }
                                     LibraryTabId.ALBUMS -> {
-                                        val albumsLazyPagingItems = libraryViewModel.albumsPagingFlow.collectAsLazyPagingItems()
                                         val isLoading = playerUiState.isLoadingLibraryCategories && albumsLazyPagingItems.itemCount == 0
 
                                         val stableOnAlbumClick: (Long) -> Unit = remember(navController) {
@@ -1537,7 +1539,6 @@ fun LibraryScreen(
                                     }
 
                                     LibraryTabId.ARTISTS -> {
-                                        val artistsLazyPagingItems = libraryViewModel.artistsPagingFlow.collectAsLazyPagingItems()
                                         val isLoading = playerUiState.isLoadingLibraryCategories && artistsLazyPagingItems.itemCount == 0
 
                                         val stableOnArtistClick: (String) -> Unit = remember(navController) {
@@ -1581,7 +1582,6 @@ fun LibraryScreen(
                                     }
 
                                     LibraryTabId.LIKED -> {
-                                        val favoritePagingItems = libraryViewModel.favoritesPagingFlow.collectAsLazyPagingItems()
                                         LibraryFavoritesTab(
                                             favoriteSongs = favoritePagingItems,
                                             isLoading = isLibraryLoading || (playerUiState.isLoadingLibraryCategories && favoritePagingItems.itemCount == 0),
@@ -3921,7 +3921,6 @@ fun AlbumGridItemRedesigned(
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .scrollReveal(initialOffsetY = 8.dp, initialScale = 0.985f)
                 .scale(selectionScale)
                 .then(
                     if (isSelected) {
@@ -4045,9 +4044,7 @@ fun AlbumGridItemRedesigned(
 fun ArtistListItem(artist: Artist, onClick: () -> Unit, isLoading: Boolean = false) {
     Card(
         onClick = onClick,
-        modifier = Modifier
-            .fillMaxWidth()
-            .scrollReveal(initialOffsetY = 8.dp, initialScale = 0.985f),
+        modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow
         )
@@ -4192,7 +4189,6 @@ fun AlbumListItem(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(88.dp)
-                .scrollReveal(initialOffsetY = 8.dp, initialScale = 0.985f)
                 .scale(selectionScale)
                 .then(
                     if (isSelected) {

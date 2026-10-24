@@ -604,6 +604,15 @@ class DualPlayerEngine @Inject constructor(
                 if (cacheKey != null) {
                     dataSpecBuilder.setKey(cacheKey)
                 }
+                val profile = StreamClientUtils.resolveRequestProfile(streamUrl)
+                val headers = buildMap {
+                    put("User-Agent", profile.userAgent)
+                    profile.origin?.let { put("Origin", it) }
+                    profile.referer?.let { put("Referer", it) }
+                }
+                if (headers.isNotEmpty()) {
+                    dataSpecBuilder.setHttpRequestHeaders(headers)
+                }
                 val dataSpec = dataSpecBuilder.build()
                 androidx.media3.datasource.cache.CacheWriter(
                     dataSource,
@@ -1225,10 +1234,10 @@ class DualPlayerEngine @Inject constructor(
         // stream cache + pre-resolved URL make underruns rare) and only grow buffers for links
         // that have ACTUALLY rebuffed recently or are genuinely slow.
         val profile = when {
-            isRecentlyUnstable -> BufferProfile(30_000, 60_000, 2_000, 4_000)
-            bandwidthKbps < 1_000 -> BufferProfile(25_000, 50_000, 1_200, 3_000)
-            bandwidthKbps < 5_000 -> BufferProfile(20_000, 45_000, 800, 2_500)
-            else -> BufferProfile(15_000, 35_000, 500, 2_000)
+            isRecentlyUnstable -> BufferProfile(20_000, 40_000, 800, 2_000)
+            bandwidthKbps < 1_000 -> BufferProfile(15_000, 35_000, 500, 1_500)
+            bandwidthKbps < 5_000 -> BufferProfile(12_000, 30_000, 300, 1_000)
+            else -> BufferProfile(10_000, 25_000, 180, 800)
         }
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(profile.minMs, profile.maxMs, profile.forPlaybackMs, profile.afterRebufferMs)
@@ -1631,6 +1640,7 @@ class DualPlayerEngine @Inject constructor(
             builder.setMimeType("audio/flac")
         } else if (scheme == "youtube") {
             val videoId = uri.toString().removePrefix("youtube://")
+            builder.setCustomCacheKey(videoId)
             val cachedMime = com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.streamMimeTypeLruCache.let { cache ->
                 cache.get("${videoId}_high")
                     ?: cache.get("${videoId}_low")

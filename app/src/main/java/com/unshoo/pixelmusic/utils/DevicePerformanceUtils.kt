@@ -220,8 +220,8 @@ object DevicePerformanceUtils {
 
             val memInfo = ActivityManager.MemoryInfo()
             activityManager?.getMemoryInfo(memInfo)
-            // Devices with less than ~3.8 GB total RAM
-            if (memInfo.totalMem in 1 until 3_800_000_000L) {
+            // Low-end RAM cutoff: devices with less than ~2.2 GB total RAM
+            if (memInfo.totalMem in 1 until 2_200_000_000L) {
                 return true
             }
 

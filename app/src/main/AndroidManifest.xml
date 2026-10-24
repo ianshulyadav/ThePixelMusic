@@ -44,6 +44,7 @@
     <application
         android:name=".PixelMusicApplication"
         android:allowBackup="true"
+        android:largeHeap="true"
         android:appCategory="audio"
         android:enableOnBackInvokedCallback="false"
         android:dataExtractionRules="@xml/data_extraction_rules"

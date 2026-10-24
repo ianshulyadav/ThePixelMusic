@@ -131,7 +131,7 @@ object QueuePreloadManager {
                     if (!streamUrl.isNullOrBlank() && streamUrl.startsWith("http")) {
                         val ytUri = "youtube://$videoId"
                         engineRef?.resolvedUriCache?.put(ytUri, android.net.Uri.parse(streamUrl))
-                        engineRef?.preCacheFirstChunk(streamUrl)
+                        engineRef?.preCacheFirstChunk(streamUrl, videoId)
                     }
                 } catch (_: Exception) {
                 }

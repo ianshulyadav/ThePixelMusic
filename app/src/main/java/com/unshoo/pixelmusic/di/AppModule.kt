@@ -268,8 +268,8 @@ object AppModule {
         // - Dispatchers.IO.limitedParallelism(2): decodes images 2 at a time without thrashing CPU or GPU decoders.
         // - crossfade(200): Smooth image reveal without visual stutter.
         val imageDispatcher = okhttp3.Dispatcher().apply {
-            maxRequests = 4
-            maxRequestsPerHost = 2
+            maxRequests = 6
+            maxRequestsPerHost = 3
         }
         val imageOkHttpClient = okHttpClient.newBuilder()
             .dispatcher(imageDispatcher)
@@ -293,11 +293,13 @@ object AppModule {
         val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
         val isLowRamDevice = activityManager?.isLowRamDevice == true
 
-        val cachePercent = if (isLowRamDevice) 0.08 else 0.15
+        // Increased RAM usage threshold to ensure smooth library and queue scrolling without image cache churn:
+        // 25% heap memory cache on standard devices, 15% on low RAM devices.
+        val cachePercent = if (isLowRamDevice) 0.15 else 0.25
 
         return ImageLoader.Builder(context)
             .okHttpClient(imageOkHttpClient)
-            .dispatcher(Dispatchers.IO.limitedParallelism(2))
+            .dispatcher(Dispatchers.IO.limitedParallelism(4))
             .allowHardware(!isLowRamDevice)
             .allowRgb565(isLowRamDevice)
             .crossfade(200)
@@ -318,7 +320,7 @@ object AppModule {
             .diskCache {
                 DiskCache.Builder()
                     .directory(context.cacheDir.resolve("image_cache"))
-                    .maxSizeBytes(if (isLowRamDevice) 50L * 1024 * 1024 else 120L * 1024 * 1024)
+                    .maxSizeBytes(if (isLowRamDevice) 100L * 1024 * 1024 else 250L * 1024 * 1024)
                     .build()
             }
             .respectCacheHeaders(false)

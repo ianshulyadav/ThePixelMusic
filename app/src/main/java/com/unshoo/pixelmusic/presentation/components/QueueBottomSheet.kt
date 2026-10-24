@@ -333,7 +333,7 @@ fun QueueBottomSheet(
     // when upstream emits equivalent list instances during drag.
     var reorderPreviewQueueSignature by remember { mutableStateOf<Int?>(null) }
     val displaySongsSignature = remember(displaySongs, queueIndexOffset) {
-        (queueIndexOffset * 31) + displaySongs.hashCode()
+        (queueIndexOffset * 31) + System.identityHashCode(displaySongs)
     }
     val defaultDisplayOrder = remember(displaySongCount, queueIndexOffset) {
         List(displaySongCount) { queueIndexOffset + it }
@@ -561,32 +561,8 @@ fun QueueBottomSheet(
         }
     }
 
-    val useLightweightQueueListShape by remember {
-        derivedStateOf {
-            listState.isScrollInProgress ||
-                draggingSheetFromList ||
-                isReordering ||
-                reorderHandleInUse
-        }
-    }
-    val hasScrollableQueue by remember {
-        derivedStateOf { listState.canScrollForward || listState.canScrollBackward }
-    }
-    val queueListShape = remember(useLightweightQueueListShape) {
-        if (useLightweightQueueListShape) {
-            RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp)
-        } else {
-            AbsoluteSmoothCornerShape(
-                cornerRadiusTR = 26.dp,
-                smoothnessAsPercentTR = 60,
-                cornerRadiusTL = 26.dp,
-                smoothnessAsPercentTL = 60,
-                cornerRadiusBR = 0.dp,
-                smoothnessAsPercentBR = 60,
-                cornerRadiusBL = 0.dp,
-                smoothnessAsPercentBL = 60
-            )
-        }
+    val queueListShape = remember {
+        RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp)
     }
 
     fun finalizeListDrag(velocity: Float = 0f) {
@@ -597,7 +573,7 @@ fun QueueBottomSheet(
         }
     }
 
-    val listDragConnection = remember(updatedCanDragSheet) {
+    val listDragConnection = remember {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
                 if (updatedIsReordering || updatedReorderHandleInUse) return Offset.Zero
@@ -780,7 +756,7 @@ fun QueueBottomSheet(
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                             contentPadding = PaddingValues(
                                 start = 0.dp,
-                                end = if (hasScrollableQueue) 26.dp else 0.dp,
+                                end = if (displaySongCount > 5) 26.dp else 0.dp,
                                 bottom = MiniPlayerHeight + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 32.dp
                             )
                         ) {
@@ -810,11 +786,7 @@ fun QueueBottomSheet(
                                                 stiffness = Spring.StiffnessMediumLow
                                             )
                                         )
-                                        else -> Modifier.animateItem(
-                                            fadeInSpec = tween(durationMillis = 140),
-                                            fadeOutSpec = tween(durationMillis = 120),
-                                            placementSpec = tween(durationMillis = 180)
-                                        )
+                                        else -> Modifier
                                     }
                                 ) { isDragging ->
                                     val scale by animateFloatAsState(
