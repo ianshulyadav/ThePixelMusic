@@ -6,6 +6,7 @@ import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
+import android.os.Looper
 import android.os.SystemClock
 import android.util.LruCache
 import androidx.annotation.OptIn
@@ -175,12 +176,16 @@ class DualPlayerEngine @Inject constructor(
     val isPlaybackBufferingState: StateFlow<Boolean> = _isPlaybackBufferingState.asStateFlow()
 
     val isPlaybackBuffering: Boolean
-        get() = ::playerA.isInitialized && playerA.playbackState == Player.STATE_BUFFERING
+        get() = _isPlaybackBufferingState.value
 
     val bufferedAheadMs: Long
-        get() = if (::playerA.isInitialized) {
-            (playerA.bufferedPosition - playerA.currentPosition).coerceAtLeast(0L)
-        } else 0L
+        get() {
+            if (!::playerA.isInitialized) return 0L
+            if (Looper.myLooper() != Looper.getMainLooper()) {
+                return 30_000L
+            }
+            return (playerA.bufferedPosition - playerA.currentPosition).coerceAtLeast(0L)
+        }
 
     // Audio Focus Management
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
