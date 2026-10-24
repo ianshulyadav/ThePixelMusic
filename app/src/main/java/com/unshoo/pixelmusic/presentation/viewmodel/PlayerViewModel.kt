@@ -1362,105 +1362,84 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             AppReadinessSignal.awaitReady()
             // On cold start, the MediaController connects asynchronously, leaving stablePlayerState.currentSong
-            // and currentPlaybackQueue empty until that happens. Pre-load the snapshot from DataStore immediately
-            // so the UI and miniplayer populate with the restored queue on the very first frame.
+            // and currentPlaybackQueue empty until that happens.
+            // PixelPlayer OSS pattern: Pre-load ONLY the single latest played song rather than restoring
+            // an obsolete multi-track queue built in past sessions.
             val snapshot = runCatching {
                 userPreferencesRepository.getPlaybackQueueSnapshotOnce()
-            }.getOrNull() ?: return@launch
+            }.getOrNull()
 
-            if (snapshot.items.isNotEmpty()) {
-                val allSongsById = libraryStateHolder.allSongsById.value
-                val preloadedQueue = snapshot.items.mapNotNull { itemSnapshot ->
-                    allSongsById[itemSnapshot.mediaId] ?: Song(
-                        id = itemSnapshot.mediaId,
-                        title = itemSnapshot.title?.takeIf { it.isNotBlank() } ?: context.getString(R.string.unknown_song_title),
-                        artist = itemSnapshot.artist?.takeIf { it.isNotBlank() } ?: context.getString(R.string.unknown_artist),
-                        artistId = -1L,
-                        album = itemSnapshot.albumTitle?.takeIf { it.isNotBlank() } ?: context.getString(R.string.unknown_album),
-                        albumId = -1L,
-                        path = "",
-                        contentUriString = itemSnapshot.uri,
-                        albumArtUriString = itemSnapshot.artworkUri,
-                        duration = itemSnapshot.durationMs ?: 0L,
-                        dateAdded = System.currentTimeMillis(),
-                        mimeType = null,
-                        bitrate = null,
-                        sampleRate = null,
-                        youtubeId = if (itemSnapshot.mediaId.startsWith("youtube_")) {
-                            itemSnapshot.mediaId.removePrefix("youtube_")
-                        } else if (itemSnapshot.uri.startsWith("youtube://")) {
-                            itemSnapshot.uri.removePrefix("youtube://")
-                        } else if (itemSnapshot.mediaId.length == 11 && !itemSnapshot.mediaId.startsWith("external:")) {
-                            itemSnapshot.mediaId
-                        } else {
-                            null
-                        }
-                    )
-                }
-                if (preloadedQueue.isNotEmpty()) {
-                    _playerUiState.update { currentState ->
-                        if (currentState.currentPlaybackQueue.isEmpty()) {
-                            currentState.copy(currentPlaybackQueue = preloadedQueue.toPlaybackQueue())
-                        } else {
-                            currentState
-                        }
-                    }
-                    _isSheetVisible.value = true
+            val currentItem = snapshot?.let { snap ->
+                if (snap.currentMediaId != null) {
+                    snap.items.find { it.mediaId == snap.currentMediaId }
+                } else {
+                    snap.items.getOrNull(snap.currentIndex)
                 }
             }
 
-            val currentItem = if (snapshot.currentMediaId != null) {
-                snapshot.items.find { it.mediaId == snapshot.currentMediaId }
-            } else {
-                snapshot.items.getOrNull(snapshot.currentIndex)
-            } ?: return@launch
+            val allSongsById = libraryStateHolder.allSongsById.value
+            val songFromItem = currentItem?.let { itemSnapshot ->
+                allSongsById[itemSnapshot.mediaId] ?: Song(
+                    id = itemSnapshot.mediaId,
+                    title = itemSnapshot.title?.takeIf { it.isNotBlank() } ?: context.getString(R.string.unknown_song_title),
+                    artist = itemSnapshot.artist?.takeIf { it.isNotBlank() } ?: context.getString(R.string.unknown_artist),
+                    artistId = -1L,
+                    album = itemSnapshot.albumTitle?.takeIf { it.isNotBlank() } ?: context.getString(R.string.unknown_album),
+                    albumId = -1L,
+                    path = "",
+                    contentUriString = itemSnapshot.uri,
+                    albumArtUriString = itemSnapshot.artworkUri,
+                    duration = itemSnapshot.durationMs ?: 0L,
+                    dateAdded = System.currentTimeMillis(),
+                    mimeType = null,
+                    bitrate = null,
+                    sampleRate = null,
+                    youtubeId = if (itemSnapshot.mediaId.startsWith("youtube_")) {
+                        itemSnapshot.mediaId.removePrefix("youtube_")
+                    } else if (itemSnapshot.uri.startsWith("youtube://")) {
+                        itemSnapshot.uri.removePrefix("youtube://")
+                    } else if (itemSnapshot.mediaId.length == 11 && !itemSnapshot.mediaId.startsWith("external:")) {
+                        itemSnapshot.mediaId
+                    } else {
+                        null
+                    }
+                )
+            }
+
+            val latestSongResolved: Song = songFromItem
+                ?: runCatching { musicRepository.getLastPlayedSong() }.getOrNull()
+                ?: return@launch
+
+            val singleSongQueue = persistentListOf(latestSongResolved)
+            _playerUiState.update { currentState ->
+                if (currentState.currentPlaybackQueue.isEmpty()) {
+                    currentState.copy(currentPlaybackQueue = singleSongQueue)
+                } else {
+                    currentState
+                }
+            }
+            _isSheetVisible.value = true
 
             if (playbackStateHolder.stablePlayerState.value.currentSong == null) {
-                val currentSongResolved = _playerUiState.value.currentPlaybackQueue.find { it.id == currentItem.mediaId }
-                    ?: Song(
-                        id = currentItem.mediaId,
-                        title = currentItem.title?.takeIf { it.isNotBlank() } ?: context.getString(R.string.unknown_song_title),
-                        artist = currentItem.artist?.takeIf { it.isNotBlank() } ?: context.getString(R.string.unknown_artist),
-                        artistId = -1L,
-                        album = currentItem.albumTitle?.takeIf { it.isNotBlank() } ?: context.getString(R.string.unknown_album),
-                        albumId = -1L,
-                        path = "",
-                        contentUriString = currentItem.uri,
-                        albumArtUriString = currentItem.artworkUri,
-                        duration = currentItem.durationMs ?: 0L,
-                        dateAdded = System.currentTimeMillis(),
-                        mimeType = null,
-                        bitrate = null,
-                        sampleRate = null,
-                        youtubeId = if (currentItem.mediaId.startsWith("youtube_")) {
-                            currentItem.mediaId.removePrefix("youtube_")
-                        } else if (currentItem.uri.startsWith("youtube://")) {
-                            currentItem.uri.removePrefix("youtube://")
-                        } else if (currentItem.mediaId.length == 11 && !currentItem.mediaId.startsWith("external:")) {
-                            currentItem.mediaId
-                        } else {
-                            null
-                        }
-                    )
                 playbackStateHolder.updateStablePlayerState { state ->
                     if (state.currentSong == null) {
                         state.copy(
-                            currentSong = currentSongResolved,
-                            currentMediaItemIndex = snapshot.currentIndex,
-                            repeatMode = snapshot.repeatMode,
-                            isShuffleEnabled = snapshot.shuffleEnabled,
-                            totalDuration = currentItem.durationMs ?: 0L
+                            currentSong = latestSongResolved,
+                            currentMediaItemIndex = 0,
+                            repeatMode = snapshot?.repeatMode ?: Player.REPEAT_MODE_OFF,
+                            isShuffleEnabled = snapshot?.shuffleEnabled ?: false,
+                            totalDuration = latestSongResolved.duration
                         )
                     } else {
                         state
                     }
                 }
-                playbackStateHolder.setCurrentPosition(snapshot.currentPositionMs.coerceAtLeast(0L))
+                playbackStateHolder.setCurrentPosition(snapshot?.currentPositionMs?.coerceAtLeast(0L) ?: 0L)
             }
 
             launch {
                 AppReadinessSignal.awaitReady()
-                val uriStr = currentItem.uri
+                val uriStr = latestSongResolved.contentUriString
                 if (uriStr.isNotBlank() && (
                     uriStr.startsWith("youtube://") ||
                     uriStr.startsWith("telegram:") ||
@@ -1469,7 +1448,7 @@ class PlayerViewModel @Inject constructor(
                     runCatching { dualPlayerEngine.resolveCloudUri(uriStr.toUri()) }
                 }
 
-                val artworkUri = currentItem.artworkUri?.takeIf { it.isNotBlank() }
+                val artworkUri = latestSongResolved.albumArtUriString?.takeIf { it.isNotBlank() }
                 if (artworkUri != null) {
                     themeStateHolder.extractAndGenerateColorScheme(
                         albumArtUriAsUri = artworkUri.toUri(),

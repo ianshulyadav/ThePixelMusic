@@ -2957,22 +2957,21 @@ class MusicService : MediaLibraryService() {
         }
 
         val resolvedIndex = when {
-            snapshot.currentIndex in restoredItems.indices -> snapshot.currentIndex
             !snapshot.currentMediaId.isNullOrBlank() -> {
                 restoredItems.indexOfFirst { it.mediaId == snapshot.currentMediaId }
-                    .takeIf { it >= 0 } ?: 0
+                    .takeIf { it >= 0 } ?: (if (snapshot.currentIndex in restoredItems.indices) snapshot.currentIndex else 0)
             }
+            snapshot.currentIndex in restoredItems.indices -> snapshot.currentIndex
             else -> 0
         }
 
-        val preparedItems = restoredItems.toMutableList()
+        val latestItem = restoredItems.getOrNull(resolvedIndex) ?: return
+
         // Do not block player restoration on resolving the track's streaming URI from network.
         // Instead, restore immediately with the unresolved media item so the UI displays the song instantly.
         // The URI resolution is launched asynchronously to warm up the cache with fresh URLs.
-        preparedItems.getOrNull(resolvedIndex)?.let { currentItem ->
-            serviceScope.launch(Dispatchers.IO) {
-                runCatching { engine.preResolveForPlayback(currentItem) }
-            }
+        serviceScope.launch(Dispatchers.IO) {
+            runCatching { engine.preResolveForPlayback(latestItem) }
         }
 
         withContext(Dispatchers.Main.immediate) {
@@ -2990,9 +2989,11 @@ class MusicService : MediaLibraryService() {
 
             isRestoringPlaybackSnapshot = true
             try {
+                // PixelPlayer OSS pattern: Restore only the latest played song rather than
+                // resurrecting a stale, obsolete multi-item queue from a past session.
                 player.setMediaItems(
-                    preparedItems,
-                    resolvedIndex,
+                    listOf(latestItem),
+                    0,
                     snapshot.currentPositionMs.coerceAtLeast(0L)
                 )
                 player.repeatMode = safeRepeatMode
@@ -3009,9 +3010,9 @@ class MusicService : MediaLibraryService() {
         }
 
         Timber.tag(TAG).i(
-            "Restored playback snapshot: items=%d index=%d",
-            restoredItems.size,
-            snapshot.currentIndex
+            "Restored latest played song: id=%s position=%d",
+            latestItem.mediaId,
+            snapshot.currentPositionMs
         )
         schedulePlaybackSnapshotPersist(immediate = true)
 
