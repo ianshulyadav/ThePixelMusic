@@ -676,7 +676,7 @@ fun LyricsSheet(
         containerColor = if (isLyricsBlurActive) Color.Transparent else containerColor,
         contentColor = contentColor,
         // Removed TopBar and FAB
-    ) { paddingValues ->
+    ) { _ ->
         Box(modifier = Modifier.fillMaxSize()) {
             if (isLyricsBlurActive) {
                 FullPlayerAtmosphereBackground(
@@ -903,7 +903,8 @@ fun LyricsSheet(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(if (isLyricsBlurActive) Color.Transparent else containerColor)
-                        .padding(bottom = paddingValues.calculateBottomPadding() + 10.dp, end = 16.dp, start = 16.dp)
+                        .navigationBarsPadding()
+                        .padding(bottom = 12.dp, end = 16.dp, start = 16.dp)
                         .pointerInput(Unit) {
                             awaitPointerEventScope {
                                 while (true) {
@@ -1112,6 +1113,7 @@ fun LyricsSheet(
             exit = fadeOut() + slideOutVertically { it / 2 },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
                 .padding(bottom = 32.dp)
         ) {
             FilledIconButton(
