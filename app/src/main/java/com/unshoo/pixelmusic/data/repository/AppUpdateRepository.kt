@@ -34,7 +34,7 @@ class AppUpdateRepository @Inject constructor(
 ) {
     companion object {
         const val GITHUB_REPO_OWNER = "ianshulyadav"
-        const val GITHUB_REPO_NAME = "PixelMusicApp"
+        const val GITHUB_REPO_NAME = "PixelMusic"
         const val GITHUB_LATEST_RELEASE_URL =
             "https://api.github.com/repos/$GITHUB_REPO_OWNER/$GITHUB_REPO_NAME/releases/latest"
         const val GITHUB_ATOM_FEED_URL =
