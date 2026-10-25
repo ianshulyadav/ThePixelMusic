@@ -54,9 +54,9 @@ fun enterTransition(): EnterTransition = slideInVertically(
 fun exitTransition(): ExitTransition = scaleOut(
     animationSpec = spring(
         dampingRatio = 1f,
-        stiffness = ExpressiveSprings.DefaultSpatialStiffness
+        stiffness = ExpressiveSprings.FastSpatialStiffness
     ),
-    targetScale = 0.92f,
+    targetScale = 0.95f,
     transformOrigin = TransformOrigin.Center
 ) + fadeOut(
     animationSpec = tween(durationMillis = 160, easing = EmphasizedAccelerateEasing)
@@ -64,19 +64,19 @@ fun exitTransition(): ExitTransition = scaleOut(
 
 /**
  * Background screen re-entry when popping back from detail screen.
- * Restores smoothly with zoom-in and very calm fade after spatial start.
+ * Restores smoothly and immediately in lockstep with the dismiss animation,
+ * eliminating lingering spring settling latency so the screen is instantly interactive.
  */
 fun popEnterTransition(): EnterTransition = scaleIn(
     animationSpec = spring(
-        dampingRatio = 0.84f,
-        stiffness = ExpressiveSprings.DefaultSpatialStiffness
+        dampingRatio = 1f,
+        stiffness = ExpressiveSprings.FastSpatialStiffness
     ),
-    initialScale = 0.92f,
+    initialScale = 0.95f,
     transformOrigin = TransformOrigin.Center
 ) + fadeIn(
     animationSpec = tween(
-        durationMillis = 300,
-        delayMillis = 85,
+        durationMillis = 180,
         easing = EmphasizedDecelerateEasing
     )
 )

@@ -852,8 +852,7 @@ private fun mainRootEnterTransition(
                 transformOrigin = TransformOrigin.Center
             ) + fadeIn(
                 animationSpec = androidx.compose.animation.core.tween(
-                    durationMillis = 300,
-                    delayMillis = 85,
+                    durationMillis = 200,
                     easing = EmphasizedDecelerateEasing
                 )
             )
@@ -874,8 +873,7 @@ private fun mainRootEnterTransition(
                 transformOrigin = TransformOrigin.Center
             ) + fadeIn(
                 animationSpec = androidx.compose.animation.core.tween(
-                    durationMillis = 300,
-                    delayMillis = 85,
+                    durationMillis = 200,
                     easing = EmphasizedDecelerateEasing
                 )
             )
