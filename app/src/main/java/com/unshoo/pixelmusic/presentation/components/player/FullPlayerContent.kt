@@ -77,6 +77,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -278,6 +279,37 @@ fun FullPlayerContent(
     var showShareSheet by remember { mutableStateOf(false) }
     var showArtistPicker by rememberSaveable { mutableStateOf(false) }
     var showAudioFormatInfoDialog by rememberSaveable { mutableStateOf(false) }
+
+    val isAnyModalOpen = showLyricsSheet || showSongInfoBottomSheet || showPlaylistBottomSheet ||
+        showShareSheet || showArtistPicker || showAudioFormatInfoDialog
+
+    LaunchedEffect(isAnyModalOpen) {
+        playerViewModel.updateFullPlayerModalOpen(isAnyModalOpen)
+    }
+    DisposableEffect(Unit) {
+        onDispose {
+            playerViewModel.updateFullPlayerModalOpen(false)
+        }
+    }
+
+    androidx.activity.compose.BackHandler(enabled = showLyricsSheet) {
+        showLyricsSheet = false
+    }
+    androidx.activity.compose.BackHandler(enabled = showSongInfoBottomSheet) {
+        showSongInfoBottomSheet = false
+    }
+    androidx.activity.compose.BackHandler(enabled = showPlaylistBottomSheet) {
+        showPlaylistBottomSheet = false
+    }
+    androidx.activity.compose.BackHandler(enabled = showShareSheet) {
+        showShareSheet = false
+    }
+    androidx.activity.compose.BackHandler(enabled = showArtistPicker) {
+        showArtistPicker = false
+    }
+    androidx.activity.compose.BackHandler(enabled = showAudioFormatInfoDialog) {
+        showAudioFormatInfoDialog = false
+    }
     
     val lyricsSearchUiState by playerViewModel.lyricsSearchUiState.collectAsStateWithLifecycle()
     val playerState by playerViewModel.stablePlayerState.collectAsStateWithLifecycle()

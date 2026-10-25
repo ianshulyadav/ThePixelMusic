@@ -117,7 +117,7 @@ class DualPlayerEngine @Inject constructor(
         // premature SocketTimeoutException on weak connections or during concurrent downloads.
         private const val HTTP_CONNECT_TIMEOUT_MS = 15_000
         private const val HTTP_READ_TIMEOUT_MS = 20_000
-        private const val FIRST_CHUNK_PRECACHE_BYTES = 256L * 1024L // 256KB — enough for instant start
+        private const val FIRST_CHUNK_PRECACHE_BYTES = 1024L * 1024L // 1MB — BitChord parity (~50s audio cushion)
         private val LOCAL_MEDIA_SCHEMES = setOf("content", "file", "android.resource")
         private val REMOTE_MEDIA_SCHEMES = setOf("http", "https", "telegram", "gdrive", "youtube", "monochrome")
     }
@@ -662,7 +662,8 @@ class DualPlayerEngine @Inject constructor(
     }
 
     private val preCacheDataSourceFactory by lazy {
-        val upstream = DefaultDataSource.Factory(context, preCacheHttpFactory)
+        val chunkedHttp = ChunkedDataSource.Factory(preCacheHttpFactory)
+        val upstream = DefaultDataSource.Factory(context, chunkedHttp)
         CacheDataSource.Factory()
             .setCache(exoCache.cache)
             .setUpstreamDataSourceFactory(upstream)
@@ -1147,27 +1148,70 @@ class DualPlayerEngine @Inject constructor(
                     else -> null
                 }
 
-                // 1. Instant Start: Check if the song is already cached in ExoCache
+                // 1. Session Stream Pinning: Check StreamChoice first (BitChord parity)
+                // Ensures continuation reads, seeking, and cache fill never switch to a different format/codec mid-song.
                 if (cleanId != null) {
-                    val isCached = runCatching {
-                        exoCache.cache.isCached(
-                            cleanId,
-                            dataSpec.position,
-                            if (dataSpec.length > 0) dataSpec.length else 128 * 1024L
+                    StreamChoice.of(cleanId)?.let { pinned ->
+                        val pinnedUri = Uri.parse(pinned.url)
+                        if (isResolvedUriFresh(uriString, pinnedUri)) {
+                            return dataSpec.buildUpon()
+                                .setUri(pinnedUri)
+                                .setKey(cleanId)
+                                .apply {
+                                    if (pinned.headers.isNotEmpty()) {
+                                        setHttpRequestHeaders(pinned.headers)
+                                    } else {
+                                        val profile = StreamClientUtils.resolveRequestProfile(pinned.url)
+                                        setHttpRequestHeaders(
+                                            buildMap {
+                                                put("User-Agent", profile.userAgent)
+                                                profile.origin?.let { put("Origin", it) }
+                                                profile.referer?.let { put("Referer", it) }
+                                            }
+                                        )
+                                    }
+                                }
+                                .build()
+                        } else {
+                            StreamChoice.forget(cleanId)
+                        }
+                    }
+                }
+
+                // 2. Instant Start: Only return early without resolving URI/headers if the ENTIRE remaining stream is cached in ExoCache.
+                // If only the pre-cached header chunk is cached, CacheDataSource still needs the resolved HTTP upstream URI to continue smoothly past it.
+                if (cleanId != null) {
+                    val isFullyCached = runCatching {
+                        val totalLen = androidx.media3.datasource.cache.ContentMetadata.getContentLength(
+                            exoCache.cache.getContentMetadata(cleanId)
                         )
+                        val remainingLen = when {
+                            dataSpec.length > 0 -> dataSpec.length
+                            totalLen > dataSpec.position -> totalLen - dataSpec.position
+                            else -> -1L
+                        }
+                        remainingLen > 0L && exoCache.cache.isCached(cleanId, dataSpec.position, remainingLen)
                     }.getOrDefault(false)
 
-                    if (isCached) {
+                    val isCloudScheme = scheme == "youtube" || uriString.startsWith("youtube://") ||
+                        scheme == "monochrome" || uriString.startsWith("monochrome://") ||
+                        scheme == "telegram" || uriString.startsWith("telegram:") ||
+                        scheme == "gdrive" || uriString.startsWith("gdrive:")
+
+                    if (isFullyCached && !isCloudScheme) {
                         return dataSpec.buildUpon().setKey(cleanId).build()
                     }
                 }
 
-                // 2. Custom cloud schemes
+                // 3. Custom cloud schemes
                 if (scheme == "monochrome") {
                     val trackId = uri.host?.takeIf { it.isNotBlank() } ?: uriString.removePrefix("monochrome://")
                     val directUri = Uri.parse("https://tracks.monochrome.st/track/$trackId")
                     activePlaybackResolvedUris[uriString] = directUri
                     resolvedUriCache.put(uriString, directUri)
+                    if (cleanId != null) {
+                        StreamChoice.remember(cleanId, directUri.toString())
+                    }
                     return dataSpec.buildUpon()
                         .setUri(directUri)
                         .apply { if (cleanId != null) setKey(cleanId) }
@@ -1199,6 +1243,9 @@ class DualPlayerEngine @Inject constructor(
                                 profile.referer?.let { put("Referer", it) }
                             }
                             this.setHttpRequestHeaders(headers)
+                            if (cleanId != null) {
+                                StreamChoice.remember(cleanId, urlStr, headers)
+                            }
                         }
                         return this
                     }
@@ -1213,6 +1260,7 @@ class DualPlayerEngine @Inject constructor(
                         } else {
                             activePlaybackResolvedUris.remove(originalUri)
                             resolvedUriCache.remove(originalUri)
+                            if (cleanId != null) StreamChoice.forget(cleanId)
                         }
                     }
 
@@ -1228,6 +1276,7 @@ class DualPlayerEngine @Inject constructor(
                         } else {
                             resolvedUriCache.remove(originalUri)
                             activePlaybackResolvedUris.remove(originalUri)
+                            if (cleanId != null) StreamChoice.forget(cleanId)
                         }
                     }
 
@@ -1278,7 +1327,12 @@ class DualPlayerEngine @Inject constructor(
             .setReadTimeoutMs(HTTP_READ_TIMEOUT_MS)
             .setAllowCrossProtocolRedirects(true)
 
-        val baseDataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
+        val chunkedHttpDataSourceFactory = ChunkedDataSource.Factory(
+            upstream = httpDataSourceFactory,
+            chunkBytes = ChunkedDataSource.DEFAULT_MAX_RANGE_BYTES
+        )
+
+        val baseDataSourceFactory = DefaultDataSource.Factory(context, chunkedHttpDataSourceFactory)
         // Lossless sources (ArchiveTune port): route `deezer://` through the on-the-fly Blowfish
         // decryptor and `tidal-dash://` through the progressive DASH stitcher; everything else
         // (http/https CDN links, flattened Apple Music files, local files) uses the default source.
@@ -1286,7 +1340,7 @@ class DualPlayerEngine @Inject constructor(
         // so the cache stores decrypted / stitched bytes and can serve them offline-fast next time.
         val losslessRoutingFactory = LosslessSchemeRoutingDataSource.create(
             defaultFactory = baseDataSourceFactory,
-            httpUpstream = httpDataSourceFactory,
+            httpUpstream = chunkedHttpDataSourceFactory,
             httpClient = LosslessStreamResolver.httpClient,
         )
         val cacheDataSourceFactory = CacheDataSource.Factory()

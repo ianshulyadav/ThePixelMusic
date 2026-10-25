@@ -121,6 +121,26 @@ object YoutubeHelper {
     @Volatile private var lastSuccessfulClientKeyLoaded: Boolean = false
 
     private val throttledVideoIds = ConcurrentHashMap<String, Long>()
+    private val quarantinedClients = ConcurrentHashMap<String, Long>()
+    private const val CLIENT_QUARANTINE_MS = 10 * 60 * 1000L // 10 min quarantine
+
+    fun isClientQuarantined(clientKey: String): Boolean {
+        val expiry = quarantinedClients[clientKey] ?: return false
+        if (System.currentTimeMillis() > expiry) {
+            quarantinedClients.remove(clientKey)
+            return false
+        }
+        return true
+    }
+
+    fun quarantineClient(clientKey: String) {
+        quarantinedClients[clientKey] = System.currentTimeMillis() + CLIENT_QUARANTINE_MS
+        PixelMusicHelper.printd("Quarantining client $clientKey for 10 minutes")
+    }
+
+    fun clearClientQuarantine(clientKey: String) {
+        quarantinedClients.remove(clientKey)
+    }
 
     fun markStreamStalledOrThrottled(videoId: String) {
         throttledVideoIds[videoId] = System.currentTimeMillis() + 10 * 60 * 1000L // 10 min quarantine
@@ -1557,10 +1577,16 @@ object YoutubeHelper {
         val videoId = song.youtubeId
         var lastError: Throwable? = null
 
-        // Stage 1 — Fast ANDROID_VR shot only if NOT throttled and not explicitly requesting attested client.
+        // Stage 1 — Fast ANDROID_VR shot only if NOT throttled, not quarantined, and not explicitly requesting attested client.
         // YouTube recently throttles raw ANDROID_VR streams without PoToken after ~30s on mobile data.
-        if (!forceAttestedClient && !isVideoThrottled(videoId)) {
-            resolveAndroidVrStreamUrl(videoId, lowQuality, maxBitrateKbps, retries)?.let { return it }
+        if (!forceAttestedClient && !isVideoThrottled(videoId) && !isClientQuarantined("ANDROID_VR")) {
+            val vrResult = resolveAndroidVrStreamUrl(videoId, lowQuality, maxBitrateKbps, retries)
+            if (vrResult != null) {
+                clearClientQuarantine("ANDROID_VR")
+                return vrResult
+            } else {
+                quarantineClient("ANDROID_VR")
+            }
         }
 
         // Stage 2 — ArchiveTune: full multi-client Innertube resolution as the ROBUST middle
@@ -1926,6 +1952,7 @@ object YoutubeHelper {
                     watchtimeTrackingCache[videoId] = it
                 }
                 val clientKey = StreamClientUtils.buildClientKey(client)
+                clearClientQuarantine(clientKey)
                 lastSuccessfulClientKey = clientKey
                 lastSuccessfulClientKeyLoaded = true
                 backgroundScope.launch {
@@ -1937,6 +1964,9 @@ object YoutubeHelper {
                     "$videoId : stream via ArchiveTune fallback client ${client.clientName} (bitrate=${resolved.third})"
                 )
                 return@withContext resolved
+            } else {
+                val clientKey = StreamClientUtils.buildClientKey(client)
+                quarantineClient(clientKey)
             }
         }
 
@@ -1960,11 +1990,11 @@ object YoutubeHelper {
 
         val orderedFallbackClients =
             if (authState.hasPlaybackLoginContext) {
-                STREAM_FALLBACK_CLIENTS.filter { it.loginSupported } +
-                    STREAM_FALLBACK_CLIENTS.filterNot { it.loginSupported }
+                (STREAM_FALLBACK_CLIENTS.filter { it.loginSupported } +
+                    STREAM_FALLBACK_CLIENTS.filterNot { it.loginSupported })
             } else {
                 STREAM_FALLBACK_CLIENTS.toList()
-            }
+            }.sortedBy { if (isClientQuarantined(StreamClientUtils.buildClientKey(it))) 1 else 0 }
 
         return buildList {
             lastSuccessfulClient?.let { add(it) }

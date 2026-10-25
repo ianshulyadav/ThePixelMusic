@@ -619,6 +619,8 @@ class PlayerViewModel @Inject constructor(
     val isQueueSheetVisible: StateFlow<Boolean> = _isQueueSheetVisible.asStateFlow()
     private val _isCastSheetVisible = MutableStateFlow(false)
     val isCastSheetVisible: StateFlow<Boolean> = _isCastSheetVisible.asStateFlow()
+    private val _isFullPlayerModalOpen = MutableStateFlow(false)
+    val isFullPlayerModalOpen: StateFlow<Boolean> = _isFullPlayerModalOpen.asStateFlow()
 
     val playerContentExpansionFraction = Animatable(0f)
 
@@ -2266,6 +2268,10 @@ class PlayerViewModel @Inject constructor(
 
     fun updateCastSheetVisibility(visible: Boolean) {
         _isCastSheetVisible.value = visible
+    }
+
+    fun updateFullPlayerModalOpen(isOpen: Boolean) {
+        _isFullPlayerModalOpen.value = isOpen
     }
 
     // Helper to resolve stored sort keys against the allowed group
@@ -4852,6 +4858,16 @@ class PlayerViewModel @Inject constructor(
                     lastMediaId = null
                 )
                 lastQueueSignature = emptySignature
+                _playerUiState.update {
+                    if (it.currentPlaybackQueue.isNotEmpty() || it.currentQueueSourceName.isNotEmpty()) {
+                        it.copy(
+                            currentPlaybackQueue = kotlinx.collections.immutable.persistentListOf(),
+                            currentQueueSourceName = ""
+                        )
+                    } else {
+                        it
+                    }
+                }
                 return@launch
             }
 
@@ -8036,7 +8052,7 @@ class PlayerViewModel @Inject constructor(
 
     fun dismissPlaylistAndShowUndo() {
         collapsePlayerSheet()
-        setMiniPlayerDismissing(true)
+        setMiniPlayerDismissing(false)
         cancelPendingDirectPlaybackBuild()
         clearPreparingSongIfMatching()
         dualPlayerEngine.cancelNext()
@@ -8065,12 +8081,14 @@ class PlayerViewModel @Inject constructor(
                 runOnMainImmediate {
                     mediaController?.stop()
                     mediaController?.clearMediaItems()
+                    dualPlayerEngine.cancelNext()
                     lastQueueSignature = null
                     com.unshoo.pixelmusic.data.remote.youtube.AutoQueueManager.reset()
-                    mediaController?.sendCustomCommand(
-                        SessionCommand(MusicNotificationProvider.CUSTOM_COMMAND_CLOSE_PLAYER, Bundle.EMPTY),
-                        Bundle.EMPTY
-                    )
+                }
+                viewModelScope.launch(Dispatchers.IO) {
+                    runCatching {
+                        userPreferencesRepository.setPlaybackQueueSnapshot(null)
+                    }
                 }
             },
             clearStablePlaybackState = {

@@ -1261,28 +1261,24 @@ class MainActivity : ComponentActivity() {
                                 .map { it.showDismissUndoBar }
                                 .distinctUntilChanged()
                         }.collectAsStateWithLifecycle(initialValue = false)
-                        val isExpandedOrExpanding = remember(
-                            expansionFractionForOverlay,
-                            showPlayerContentInitially,
-                            isMiniPlayerDismissingForOverlay,
-                            isUndoBarVisibleForOverlay
-                        ) {
-                            !isUndoBarVisibleForOverlay &&
-                                !isMiniPlayerDismissingForOverlay &&
-                                showPlayerContentInitially &&
-                                expansionFractionForOverlay > 0.01f
+                        val isExpandedOrExpanding by remember {
+                            derivedStateOf {
+                                !isUndoBarVisibleForOverlay &&
+                                    !isMiniPlayerDismissingForOverlay &&
+                                    showPlayerContentInitially &&
+                                    playerViewModel.playerContentExpansionFraction.value > 0.01f
+                            }
                         }
 
-                        AnimatedVisibility(
-                            visible = isExpandedOrExpanding,
-                            enter = fadeIn(animationSpec = tween(durationMillis = 350)),
-                            exit = fadeOut(animationSpec = tween(durationMillis = 350)),
-                            modifier = Modifier.fillMaxSize()
-                        ) {
+                        if (isExpandedOrExpanding) {
+                            val scrimColor = MaterialTheme.colorScheme.surfaceContainerLowest
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .background(MaterialTheme.colorScheme.surfaceContainerLowest.copy(alpha = 0.6f))
+                                    .graphicsLayer {
+                                        alpha = (playerViewModel.playerContentExpansionFraction.value * 0.6f).coerceIn(0f, 0.6f)
+                                    }
+                                    .background(scrimColor)
                                     .pointerInput(Unit) {
                                         detectTapGestures {
                                             playerViewModel.collapsePlayerSheet()
