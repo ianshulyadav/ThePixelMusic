@@ -31,6 +31,7 @@ import com.unshoo.pixelmusic.data.database.MusicDao
 import com.unshoo.pixelmusic.data.preferences.UserPreferencesRepository
 import com.unshoo.pixelmusic.utils.ContentFilterUtils
 import com.unshoo.pixelmusic.data.lossless.audiosource.TitleMatch
+import com.unshoo.pixelmusic.utils.MediaItemBuilder
 
 object AutoQueueManager {
     private const val TAG = "AutoQueueMgr"
@@ -41,6 +42,7 @@ object AutoQueueManager {
     private const val SETTINGS_READ_TIMEOUT_MS = 2_000L
 
     @Volatile private var currentQueue: Queue = EmptyQueue
+    private val sessionQueuedIds = LinkedHashSet<String>()
 
     private val refillMutex = Mutex()
     @Volatile private var refillRequestedAgain = false
@@ -219,6 +221,11 @@ object AutoQueueManager {
     fun reset() {
         Timber.tag(TAG).d("reset() called")
         currentQueue = EmptyQueue
+        if (sessionQueuedIds.size > 100) {
+            val keep = sessionQueuedIds.toList().takeLast(30)
+            sessionQueuedIds.clear()
+            sessionQueuedIds.addAll(keep)
+        }
     }
 
     fun disableAndTrimQueue() {
@@ -473,9 +480,30 @@ object AutoQueueManager {
 
             val filterCoverLofi = runCatching { userPreferencesRepository?.filterCoverAndLofiFlow?.first() }.getOrNull() ?: true
             val filterKeywords = runCatching { userPreferencesRepository?.filterKeywordsFlow?.first() }.getOrNull() ?: ContentFilterUtils.DEFAULT_FILTER_KEYWORDS
+            val pureYtMusic = runCatching { userPreferencesRepository?.pureYtMusicOnlyFlow?.first() }.getOrNull() ?: true
             val dislikedYtIds = runCatching { musicDaoRef?.getDislikedYoutubeIds()?.toSet() }.getOrNull() ?: emptySet()
             val dislikedSongIds = runCatching { musicDaoRef?.getDislikedSongIds()?.map { it.toString() }?.toSet() }.getOrNull() ?: emptySet()
             val notInterestedIds = runCatching { userPreferencesRepository?.notInterestedSongIdsFlow?.first() }.getOrNull() ?: emptySet()
+
+            // Fetch recently played and over-rotated songs to prevent repetitive tracks in auto-queue
+            val recentPlayedSongIds = HashSet<String>()
+            val highlyRotatedSongIds = HashSet<String>()
+            runCatching {
+                val recentEngagements = engagementDaoRef?.getRecentlyPlayedSongs(40).orEmpty()
+                recentEngagements.forEach {
+                    recentPlayedSongIds.add(it.songId)
+                    recentPlayedSongIds.add(it.songId.removePrefix("youtube_"))
+                    val ext = YouTubeIdUtils.extractVideoId(it.songId)
+                    if (ext.isNotBlank()) recentPlayedSongIds.add(ext)
+                }
+                val topEngagements = engagementDaoRef?.getTopPlayedSongs(25).orEmpty()
+                topEngagements.filter { it.playCount >= 6 }.forEach {
+                    highlyRotatedSongIds.add(it.songId)
+                    highlyRotatedSongIds.add(it.songId.removePrefix("youtube_"))
+                    val ext = YouTubeIdUtils.extractVideoId(it.songId)
+                    if (ext.isNotBlank()) highlyRotatedSongIds.add(ext)
+                }
+            }
 
             val newItems = fetched.filterNot { item ->
                 val ytId = YouTubeIdUtils.extractVideoId(item.mediaId)
@@ -490,19 +518,39 @@ object AutoQueueManager {
                 item.mediaId in dislikedSongIds ||
                 (ytId.isNotBlank() && ytId in dislikedYtIds) ||
                 item.mediaId in notInterestedIds ||
-                (ytId.isNotBlank() && ytId in notInterestedIds)
+                (ytId.isNotBlank() && ytId in notInterestedIds) ||
+                (ytId.isNotBlank() && ytId in sessionQueuedIds) ||
+                (ytId.isNotBlank() && ytId in recentPlayedSongIds) ||
+                (ytId.isNotBlank() && ytId in highlyRotatedSongIds) ||
+                item.mediaId in sessionQueuedIds ||
+                item.mediaId in recentPlayedSongIds ||
+                item.mediaId in highlyRotatedSongIds
             }.let { items ->
+                var filtered = items
                 if (filterCoverLofi) {
-                    items.filterNot { item ->
+                    filtered = filtered.filterNot { item ->
                         val title = item.mediaMetadata.title?.toString().orEmpty()
                         val artist = item.mediaMetadata.artist?.toString().orEmpty()
-                        ContentFilterUtils.isCoverOrLofi(title, artist, filterKeywords = filterKeywords)
+                        val album = item.mediaMetadata.albumTitle?.toString().orEmpty()
+                        ContentFilterUtils.isCoverOrLofi(title, artist, album, filterKeywords = filterKeywords)
                     }
-                } else items
+                }
+                if (pureYtMusic) {
+                    filtered = filtered.filterNot { item ->
+                        val title = item.mediaMetadata.title?.toString().orEmpty()
+                        ContentFilterUtils.isVideoTitle(title)
+                    }
+                }
+                filtered
             }
 
             if (newItems.isNotEmpty()) {
                 consecutiveEmptyFetches = 0
+                for (item in newItems) {
+                    val yt = YouTubeIdUtils.extractVideoId(item.mediaId)
+                    if (yt.isNotBlank()) sessionQueuedIds.add(yt)
+                    sessionQueuedIds.add(item.mediaId)
+                }
                 withContext(Dispatchers.Main) {
                     livePlayer()?.addMediaItems(newItems)
                     onQueueItemsAddedCallback?.invoke()
@@ -567,12 +615,46 @@ object AutoQueueManager {
     }
 
     private suspend fun resolveVideoId(mediaId: String): String? {
+        val extractedDirect = YouTubeIdUtils.extractVideoId(mediaId)
+        if (extractedDirect.length == 11 && extractedDirect.matches(Regex("^[a-zA-Z0-9_-]{11}$"))) {
+            return extractedDirect
+        }
         val clean = normalizeId(mediaId)
         if (clean.length == 11 && clean.matches(Regex("^[a-zA-Z0-9_-]{11}$"))) return clean
+
+        // Check if live player holds this item with a content URI in extras or local configuration
+        val playerUri = withContext(Dispatchers.Main) {
+            val p = livePlayer() ?: return@withContext null
+            val cur = p.currentMediaItem
+            if (cur != null && (cur.mediaId == mediaId || cur.mediaId == clean)) {
+                cur.mediaMetadata.extras?.getString(MediaItemBuilder.EXTERNAL_EXTRA_CONTENT_URI)
+                    ?: cur.localConfiguration?.uri?.toString()
+            } else {
+                for (i in 0 until p.mediaItemCount) {
+                    val item = p.getMediaItemAt(i)
+                    if (item.mediaId == mediaId || item.mediaId == clean) {
+                        return@withContext item.mediaMetadata.extras?.getString(MediaItemBuilder.EXTERNAL_EXTRA_CONTENT_URI)
+                            ?: item.localConfiguration?.uri?.toString()
+                    }
+                }
+                null
+            }
+        }
+        if (!playerUri.isNullOrBlank()) {
+            val fromUri = YouTubeIdUtils.extractVideoId(playerUri)
+            if (fromUri.length == 11 && fromUri.matches(Regex("^[a-zA-Z0-9_-]{11}$"))) {
+                return fromUri
+            }
+        }
+
         val dao = musicDaoRef ?: return null
         val longId = mediaId.toLongOrNull() ?: return null
         val entity = runCatching { dao.getSongByIdOnce(longId) }.getOrNull() ?: return null
         val uri = entity.contentUriString
+        val fromEntity = YouTubeIdUtils.extractVideoId(uri)
+        if (fromEntity.length == 11 && fromEntity.matches(Regex("^[a-zA-Z0-9_-]{11}$"))) {
+            return fromEntity
+        }
         return if (uri.startsWith("youtube://")) uri.removePrefix("youtube://") else null
     }
 

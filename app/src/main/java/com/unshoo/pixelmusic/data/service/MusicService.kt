@@ -2965,8 +2965,14 @@ class MusicService : MediaLibraryService() {
             else -> 0
         }
 
-        val preparedItems = restoredItems.toMutableList()
-        val latestItem = preparedItems.getOrNull(resolvedIndex) ?: return
+        // Device-friendly queue restore: only restore the left songs in the queue after the last played song
+        val leftItems = if (resolvedIndex in restoredItems.indices) {
+            restoredItems.subList(resolvedIndex, restoredItems.size)
+        } else {
+            restoredItems
+        }
+        val preparedItems = leftItems.toMutableList()
+        val latestItem = preparedItems.firstOrNull() ?: return
 
         // Do not block player restoration on resolving the track's streaming URI from network.
         // Instead, restore immediately with the unresolved media item so the UI displays the song instantly.
@@ -2990,10 +2996,10 @@ class MusicService : MediaLibraryService() {
 
             isRestoringPlaybackSnapshot = true
             try {
-                // PixelPlayer OSS pattern: Restore entire multi-item queue into ExoPlayer
+                // Restore only remaining upcoming tracks with the last-played song placed cleanly at index 0
                 player.setMediaItems(
                     preparedItems,
-                    resolvedIndex,
+                    0,
                     snapshot.currentPositionMs.coerceAtLeast(0L)
                 )
                 player.repeatMode = safeRepeatMode
@@ -3010,9 +3016,8 @@ class MusicService : MediaLibraryService() {
         }
 
         Timber.tag(TAG).i(
-            "Restored playback queue snapshot: items=%d index=%d position=%d",
+            "Restored playback queue snapshot: leftItems=%d position=%d",
             preparedItems.size,
-            resolvedIndex,
             snapshot.currentPositionMs
         )
         schedulePlaybackSnapshotPersist(immediate = true)

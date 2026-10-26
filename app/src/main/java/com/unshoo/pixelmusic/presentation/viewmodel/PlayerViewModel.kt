@@ -1379,36 +1379,7 @@ class PlayerViewModel @Inject constructor(
                 }
             }
 
-            val allSongsById = libraryStateHolder.allSongsById.value
-            fun mapSnapshotItemToSong(itemSnapshot: PlaybackQueueItemSnapshot): Song {
-                return allSongsById[itemSnapshot.mediaId] ?: Song(
-                    id = itemSnapshot.mediaId,
-                    title = itemSnapshot.title?.takeIf { it.isNotBlank() } ?: context.getString(R.string.unknown_song_title),
-                    artist = itemSnapshot.artist?.takeIf { it.isNotBlank() } ?: context.getString(R.string.unknown_artist),
-                    artistId = -1L,
-                    album = itemSnapshot.albumTitle?.takeIf { it.isNotBlank() } ?: context.getString(R.string.unknown_album),
-                    albumId = -1L,
-                    path = "",
-                    contentUriString = itemSnapshot.uri,
-                    albumArtUriString = itemSnapshot.artworkUri,
-                    duration = itemSnapshot.durationMs ?: 0L,
-                    dateAdded = System.currentTimeMillis(),
-                    mimeType = null,
-                    bitrate = null,
-                    sampleRate = null,
-                    youtubeId = if (itemSnapshot.mediaId.startsWith("youtube_")) {
-                        itemSnapshot.mediaId.removePrefix("youtube_")
-                    } else if (itemSnapshot.uri.startsWith("youtube://")) {
-                        itemSnapshot.uri.removePrefix("youtube://")
-                    } else if (itemSnapshot.mediaId.length == 11 && !itemSnapshot.mediaId.startsWith("external:")) {
-                        itemSnapshot.mediaId
-                    } else {
-                        null
-                    }
-                )
-            }
-
-            val restoredQueueList: List<Song> = snapshot?.items?.map(::mapSnapshotItemToSong).orEmpty()
+            val restoredQueueList: List<Song> = snapshot?.items?.map { mapSnapshotItemToSong(it) }.orEmpty()
             val resolvedIndex = when {
                 snapshot != null && snapshot.currentIndex in restoredQueueList.indices -> snapshot.currentIndex
                 !snapshot?.currentMediaId.isNullOrBlank() -> {
@@ -1417,12 +1388,21 @@ class PlayerViewModel @Inject constructor(
                 else -> 0
             }
 
-            val latestSongResolved: Song = restoredQueueList.getOrNull(resolvedIndex)
+            // Device-friendly: only restore the left songs in the queue after the last played song
+            val remainingQueueList = if (restoredQueueList.isNotEmpty() && resolvedIndex in restoredQueueList.indices) {
+                restoredQueueList.subList(resolvedIndex, restoredQueueList.size)
+            } else if (restoredQueueList.isNotEmpty()) {
+                restoredQueueList
+            } else {
+                emptyList()
+            }
+
+            val latestSongResolved: Song = remainingQueueList.firstOrNull()
                 ?: runCatching { musicRepository.getLastPlayedSong() }.getOrNull()
                 ?: return@launch
 
-            val fullQueue = if (restoredQueueList.isNotEmpty()) {
-                restoredQueueList.toPersistentList()
+            val fullQueue = if (remainingQueueList.isNotEmpty()) {
+                remainingQueueList.toPersistentList()
             } else {
                 persistentListOf(latestSongResolved)
             }
@@ -1441,7 +1421,7 @@ class PlayerViewModel @Inject constructor(
                     if (state.currentSong == null) {
                         state.copy(
                             currentSong = latestSongResolved,
-                            currentMediaItemIndex = resolvedIndex,
+                            currentMediaItemIndex = 0,
                             repeatMode = snapshot?.repeatMode ?: Player.REPEAT_MODE_OFF,
                             isShuffleEnabled = snapshot?.shuffleEnabled ?: false,
                             totalDuration = latestSongResolved.duration
@@ -4858,14 +4838,18 @@ class PlayerViewModel @Inject constructor(
                     lastMediaId = null
                 )
                 lastQueueSignature = emptySignature
-                _playerUiState.update {
-                    if (it.currentPlaybackQueue.isNotEmpty() || it.currentQueueSourceName.isNotEmpty()) {
-                        it.copy(
-                            currentPlaybackQueue = kotlinx.collections.immutable.persistentListOf(),
-                            currentQueueSourceName = ""
-                        )
-                    } else {
-                        it
+                // Do NOT wipe restored queue while the player is idle/paused with a restored current song
+                val currentSong = playbackStateHolder.stablePlayerState.value.currentSong
+                if (currentSong == null) {
+                    _playerUiState.update {
+                        if (it.currentPlaybackQueue.isNotEmpty() || it.currentQueueSourceName.isNotEmpty()) {
+                            it.copy(
+                                currentPlaybackQueue = kotlinx.collections.immutable.persistentListOf(),
+                                currentQueueSourceName = ""
+                            )
+                        } else {
+                            it
+                        }
                     }
                 }
                 return@launch
@@ -4962,6 +4946,38 @@ class PlayerViewModel @Inject constructor(
                 Timber.w(it, "Failed to persist playback snapshot from PlayerViewModel")
             }
         }
+    }
+
+    private fun mapSnapshotItemToSong(
+        itemSnapshot: PlaybackQueueItemSnapshot,
+        allSongsById: Map<String, Song>? = null
+    ): Song {
+        val songsMap = allSongsById ?: libraryStateHolder.allSongsById.value
+        return songsMap[itemSnapshot.mediaId] ?: Song(
+            id = itemSnapshot.mediaId,
+            title = itemSnapshot.title?.takeIf { it.isNotBlank() } ?: context.getString(R.string.unknown_song_title),
+            artist = itemSnapshot.artist?.takeIf { it.isNotBlank() } ?: context.getString(R.string.unknown_artist),
+            artistId = -1L,
+            album = itemSnapshot.albumTitle?.takeIf { it.isNotBlank() } ?: context.getString(R.string.unknown_album),
+            albumId = -1L,
+            path = "",
+            contentUriString = itemSnapshot.uri,
+            albumArtUriString = itemSnapshot.artworkUri,
+            duration = itemSnapshot.durationMs ?: 0L,
+            dateAdded = System.currentTimeMillis(),
+            mimeType = null,
+            bitrate = null,
+            sampleRate = null,
+            youtubeId = if (itemSnapshot.mediaId.startsWith("youtube_")) {
+                itemSnapshot.mediaId.removePrefix("youtube_")
+            } else if (itemSnapshot.uri.startsWith("youtube://")) {
+                itemSnapshot.uri.removePrefix("youtube://")
+            } else if (itemSnapshot.mediaId.length == 11 && !itemSnapshot.mediaId.startsWith("external:")) {
+                itemSnapshot.mediaId
+            } else {
+                null
+            }
+        )
     }
 
     private fun applyPreferredRepeatMode(@Player.RepeatMode mode: Int) {
@@ -6423,9 +6439,14 @@ class PlayerViewModel @Inject constructor(
                             // Instant YT Music history sync for the song just launched.
                             player.currentMediaItem?.let { registerYoutubePlaybackHistoryIfNeeded(it) }
                             _playerUiState.update { it.copy(isLoadingInitialSongs = false) }
-                            if (!skipAutoQueueSchedule && songsToPlay.size <= 1) {
-                                // Auto Queue automatically refills related songs with an adaptive debounce delay so tap-to-play gets 100% priority
-                                com.unshoo.pixelmusic.data.remote.youtube.AutoQueueManager.scheduleAdaptiveRefill(forceRefresh = true)
+                            if (!skipAutoQueueSchedule) {
+                                if (songsToPlay.size <= 1) {
+                                    // Auto Queue automatically refills related songs with an adaptive debounce delay so tap-to-play gets 100% priority
+                                    com.unshoo.pixelmusic.data.remote.youtube.AutoQueueManager.scheduleAdaptiveRefill(forceRefresh = true)
+                                } else {
+                                    // Multi-song or restored queue: keep AutoQueue ready to refill smoothly when approaching the end of the queue
+                                    com.unshoo.pixelmusic.data.remote.youtube.AutoQueueManager.scheduleAdaptiveRefill(delayMs = 1500L, forceRefresh = false)
+                                }
                             }
                         }
 
@@ -7667,11 +7688,28 @@ class PlayerViewModel @Inject constructor(
                     controller.pause()
                 } else {
                     if (controller.currentMediaItem == null) {
-                        val currentQueue = _playerUiState.value.currentPlaybackQueue
-                        val currentSong = playbackStateHolder.stablePlayerState.value.currentSong
-                        when {
-                            currentQueue.isNotEmpty() && currentSong != null -> {
-                                viewModelScope.launch {
+                        viewModelScope.launch {
+                            var currentQueue = _playerUiState.value.currentPlaybackQueue
+                            val currentSong = playbackStateHolder.stablePlayerState.value.currentSong
+                            if (currentQueue.isEmpty() && currentSong != null) {
+                                val snapshot = runCatching { userPreferencesRepository.getPlaybackQueueSnapshotOnce() }.getOrNull()
+                                if (snapshot != null && snapshot.items.isNotEmpty()) {
+                                    val allSongsById = libraryStateHolder.allSongsById.value
+                                    val restored = snapshot.items.map { item -> mapSnapshotItemToSong(item, allSongsById) }
+                                    val idx = when {
+                                        !snapshot.currentMediaId.isNullOrBlank() -> restored.indexOfFirst { it.id == snapshot.currentMediaId }.takeIf { it >= 0 } ?: 0
+                                        snapshot.currentIndex in restored.indices -> snapshot.currentIndex
+                                        else -> 0
+                                    }
+                                    val leftSongs = if (idx in restored.indices) restored.subList(idx, restored.size) else restored
+                                    if (leftSongs.isNotEmpty()) {
+                                        currentQueue = leftSongs.toPlaybackQueue()
+                                        _playerUiState.update { it.copy(currentPlaybackQueue = currentQueue) }
+                                    }
+                                }
+                            }
+                            when {
+                                currentQueue.isNotEmpty() && currentSong != null -> {
                                     transitionSchedulerJob?.cancel()
                                     internalPlaySongs(
                                         currentQueue.toList(),
@@ -7679,12 +7717,10 @@ class PlayerViewModel @Inject constructor(
                                         _playerUiState.value.currentQueueSourceName
                                     )
                                 }
-                            }
-                            currentSong != null -> {
-                                loadAndPlaySong(currentSong)
-                            }
-                            else -> {
-                                viewModelScope.launch {
+                                currentSong != null -> {
+                                    loadAndPlaySong(currentSong)
+                                }
+                                else -> {
                                     val fallbackSong = musicRepository.getFirstPlayableSong()
                                     if (fallbackSong != null) {
                                         loadAndPlaySong(fallbackSong)
