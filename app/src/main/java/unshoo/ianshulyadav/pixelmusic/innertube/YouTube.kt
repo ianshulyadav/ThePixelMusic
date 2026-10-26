@@ -263,12 +263,23 @@ object YouTube {
 
         contents.forEach { content ->
             content.musicCardShelfRenderer?.let { renderer ->
+                val shelfArtist: Artist? = if (renderer.onTap.browseEndpoint?.isArtistEndpoint == true ||
+                    renderer.subtitle.runs?.any { it.text.contains("Artist", ignoreCase = true) } == true) {
+                    val name = renderer.title.runs?.firstOrNull()?.text?.trim()
+                    if (!name.isNullOrBlank()) {
+                        Artist(
+                            name = name,
+                            id = renderer.onTap.browseEndpoint?.browseId
+                        )
+                    } else null
+                } else null
+
                 topItems +=
                     listOfNotNull(SearchSummaryPage.fromMusicCardShelfRenderer(renderer))
                         .plus(
                             renderer.contents
                                 ?.mapNotNull { it.musicResponsiveListItemRenderer }
-                                ?.mapNotNull { SearchSummaryPage.fromMusicResponsiveListItemRenderer(it) }
+                                ?.mapNotNull { SearchSummaryPage.fromMusicResponsiveListItemRenderer(it, defaultArtist = shelfArtist) }
                                 .orEmpty()
                         )
                 return@forEach

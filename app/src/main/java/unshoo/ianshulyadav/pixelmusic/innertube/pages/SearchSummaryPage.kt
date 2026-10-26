@@ -95,25 +95,30 @@ data class SearchSummaryPage(
                                 ?.firstOrNull()
                                 ?.text ?: return null,
                         artists = run {
-                            // Guard against the card-shelf subtitle having no artist segment:
-                            // subtitle structure is [Type, Artist(s), Album, Duration].
-                            // When the structure is shorter (e.g. [Type, Duration]) the segment
-                            // at index 1 is a time string — we must not treat it as an artist name.
-                            val candidateSegment = subtitle?.getOrNull(1)
-                            val candidateArtists = candidateSegment?.oddElements()?.map {
-                                Artist(
-                                    name = it.text,
-                                    id = it.navigationEndpoint?.browseEndpoint?.browseId,
-                                )
+                            val artistEndpointSegment = subtitle?.firstOrNull { segment ->
+                                segment.any { PageHelper.isArtistEndpoint(it) }
                             }
-                            // If every candidate artist name parses as a duration, it is not an
-                            // artist — return null to fall through to the ?: return null guard.
-                            if (candidateArtists != null &&
-                                candidateArtists.all { it.name.parseTime() != null }) {
-                                return null  // skip this card — no usable artist info
+                            if (artistEndpointSegment != null) {
+                                val list = artistEndpointSegment.oddElements().mapNotNull {
+                                    val name = it.text.trim()
+                                    if (name.isNotEmpty() && !PageHelper.isNonAlbumMetadata(name) && !PageHelper.isMediaTypeMarker(name)) {
+                                        Artist(name = name, id = it.navigationEndpoint?.browseEndpoint?.browseId)
+                                    } else null
+                                }
+                                if (list.isNotEmpty()) return@run list
                             }
-                            candidateArtists ?: return null
-                        },
+
+                            val fallbackSegment = subtitle?.firstOrNull { segment ->
+                                val text = segment.firstOrNull()?.text?.trim().orEmpty()
+                                text.isNotEmpty() && !PageHelper.isMediaTypeMarker(text) && !PageHelper.isNonAlbumMetadata(text)
+                            }
+                            fallbackSegment?.oddElements()?.mapNotNull {
+                                val name = it.text.trim()
+                                if (name.isNotEmpty() && !PageHelper.isNonAlbumMetadata(name) && !PageHelper.isMediaTypeMarker(name)) {
+                                    Artist(name = name, id = it.navigationEndpoint?.browseEndpoint?.browseId)
+                                } else null
+                            }?.takeIf { it.isNotEmpty() }
+                        } ?: return null,
                         album = PageHelper.extractAlbumFromRuns(renderer.subtitle.runs)
                             ?: subtitle?.getOrNull(2)?.firstOrNull()?.let {
                                 Album(
@@ -176,13 +181,22 @@ data class SearchSummaryPage(
                             renderer.title.runs
                                 ?.firstOrNull()
                                 ?.text ?: return null,
-                        artists =
-                            subtitle?.getOrNull(1)?.oddElements()?.map {
-                                Artist(
-                                    name = it.text,
-                                    id = it.navigationEndpoint?.browseEndpoint?.browseId,
-                                )
-                            } ?: return null,
+                        artists = subtitle?.firstOrNull { segment ->
+                            segment.any { PageHelper.isArtistEndpoint(it) }
+                        }?.oddElements()?.mapNotNull {
+                            val name = it.text.trim()
+                            if (name.isNotEmpty() && !PageHelper.isNonAlbumMetadata(name) && !PageHelper.isMediaTypeMarker(name)) {
+                                Artist(name = name, id = it.navigationEndpoint?.browseEndpoint?.browseId)
+                            } else null
+                        } ?: subtitle?.firstOrNull { segment ->
+                            val text = segment.firstOrNull()?.text?.trim().orEmpty()
+                            text.isNotEmpty() && !PageHelper.isMediaTypeMarker(text) && !PageHelper.isNonAlbumMetadata(text)
+                        }?.oddElements()?.mapNotNull {
+                            val name = it.text.trim()
+                            if (name.isNotEmpty() && !PageHelper.isNonAlbumMetadata(name) && !PageHelper.isMediaTypeMarker(name)) {
+                                Artist(name = name, id = it.navigationEndpoint?.browseEndpoint?.browseId)
+                            } else null
+                        } ?: return null,
                         year = null,
                         thumbnail = renderer.thumbnail.musicThumbnailRenderer?.getThumbnailUrl() ?: return null,
                         explicit =
@@ -230,7 +244,10 @@ data class SearchSummaryPage(
             }
         }
 
-        fun fromMusicResponsiveListItemRenderer(renderer: MusicResponsiveListItemRenderer): YTItem? =
-            SearchPage.toYTItem(renderer)
+        fun fromMusicResponsiveListItemRenderer(
+            renderer: MusicResponsiveListItemRenderer,
+            defaultArtist: Artist? = null
+        ): YTItem? =
+            SearchPage.toYTItem(renderer, defaultArtist)
     }
 }

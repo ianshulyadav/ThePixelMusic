@@ -25,6 +25,7 @@ import unshoo.ianshulyadav.pixelmusic.innertube.models.clean
 import unshoo.ianshulyadav.pixelmusic.innertube.models.oddElements
 import unshoo.ianshulyadav.pixelmusic.innertube.models.splitBySeparator
 import unshoo.ianshulyadav.pixelmusic.innertube.utils.parseTime
+import com.unshoo.pixelmusic.utils.extractArtistsFromTitle
 
 data class SearchResult(
     val items: List<YTItem>,
@@ -32,7 +33,10 @@ data class SearchResult(
 )
 
 object SearchPage {
-    fun toYTItem(renderer: MusicResponsiveListItemRenderer): YTItem? {
+    fun toYTItem(
+        renderer: MusicResponsiveListItemRenderer,
+        defaultArtist: Artist? = null
+    ): YTItem? {
         val title = renderer.titleText ?: return null
         val thumbnail = renderer.thumbnail?.musicThumbnailRenderer?.getThumbnailUrl()
         val metadata = renderer.metadataGroups()
@@ -48,10 +52,25 @@ object SearchPage {
                     it != unshoo.ianshulyadav.pixelmusic.innertube.models.WatchEndpoint.WatchEndpointMusicSupportedConfigs.WatchEndpointMusicConfig.MUSIC_VIDEO_TYPE_ATV
                 } ?: false) || com.unshoo.pixelmusic.utils.ContentFilterUtils.isVideoTitle(title)
 
+                val extracted = PageHelper.extractArtists(renderer, title)
+                val artists = if (extracted.isNotEmpty()) {
+                    extracted
+                } else if (defaultArtist != null) {
+                    val (_, featArtists) = title.extractArtistsFromTitle()
+                    if (featArtists.isNotEmpty()) {
+                        listOf(defaultArtist) + featArtists.map { Artist(name = it, id = null) }
+                    } else {
+                        listOf(defaultArtist)
+                    }
+                } else {
+                    val (_, featArtists) = title.extractArtistsFromTitle()
+                    featArtists.map { Artist(name = it, id = null) }
+                }
+
                 SongItem(
                     id = renderer.playlistItemData?.videoId ?: endpoint?.videoId ?: return null,
                     title = title,
-                    artists = PageHelper.extractArtists(renderer, title),
+                    artists = artists,
                     album = PageHelper.extractAlbum(renderer)
                         ?: metadata.getOrNull(1)?.firstOrNull()?.let {
                             Album(
@@ -98,7 +117,8 @@ object SearchPage {
                             ?.playlistId
                             ?: return null,
                     title = title,
-                    artists = PageHelper.extractArtists(renderer, title).takeIf { it.isNotEmpty() },
+                    artists = PageHelper.extractArtists(renderer, title).takeIf { it.isNotEmpty() }
+                        ?: defaultArtist?.let { listOf(it) },
                     year = metadata.year(),
                     thumbnail = thumbnail ?: return null,
                     explicit = renderer.isExplicit,

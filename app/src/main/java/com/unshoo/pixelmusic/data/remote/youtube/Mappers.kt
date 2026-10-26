@@ -2,7 +2,9 @@ package com.unshoo.pixelmusic.data.remote.youtube
 
 import com.unshoo.pixelmusic.data.model.Song
 import com.unshoo.pixelmusic.data.model.ArtistRef
+import com.unshoo.pixelmusic.utils.extractArtistsFromTitle
 import unshoo.ianshulyadav.pixelmusic.innertube.models.SongItem
+import unshoo.ianshulyadav.pixelmusic.innertube.pages.PageHelper
 
 fun upgradeThumbnailUrlToQuality(
     url: String?,
@@ -82,10 +84,22 @@ fun SongItem.toYoutubeSong(): com.unshoo.pixelmusic.data.model.youtube.Song {
 }
 
 fun SongItem.toNativeSong(): Song {
-    val rawArtistName = artists.joinToString { it.name }
+    val validArtists = artists.filterNot {
+        PageHelper.isNonAlbumMetadata(it.name) || PageHelper.isMediaTypeMarker(it.name)
+    }
+    val rawArtistName = if (validArtists.isNotEmpty()) {
+        validArtists.joinToString { it.name }
+    } else {
+        val (_, featArtists) = title.extractArtistsFromTitle()
+        if (featArtists.isNotEmpty()) {
+            featArtists.joinToString(", ")
+        } else {
+            "Unknown Artist"
+        }
+    }
     val artistNames = com.unshoo.pixelmusic.data.stream.CloudMusicUtils.parseArtistNames(rawArtistName)
     val artistRefs = artistNames.mapIndexed { index, name ->
-        val originalArtist = artists.find { it.name.equals(name, ignoreCase = true) }
+        val originalArtist = validArtists.find { it.name.equals(name, ignoreCase = true) }
         val artistId = -(17_000_000_000_000L + kotlin.math.abs(name.lowercase().hashCode().toLong()))
         ArtistRef(
             id = artistId,
@@ -136,7 +150,15 @@ fun SongItem.toNativeSong(): Song {
 }
 
 fun com.unshoo.pixelmusic.data.model.youtube.Song.toNativeSong(): Song {
-    val artistNames = com.unshoo.pixelmusic.data.stream.CloudMusicUtils.parseArtistNames(artist)
+    val cleanArtist = if (artist.isNotBlank() &&
+        !PageHelper.isNonAlbumMetadata(artist) &&
+        !PageHelper.isMediaTypeMarker(artist)) {
+        artist
+    } else {
+        val (_, featArtists) = title.extractArtistsFromTitle()
+        if (featArtists.isNotEmpty()) featArtists.joinToString(", ") else "Unknown Artist"
+    }
+    val artistNames = com.unshoo.pixelmusic.data.stream.CloudMusicUtils.parseArtistNames(cleanArtist)
     val artistRefs = artistNames.mapIndexed { index, name ->
         val artistId = -(17_000_000_000_000L + kotlin.math.abs(name.lowercase().hashCode().toLong()))
         ArtistRef(

@@ -41,9 +41,41 @@ object PageHelper {
         return filteredRuns
     }
 
-    private val VIEWS_REGEX = Regex("""^\s*\d+([.,]\d+)?\s*(K|M|B|k|m|b|views|plays|visualizaciones|vues)?\s*$""", RegexOption.IGNORE_CASE)
+    private val COUNT_WORDS_REGEX = Regex(
+        """\b(plays?|views?|streams?|listeners?|subscribers?|audience|crores?|lakhs?|millions?|billions?|trillions?|thousands?|milliards?|mil|mio|reproducciones|visualizaciones|vues|écoutes|aufrufe)\b""",
+        RegexOption.IGNORE_CASE
+    )
 
-    private fun isAlbumEndpoint(run: Run): Boolean {
+    private val STANDALONE_COUNT_REGEX = Regex(
+        """^\s*[\d.,]+\s*(?:k|m|b|bn|t|cr)\s*$""",
+        RegexOption.IGNORE_CASE
+    )
+
+    private val MULTI_TOKEN_COUNT_REGEX = Regex(
+        """^\s*[\d.,]+\s*(?:crore|crores|lakh|lakhs|million|millions|billion|billions|trillion|trillions|thousand|thousands|mil|mio|milliard|milliards)\s*$""",
+        RegexOption.IGNORE_CASE
+    )
+
+    private val METADATA_ONLY_WORDS = setOf(
+        "plays", "views", "streams", "subscribers", "crore", "crores", "lakh", "lakhs",
+        "million", "millions", "billion", "billions", "trillion", "trillions", "thousand", "thousands"
+    )
+
+    fun isCountMetadata(text: String): Boolean {
+        val clean = text.replace('\u00A0', ' ').trim()
+        if (clean.isEmpty() || clean == "•") return true
+        val lower = clean.lowercase()
+
+        val hasDigits = clean.any { it.isDigit() }
+        if (hasDigits && COUNT_WORDS_REGEX.containsMatchIn(lower)) return true
+        if (!hasDigits && lower in METADATA_ONLY_WORDS) return true
+        if (STANDALONE_COUNT_REGEX.matches(clean)) return true
+        if (MULTI_TOKEN_COUNT_REGEX.matches(lower)) return true
+
+        return false
+    }
+
+    fun isAlbumEndpoint(run: Run): Boolean {
         val endpoint = run.navigationEndpoint?.browseEndpoint ?: return false
         val pageType = endpoint.browseEndpointContextSupportedConfigs?.browseEndpointContextMusicConfig?.pageType
         return endpoint.isAlbumEndpoint ||
@@ -51,7 +83,7 @@ object PageHelper {
                 (pageType != null && "ALBUM" in pageType)
     }
 
-    private fun isArtistEndpoint(run: Run): Boolean {
+    fun isArtistEndpoint(run: Run): Boolean {
         val endpoint = run.navigationEndpoint?.browseEndpoint ?: return false
         val pageType = endpoint.browseEndpointContextSupportedConfigs?.browseEndpointContextMusicConfig?.pageType
         return endpoint.isArtistEndpoint ||
@@ -59,20 +91,21 @@ object PageHelper {
                 (pageType != null && "ARTIST" in pageType)
     }
 
-    private fun isNonAlbumMetadata(text: String): Boolean {
+    fun isNonAlbumMetadata(text: String): Boolean {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return true
         if (trimmed == "•") return true
         if (trimmed.parseTime() != null) return true
-        if (VIEWS_REGEX.matches(trimmed)) return true
+        if (isCountMetadata(trimmed)) return true
         return false
     }
 
-    private fun isMediaTypeMarker(text: String): Boolean {
+    fun isMediaTypeMarker(text: String): Boolean {
         val lower = text.trim().lowercase()
         return lower in setOf(
             "song", "songs", "video", "videos", "single", "singles", "album", "albums", "ep",
-            "canción", "chanson", "lied", "canzone", "música", "music"
+            "canción", "chanson", "lied", "canzone", "música", "music", "artist", "artists",
+            "playlist", "playlists", "profile", "channel"
         )
     }
 
@@ -81,7 +114,8 @@ object PageHelper {
             .oddElements()
             .mapNotNull { run ->
                 val cleanName = run.text.trim()
-                if (cleanName.isNotBlank() && cleanName != "•" && cleanName != "&" && cleanName != ",") {
+                if (cleanName.isNotBlank() && cleanName != "•" && cleanName != "&" && cleanName != "," &&
+                    !isNonAlbumMetadata(cleanName) && !isMediaTypeMarker(cleanName)) {
                     Artist(
                         name = cleanName,
                         id = run.navigationEndpoint?.browseEndpoint?.browseId
