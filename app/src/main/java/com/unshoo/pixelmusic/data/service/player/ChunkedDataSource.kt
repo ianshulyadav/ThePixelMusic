@@ -44,8 +44,12 @@ class ChunkedDataSource(
         baseSpec = dataSpec
         position = dataSpec.position
 
+        val uriStr = dataSpec.uri.toString()
+        val isYoutubeHost = uriStr.contains("googlevideo.com", ignoreCase = true) ||
+            uriStr.contains("youtube.com", ignoreCase = true)
+
         val total = dataSpec.uri.getQueryParameter("clen")?.toLongOrNull()
-        if (total == null) {
+        if (!isYoutubeHost || total == null) {
             passthrough = true
             chunkOpen = true
             try {

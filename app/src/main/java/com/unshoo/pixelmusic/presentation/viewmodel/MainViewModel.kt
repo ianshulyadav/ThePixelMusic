@@ -24,6 +24,7 @@ class MainViewModel @Inject constructor(
     private val syncManager: SyncManager,
     private val datastoreRepository: com.unshoo.pixelmusic.data.remote.youtube.DatastoreRepository,
     private val playlistPreferencesRepository: PlaylistPreferencesRepository,
+    private val youTubeLibrarySyncManager: com.unshoo.pixelmusic.data.worker.YouTubeLibrarySyncManager,
     musicRepository: MusicRepository,
     userPreferencesRepository: UserPreferencesRepository
 ) : ViewModel() {
@@ -84,6 +85,14 @@ class MainViewModel @Inject constructor(
             } catch (error: Exception) {
                 LogUtils.e(this@MainViewModel, error, "Error fetching YouTube account info")
             }
+
+            // Low-priority gentle background sync for playlists & library when account is connected.
+            // syncNow() internally enforces a 6-hour interval, uses boundary detection (skipping unchanged playlists),
+            // and yields between pages so it never overheats the CPU or causes UI stutters.
+            try {
+                delay(4_000L) // Wait for UI to settle after startup
+                youTubeLibrarySyncManager.syncNow(force = false)
+            } catch (_: Exception) {}
         }
     }
 

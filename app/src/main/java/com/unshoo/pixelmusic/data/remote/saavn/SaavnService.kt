@@ -1,6 +1,7 @@
 package com.unshoo.pixelmusic.data.remote.saavn
 
 import android.util.Base64
+import com.unshoo.pixelmusic.data.lossless.audiosource.TitleMatch
 import com.unshoo.pixelmusic.data.preferences.StreamingAudioQuality
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -360,36 +361,37 @@ object SaavnService {
                     }
                 }
 
-                // 1. Title match (exact or clean)
-                val titleMatches = candTitleClean == wantedTitleLower ||
-                        (candTitleClean.contains(wantedTitleLower) && (candTitleClean.length - wantedTitleLower.length <= 10)) ||
-                        (wantedTitleLower.contains(candTitleClean) && (wantedTitleLower.length - candTitleClean.length <= 10))
-
+                // 1. Strict Title match (exact or Jaro-Winkler ratio >= 0.85)
+                val titleRatio = TitleMatch.ratio(wantedTitleLower, candTitleClean)
+                val titleMatches = candTitleClean == wantedTitleLower || titleRatio >= 0.85
                 if (!titleMatches) return@firstOrNull false
 
-                // 2. Artist match: check intersection or name substring containment
+                // 2. Strict Artist match: require intersection or primary artist match
                 val artistMatches = if (wantedArtistsLower.isEmpty()) {
                     true
                 } else {
                     val intersection = candArtists.intersect(wantedArtistsLower.toSet())
-                    intersection.isNotEmpty() || wantedArtistsLower.any { wanted ->
-                        candArtists.any { it.contains(wanted) || wanted.contains(it) }
+                    if (intersection.isNotEmpty()) {
+                        true
+                    } else {
+                        // Check if any primary artist matches with high similarity
+                        val candPrimary = candidate.artists.primary.map { it.name.lowercase(Locale.US).trim() }
+                        candPrimary.any { cp -> wantedArtistsLower.any { wa -> TitleMatch.ratio(cp, wa) >= 0.80 } }
                     }
                 }
-
                 if (!artistMatches) return@firstOrNull false
 
-                // 3. Duration match: within 12 seconds tolerance if both are available
+                // 3. Strict Duration match: within 5 seconds tolerance if available (down from loose 12s)
                 val candDuration = candidate.duration
                 val durationMatches = if (durationSeconds != null && candDuration != null && durationSeconds > 0) {
-                    abs(durationSeconds - candDuration) <= 12
+                    abs(durationSeconds - candDuration) <= 5
                 } else {
                     true
                 }
 
                 if (!durationMatches) {
                     Timber.tag(TAG).d(
-                        "resolveStream: Candidate \"${candidate.name}\" matches title/artist but duration differs (wanted=$durationSeconds, cand=$candDuration)"
+                        "resolveStream: Candidate \"${candidate.name}\" rejected: duration diff exceeds 5s (wanted=$durationSeconds, cand=$candDuration)"
                     )
                     return@firstOrNull false
                 }

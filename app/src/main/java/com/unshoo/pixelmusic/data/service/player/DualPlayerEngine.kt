@@ -561,6 +561,21 @@ class DualPlayerEngine @Inject constructor(
         resolvedUriCache.remove(uriString)
         activePlaybackResolvedUris.remove(uriString)
         activeResolutions.remove(uriString)?.cancel()
+        StreamChoice.forget(uriString)
+        val cleanId = when {
+            uriString.startsWith("youtube://") -> uriString.removePrefix("youtube://")
+            uriString.startsWith("youtube_") -> uriString.removePrefix("youtube_")
+            uriString.startsWith("monochrome://") -> uriString.removePrefix("monochrome://")
+            uriString.startsWith("monochrome_") -> uriString.removePrefix("monochrome_")
+            else -> null
+        }
+        if (cleanId != null) {
+            StreamChoice.forget(cleanId)
+            activePlaybackResolvedUris.remove("youtube://$cleanId")
+            activePlaybackResolvedUris.remove(cleanId)
+            resolvedUriCache.remove("youtube://$cleanId")
+            resolvedUriCache.remove(cleanId)
+        }
     }
 
     private var isReleased = false
@@ -662,8 +677,7 @@ class DualPlayerEngine @Inject constructor(
     }
 
     private val preCacheDataSourceFactory by lazy {
-        val chunkedHttp = ChunkedDataSource.Factory(preCacheHttpFactory)
-        val upstream = DefaultDataSource.Factory(context, chunkedHttp)
+        val upstream = DefaultDataSource.Factory(context, preCacheHttpFactory)
         CacheDataSource.Factory()
             .setCache(exoCache.cache)
             .setUpstreamDataSourceFactory(upstream)
@@ -1336,11 +1350,10 @@ class DualPlayerEngine @Inject constructor(
         // Lossless sources (ArchiveTune port): route `deezer://` through the on-the-fly Blowfish
         // decryptor and `tidal-dash://` through the progressive DASH stitcher; everything else
         // (http/https CDN links, flattened Apple Music files, local files) uses the default source.
-        // The router sits UNDER the cache, exactly like ArchiveTune's ResolvedSchemeRoutingDataSource,
-        // so the cache stores decrypted / stitched bytes and can serve them offline-fast next time.
+        // Lossless and custom audio streams bypass chunking completely via direct pure httpUpstream.
         val losslessRoutingFactory = LosslessSchemeRoutingDataSource.create(
             defaultFactory = baseDataSourceFactory,
-            httpUpstream = chunkedHttpDataSourceFactory,
+            httpUpstream = httpDataSourceFactory,
             httpClient = LosslessStreamResolver.httpClient,
         )
         val cacheDataSourceFactory = CacheDataSource.Factory()
