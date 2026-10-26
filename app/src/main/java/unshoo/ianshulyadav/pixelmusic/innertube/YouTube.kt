@@ -114,6 +114,11 @@ object YouTube {
     var locale: YouTubeLocale
         get() = innerTube.locale
         set(value) {
+            val oldLocale = innerTube.locale
+            if (oldLocale.gl != value.gl || oldLocale.hl != value.hl) {
+                visitorData = null
+                invalidateHomeCache()
+            }
             innerTube.locale = value
         }
     var visitorData: String?
@@ -366,22 +371,40 @@ object YouTube {
     }
 
     private fun MusicShelfRenderer.toSearchSummary(): SearchSummary? {
-        val items =
-            contents
-                ?.getItems()
-                ?.mapNotNull { SearchSummaryPage.fromMusicResponsiveListItemRenderer(it) }
-                ?.distinctBy { it.id }
-                .orEmpty()
-        if (items.isEmpty()) return null
-
-        val title =
+        val titleText =
             title
                 ?.runs
                 ?.joinToString(separator = "") { it.text }
                 ?.takeIf { it.isNotBlank() }
                 ?: "Other"
 
-        return SearchSummary(title = title, items = items)
+        val lowerTitle = titleText.lowercase()
+        val isVideoShelf = lowerTitle.contains("video") ||
+            lowerTitle.contains("vídeo") ||
+            lowerTitle.contains("vidéo") ||
+            lowerTitle.contains("видео") ||
+            lowerTitle.contains("동영상") ||
+            lowerTitle.contains("视频") ||
+            lowerTitle.contains("動画") ||
+            bottomEndpoint?.searchEndpoint?.params?.contains("QIQAW") == true ||
+            bottomEndpoint?.searchEndpoint?.params == SearchFilter.FILTER_VIDEO.value
+
+        val items =
+            contents
+                ?.getItems()
+                ?.mapNotNull { SearchSummaryPage.fromMusicResponsiveListItemRenderer(it) }
+                ?.map { item ->
+                    if (isVideoShelf && item is SongItem && !item.isVideo) {
+                        item.copy(isVideo = true)
+                    } else {
+                        item
+                    }
+                }
+                ?.distinctBy { it.id }
+                .orEmpty()
+        if (items.isEmpty()) return null
+
+        return SearchSummary(title = titleText, items = items)
     }
 
     suspend fun album(browseId: String, withSongs: Boolean = true): Result<AlbumPage> = runCatching {

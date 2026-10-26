@@ -40,6 +40,7 @@ import kotlinx.coroutines.FlowPreview
 
 import com.unshoo.pixelmusic.data.preferences.UserPreferencesRepository
 import com.unshoo.pixelmusic.data.preferences.SearchSource
+import com.unshoo.pixelmusic.utils.ContentFilterUtils
 import com.unshoo.pixelmusic.data.repository.MusicRepository
 import kotlinx.coroutines.flow.first
 
@@ -85,8 +86,14 @@ class SearchStateHolder @Inject constructor(
     private var activeFilterType: SearchFilterType = SearchFilterType.ALL
     private var isLoadingMore = false
 
-    private fun cacheKey(query: String, filter: SearchFilterType, source: SearchSource): String =
-        "${source.name}:${filter.name}:${query.lowercase().trim()}"
+    private fun cacheKey(
+        query: String,
+        filter: SearchFilterType,
+        source: SearchSource,
+        pureYtMusic: Boolean,
+        hideVideo: Boolean
+    ): String =
+        "${source.name}:${filter.name}:${pureYtMusic}:${hideVideo}:${query.lowercase().trim()}"
 
     fun initialize(scope: CoroutineScope) {
         this.scope = scope
@@ -110,7 +117,9 @@ class SearchStateHolder @Inject constructor(
 
                     val isLocalMode = userPreferencesRepository.localModeEnabledFlow.first()
                     val source = if (isLocalMode) SearchSource.LOCAL else userPreferencesRepository.searchSourceFlow.first()
-                    val key = cacheKey(query, currentFilter, source)
+                    val pureYtMusic = userPreferencesRepository.pureYtMusicOnlyFlow.first()
+                    val hideVideo = userPreferencesRepository.hideVideoFlow.first()
+                    val key = cacheKey(query, currentFilter, source, pureYtMusic, hideVideo)
                     val cached = searchResultCache.get(key)
                     if (cached != null) {
                         _searchResults.value = cached
@@ -122,8 +131,14 @@ class SearchStateHolder @Inject constructor(
                     if (source == SearchSource.LOCAL) {
                         try {
                             val results = musicRepository.searchAllOnce(query, currentFilter)
+                            val shouldFilterVideos = if (currentFilter == SearchFilterType.VIDEOS) false else (pureYtMusic || hideVideo)
+                            val finalResults = if (shouldFilterVideos) {
+                                results.filterNot { it is SearchResultItem.SongItem && ContentFilterUtils.isVideoSong(it.song) }
+                            } else {
+                                results
+                            }
                             if (request.requestId == latestSearchRequestId.get()) {
-                                val immutable = results.toImmutableList()
+                                val immutable = finalResults.toImmutableList()
                                 _searchResults.value = immutable
                                 _isSearching.value = false
                                 searchResultCache.put(key, immutable)
@@ -142,7 +157,13 @@ class SearchStateHolder @Inject constructor(
                         val results = withContext(Dispatchers.IO) {
                             val remote = searchYouTube(query, currentFilter)
                             if (remote.isEmpty()) {
-                                musicRepository.searchAllOnce(query, currentFilter)
+                                val localFallback = musicRepository.searchAllOnce(query, currentFilter)
+                                val shouldFilterVideos = if (currentFilter == SearchFilterType.VIDEOS) false else (pureYtMusic || hideVideo)
+                                if (shouldFilterVideos) {
+                                    localFallback.filterNot { it is SearchResultItem.SongItem && ContentFilterUtils.isVideoSong(it.song) }
+                                } else {
+                                    localFallback
+                                }
                             } else {
                                 remote
                             }
@@ -199,13 +220,14 @@ class SearchStateHolder @Inject constructor(
      * its own 3-way parallel-search-and-interleave instead of using YouTube's own ranked
      * summary, and had no shared mapper).
      */
-    private fun YTItem.toSearchResultItem(pureYtMusicOnly: Boolean): SearchResultItem? =
+    private fun YTItem.toSearchResultItem(filterVideos: Boolean): SearchResultItem? =
         when (this) {
             is SongItem -> {
-                val musicVideoType = endpoint?.watchEndpointMusicSupportedConfigs?.watchEndpointMusicConfig?.musicVideoType
-                val isMusicVideo = musicVideoType == "MUSIC_VIDEO_TYPE_OMV" || musicVideoType == "MUSIC_VIDEO_TYPE_UGC"
-                if (!pureYtMusicOnly || !isMusicVideo) {
-                    SearchResultItem.SongItem(toNativeSong())
+                val nativeSong = toNativeSong()
+                val isMusicVideo = this.isMusicVideo ||
+                    com.unshoo.pixelmusic.utils.ContentFilterUtils.isVideoSong(nativeSong)
+                if (!filterVideos || !isMusicVideo) {
+                    SearchResultItem.SongItem(nativeSong)
                 } else {
                     null
                 }
@@ -243,7 +265,9 @@ class SearchStateHolder @Inject constructor(
                 val result = YouTube.searchContinuation(token).getOrNull()
                 if (result != null) {
                     val pureYtMusicOnly = userPreferencesRepository.pureYtMusicOnlyFlow.first()
-                    val newItems = result.items.mapNotNull { it.toSearchResultItem(pureYtMusicOnly) }
+                    val hideVideo = userPreferencesRepository.hideVideoFlow.first()
+                    val shouldFilterVideos = if (filter == SearchFilterType.VIDEOS) false else (pureYtMusicOnly || hideVideo)
+                    val newItems = result.items.mapNotNull { it.toSearchResultItem(shouldFilterVideos) }
                     if (newItems.isNotEmpty()) {
                         val currentList = _searchResults.value
                         val updatedList = (currentList + newItems).toImmutableList()
@@ -261,6 +285,8 @@ class SearchStateHolder @Inject constructor(
 
     private suspend fun searchYouTube(query: String, filter: SearchFilterType): List<SearchResultItem> {
         val pureYtMusicOnly = userPreferencesRepository.pureYtMusicOnlyFlow.first()
+        val hideVideo = userPreferencesRepository.hideVideoFlow.first()
+        val shouldFilterVideos = pureYtMusicOnly || hideVideo
         val items = mutableListOf<SearchResultItem>()
         
         activeSearchQuery = query
@@ -268,83 +294,54 @@ class SearchStateHolder @Inject constructor(
         lastContinuationToken = null
 
         when (filter) {
-            SearchFilterType.ALL -> coroutineScope {
-                val songsDeferred = async { YouTube.search(query, YouTube.SearchFilter.FILTER_SONG).getOrNull() }
-                val artistsDeferred = async { YouTube.search(query, YouTube.SearchFilter.FILTER_ARTIST).getOrNull() }
-                val albumsDeferred = async { YouTube.search(query, YouTube.SearchFilter.FILTER_ALBUM).getOrNull() }
-                val playlistsDeferred = async { YouTube.search(query, YouTube.SearchFilter.FILTER_FEATURED_PLAYLIST).getOrNull() }
+            SearchFilterType.ALL -> {
+                val summaryResult = YouTube.searchSummary(query).getOrNull()
+                if (summaryResult != null && summaryResult.summaries.isNotEmpty()) {
+                    val filteredSummary = if (shouldFilterVideos) summaryResult.filterVideo(true) else summaryResult
+                    val rawItems = filteredSummary.summaries.flatMap { it.items }
+                    val mappedItems = rawItems.mapNotNull { it.toSearchResultItem(shouldFilterVideos) }
 
-                val songsResult = songsDeferred.await()
-                val artistsResult = artistsDeferred.await()
-                val albumsResult = albumsDeferred.await()
-                val playlistsResult = playlistsDeferred.await()
-
-                lastContinuationToken = songsResult?.continuation
-
-                val topSongs = mutableListOf<SearchResultItem>()
-                val mixedItems = mutableListOf<SearchResultItem>()
-
-                val songsList = songsResult?.items?.filterIsInstance<SongItem>()?.filterVideo(pureYtMusicOnly).orEmpty()
-                val artistsList = artistsResult?.items?.filterIsInstance<ArtistItem>().orEmpty()
-                val albumsList = albumsResult?.items?.filterIsInstance<AlbumItem>().orEmpty()
-                val playlistsList = playlistsResult?.items?.filterIsInstance<PlaylistItem>().orEmpty()
-
-                // Optimization: Pre-calculate search items off-main
-                withContext(Dispatchers.Default) {
-                    // Top 10 Songs
-                    val (top10Songs, remainingSongs) = if (songsList.size > 10) {
-                        songsList.take(10) to songsList.drop(10)
-                    } else {
-                        songsList to emptyList()
+                    fun itemKey(item: SearchResultItem): String = when (item) {
+                        is SearchResultItem.SongItem -> "song_${item.song.id}"
+                        is SearchResultItem.ArtistItem -> "artist_${item.artist.id}"
+                        is SearchResultItem.AlbumItem -> "album_${item.album.id}"
+                        is SearchResultItem.PlaylistItem -> "playlist_${item.playlist.id}"
                     }
 
-                    top10Songs.forEach { topSongs.add(SearchResultItem.SongItem(it.toNativeSong())) }
+                    val seenKeys = mutableSetOf<String>()
 
-                    // Interleave Artists, Albums, Playlists, and remaining Songs (1 of each per iteration)
-                    val artistIterator = artistsList.iterator()
-                    val albumIterator = albumsList.iterator()
-                    val playlistIterator = playlistsList.iterator()
-                    val songIterator = remainingSongs.iterator()
-
-                    while (artistIterator.hasNext() || albumIterator.hasNext() || playlistIterator.hasNext() || songIterator.hasNext()) {
-                        if (artistIterator.hasNext()) {
-                            val artist = artistIterator.next()
-                            mixedItems.add(SearchResultItem.ArtistItem(
-                                Artist(id = ytArtistId(artist.title), name = artist.title, songCount = 0, imageUrl = artist.thumbnail, channelId = artist.id)
-                            ))
-                        }
-                        if (albumIterator.hasNext()) {
-                            val album = albumIterator.next()
-                            val longId = album.browseId.hashCode().toLong()
-                            albumIdMap[longId] = album.browseId
-                            AlbumIdMapper.putMapping(appContext, longId, album.browseId)
-                            mixedItems.add(SearchResultItem.AlbumItem(
-                                Album(id = longId, title = album.title,
-                                    artist = album.artists?.joinToString { it.name }.orEmpty(),
-                                    year = album.year ?: 0, dateAdded = System.currentTimeMillis(),
-                                    albumArtUriString = album.thumbnail, songCount = 0)
-                            ))
-                        }
-                        if (playlistIterator.hasNext()) {
-                            val playlist = playlistIterator.next()
-                            mixedItems.add(SearchResultItem.PlaylistItem(
-                                Playlist(id = playlist.id, name = playlist.title, songIds = emptyList(), coverImageUri = playlist.thumbnail, source = "YOUTUBE")
-                            ))
-                        }
-                        if (songIterator.hasNext()) {
-                            val song = songIterator.next()
-                            mixedItems.add(SearchResultItem.SongItem(song.toNativeSong()))
+                    // 1-- Priority: Keep up to 10 top songs according to user's YouTube Music search ranking
+                    val topSongs = mappedItems.filterIsInstance<SearchResultItem.SongItem>().take(10)
+                    topSongs.forEach { songItem ->
+                        if (seenKeys.add(itemKey(songItem))) {
+                            items.add(songItem)
                         }
                     }
 
-                    items.addAll(topSongs)
-                    items.addAll(mixedItems)
+                    // 2-- After that: Keep the natural list of artists, albums, playlists, and further items
+                    mappedItems.forEach { item ->
+                        if (seenKeys.add(itemKey(item))) {
+                            items.add(item)
+                        }
+                    }
+                } else {
+                    val songsResult = YouTube.search(query, YouTube.SearchFilter.FILTER_SONG).getOrNull()
+                    lastContinuationToken = songsResult?.continuation
+                    songsResult?.items?.filterIsInstance<SongItem>()
+                        ?.let { list -> if (shouldFilterVideos) list.filterVideo(true) else list }
+                        ?.forEach { songItem ->
+                            songItem.toSearchResultItem(shouldFilterVideos)?.let { items.add(it) }
+                        }
                 }
             }
             SearchFilterType.SONGS -> {
                 val result = YouTube.search(query, YouTube.SearchFilter.FILTER_SONG).getOrNull()
                 lastContinuationToken = result?.continuation
-                result?.items?.filterIsInstance<SongItem>()?.filterVideo(pureYtMusicOnly)?.forEach { items.add(SearchResultItem.SongItem(it.toNativeSong())) }
+                result?.items?.filterIsInstance<SongItem>()
+                    ?.let { list -> if (shouldFilterVideos) list.filterVideo(true) else list }
+                    ?.forEach { songItem ->
+                        songItem.toSearchResultItem(shouldFilterVideos)?.let { items.add(it) }
+                    }
             }
             SearchFilterType.ARTISTS -> {
                 val result = YouTube.search(query, YouTube.SearchFilter.FILTER_ARTIST).getOrNull()
@@ -373,10 +370,10 @@ class SearchStateHolder @Inject constructor(
                 }
             }
             SearchFilterType.VIDEOS -> {
-                if (!pureYtMusicOnly) {
-                    val result = YouTube.search(query, YouTube.SearchFilter.FILTER_VIDEO).getOrNull()
-                    lastContinuationToken = result?.continuation
-                    result?.items?.filterIsInstance<SongItem>()?.forEach { items.add(SearchResultItem.SongItem(it.toNativeSong())) }
+                val result = YouTube.search(query, YouTube.SearchFilter.FILTER_VIDEO).getOrNull()
+                lastContinuationToken = result?.continuation
+                result?.items?.filterIsInstance<SongItem>()?.forEach {
+                    items.add(SearchResultItem.SongItem(it.toNativeSong()))
                 }
             }
         }

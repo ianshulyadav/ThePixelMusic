@@ -609,11 +609,20 @@ fun ArtistDetailScreen(
                         )
                     }
 
+                    val effectiveSongsCount = if (uiState.isOnlineArtist) {
+                        if (songs.isNotEmpty()) songs.size else uiState.popularSongs.size
+                    } else songs.size
+                    val artistSubtitleText = when {
+                        uiState.isOnlineArtist && !uiState.subscriberCount.isNullOrBlank() -> uiState.subscriberCount
+                        effectiveSongsCount > 0 -> formatSongCount(effectiveSongsCount)
+                        else -> "Artist"
+                    }
                     if (UseSharedCollapsibleTopBarProbe) {
                         SharedArtistTopBarProbe(
                             artist = artist,
                             effectiveImageUrl = uiState.effectiveImageUrl,
-                            songsCount = if (uiState.isOnlineArtist) artist.songCount else songs.size,
+                            songsCount = effectiveSongsCount,
+                            subtitleText = artistSubtitleText,
                             collapseFraction = collapseFraction,
                             headerHeight = currentTopBarHeightDp,
                             headerImageRequestSize = headerImageRequestSize,
@@ -639,7 +648,8 @@ fun ArtistDetailScreen(
                             hasCustomImage = !artist.customImageUri.isNullOrBlank(),
                             isSubscribed = isSubscribed,
                             onSubscribeClick = { viewModel.toggleSubscription() },
-                            songsCount = if (uiState.isOnlineArtist) artist.songCount else songs.size,
+                            songsCount = effectiveSongsCount,
+                            subtitleText = artistSubtitleText,
                             collapseFraction = collapseFraction,
                             headerHeight = currentTopBarHeightDp,
                             headerImageRequestSize = headerImageRequestSize,
@@ -1185,6 +1195,7 @@ private fun SharedArtistTopBarProbe(
     artist: Artist,
     effectiveImageUrl: String?,
     songsCount: Int,
+    subtitleText: String? = null,
     collapseFraction: Float,
     headerHeight: Dp,
     headerImageRequestSize: Size,
@@ -1271,7 +1282,7 @@ private fun SharedArtistTopBarProbe(
 
         CollapsibleCommonTopBar(
             title = artist.name,
-            subtitle = formatSongCount(songsCount),
+            subtitle = subtitleText ?: if (songsCount > 0) formatSongCount(songsCount) else "Artist",
             collapseFraction = collapseFraction,
             headerHeight = headerHeight,
             onBackClick = onBackPressed,
@@ -1389,6 +1400,7 @@ private fun CustomCollapsingTopBar(
     isSubscribed: Boolean,
     onSubscribeClick: () -> Unit,
     songsCount: Int,
+    subtitleText: String? = null,
     collapseFraction: Float, // 0.0 = expandido, 1.0 = colapsado
     headerHeight: Dp,
     headerImageRequestSize: Size,
@@ -1596,7 +1608,7 @@ private fun CustomCollapsingTopBar(
                         )
 
                         Text(
-                            text = formatSongCount(songsCount),
+                            text = subtitleText ?: if (songsCount > 0) formatSongCount(songsCount) else "Artist",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,

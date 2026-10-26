@@ -486,7 +486,8 @@ fun UnifiedPlayerSheetV2(
     // isQueueVisible depends on measured height and can briefly be false while
     // the queue is already opening; showQueueSheet is the authoritative state.
     val isPlayerSheetHandlingBack =
-        canHandlePlayerBack ||
+        (currentSheetContentState == PlayerSheetState.EXPANDED && showPlayerContentArea) ||
+            canHandlePlayerBack ||
             ((showQueueSheet || isQueueVisible) && !internalIsKeyboardVisible) ||
             isFullPlayerModalOpen ||
             castSheetState.showCastSheet ||

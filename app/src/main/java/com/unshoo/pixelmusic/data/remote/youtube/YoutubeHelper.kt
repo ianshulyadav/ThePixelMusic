@@ -658,16 +658,30 @@ object YoutubeHelper {
                     val speed = connectivityStateHolder.linkDownstreamBandwidthKbps.value
                     val recentlyUnstable = connectivityStateHolder.isNetworkRecentlyUnstable.value
                     val isConnectionFastAndStable = isWifi || (speed >= 2_000 && !recentlyUnstable)
-                    val targetCeiling = if (isMetered && !forceHigh && !isConnectionFastAndStable) {
-                        StreamingAudioQuality.MEDIUM.maxBitrateKbps
-                    } else {
-                        0 // No ceiling → highest available quality (256+ kbps)
+
+                    val effectiveQuality = when {
+                        recentlyUnstable || (speed in 1..499) -> StreamingAudioQuality.LOW
+                        !isConnectionFastAndStable || (speed in 500..1999) -> StreamingAudioQuality.MEDIUM
+                        else -> StreamingAudioQuality.HIGH
                     }
-                    StreamQualityPlan(
-                        quality = StreamingAudioQuality.AUTO,
-                        maxBitrateKbps = targetCeiling,
-                        preferLowFirst = false
-                    )
+
+                    when (effectiveQuality) {
+                        StreamingAudioQuality.LOW -> StreamQualityPlan(
+                            quality = StreamingAudioQuality.LOW,
+                            maxBitrateKbps = StreamingAudioQuality.LOW.maxBitrateKbps,
+                            preferLowFirst = true
+                        )
+                        StreamingAudioQuality.MEDIUM -> StreamQualityPlan(
+                            quality = StreamingAudioQuality.MEDIUM,
+                            maxBitrateKbps = 0,
+                            preferLowFirst = false
+                        )
+                        else -> StreamQualityPlan(
+                            quality = StreamingAudioQuality.HIGH,
+                            maxBitrateKbps = 0,
+                            preferLowFirst = false
+                        )
+                    }
                 }
                 StreamingAudioQuality.HIGH -> StreamQualityPlan(
                     quality = StreamingAudioQuality.HIGH,
@@ -676,8 +690,7 @@ object YoutubeHelper {
                 )
                 StreamingAudioQuality.MEDIUM -> StreamQualityPlan(
                     quality = StreamingAudioQuality.MEDIUM,
-                    maxBitrateKbps = StreamingAudioQuality.MEDIUM.maxBitrateKbps,
-                    // Medium: pick best under ceiling (not lowest).
+                    maxBitrateKbps = 0, // YouTube high (or JioSaavn 320k HQ)
                     preferLowFirst = false,
                 )
                 StreamingAudioQuality.LOW -> StreamQualityPlan(
@@ -835,7 +848,7 @@ object YoutubeHelper {
         )?.let { return it }
 
         // ── JIOSAAVN HIGH-FIDELITY STREAMING GATE (3s timeout → YouTube fallback) ──
-        if (isSaavnEnabled) {
+        if (isSaavnEnabled && plan.quality != StreamingAudioQuality.LOW) {
             try {
                 var effectiveTitle = song.title.ifBlank { savedSong?.title.orEmpty() }
                 var effectiveArtist = song.artist.ifBlank { savedSong?.artist.orEmpty() }
@@ -864,9 +877,9 @@ object YoutubeHelper {
                             artists = if (artistsList.isNotEmpty()) artistsList else listOf(effectiveArtist),
                             album = effectiveAlbum,
                             durationSeconds = effectiveDuration,
-                            streamingQuality = plan.quality,
-                            maxBitrateKbps = maxBitrate,
-                            saavnQuality = saavnQuality
+                            streamingQuality = if (plan.quality == StreamingAudioQuality.MEDIUM) StreamingAudioQuality.HIGH else plan.quality,
+                            maxBitrateKbps = if (plan.quality == StreamingAudioQuality.MEDIUM) 0 else maxBitrate,
+                            saavnQuality = if (plan.quality == StreamingAudioQuality.MEDIUM) SaavnAudioQuality.QUALITY_320 else saavnQuality
                         )
                     }
 
@@ -899,15 +912,17 @@ object YoutubeHelper {
 
         // ── Resolve at the selected quality FIRST (no forced low on HIGH) ──────
         // HIGH  → lowQuality=false, maxBitrate=0  → highest available instantly
-        // MEDIUM→ lowQuality=false, maxBitrate=128 → best under ceiling
+        // MEDIUM→ lowQuality=false, maxBitrate=0  → YouTube high (or JioSaavn high)
+        // LOW   → lowQuality=true,  maxBitrate=LOW.maxBitrateKbps → strictly low YouTube stream
         val useLowQuality = plan.quality == StreamingAudioQuality.LOW
+        val effectiveMaxBitrate = if (plan.quality == StreamingAudioQuality.MEDIUM) 0 else maxBitrate
         val result = try {
             getSongUrlFromYoutube(
                 context = context,
                 song = song,
                 retries = 1,
                 lowQuality = useLowQuality,
-                maxBitrateKbps = maxBitrate,
+                maxBitrateKbps = effectiveMaxBitrate,
             )
         } catch (primary: Exception) {
             PixelMusicHelper.printe(

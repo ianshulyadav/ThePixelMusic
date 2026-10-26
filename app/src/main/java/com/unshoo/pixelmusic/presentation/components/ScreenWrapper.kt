@@ -103,8 +103,8 @@ fun ScreenWrapper(
     // ── INPUT ROUTING (hit-testing) FIX ───────────────────────────────────────────
     // Only block input if this entry is strictly in the background (covered by a
     // higher entry in the visible stack) and is NOT the navigation target.
-    // The incoming screen and topmost screen must never have their touches consumed.
-    val isInputBlocked = myEntry != null && !isNavigationTarget && myIndex != -1 && topIndex != -1 && myIndex < topIndex
+    val isCurrentDestination = myEntry != null && (currentBackStackEntry?.id == myEntry.id || currentBackStackEntry?.destination?.route == myRoute)
+    val isInputBlocked = !isResumed && !isCurrentDestination && !isNavigationTarget && myEntry != null && myIndex != -1 && topIndex != -1 && myIndex < topIndex
 
     // Dim Logic:
     // If I am BACKGROUND (myIndex < topIndex) -> Dim.

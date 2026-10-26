@@ -1601,7 +1601,7 @@ fun SearchResultArtistItem(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = formatSongCount(artist.songCount),
+                    text = if (artist.songCount > 0) formatSongCount(artist.songCount) else "Artist",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

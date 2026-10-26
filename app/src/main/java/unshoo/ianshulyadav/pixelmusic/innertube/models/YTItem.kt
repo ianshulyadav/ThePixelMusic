@@ -77,9 +77,23 @@ data class SongItem(
     val endpoint: WatchEndpoint? = null,
     val setVideoId: String? = null,
     val likeStatus: String? = null,
+    val isVideo: Boolean = false,
 ) : YTItem() {
     override val shareLink: String
         get() = "https://music.youtube.com/watch?v=$id"
+
+    val isMusicVideo: Boolean
+        get() {
+            if (isVideo) return true
+            val musicVideoType = endpoint?.watchEndpointMusicSupportedConfigs?.watchEndpointMusicConfig?.musicVideoType
+            if (musicVideoType == MUSIC_VIDEO_TYPE_OMV ||
+                musicVideoType == MUSIC_VIDEO_TYPE_UGC ||
+                (musicVideoType != null && musicVideoType != WatchEndpoint.WatchEndpointMusicSupportedConfigs.WatchEndpointMusicConfig.MUSIC_VIDEO_TYPE_ATV)) {
+                return true
+            }
+            if (com.unshoo.pixelmusic.utils.ContentFilterUtils.isVideoTitle(title)) return true
+            return false
+        }
 }
 
 @Immutable
@@ -146,14 +160,7 @@ fun <T : YTItem> List<T>.filterVideo(enabled: Boolean = true) =
     if (enabled) {
         filter {
             when (it) {
-                is SongItem -> {
-                    val musicVideoType = it.endpoint?.watchEndpointMusicSupportedConfigs?.watchEndpointMusicConfig?.musicVideoType
-                    val isMusicVideo = musicVideoType == MUSIC_VIDEO_TYPE_OMV ||
-                        musicVideoType == MUSIC_VIDEO_TYPE_UGC ||
-                        (musicVideoType != null && musicVideoType != WatchEndpoint.WatchEndpointMusicSupportedConfigs.WatchEndpointMusicConfig.MUSIC_VIDEO_TYPE_ATV) ||
-                        com.unshoo.pixelmusic.utils.ContentFilterUtils.isVideoTitle(it.title)
-                    !isMusicVideo
-                }
+                is SongItem -> !it.isMusicVideo
                 else -> true
             }
         }

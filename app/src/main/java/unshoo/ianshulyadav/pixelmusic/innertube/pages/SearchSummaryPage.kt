@@ -51,13 +51,24 @@ data class SearchSummaryPage(
             this
         }
 
-    fun filterVideo(enabled: Boolean) =
+    fun filterVideo(enabled: Boolean = true) =
         if (enabled) {
             SearchSummaryPage(
                 summaries.mapNotNull { s ->
+                    val lowerTitle = s.title.lowercase()
+                    val isVideoShelf = lowerTitle.contains("video") ||
+                        lowerTitle.contains("vídeo") ||
+                        lowerTitle.contains("vidéo") ||
+                        lowerTitle.contains("видео") ||
+                        lowerTitle.contains("동영상") ||
+                        lowerTitle.contains("视频") ||
+                        lowerTitle.contains("動画")
+                    if (isVideoShelf) return@mapNotNull null
+                    val filteredItems = s.items.filterVideo()
+                    if (filteredItems.isEmpty()) return@mapNotNull null
                     SearchSummary(
                         title = s.title,
-                        items = s.items.filterVideo().ifEmpty { return@mapNotNull null },
+                        items = filteredItems,
                     )
                 },
             )
@@ -68,6 +79,13 @@ data class SearchSummaryPage(
     companion object {
         fun fromMusicCardShelfRenderer(renderer: MusicCardShelfRenderer): YTItem? {
             val subtitle = renderer.subtitle.runs?.splitBySeparator()
+            val isVideo = renderer.subtitle.runs?.any { run ->
+                val text = run.text.trim().lowercase()
+                text in setOf("video", "videos", "vídeo", "vídeos", "vidéo", "vidéos", "видео", "동영상", "视频", "動画")
+            } == true || renderer.header?.musicCardShelfHeaderBasicRenderer?.title?.runs?.any { run ->
+                val text = run.text.trim().lowercase()
+                text.contains("video") || text.contains("vídeo") || text.contains("vidéo") || text.contains("видео")
+            } == true
             return when {
                 renderer.onTap.watchEndpoint != null -> {
                     SongItem(
@@ -114,6 +132,8 @@ data class SearchSummaryPage(
                             renderer.subtitleBadges?.find {
                                 it.musicInlineBadgeRenderer?.icon?.iconType == "MUSIC_EXPLICIT_BADGE"
                             } != null,
+                        endpoint = renderer.onTap.watchEndpoint,
+                        isVideo = isVideo,
                     )
                 }
 
@@ -130,13 +150,14 @@ data class SearchSummaryPage(
                                 .find { it.buttonRenderer.icon?.iconType == "MUSIC_SHUFFLE" }
                                 ?.buttonRenderer
                                 ?.command
-                                ?.watchPlaylistEndpoint ?: return null,
+                                ?.watchPlaylistEndpoint,
                         radioEndpoint =
                             renderer.buttons
                                 .find { it.buttonRenderer.icon?.iconType == "MIX" }
                                 ?.buttonRenderer
                                 ?.command
-                                ?.watchPlaylistEndpoint ?: return null,
+                                ?.watchPlaylistEndpoint,
+                        subscriberCountText = renderer.subtitle.runs?.joinToString(separator = "") { it.text },
                     )
                 }
 
@@ -149,7 +170,8 @@ data class SearchSummaryPage(
                                 ?.buttonRenderer
                                 ?.command
                                 ?.anyWatchEndpoint
-                                ?.playlistId ?: return null,
+                                ?.playlistId
+                                ?: renderer.onTap.browseEndpoint.browseId,
                         title =
                             renderer.title.runs
                                 ?.firstOrNull()

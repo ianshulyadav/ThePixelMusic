@@ -56,7 +56,15 @@ fun formatListeningDurationCompact(milliseconds: Long): String {
 }
 
 fun formatSongCount(count: Int): String {
-    return if (count <= 1) "$count Song" else "$count Songs"
+    return when {
+        count <= 0 -> "0 Songs"
+        count == 1 -> "1 Song"
+        else -> "$count Songs"
+    }
+}
+
+fun formatArtistSongCount(count: Int): String {
+    return if (count <= 0) "Artist" else formatSongCount(count)
 }
 
 fun formatTimeAgo(timestamp: Long): String {

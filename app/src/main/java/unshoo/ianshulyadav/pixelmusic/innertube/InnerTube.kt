@@ -300,6 +300,17 @@ class InnerTube {
                 delay(currentDelay)
                 currentDelay = (currentDelay * factor).toLong()
             } catch (e: ClientRequestException) {
+                if (e.response.status == HttpStatusCode.BadRequest && visitorData != null) {
+                    // Stale visitorData bound to a previous region or client causes HTTP 400 Innertube error.
+                    // Reset visitorData to allow YouTube to mint a fresh token for the current locale.
+                    visitorData = null
+                    YouTube.visitorData = null
+                    lastException = e
+                    attempt++
+                    if (attempt >= maxAttempts) throw e
+                    delay(300L)
+                    continue
+                }
                 // Only retry 429 Too Many Requests
                 if (e.response.status != HttpStatusCode.TooManyRequests) throw e
                 lastException = e

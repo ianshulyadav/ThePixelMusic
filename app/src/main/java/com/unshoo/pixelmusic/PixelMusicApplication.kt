@@ -293,9 +293,11 @@ class PixelMusicApplication : Application(), ImageLoaderFactory, Configuration.P
                 userPreferencesRepository.get().contentLanguageFlow,
                 userPreferencesRepository.get().contentCountryFlow
             ) { language, country ->
+                val safeCountry = country.trim().uppercase().ifBlank { "IN" }
+                val safeLanguage = language.trim().replace('_', '-').ifBlank { "en" }
                 unshoo.ianshulyadav.pixelmusic.innertube.models.YouTubeLocale(
-                    gl = country,
-                    hl = language
+                    gl = safeCountry,
+                    hl = safeLanguage
                 )
             }.collect { locale ->
                 unshoo.ianshulyadav.pixelmusic.innertube.YouTube.locale = locale

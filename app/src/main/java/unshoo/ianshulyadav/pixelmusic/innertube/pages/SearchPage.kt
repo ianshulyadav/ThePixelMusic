@@ -39,6 +39,15 @@ object SearchPage {
         return when {
             renderer.isSong -> {
                 val endpoint = renderer.watchEndpoint()
+                val isVideo = renderer.flexColumns.drop(1).any { col ->
+                    col.musicResponsiveListItemFlexColumnRenderer.text?.runs?.any { run ->
+                        val text = run.text.trim().lowercase()
+                        text in setOf("video", "videos", "vídeo", "vídeos", "vidéo", "vidéos", "видео", "동영상", "视频", "動画")
+                    } == true
+                } || (endpoint?.watchEndpointMusicSupportedConfigs?.watchEndpointMusicConfig?.musicVideoType?.let {
+                    it != unshoo.ianshulyadav.pixelmusic.innertube.models.WatchEndpoint.WatchEndpointMusicSupportedConfigs.WatchEndpointMusicConfig.MUSIC_VIDEO_TYPE_ATV
+                } ?: false) || com.unshoo.pixelmusic.utils.ContentFilterUtils.isVideoTitle(title)
+
                 SongItem(
                     id = renderer.playlistItemData?.videoId ?: endpoint?.videoId ?: return null,
                     title = title,
@@ -54,6 +63,7 @@ object SearchPage {
                     thumbnail = thumbnail ?: return null,
                     explicit = renderer.isExplicit,
                     endpoint = endpoint,
+                    isVideo = isVideo,
                 )
             }
             renderer.isArtist -> {

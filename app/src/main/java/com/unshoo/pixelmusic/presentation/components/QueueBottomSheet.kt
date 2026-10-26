@@ -268,6 +268,10 @@ fun QueueBottomSheet(
         isFabExpanded = false
     }
 
+    BackHandler(enabled = !isFabExpanded) {
+        onDismiss()
+    }
+
     val infrequentPlayerState by viewModel.stablePlayerState.collectAsStateWithLifecycle()
     val autoQueueEnabled by viewModel.autoQueueEnabled.collectAsStateWithLifecycle()
 
