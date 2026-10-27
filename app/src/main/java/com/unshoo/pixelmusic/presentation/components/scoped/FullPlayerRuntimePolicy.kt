@@ -6,7 +6,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import com.unshoo.pixelmusic.presentation.viewmodel.PlayerSheetState
 
 internal data class FullPlayerRuntimePolicy(
@@ -17,23 +16,23 @@ internal data class FullPlayerRuntimePolicy(
  * Gates high-frequency UI updates (progress bar sampling, animations) behind
  * conditions that only flip at expansion thresholds — not on every frame.
  *
- * [expansionFraction] and [bottomSheetOpenFractionProvider] are read inside
- * [derivedStateOf], producing a Boolean that changes only when crossing the
- * thresholds. The open-fraction arrives as a draw-phase provider (it follows the
- * live queue offset), so a queue drag never recomposes the caller — the derived
- * boolean only re-emits when the 0.08 occlusion threshold is crossed.
+ * [expansionFraction] is read inside [derivedStateOf], producing a Boolean that
+ * changes only when crossing the 0.985 / 0.95 thresholds. This avoids per-frame
+ * recomposition of the caller during gestures.
+ *
+ * [currentSheetState] and [bottomSheetOpenFraction] are used as `remember` keys
+ * because they change infrequently (state transitions / queue sheet interactions).
  */
 @Composable
 internal fun rememberFullPlayerRuntimePolicy(
     currentSheetState: PlayerSheetState,
     expansionFraction: Animatable<Float, AnimationVector1D>,
-    bottomSheetOpenFractionProvider: () -> Float
+    bottomSheetOpenFraction: Float
 ): FullPlayerRuntimePolicy {
-    val latestFractionProvider = rememberUpdatedState(bottomSheetOpenFractionProvider)
-    val allowRealtimeUpdates by remember(currentSheetState, expansionFraction) {
+    val allowRealtimeUpdates by remember(currentSheetState, bottomSheetOpenFraction) {
         derivedStateOf {
             val ef = expansionFraction.value
-            val isOccluded = latestFractionProvider.value() >= 0.08f
+            val isOccluded = bottomSheetOpenFraction >= 0.08f
 
             // Enable live position updates once the player is >65% open.
             // The old 98.5% threshold was the cause of the seekbar "glitch" — the progress

@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.material3.ColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -50,7 +51,7 @@ internal fun BoxScope.UnifiedPlayerMiniAndFullLayers(
     isPreparingPlayback: Boolean,
     playerContentExpansionFraction: Animatable<Float, AnimationVector1D>,
     albumColorScheme: ColorScheme,
-    bottomSheetOpenFractionProvider: () -> Float,
+    bottomSheetOpenFraction: Float,
     fullPlayerVisualState: FullPlayerVisualState,
     containerHeight: Dp,
     currentQueueSourceName: String,
@@ -108,13 +109,15 @@ internal fun BoxScope.UnifiedPlayerMiniAndFullLayers(
             CompositionLocalProvider(
                 LocalMaterialTheme provides albumColorScheme
             ) {
-                // Depth scale is evaluated inside graphicsLayer (draw phase) from the
-                // position-driven provider, so queue drags/settles never recompose
-                // this scope — only the layer is re-transformed.
+                val fullPlayerScale by remember(bottomSheetOpenFraction) {
+                    // Keep the depth effect, but avoid aggressive full-screen rescaling on every frame.
+                    derivedStateOf { lerp(1f, 0.972f, bottomSheetOpenFraction) }
+                }
+
                 val fullPlayerRuntimePolicy = rememberFullPlayerRuntimePolicy(
                     currentSheetState = currentSheetContentState,
                     expansionFraction = playerContentExpansionFraction,
-                    bottomSheetOpenFractionProvider = bottomSheetOpenFractionProvider
+                    bottomSheetOpenFraction = bottomSheetOpenFraction
                 )
 
                 val currentPlaybackQueue by playerViewModel.queueFlow
@@ -132,9 +135,7 @@ internal fun BoxScope.UnifiedPlayerMiniAndFullLayers(
                             val ca = fullPlayerVisualState.contentAlpha
                             alpha = ca
                             translationY = fullPlayerVisualState.translationY
-                            // Subtle 0.972 depth when a sheet covers the player.
-                            val depthScale = lerp(1f, 0.972f, bottomSheetOpenFractionProvider())
-                            val cs = fullPlayerVisualState.contentScale * depthScale
+                            val cs = fullPlayerVisualState.contentScale * fullPlayerScale
                             scaleX = cs
                             scaleY = cs
                         }

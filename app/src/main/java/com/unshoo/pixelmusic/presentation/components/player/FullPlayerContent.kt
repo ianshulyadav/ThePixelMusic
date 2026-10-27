@@ -156,7 +156,6 @@ import com.unshoo.pixelmusic.presentation.viewmodel.SongInfoBottomSheetViewModel
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.unshoo.pixelmusic.presentation.components.PlaylistBottomSheet
 import com.unshoo.pixelmusic.presentation.viewmodel.PlaylistViewModel
-import com.unshoo.pixelmusic.presentation.components.scoped.MotionTokens
 import com.unshoo.pixelmusic.presentation.components.scoped.rememberSmoothProgress
 import com.unshoo.pixelmusic.presentation.components.subcomps.FetchLyricsDialog
 import com.unshoo.pixelmusic.presentation.viewmodel.LyricsSearchUiState
@@ -1056,34 +1055,12 @@ fun FullPlayerContent(
         visible = showLyricsSheet,
         enter = slideInVertically(
             initialOffsetY = { it / 5 },
-            animationSpec = tween(
-                durationMillis = MotionTokens.LYRICS_ENTER_DURATION_MS,
-                easing = MotionTokens.EmphasizedDecelerateEasing
-            )
-        ) + fadeIn(
-            animationSpec = tween(durationMillis = MotionTokens.LYRICS_FADE_IN_MS)
-        ) + scaleIn(
-            initialScale = 0.96f,
-            animationSpec = tween(
-                durationMillis = MotionTokens.LYRICS_ENTER_DURATION_MS,
-                easing = MotionTokens.EmphasizedDecelerateEasing
-            )
-        ),
+            animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing)
+        ) + fadeIn(animationSpec = tween(durationMillis = 160)),
         exit = slideOutVertically(
             targetOffsetY = { it / 6 },
-            animationSpec = tween(
-                durationMillis = MotionTokens.LYRICS_EXIT_DURATION_MS,
-                easing = MotionTokens.EmphasizedAccelerateEasing
-            )
-        ) + fadeOut(
-            animationSpec = tween(durationMillis = MotionTokens.LYRICS_FADE_OUT_MS)
-        ) + scaleOut(
-            targetScale = 0.97f,
-            animationSpec = tween(
-                durationMillis = MotionTokens.LYRICS_EXIT_DURATION_MS,
-                easing = MotionTokens.EmphasizedAccelerateEasing
-            )
-        ),
+            animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing)
+        ) + fadeOut(animationSpec = tween(durationMillis = 120)),
         modifier = Modifier.fillMaxSize()
     ) {
         LyricsSheet(

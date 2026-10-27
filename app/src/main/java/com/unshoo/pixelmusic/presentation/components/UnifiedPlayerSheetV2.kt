@@ -4,6 +4,8 @@ import android.widget.Toast
 import com.unshoo.pixelmusic.presentation.components.ExpressiveOfflineDialog
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.MutatorMutex
 import androidx.compose.foundation.background
@@ -20,7 +22,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -60,11 +61,8 @@ import com.unshoo.pixelmusic.data.model.Song
 import com.unshoo.pixelmusic.data.preferences.PlayerBackgroundStyle
 import com.unshoo.pixelmusic.data.preferences.sanitizeNavBarCornerRadius
 import com.unshoo.pixelmusic.presentation.components.player.FullPlayerAtmosphereBackground
-import com.unshoo.pixelmusic.presentation.components.scoped.LocalPlayerMotionState
-import com.unshoo.pixelmusic.presentation.components.scoped.MotionTokens
 import com.unshoo.pixelmusic.presentation.components.scoped.PlayerAlbumNavigationEffect
 import com.unshoo.pixelmusic.presentation.components.scoped.PlayerArtistNavigationEffect
-import com.unshoo.pixelmusic.presentation.components.scoped.PlayerMotionState
 import com.unshoo.pixelmusic.presentation.components.scoped.PlayerSheetPredictiveBackHandler
 import com.unshoo.pixelmusic.presentation.components.scoped.QueueSheetRuntimeEffects
 import com.unshoo.pixelmusic.presentation.components.scoped.SheetMotionController
@@ -266,20 +264,8 @@ fun UnifiedPlayerSheetV2(
     val playerContentExpansionFraction = playerViewModel.playerContentExpansionFraction
     val visualOvershootScaleY = remember { Animatable(1f) }
     val initialFullPlayerOffsetY = remember(density) { with(density) { 24.dp.toPx() } }
-    // Expressive M3 motion: entrances decelerate into place, exits accelerate away.
-    // The slightly longer expand gives the depth/scale choreography room to breathe.
-    val sheetExpandAnimSpec = remember {
-        tween<Float>(
-            durationMillis = MotionTokens.PLAYER_EXPAND_DURATION_MS,
-            easing = MotionTokens.EmphasizedDecelerateEasing
-        )
-    }
-    val sheetCollapseAnimSpec = remember {
-        tween<Float>(
-            durationMillis = MotionTokens.PLAYER_COLLAPSE_DURATION_MS,
-            easing = MotionTokens.EmphasizedAccelerateEasing
-        )
-    }
+    val sheetExpandAnimSpec = remember { tween<Float>(durationMillis = 280, easing = FastOutSlowInEasing) }
+    val sheetCollapseAnimSpec = remember { tween<Float>(durationMillis = 240, easing = FastOutSlowInEasing) }
     // Use expand spec as the default (collapse overrides it in SheetMotionController)
     val sheetAnimationSpec = sheetExpandAnimSpec
     val sheetAnimationMutex = remember { MutatorMutex() }
@@ -413,14 +399,6 @@ fun UnifiedPlayerSheetV2(
     val pendingSaveQueueOverlay = sheetModalOverlayController.pendingSaveQueueOverlay
     val selectedSongForInfo = sheetModalOverlayController.selectedSongForInfo
 
-    // Remembered providers keep the overlay's derived states stable across
-    // recompositions (a fresh lambda each pass would re-key every remember).
-    val queueOffsetProvider = remember(queueSheetOffset) {
-        { queueSheetOffset.value }
-    }
-    val queueHiddenOffsetProvider = remember(queueHiddenOffsetPx) {
-        { queueHiddenOffsetPx }
-    }
     val sheetOverlayState = rememberSheetOverlayState(
         density = density,
         showPlayerContentArea = showPlayerContentArea,
@@ -428,17 +406,13 @@ fun UnifiedPlayerSheetV2(
         showQueueSheet = showQueueSheet,
         queueHiddenOffsetPx = queueHiddenOffsetPx,
         screenHeightPx = screenHeightPx,
-        castSheetOpenFraction = castSheetState.castSheetOpenFraction,
-        // Feed the REAL offset so the scrim fade and full-player depth track the
-        // queue sheet 1:1 during drags and settle animations.
-        queueOffsetProvider = queueOffsetProvider,
-        queueHiddenOffsetProvider = queueHiddenOffsetProvider
+        castSheetOpenFraction = castSheetState.castSheetOpenFraction
     )
     val internalIsKeyboardVisible = sheetOverlayState.internalIsKeyboardVisible
     val actuallyShowSheetContent = sheetOverlayState.actuallyShowSheetContent
     val isQueueVisible = sheetOverlayState.isQueueVisible
-    val bottomSheetOpenFractionProvider = sheetOverlayState.bottomSheetOpenFractionProvider
-    val queueScrimAlphaProvider = sheetOverlayState.queueScrimAlphaProvider
+    val bottomSheetOpenFraction = sheetOverlayState.bottomSheetOpenFraction
+    val queueScrimAlpha = sheetOverlayState.queueScrimAlpha
     val shouldRenderQueueHost = true
     val isQueueTelemetryActive = showQueueSheet
 
@@ -612,50 +586,6 @@ fun UnifiedPlayerSheetV2(
 
     if (!actuallyShowSheetContent || !showPlayerContentArea) return
 
-    // Heavy-motion coordinator for the whole player tree. All reads happen through
-    // lambdas over snapshot state, so the object itself stays stable across frames;
-    // consumers only recompose when a motion flag flips at gesture boundaries.
-    val predictiveBackProgressState = rememberUpdatedState(predictiveBackCollapseProgress)
-    // CastSheetState is a fresh data class per recomposition; keep the lambda on
-    // the latest instance without re-keying the remembered motion state.
-    val latestCastSheetState = rememberUpdatedState(castSheetState)
-
-    // Threshold high-frequency per-frame signals into booleans via derivedStateOf
-    // so consumers only recompose when the flag actually flips — not on every frame.
-    val isPredictiveBackActive by remember {
-        derivedStateOf { predictiveBackProgressState.value > 0f }
-    }
-    val isCastSheetMoving by remember {
-        derivedStateOf {
-            // Cast sheet settles on exact 0f/1f endpoints; anything between is motion.
-            val cast = latestCastSheetState.value
-            cast.showCastSheet &&
-                cast.castSheetOpenFraction > 0.001f &&
-                cast.castSheetOpenFraction < 0.999f
-        }
-    }
-    val playerMotionState = remember(
-        currentSheetTranslationY,
-        playerContentExpansionFraction,
-        queueSheetOffset,
-        queueSheetController,
-        sheetBackAndDragState
-    ) {
-        PlayerMotionState(
-            playerSheetMotion = {
-                currentSheetTranslationY.isRunning ||
-                    playerContentExpansionFraction.isRunning ||
-                    sheetBackAndDragState.isDragging ||
-                    sheetBackAndDragState.isDraggingPlayerArea ||
-                    isPredictiveBackActive
-            },
-            queueSheetMotion = {
-                queueSheetOffset.isRunning || queueSheetController.isDragging
-            },
-            overlayMotion = { isCastSheetMoving }
-        )
-    }
-
     val playerSheetSemanticsDescription = remember(
         currentSheetContentState,
         infrequentPlayerState.currentSong?.title
@@ -664,7 +594,6 @@ fun UnifiedPlayerSheetV2(
             (infrequentPlayerState.currentSong?.title ?: "")
     }
 
-    CompositionLocalProvider(LocalPlayerMotionState provides playerMotionState) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -771,7 +700,7 @@ fun UnifiedPlayerSheetV2(
                             isPreparingPlayback = isPreparingPlayback,
                             playerContentExpansionFraction = playerContentExpansionFraction,
                             albumColorScheme = albumColorScheme,
-                            bottomSheetOpenFractionProvider = bottomSheetOpenFractionProvider,
+                            bottomSheetOpenFraction = bottomSheetOpenFraction,
                             fullPlayerVisualState = fullPlayerVisualState,
                             containerHeight = containerHeight,
                             currentQueueSourceName = currentQueueSourceName,
@@ -834,7 +763,7 @@ fun UnifiedPlayerSheetV2(
                 shouldRenderHost = shouldRenderQueueHost,
                 isQueueTelemetryActive = isQueueTelemetryActive,
                 albumColorScheme = albumColorScheme,
-                queueScrimAlphaProvider = queueScrimAlphaProvider,
+                queueScrimAlpha = queueScrimAlpha,
                 showQueueSheet = showQueueSheet,
                 queueHiddenOffsetPx = queueHiddenOffsetPx,
                 queueSheetOffset = queueSheetOffset,
@@ -871,5 +800,4 @@ fun UnifiedPlayerSheetV2(
         pendingOverlay = pendingSaveQueueOverlay,
         onDismissOverlay = { sheetModalOverlayController.dismissSaveQueueOverlay() }
     )
-    }
 }

@@ -2,6 +2,7 @@ package com.unshoo.pixelmusic.presentation.components.scoped
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -113,7 +114,7 @@ internal class MiniPlayerDismissGestureHandler(
                     targetValue = targetDismissOffset,
                     animationSpec = tween(
                         durationMillis = 200,
-                        easing = MotionTokens.EmphasizedAccelerateEasing
+                        easing = FastOutSlowInEasing
                     )
                 )
                 onDismissPlaylistAndShowUndo()

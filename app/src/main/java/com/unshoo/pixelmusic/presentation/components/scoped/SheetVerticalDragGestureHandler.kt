@@ -131,7 +131,7 @@ internal class SheetVerticalDragGestureHandler(
             } else {
                 val closeSpec = tween<Float>(
                     durationMillis = collapseAnimationDurationForFraction(currentFraction),
-                    easing = MotionTokens.EmphasizedAccelerateEasing
+                    easing = androidx.compose.animation.core.FastOutSlowInEasing
                 )
                 val clampedVelocity = verticalVelocity.coerceIn(-2600f, 2600f)
                 // No scale squash — keep it at 1f to avoid any secondary bounce.
@@ -160,7 +160,7 @@ internal class SheetVerticalDragGestureHandler(
             visualOvershootScaleY.snapTo(1f)
             onAnimateSheet(
                 restoreExpanded,
-                tween(durationMillis = 180, easing = MotionTokens.EmphasizedDecelerateEasing),
+                tween(durationMillis = 180, easing = androidx.compose.animation.core.FastOutSlowInEasing),
                 0f
             )
         }

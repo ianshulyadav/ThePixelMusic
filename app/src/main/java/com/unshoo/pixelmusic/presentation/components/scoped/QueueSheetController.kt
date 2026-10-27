@@ -2,11 +2,9 @@ package com.unshoo.pixelmusic.presentation.components.scoped
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.MonotonicFrameClock
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -30,14 +28,6 @@ internal class QueueSheetController(
     private val showQueueSheetProvider: () -> Boolean,
     private val onShowQueueSheetChange: (Boolean) -> Unit
 ) {
-    /**
-     * Snapshot-observed drag flag. Unlike [Animatable.isRunning] this is also true
-     * while finger-dragging (deltas are applied via snapTo, which never "runs").
-     * Renderers such as the atmosphere blur read it to drop quality during drags.
-     */
-    var isDragging by mutableStateOf(false)
-        private set
-
     private var dragOffsetCache: Float? = null
     private var pendingDragTarget: Float? = null
     private var dragSnapJob: Job? = null
@@ -100,7 +90,6 @@ internal class QueueSheetController(
 
     suspend fun animateTo(targetExpanded: Boolean) {
         resetDragPipeline()
-        isDragging = false
         val hiddenOffset = hiddenOffsetProvider()
         if (hiddenOffset == 0f) {
             onShowQueueSheetChange(targetExpanded)
@@ -122,25 +111,16 @@ internal class QueueSheetController(
         } else {
             1f
         }
-        // Distance-aware duration keeps short flicks snappy while full open/close
-        // gets the smooth, emphasized landing. Entrances decelerate; exits accelerate.
         val durationMillis = if (targetExpanded) {
-            (MotionTokens.QUEUE_EXPAND_BASE_MS +
-                (MotionTokens.QUEUE_EXPAND_TRAVEL_MS * travelFraction)).toInt()
+            (220f + (120f * travelFraction)).toInt()
         } else {
-            (MotionTokens.QUEUE_COLLAPSE_BASE_MS +
-                (MotionTokens.QUEUE_COLLAPSE_TRAVEL_MS * travelFraction)).toInt()
-        }
-        val easing = if (targetExpanded) {
-            MotionTokens.EmphasizedDecelerateEasing
-        } else {
-            MotionTokens.EmphasizedAccelerateEasing
+            (190f + (110f * travelFraction)).toInt()
         }
         queueSheetOffset.animateTo(
             targetValue = target,
             animationSpec = tween(
                 durationMillis = durationMillis,
-                easing = easing
+                easing = FastOutSlowInEasing
             )
         )
         onShowQueueSheetChange(targetExpanded)
@@ -155,7 +135,6 @@ internal class QueueSheetController(
         val hiddenOffset = hiddenOffsetProvider()
         if (hiddenOffset == 0f || !allowInteractionProvider()) return
         resetDragPipeline()
-        isDragging = true
         dragOffsetCache = queueSheetOffset.value
         onShowQueueSheetChange(true)
         scope.launch { queueSheetOffset.stop() }
@@ -173,17 +152,11 @@ internal class QueueSheetController(
 
     fun endDrag(totalDrag: Float, velocity: Float) {
         val hiddenOffset = hiddenOffsetProvider()
-        if (hiddenOffset == 0f || !allowInteractionProvider()) {
-            isDragging = false
-            return
-        }
+        if (hiddenOffset == 0f || !allowInteractionProvider()) return
 
-        // Freeze pending deltas before deciding snap target. The settle animation
-        // (queueSheetOffset.isRunning) keeps the reduced-blur window active, so
-        // clearing the drag flag here causes no visual quality pop.
+        // Freeze pending deltas before deciding snap target.
         val settledOffset = pendingDragTarget ?: dragOffsetCache ?: queueSheetOffset.value
         resetDragPipeline()
-        isDragging = false
 
         val isFastUpward = velocity < -520f
         val isFastDownward = velocity > 700f
