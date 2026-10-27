@@ -1503,6 +1503,7 @@ class MusicService : MediaLibraryService() {
      * and we only latch on success — so the very next 1s tick retries.
      */
     private fun ensureTelemetrySessionForCurrentItem(player: Player) {
+        if (!unshoo.ianshulyadav.pixelmusic.innertube.YouTube.hasLoginCookie()) return
         val item = player.currentMediaItem ?: return
         if (!isYoutubeMediaItem(item)) return
 
@@ -1557,7 +1558,7 @@ class MusicService : MediaLibraryService() {
                         listeningStatsTracker.onProgress(positionMs, true)
 
                         val item = tickPlayer.currentMediaItem
-                        if (item != null && isYoutubeMediaItem(item)) {
+                        if (item != null && isYoutubeMediaItem(item) && unshoo.ianshulyadav.pixelmusic.innertube.YouTube.hasLoginCookie()) {
                             // Watchdog: re-open the session if it went missing (expired cookie
                             // restored late, a torn-down session, a mid-queue transition that
                             // no listener reported).
@@ -1583,7 +1584,7 @@ class MusicService : MediaLibraryService() {
                 } catch (t: Throwable) {
                     Timber.tag(TAG).w(t, "Telemetry tick failed; loop continues")
                 }
-                delay(1000L)
+                delay(3000L)
             }
         }
     }
@@ -2846,11 +2847,11 @@ class MusicService : MediaLibraryService() {
             val rawContentUri = metadata.extras?.getString(MediaItemBuilder.EXTERNAL_EXTRA_CONTENT_URI)
             val localUri = mediaItem.localConfiguration?.uri?.toString()
             val uri = when {
-                !rawContentUri.isNullOrBlank() && !rawContentUri.startsWith("http") -> rawContentUri
                 mediaItem.mediaId.startsWith("youtube_") -> "youtube://${mediaItem.mediaId.removePrefix("youtube_")}"
                 mediaItem.mediaId.length == 11 && !mediaItem.mediaId.startsWith("external:") -> "youtube://${mediaItem.mediaId}"
                 rawContentUri?.startsWith("youtube://") == true -> rawContentUri
                 localUri?.startsWith("youtube://") == true -> localUri
+                !rawContentUri.isNullOrBlank() && !rawContentUri.startsWith("http") -> rawContentUri
                 !rawContentUri.isNullOrBlank() -> rawContentUri
                 else -> localUri
             }
@@ -3029,10 +3030,12 @@ class MusicService : MediaLibraryService() {
             return null
         }
         val uriStr = when {
-            snapshotItem.uri.isNotBlank() -> snapshotItem.uri
             snapshotItem.mediaId.startsWith("youtube_") -> "youtube://${snapshotItem.mediaId.removePrefix("youtube_")}"
             snapshotItem.mediaId.length == 11 && !snapshotItem.mediaId.startsWith("external:") -> "youtube://${snapshotItem.mediaId}"
             snapshotItem.mediaId.startsWith("-15") -> "youtube://${snapshotItem.mediaId}"
+            snapshotItem.uri.startsWith("youtube://") -> snapshotItem.uri
+            snapshotItem.uri.isNotBlank() && !snapshotItem.uri.startsWith("http") -> snapshotItem.uri
+            snapshotItem.uri.isNotBlank() -> snapshotItem.uri
             else -> snapshotItem.mediaId
         }
 
@@ -3469,6 +3472,7 @@ class MusicService : MediaLibraryService() {
     private var cachedWidgetArtBytes: ByteArray? = null
     private var cachedWidgetArtLoadFailureKey: String? = null
     private var cachedWidgetArtLoadFailureAtMs: Long = 0L
+    private val queueArtworkUriCache = androidx.collection.LruCache<String, Uri>(16)
 
     private fun invalidateCachedWidgetArtwork() {
         cachedWidgetArtSourceKey = null
@@ -3636,17 +3640,22 @@ class MusicService : MediaLibraryService() {
 
     private suspend fun resolveRepositoryArtworkUri(mediaId: String?): Uri? {
         val songId = mediaId?.takeIf { it.isNotBlank() } ?: return null
+        queueArtworkUriCache[songId]?.let { return it }
         val song = withContext(Dispatchers.IO) {
             musicRepository.getSong(songId).first()
         } ?: return null
 
-        return MediaItemBuilder.artworkUri(song.albumArtUriString)
+        val uri = MediaItemBuilder.artworkUri(song.albumArtUriString)
             ?: song.albumArtUriString
                 ?.takeIf { it.isNotBlank() }
                 ?.let { raw ->
                     if (raw.startsWith("/")) Uri.fromFile(java.io.File(raw))
                     else runCatching { Uri.parse(raw) }.getOrNull()
                 }
+        if (uri != null) {
+            queueArtworkUriCache.put(songId, uri)
+        }
+        return uri
     }
 
     private suspend fun loadArtworkBytesForWidget(uri: Uri): ByteArray? {

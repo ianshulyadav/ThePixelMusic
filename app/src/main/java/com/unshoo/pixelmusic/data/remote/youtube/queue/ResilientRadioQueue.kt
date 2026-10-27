@@ -97,7 +97,7 @@ class ResilientRadioQueue(
             val candidates = mutableListOf<SongEntity>()
             val seed = localSeed
 
-            if (seed != null) {
+            if (seed != null && seed.sourceType == com.unshoo.pixelmusic.data.database.SourceType.LOCAL && seed.filePath.isNotBlank()) {
                 runCatching {
                     candidates += musicDao.getLocalRelatedSongs(
                         songId = seed.id,
@@ -110,12 +110,12 @@ class ResilientRadioQueue(
                 if (seed.artistName.isNotBlank()) {
                     runCatching { candidates += musicDao.getSongsByArtistName(seed.artistName, 20) }
                 }
-                if (!seed.genre.isNullOrBlank() && !seed.genre.equals("YouTube", ignoreCase = true)) {
+                if (!seed.genre.isNullOrBlank()) {
                     runCatching { candidates += musicDao.getSongsByGenre(seed.genre, seed.id, 20) }
                 }
             }
             if (candidates.isEmpty()) {
-                runCatching { candidates += musicDao.getRandomSongs(limit = 30) }
+                return@withContext emptyList()
             }
 
             var fresh = candidates.distinctBy { it.id }.filter { it.id !in usedLocalIds }

@@ -1381,10 +1381,11 @@ class PlayerViewModel @Inject constructor(
 
             val restoredQueueList: List<Song> = snapshot?.items?.map { mapSnapshotItemToSong(it) }.orEmpty()
             val resolvedIndex = when {
-                snapshot != null && snapshot.currentIndex in restoredQueueList.indices -> snapshot.currentIndex
                 !snapshot?.currentMediaId.isNullOrBlank() -> {
-                    restoredQueueList.indexOfFirst { it.id == snapshot?.currentMediaId }.takeIf { it >= 0 } ?: 0
+                    restoredQueueList.indexOfFirst { it.id == snapshot?.currentMediaId }.takeIf { it >= 0 }
+                        ?: (if (snapshot != null && snapshot.currentIndex in restoredQueueList.indices) snapshot.currentIndex else 0)
                 }
+                snapshot != null && snapshot.currentIndex in restoredQueueList.indices -> snapshot.currentIndex
                 else -> 0
             }
 
@@ -2903,7 +2904,6 @@ class PlayerViewModel @Inject constructor(
                         stable.currentSong?.id,
                         controller.isConnected
                     )
-                    setupMediaControllerListeners()
                     syncCurrentPlayerState(controller)
                 }
             }
@@ -2918,23 +2918,9 @@ class PlayerViewModel @Inject constructor(
             return
         }
 
-        // BUGFIX (Full Player freezes after long background idle, notification stays fine):
-        // MediaController.isConnected staying true does NOT guarantee the ViewModel-side UI
-        // state (_stablePlayerState, current position, queue) is still in sync with it. The
-        // notification is built server-side directly from MusicService's own player/session, so
-        // it's unaffected by anything on this side - but the Full Player only reflects whatever
-        // was last pushed into these StateFlows. If a Player.Listener callback was ever missed,
-        // or a downstream distinctUntilChanged() suppressed an update while the screen wasn't
-        // being actively collected, the Full Player is left showing a stale snapshot with no
-        // trigger to correct itself, even though the controller is technically fine. Rather than
-        // relying purely on passive listener callbacks to eventually catch up,
-        // setupMediaControllerListeners() re-derives every piece of Full Player state directly
-        // from the live controller and is safe to call again on an already-connected controller
-        // (it removes/re-adds its own listener and every value it sets is freshly read here, not
-        // incrementally patched) - so forcing it on every foreground return guarantees the Full
-        // Player always reflects the actual MediaSession the moment the user looks at it again.
-        Log.d("PlayerViewModel", "MediaController still connected; forcing a full state resync for Full Player")
-        setupMediaControllerListeners()
+        // Fast path on foreground return: controller is already connected and listeners are attached.
+        // Avoid tearing down listeners, querying Binder volume, and re-extracting palettes.
+        // Just sync player position and playback state cleanly to prevent audio/UI glitch.
         syncCurrentPlayerState(currentController)
     }
 
@@ -5537,7 +5523,9 @@ class PlayerViewModel @Inject constructor(
                 viewModelScope.launch {
                     val uri = song.albumArtUriString?.toUri()
                     val currentUri = playbackStateHolder.stablePlayerState.value.currentSong?.albumArtUriString
-                    themeStateHolder.extractAndGenerateColorScheme(uri, currentUri)
+                    if (uri != null && uri.toString() != currentUri) {
+                        themeStateHolder.extractAndGenerateColorScheme(uri, currentUri)
+                    }
                 }
                 loadLyricsForCurrentSong()
                 if (playerCtrl.isPlaying) {
@@ -7722,7 +7710,7 @@ class PlayerViewModel @Inject constructor(
                                 }
                                 else -> {
                                     val fallbackSong = musicRepository.getFirstPlayableSong()
-                                    if (fallbackSong != null) {
+                                    if (fallbackSong != null && _playerUiState.value.preparingSongId == null) {
                                         loadAndPlaySong(fallbackSong)
                                     } else {
                                         mediaController?.takeIf { it.isConnected }?.play()

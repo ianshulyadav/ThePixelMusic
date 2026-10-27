@@ -312,6 +312,13 @@ fun SearchScreen(
     LaunchedEffect(searchQuery, currentFilter, searchSource) {
         playerViewModel.performSearch(searchQuery)
     }
+
+    // Reset search results list scroll position to top whenever the filter changes
+    LaunchedEffect(currentFilter) {
+        if (searchListState.firstVisibleItemIndex > 0 || searchListState.firstVisibleItemScrollOffset > 0) {
+            searchListState.scrollToItem(0)
+        }
+    }
     val searchResults = searchUiState.searchResults
     val handleSongMoreOptionsClick: (Song) -> Unit = { song ->
         focusManager.clearFocus(force = true)

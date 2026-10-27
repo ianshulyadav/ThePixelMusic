@@ -293,9 +293,9 @@ object AppModule {
         val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
         val isLowRamDevice = activityManager?.isLowRamDevice == true
 
-        // Increased RAM usage threshold to ensure smooth library and queue scrolling without image cache churn:
-        // 25% heap memory cache on standard devices, 15% on low RAM devices.
-        val cachePercent = if (isLowRamDevice) 0.15 else 0.25
+        // Balanced RAM usage threshold: 15% heap memory cache on standard devices, 10% on low RAM devices.
+        // Paired with a 250MB local disk cache, this keeps fast image access without eating excessive JVM heap.
+        val cachePercent = if (isLowRamDevice) 0.10 else 0.15
 
         return ImageLoader.Builder(context)
             .okHttpClient(imageOkHttpClient)

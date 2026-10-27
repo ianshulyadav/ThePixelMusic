@@ -657,11 +657,11 @@ object YoutubeHelper {
                     val isWifi = !isMetered
                     val speed = connectivityStateHolder.linkDownstreamBandwidthKbps.value
                     val recentlyUnstable = connectivityStateHolder.isNetworkRecentlyUnstable.value
-                    val isConnectionFastAndStable = isWifi || (speed >= 2_000 && !recentlyUnstable)
+                    val isConnectionFastAndStable = !isMetered && !recentlyUnstable && (speed >= 3_500 || (speed == 0 && isWifi))
 
                     val effectiveQuality = when {
-                        recentlyUnstable || (speed in 1..499) -> StreamingAudioQuality.LOW
-                        !isConnectionFastAndStable || (speed in 500..1999) -> StreamingAudioQuality.MEDIUM
+                        recentlyUnstable || isMetered || (speed in 1..999) -> StreamingAudioQuality.LOW
+                        !isConnectionFastAndStable || (speed in 1000..3499) -> StreamingAudioQuality.MEDIUM
                         else -> StreamingAudioQuality.HIGH
                     }
 

@@ -40,7 +40,7 @@ fun SineWaveLine(
     phase: Float = 0f,
     animate: Boolean? = false,
     animationDurationMillis: Int = 2000,
-    samples: Int = 400,
+    samples: Int = 300,
     cap: StrokeCap = StrokeCap.Round
 ) {
     val density = LocalDensity.current

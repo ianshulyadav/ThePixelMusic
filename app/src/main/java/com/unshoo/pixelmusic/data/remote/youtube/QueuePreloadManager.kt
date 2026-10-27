@@ -147,10 +147,8 @@ object QueuePreloadManager {
                 } catch (_: Exception) {
                 }
 
-                if (!streamUrl.isNullOrBlank() && streamUrl.startsWith("http") && i <= currentIndex + 1) {
-                    // Smaller first-chunk on preload; DualPlayerEngine also pre-caches on resolve.
-                    prefetchAudioBytes(ctx, videoId, streamUrl)
-                }
+                // Deduped: engineRef.preCacheFirstChunk already writes to ExoCache with correct client headers;
+                // prefetchAudioBytes was doing a redundant second write of the exact same first 128KB.
 
                 val thumbnailUrl = song.thumbnailHref
                 if (thumbnailUrl.isNotBlank()) {
@@ -170,7 +168,7 @@ object QueuePreloadManager {
                     }
                 }
 
-                delay(if (includeCurrent && i == currentIndex) 120 else 350)
+                delay(if (includeCurrent && i == currentIndex) 250 else 500)
             }
         }
     }

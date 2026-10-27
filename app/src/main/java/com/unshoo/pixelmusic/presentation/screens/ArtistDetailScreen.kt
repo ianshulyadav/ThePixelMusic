@@ -26,8 +26,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.AddAPhoto
@@ -329,47 +331,165 @@ fun ArtistDetailScreen(
                             bottom = MiniPlayerHeight + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 24.dp
                         )
                     ) {
-                        // ─── Subscriber count / description for online artist ───
-                        if (isOnlineArtist) {
-                            val subCount = uiState.subscriberCount
-                            item(key = "subscriber_info", contentType = "subscriber_info") {
+                        // ─── Artist Action Row (Subscribe + Mix Radio + Play) ───
+                        item(key = "artist_action_row", contentType = "artist_action_row") {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 4.dp, bottom = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                if (isOnlineArtist) {
+                                    val subText = buildString {
+                                        append(if (isSubscribed) "Subscribed" else "Subscribe")
+                                        if (!uiState.subscriberCount.isNullOrBlank()) {
+                                            append(" ")
+                                            append(uiState.subscriberCount)
+                                        }
+                                    }
+                                    FilledTonalButton(
+                                        onClick = { viewModel.toggleSubscription() },
+                                        colors = ButtonDefaults.filledTonalButtonColors(
+                                            containerColor = if (isSubscribed) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.primary,
+                                            contentColor = if (isSubscribed) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onPrimary
+                                        ),
+                                        shape = CircleShape,
+                                        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp)
+                                    ) {
+                                        Text(
+                                            text = subText,
+                                            style = MaterialTheme.typography.labelLarge,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                } else {
+                                    Spacer(modifier = Modifier.weight(1f, fill = false))
+                                }
+
                                 Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(bottom = 8.dp),
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
-                                    if (!subCount.isNullOrBlank()) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                            modifier = Modifier.weight(1f, fill = false)
+                                    if (isOnlineArtist && popularSongs.isNotEmpty()) {
+                                        FilledTonalIconButton(
+                                            onClick = {
+                                                playerViewModel.startArtistMixRadio(
+                                                    artistName = artist.name,
+                                                    popularSongs = popularSongs
+                                                )
+                                            },
+                                            modifier = Modifier.size(46.dp),
+                                            shape = CircleShape,
+                                            colors = IconButtonDefaults.filledTonalIconButtonColors(
+                                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                                contentColor = MaterialTheme.colorScheme.onSurface
+                                            )
                                         ) {
                                             Icon(
-                                                Icons.Rounded.QueueMusic,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                            Text(
-                                                text = subCount,
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                imageVector = Icons.Rounded.Radio,
+                                                contentDescription = "Mix Radio",
+                                                modifier = Modifier.size(22.dp)
                                             )
                                         }
-                                    } else {
-                                        Spacer(modifier = Modifier.weight(1f))
                                     }
-                                    
-                                    ArtistMixRadioButton(
+
+                                    FilledIconButton(
                                         onClick = {
-                                            playerViewModel.startArtistMixRadio(
+                                            playerViewModel.playArtistSongsShuffledWithRelated(
                                                 artistName = artist.name,
-                                                popularSongs = popularSongs
+                                                initialArtistSongs = songs,
+                                                songsMoreEndpoint = uiState.songsMoreEndpoint,
+                                                isOnline = uiState.isOnlineArtist
+                                            )
+                                        },
+                                        modifier = Modifier.size(54.dp),
+                                        shape = CircleShape,
+                                        colors = IconButtonDefaults.filledIconButtonColors(
+                                            containerColor = MaterialTheme.colorScheme.onSurface,
+                                            contentColor = MaterialTheme.colorScheme.surface
+                                        )
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.PlayArrow,
+                                            contentDescription = stringResource(R.string.play_playback),
+                                            modifier = Modifier.size(30.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // ─── Latest Release ("Listen to the new single / album") ───
+                        val latestRelease = uiState.latestRelease
+                        if (isOnlineArtist && latestRelease != null) {
+                            item(key = "artist_latest_release", contentType = "artist_latest_release") {
+                                val label = if (uiState.latestReleaseType == "album") "Listen to the new album" else "Listen to the new single"
+                                Card(
+                                    onClick = {
+                                        if (latestRelease.browseId != null) {
+                                            navController.navigateSafely(Screen.AlbumDetail.createRoute(latestRelease.browseId))
+                                        }
+                                    },
+                                    shape = CircleShape,
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                                    ),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(bottom = 14.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(48.dp)
+                                                .background(MaterialTheme.colorScheme.surfaceContainerHighest, RoundedCornerShape(14.dp)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            SmartImage(
+                                                model = latestRelease.albumArtUriString,
+                                                contentDescription = latestRelease.title,
+                                                modifier = Modifier
+                                                    .size(44.dp)
+                                                    .clip(RoundedCornerShape(10.dp))
                                             )
                                         }
-                                    )
+                                        Spacer(modifier = Modifier.width(14.dp))
+                                        Column(
+                                            modifier = Modifier.weight(1f),
+                                            verticalArrangement = Arrangement.Center
+                                        ) {
+                                            Text(
+                                                text = label,
+                                                style = MaterialTheme.typography.titleSmall,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            Text(
+                                                text = latestRelease.title,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier
+                                                .padding(end = 10.dp)
+                                                .size(24.dp)
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -613,6 +733,7 @@ fun ArtistDetailScreen(
                         if (songs.isNotEmpty()) songs.size else uiState.popularSongs.size
                     } else songs.size
                     val artistSubtitleText = when {
+                        !uiState.monthlyListeners.isNullOrBlank() -> uiState.monthlyListeners
                         uiState.isOnlineArtist && !uiState.subscriberCount.isNullOrBlank() -> uiState.subscriberCount
                         effectiveSongsCount > 0 -> formatSongCount(effectiveSongsCount)
                         else -> "Artist"
@@ -1312,22 +1433,6 @@ private fun SharedArtistTopBarProbe(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.padding(end = 12.dp, top = 4.dp)
                 ) {
-                    Button(
-                        onClick = onSubscribeClick,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (isSubscribed) MaterialTheme.colorScheme.primary.copy(alpha = 0.8f) else MaterialTheme.colorScheme.surfaceContainerLow,
-                            contentColor = if (isSubscribed) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
-                        ),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                        modifier = Modifier.height(36.dp)
-                    ) {
-                        Text(
-                            text = if (isSubscribed) "Subscribed" else "Subscribe",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-
                     Box {
                         FilledIconButton(
                             onClick = { showImageMenu = true },
@@ -1372,22 +1477,6 @@ private fun SharedArtistTopBarProbe(
                 }
             }
         )
-
-        LargeExtendedFloatingActionButton(
-            onClick = onPlayClick,
-            shape = RoundedStarShape(sides = 8, curve = 0.05, rotation = 0f),
-            modifier = Modifier
-                .align(shuffleAlignment)
-                .statusBarsPadding()
-                .padding(end = 16.dp)
-                .graphicsLayer {
-                    scaleX = expandedContentAlpha
-                    scaleY = expandedContentAlpha
-                    alpha = expandedContentAlpha
-                }
-        ) {
-            Icon(Icons.Rounded.Shuffle, contentDescription = stringResource(R.string.presentation_batch_d_cd_shuffle_play_artist))
-        }
     }
 }
 
@@ -1526,21 +1615,7 @@ private fun CustomCollapsingTopBar(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Button(
-                            onClick = onSubscribeClick,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isSubscribed) MaterialTheme.colorScheme.primary.copy(alpha = 0.8f) else MaterialTheme.colorScheme.surfaceContainerLow,
-                                contentColor = if (isSubscribed) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
-                            ),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                            modifier = Modifier.height(36.dp)
-                        ) {
-                            Text(
-                                text = if (isSubscribed) "Subscribed" else "Subscribe",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
+
 
                         Box {
                             SmallFloatingActionButton(
@@ -1617,21 +1692,7 @@ private fun CustomCollapsingTopBar(
                     }
                 }
 
-                // Botón de Play
-                LargeExtendedFloatingActionButton(
-                    onClick = onPlayClick,
-                    shape = RoundedStarShape(sides = 8, curve = 0.05, rotation = 0f),
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(16.dp)
-                        .graphicsLayer {
-                            scaleX = fabScale
-                            scaleY = fabScale
-                            alpha = fabScale
-                        }
-                ) {
-                    Icon(Icons.Rounded.Shuffle, contentDescription = stringResource(R.string.cd_shuffle_play_album))
-                }
+
             }
         }
     }

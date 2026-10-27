@@ -371,11 +371,11 @@ object AutoQueueManager {
             try {
                 if (!isAutoQueueEnabled()) return@launch
 
-                val remaining = withContext(Dispatchers.Main) {
-                    val p = livePlayer() ?: return@withContext -1
-                    computeRemainingUpcoming(p)
+                val (remaining, isPlaying) = withContext(Dispatchers.Main) {
+                    val p = livePlayer() ?: return@withContext Pair(-1, false)
+                    Pair(computeRemainingUpcoming(p), p.isPlaying || p.playWhenReady)
                 }
-                if (remaining < 0) return@launch
+                if (remaining < 0 || !isPlaying) return@launch
 
                 if (forceImmediate || remaining <= REFILL_THRESHOLD) {
                     doRefill()
@@ -407,11 +407,11 @@ object AutoQueueManager {
         if (livePlayer() == null) return
         if (!isAutoQueueEnabled()) return
 
-        var remaining = withContext(Dispatchers.Main) {
-            val p = livePlayer() ?: return@withContext -1
-            computeRemainingUpcoming(p)
+        var (remaining, isPlaying) = withContext(Dispatchers.Main) {
+            val p = livePlayer() ?: return@withContext Pair(-1, false)
+            Pair(computeRemainingUpcoming(p), p.isPlaying || p.playWhenReady)
         }
-        if (remaining < 0 || remaining > REFILL_THRESHOLD) return
+        if (remaining < 0 || !isPlaying || remaining > REFILL_THRESHOLD) return
 
         if (currentQueue === EmptyQueue) {
             val currentId = withContext(Dispatchers.Main) { livePlayer()?.currentMediaItem?.mediaId }

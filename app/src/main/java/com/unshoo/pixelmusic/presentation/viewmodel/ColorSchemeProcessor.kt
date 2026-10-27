@@ -200,9 +200,11 @@ class ColorSchemeProcessor @Inject constructor(
             
             val drawable = context.imageLoader.execute(request).drawable ?: return null
             
+            val targetWidth = drawable.intrinsicWidth.coerceIn(1, 128)
+            val targetHeight = drawable.intrinsicHeight.coerceIn(1, 128)
             createBitmap(
-                drawable.intrinsicWidth.coerceAtLeast(1),
-                drawable.intrinsicHeight.coerceAtLeast(1)
+                targetWidth,
+                targetHeight
             ).also { bmp ->
                 Canvas(bmp).let { canvas ->
                     drawable.setBounds(0, 0, canvas.width, canvas.height)

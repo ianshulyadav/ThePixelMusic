@@ -200,13 +200,9 @@ class DualPlayerEngine @Inject constructor(
     private fun acquireWifiLockIfNeeded() {
         try {
             if (wifiLock == null) {
+                @Suppress("DEPRECATION")
                 wifiLock = wifiManager?.createWifiLock(
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        android.net.wifi.WifiManager.WIFI_MODE_FULL_LOW_LATENCY
-                    } else {
-                        @Suppress("DEPRECATION")
-                        android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF
-                    },
+                    android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF,
                     "PixelMusic:PlaybackWifiLock"
                 )?.apply {
                     setReferenceCounted(false)
@@ -872,11 +868,12 @@ class DualPlayerEngine @Inject constructor(
         }
 
         playerA = buildPlayer()
-        playerB = buildPlayer()
 
         if (pinnedAudioSessionId != C.AUDIO_SESSION_ID_UNSET && pinnedAudioSessionId != 0) {
             try { playerA.audioSessionId = pinnedAudioSessionId } catch (_: Exception) {}
-            try { playerB.audioSessionId = pinnedAudioSessionId } catch (_: Exception) {}
+            if (::playerB.isInitialized) {
+                try { playerB.audioSessionId = pinnedAudioSessionId } catch (_: Exception) {}
+            }
             _activeAudioSessionId.value = pinnedAudioSessionId
         } else {
             _activeAudioSessionId.value = playerA.audioSessionId
@@ -1043,10 +1040,11 @@ class DualPlayerEngine @Inject constructor(
         playerA.removeAudioOffloadListener(masterAudioOffloadListener)
         onPlayerAboutToBeReleasedListener?.invoke(playerA)
         playerA.release()
-        playerB.release()
+        if (::playerB.isInitialized) {
+            try { playerB.release() } catch (_: Exception) {}
+        }
 
         playerA = buildPlayer()
-        playerB = buildPlayer()
 
         playerA.addListener(masterPlayerListener)
         playerA.addAnalyticsListener(masterPlayerListener)
@@ -1059,8 +1057,10 @@ class DualPlayerEngine @Inject constructor(
             playerA.setMediaItems(mediaItems, currentIndex, positionMs)
             playerA.repeatMode = repeatMode
             playerA.shuffleModeEnabled = shuffleMode
-            playerB.repeatMode = repeatMode
-            playerB.shuffleModeEnabled = shuffleMode
+            if (::playerB.isInitialized) {
+                playerB.repeatMode = repeatMode
+                playerB.shuffleModeEnabled = shuffleMode
+            }
             playerA.prepare()
             playerA.playWhenReady = desiredPlayWhenReady
             applyWakeModeForCurrentItem()
@@ -1068,7 +1068,9 @@ class DualPlayerEngine @Inject constructor(
 
         if (pinnedAudioSessionId != C.AUDIO_SESSION_ID_UNSET && pinnedAudioSessionId != 0) {
             try { playerA.audioSessionId = pinnedAudioSessionId } catch (_: Exception) {}
-            try { playerB.audioSessionId = pinnedAudioSessionId } catch (_: Exception) {}
+            if (::playerB.isInitialized) {
+                try { playerB.audioSessionId = pinnedAudioSessionId } catch (_: Exception) {}
+            }
             _activeAudioSessionId.value = pinnedAudioSessionId
         } else {
             _activeAudioSessionId.value = playerA.audioSessionId
@@ -1528,10 +1530,19 @@ class DualPlayerEngine @Inject constructor(
             }
             Timber.tag("DualPlayerEngine").i("Stream URL stale on resume for %s, re-resolving...", originalUriStr)
             invalidateResolvedUri(originalUriStr)
-            val sourceUri = Uri.parse(originalUriStr)
-            if (sourceUri.scheme in REMOTE_MEDIA_SCHEMES) {
+            val effectiveSourceUri = if (originalUriStr.startsWith("http")) {
+                val cleanId = when {
+                    currentItem.mediaId.startsWith("youtube_") -> currentItem.mediaId.removePrefix("youtube_")
+                    currentItem.mediaId.length == 11 -> currentItem.mediaId
+                    else -> null
+                }
+                if (cleanId != null) Uri.parse("youtube://$cleanId") else Uri.parse(originalUriStr)
+            } else {
+                Uri.parse(originalUriStr)
+            }
+            if (effectiveSourceUri.scheme in REMOTE_MEDIA_SCHEMES) {
                 val freshItem = withContext(Dispatchers.IO) {
-                    val resolved = resolveMediaItem(currentItem.buildUpon().setUri(sourceUri).build())
+                    val resolved = resolveMediaItem(currentItem.buildUpon().setUri(effectiveSourceUri).build())
                     resolved.localConfiguration?.uri?.toString()?.let { u ->
                         val key = currentItem.mediaId.removePrefix("youtube_").takeIf { it.isNotBlank() }
                         if (u.startsWith("http")) preCacheFirstChunk(u, key)
@@ -1653,10 +1664,10 @@ class DualPlayerEngine @Inject constructor(
         val isYoutubeResolution = originalUriString.startsWith("youtube://") ||
             resolved.contains("googlevideo.com", ignoreCase = true) ||
             resolved.contains("youtube.com", ignoreCase = true)
-        if (!isYoutubeResolution) return true
+        if (!isYoutubeResolution) return false
 
         val expireSeconds = resolvedUri.getQueryParameter("expire")?.toLongOrNull()
-            ?: return true
+            ?: return false
         val nowSeconds = System.currentTimeMillis() / 1000L
         // Require at least 15 minutes (900s) remaining validity.
         // YouTube URLs expire in 6 hours. If the app hasn't been used in 5.5+ hours,
@@ -1835,23 +1846,37 @@ class DualPlayerEngine @Inject constructor(
         return builder.build()
     }
 
+    private fun ensurePlayerB(): ExoPlayer {
+        if (!::playerB.isInitialized) {
+            playerB = buildPlayer()
+            if (pinnedAudioSessionId != C.AUDIO_SESSION_ID_UNSET && pinnedAudioSessionId != 0) {
+                try { playerB.audioSessionId = pinnedAudioSessionId } catch (_: Exception) {}
+            }
+            if (audioOffloadEnabled) {
+                applyAudioOffload(playerB)
+            }
+        }
+        return playerB
+    }
+
     suspend fun prepareNext(target: TransitionTarget, startPositionMs: Long = 0L) {
         try {
             pendingTransitionTarget = target
             val resolvedItem = resolveMediaItem(target.mediaItem)
 
-            playerB.stop()
-            playerB.clearMediaItems()
+            val standbyPlayer = ensurePlayerB()
+            standbyPlayer.stop()
+            standbyPlayer.clearMediaItems()
             // Standby player loads ONLY the target item to pre-buffer.
             // Queue items are spliced around it at swap time from the live master timeline.
-            playerB.setMediaItem(resolvedItem, startPositionMs.coerceAtLeast(0L))
-            playerB.repeatMode = playerA.repeatMode
-            playerB.shuffleModeEnabled = playerA.shuffleModeEnabled
-            playerB.volume = 0f
-            playerB.playWhenReady = false
-            playerB.prepare()
+            standbyPlayer.setMediaItem(resolvedItem, startPositionMs.coerceAtLeast(0L))
+            standbyPlayer.repeatMode = playerA.repeatMode
+            standbyPlayer.shuffleModeEnabled = playerA.shuffleModeEnabled
+            standbyPlayer.volume = 0f
+            standbyPlayer.playWhenReady = false
+            standbyPlayer.prepare()
 
-            onNextPlayerPreparedListeners.forEach { it(playerB) }
+            onNextPlayerPreparedListeners.forEach { it(standbyPlayer) }
         } catch (e: Exception) {
             Timber.tag("TransitionDebug").e(e, "Failed to prepare next player")
         }
@@ -1864,15 +1889,16 @@ class DualPlayerEngine @Inject constructor(
         } else {
             try {
                 val resolvedItem = resolveMediaItem(mediaItem)
-                playerB.stop()
-                playerB.clearMediaItems()
-                playerB.setMediaItem(resolvedItem, startPositionMs.coerceAtLeast(0L))
-                playerB.repeatMode = playerA.repeatMode
-                playerB.shuffleModeEnabled = playerA.shuffleModeEnabled
-                playerB.volume = 0f
-                playerB.playWhenReady = false
-                playerB.prepare()
-                onNextPlayerPreparedListeners.forEach { it(playerB) }
+                val standbyPlayer = ensurePlayerB()
+                standbyPlayer.stop()
+                standbyPlayer.clearMediaItems()
+                standbyPlayer.setMediaItem(resolvedItem, startPositionMs.coerceAtLeast(0L))
+                standbyPlayer.repeatMode = playerA.repeatMode
+                standbyPlayer.shuffleModeEnabled = playerA.shuffleModeEnabled
+                standbyPlayer.volume = 0f
+                standbyPlayer.playWhenReady = false
+                standbyPlayer.prepare()
+                onNextPlayerPreparedListeners.forEach { it(standbyPlayer) }
             } catch (e: Exception) {
                 Timber.tag("TransitionDebug").e(e, "Failed to prepare next player with single item")
             }

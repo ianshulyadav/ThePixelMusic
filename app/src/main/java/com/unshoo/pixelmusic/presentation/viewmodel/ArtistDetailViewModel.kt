@@ -60,6 +60,9 @@ data class ArtistDetailUiState(
     val isOnlineArtist: Boolean = false,
     val artistDescription: String? = null,
     val subscriberCount: String? = null,
+    val monthlyListeners: String? = null,
+    val latestRelease: ArtistAlbumSection? = null,
+    val latestReleaseType: String? = null,
     val browseId: String? = null,
     val albumsMoreEndpoint: BrowseEndpoint? = null,
     val singlesMoreEndpoint: BrowseEndpoint? = null,
@@ -486,6 +489,17 @@ class ArtistDetailViewModel @Inject constructor(
                     }
                 } else null
 
+                val (latestRelease, latestReleaseType) = when {
+                    singlesAndEPs.isNotEmpty() && albumSections.isNotEmpty() -> {
+                        val s = singlesAndEPs.first()
+                        val a = albumSections.first()
+                        if ((s.year ?: 0) >= (a.year ?: 0)) s to "single" else a to "album"
+                    }
+                    singlesAndEPs.isNotEmpty() -> singlesAndEPs.first() to "single"
+                    albumSections.isNotEmpty() -> albumSections.first() to "album"
+                    else -> null to null
+                }
+
                 withContext(Dispatchers.Main) {
                     _artistColorScheme.value = newScheme
                     _uiState.value = ArtistDetailUiState(
@@ -500,6 +514,9 @@ class ArtistDetailViewModel @Inject constructor(
                         isOnlineArtist = true,
                         artistDescription = artistPage.description,
                         subscriberCount = artistItem.subscriberCountText,
+                        monthlyListeners = artistItem.monthlyListenerCountText,
+                        latestRelease = latestRelease,
+                        latestReleaseType = latestReleaseType,
                         browseId = browseId,
                         albumsMoreEndpoint = albumsSection?.moreEndpoint,
                         singlesMoreEndpoint = singlesSection?.moreEndpoint,
