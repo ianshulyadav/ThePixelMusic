@@ -5,6 +5,7 @@ import com.unshoo.pixelmusic.data.model.Song
 import com.unshoo.pixelmusic.data.model.Lyrics
 import com.unshoo.pixelmusic.R
 import androidx.activity.compose.BackHandler
+import com.unshoo.pixelmusic.presentation.components.scoped.LocalPlayerMotionState
 import com.unshoo.pixelmusic.presentation.components.scoped.LyricsPredictiveBackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.ui.zIndex
@@ -1494,9 +1495,21 @@ fun LyricLineRow(
         label = "lineAlpha"
     )
 
-    // Blur Effect
-    val targetBlur = if (useAnimatedLyrics && animatedLyricsBlurEnabled && distanceFromCurrent > 0) {
-        (distanceFromCurrent * animatedLyricsBlurStrength).coerceAtMost(10f).dp
+    // Blur Effect — GPU budget control.
+    // A Modifier.blur on every visible non-current line used to leave up to ~10
+    // live RenderEffect Gaussian passes on screen (each re-created per animation
+    // frame), stacked on top of the full-screen atmosphere blur. Defocus is now
+    // limited to the two lines adjacent to the active one; farther lines already
+    // communicate depth through scale + alpha. During sheet/player motion blur is
+    // suspended entirely so line transitions never compete with sheet frames.
+    val isHeavyMotion = LocalPlayerMotionState.current.isHeavyMotionActive
+    val targetBlur = if (
+        useAnimatedLyrics &&
+        animatedLyricsBlurEnabled &&
+        !isHeavyMotion &&
+        distanceFromCurrent in 1..2
+    ) {
+        (distanceFromCurrent * animatedLyricsBlurStrength).coerceAtMost(6f).dp
     } else 0.dp
 
     val blurRadius by animateDpAsState(

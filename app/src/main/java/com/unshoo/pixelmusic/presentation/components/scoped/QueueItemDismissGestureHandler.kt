@@ -3,7 +3,6 @@ package com.unshoo.pixelmusic.presentation.components.scoped
 import android.view.View
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -154,7 +153,7 @@ internal class QueueItemDismissGestureHandler(
                     targetValue = -itemWidthPx,
                     animationSpec = tween(
                         durationMillis = 180,
-                        easing = FastOutSlowInEasing
+                        easing = MotionTokens.EmphasizedAccelerateEasing
                     )
                 )
                 onDismiss()

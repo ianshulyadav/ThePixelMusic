@@ -47,7 +47,7 @@ internal fun UnifiedPlayerQueueLayer(
     playerViewModel: PlayerViewModel,
     shouldRenderLayer: Boolean,
     albumColorScheme: ColorScheme,
-    queueScrimAlpha: Float,
+    queueScrimAlphaProvider: () -> Float,
     showQueueSheet: Boolean,
     queueHiddenOffsetPx: Float,
     queueSheetOffset: Animatable<Float, AnimationVector1D>,
@@ -88,15 +88,16 @@ internal fun UnifiedPlayerQueueLayer(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        if (queueScrimAlpha > 0f) {
-            Box(
-                modifier = Modifier
-                    .matchParentSize()
-                    .zIndex(0f)
-                    .graphicsLayer { alpha = queueScrimAlpha }
-                    .background(MaterialTheme.colorScheme.scrim)
-            )
-        }
+        // Always composed; alpha 0 draws nothing. Reading the provider inside
+        // graphicsLayer keeps the per-frame drag offset in the draw phase — no
+        // recomposition while the scrim fades.
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .zIndex(0f)
+                .graphicsLayer { alpha = queueScrimAlphaProvider() }
+                .background(MaterialTheme.colorScheme.scrim)
+        )
 
         val shouldRenderQueueSheet = remember(showQueueSheet, queueSheetHeightPx) {
             showQueueSheet || queueSheetHeightPx == 0f
@@ -285,7 +286,7 @@ internal fun UnifiedPlayerQueueAndSongInfoHost(
     shouldRenderHost: Boolean,
     isQueueTelemetryActive: Boolean,
     albumColorScheme: ColorScheme,
-    queueScrimAlpha: Float,
+    queueScrimAlphaProvider: () -> Float,
     showQueueSheet: Boolean,
     queueHiddenOffsetPx: Float,
     queueSheetOffset: Animatable<Float, AnimationVector1D>,
@@ -401,7 +402,7 @@ internal fun UnifiedPlayerQueueAndSongInfoHost(
                 playerViewModel = playerViewModel,
                 shouldRenderLayer = true,
                 albumColorScheme = albumColorScheme,
-                queueScrimAlpha = queueScrimAlpha,
+                queueScrimAlphaProvider = queueScrimAlphaProvider,
                 showQueueSheet = showQueueSheet,
                 queueHiddenOffsetPx = queueHiddenOffsetPx,
                 queueSheetOffset = queueSheetOffset,

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### ⚡ Fixes & Improvements
+- **Silky-Smooth Sheet Motion:** Full player, queue and lyrics sheets now share one Material 3 expressive motion system (emphasized decelerate entrances / accelerated exits) with distance-aware settle durations, so expand and collapse animations feel connected and weighty.
+- **Blur Jank Eliminated:** The full-screen Gaussian atmosphere blur now renders on a stable hardware layer (per-frame transforms moved to a parent node) and automatically steps down to a lightweight radius while any sheet is dragged or animated, restoring full quality at rest — no more heavy, laggy frames with blur enabled over the player, queue and lyrics.
+- **Lyrics Defocus On A Budget:** Per-line lyric blur is limited to the two lines adjacent to the active line and suspended during sheet motion, removing up to ~10 simultaneous RenderEffect blur passes.
+- **Frame-Accurate Queue Scrim & Depth:** Scrim fade and full-player depth scale are derived from the real queue offset in the draw phase instead of a second drifting tween, eliminating per-frame recomposition during queue drags.
+- **Window Blur Cleanup:** The native blur-behind window flag is now correctly released when blur sheets dismiss, stopping a leaked compositor blur pass over the whole app.
+
 ## [1.8.10] - 2026-10-24
 
 ### ✨ What's New
