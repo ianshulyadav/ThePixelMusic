@@ -118,7 +118,6 @@ class DualPlayerEngine @Inject constructor(
         private const val HTTP_CONNECT_TIMEOUT_MS = 15_000
         private const val HTTP_READ_TIMEOUT_MS = 20_000
         private const val FIRST_CHUNK_PRECACHE_BYTES = 1024L * 1024L // 1MB — standard audio (~50s audio cushion)
-        private const val LOSSLESS_CHUNK_PRECACHE_BYTES = 5L * 1024L * 1024L // 5MB — lossless/FLAC (~45-60s cushion for 40-50MB tracks)
         private val LOCAL_MEDIA_SCHEMES = setOf("content", "file", "android.resource")
         private val REMOTE_MEDIA_SCHEMES = setOf("http", "https", "telegram", "gdrive", "youtube", "monochrome")
     }
@@ -255,18 +254,18 @@ class DualPlayerEngine @Inject constructor(
             AudioManager.AUDIOFOCUS_LOSS -> {
                 Timber.tag("TransitionDebug").d("AudioFocus LOSS. Pausing.")
                 isFocusLossPause = false
-                playerA.playWhenReady = false
-                playerB.playWhenReady = false
+                if (::playerA.isInitialized) playerA.playWhenReady = false
+                if (::playerB.isInitialized) playerB.playWhenReady = false
                 releaseWifiLock()
                 abandonAudioFocus()
             }
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
                 Timber.tag("TransitionDebug").d("AudioFocus LOSS_TRANSIENT (%d). Pausing.", focusChange)
-                isFocusLossPause = playerA.playWhenReady || playerA.isPlaying ||
-                    (transitionRunning && (playerB.playWhenReady || playerB.isPlaying))
-                playerA.playWhenReady = false
-                playerB.playWhenReady = false
+                isFocusLossPause = (::playerA.isInitialized && (playerA.playWhenReady || playerA.isPlaying)) ||
+                    (transitionRunning && ::playerB.isInitialized && (playerB.playWhenReady || playerB.isPlaying))
+                if (::playerA.isInitialized) playerA.playWhenReady = false
+                if (::playerB.isInitialized) playerB.playWhenReady = false
             }
             AudioManager.AUDIOFOCUS_GAIN -> {
                 Timber.tag("TransitionDebug").d("AudioFocus GAIN. Resuming if paused by loss.")
@@ -653,8 +652,10 @@ class DualPlayerEngine @Inject constructor(
                     val resolved = preResolveForPlayback(result[idx])
                     // Cache only — do not mutate the already-returned list.
                     resolved.localConfiguration?.uri?.toString()?.let { u ->
-                        val key = result[idx].mediaId.removePrefix("youtube_").takeIf { it.isNotBlank() }
-                        if (u.startsWith("http")) preCacheFirstChunk(u, key)
+                        if (!LosslessStreamResolver.isLosslessUri(u) && !u.contains("monochrome.st/track/")) {
+                            val key = result[idx].mediaId.removePrefix("youtube_").takeIf { it.isNotBlank() }
+                            if (u.startsWith("http")) preCacheFirstChunk(u, key)
+                        }
                     }
                 }
             }
@@ -685,13 +686,17 @@ class DualPlayerEngine @Inject constructor(
      * Pre-cache the first chunk of a stream into SimpleCache for instant playback start.
      * Ported from SpatialFlow AudioPlaybackService.preCacheFirstChunk.
      */
-    fun preCacheFirstChunk(streamUrl: String, cacheKey: String? = null, isLossless: Boolean = false) {
+    fun preCacheFirstChunk(streamUrl: String, cacheKey: String? = null) {
         if (!streamUrl.startsWith("http")) return
-        val chunkSize = if (isLossless || streamUrl.contains("monochrome.st/track/") || streamUrl.endsWith(".flac", ignoreCase = true)) {
-            LOSSLESS_CHUNK_PRECACHE_BYTES
-        } else {
-            FIRST_CHUNK_PRECACHE_BYTES
+        // Lossless streams must never be chunk-cached; they must stream as one continuous file.
+        if (LosslessStreamResolver.isLosslessUri(streamUrl) ||
+            streamUrl.contains("monochrome.st/track/") ||
+            streamUrl.endsWith(".flac", ignoreCase = true) ||
+            LosslessSchemeRoutingDataSource.isCustomLosslessScheme(streamUrl)
+        ) {
+            return
         }
+        val chunkSize = FIRST_CHUNK_PRECACHE_BYTES
         if (cacheKey != null && runCatching { exoCache.cache.isCached(cacheKey, 0, chunkSize) }.getOrDefault(false)) return
         scope.launch(Dispatchers.IO) {
             try {
@@ -846,6 +851,15 @@ class DualPlayerEngine @Inject constructor(
                 }
             }
         }
+        // Purge any stale monochrome chunk-cache entries from prior sessions so playback is clean
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                val monoKeys = exoCache.cache.keys.filter { it.startsWith("monochrome_") }
+                for (k in monoKeys) {
+                    exoCache.cache.removeResource(k)
+                }
+            }
+        }
     }
 
     fun initialize() {
@@ -921,12 +935,12 @@ class DualPlayerEngine @Inject constructor(
             AudioManager.AUDIOFOCUS_REQUEST_DELAYED -> {
                 audioFocusRequest = request
                 isFocusLossPause = true
-                playerA.playWhenReady = false
-                if (transitionRunning) playerB.playWhenReady = false
+                if (::playerA.isInitialized) playerA.playWhenReady = false
+                if (transitionRunning && ::playerB.isInitialized) playerB.playWhenReady = false
             }
             else -> {
                 Timber.tag("TransitionDebug").w("AudioFocus Request Failed: $result")
-                playerA.playWhenReady = false
+                if (::playerA.isInitialized) playerA.playWhenReady = false
             }
         }
     }
@@ -1164,9 +1178,6 @@ class DualPlayerEngine @Inject constructor(
                 val cleanId = dataSpec.key ?: when {
                     scheme == "youtube" -> uri.host?.takeIf { it.isNotBlank() } ?: uriString.removePrefix("youtube://")
                     uriString.startsWith("youtube://") -> uriString.removePrefix("youtube://")
-                    scheme == "monochrome" -> "monochrome_" + (uri.host?.takeIf { it.isNotBlank() } ?: uriString.removePrefix("monochrome://"))
-                    uriString.startsWith("monochrome://") -> "monochrome_" + uriString.removePrefix("monochrome://")
-                    uriString.contains("monochrome.st/track/") -> "monochrome_" + uriString.substringAfterLast("/")
                     else -> null
                 }
 
@@ -1216,7 +1227,6 @@ class DualPlayerEngine @Inject constructor(
                     }.getOrDefault(false)
 
                     val isCloudScheme = scheme == "youtube" || uriString.startsWith("youtube://") ||
-                        scheme == "monochrome" || uriString.startsWith("monochrome://") ||
                         scheme == "telegram" || uriString.startsWith("telegram:") ||
                         scheme == "gdrive" || uriString.startsWith("gdrive:")
 
@@ -1232,12 +1242,8 @@ class DualPlayerEngine @Inject constructor(
                     LosslessStreamResolver.markUriFresh(directUri.toString())
                     activePlaybackResolvedUris[uriString] = directUri
                     resolvedUriCache.put(uriString, directUri)
-                    if (cleanId != null) {
-                        StreamChoice.remember(cleanId, directUri.toString())
-                    }
                     return dataSpec.buildUpon()
                         .setUri(directUri)
-                        .apply { if (cleanId != null) setKey(cleanId) }
                         .setHttpRequestHeaders(
                             mapOf(
                                 "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
@@ -1510,8 +1516,10 @@ class DualPlayerEngine @Inject constructor(
             val freshItem = withContext(Dispatchers.IO) {
                 val resolved = resolveMediaItem(currentItem.buildUpon().setUri(sourceUri).build())
                 resolved.localConfiguration?.uri?.toString()?.let { u ->
-                    val key = currentItem.mediaId.removePrefix("youtube_").takeIf { it.isNotBlank() }
-                    if (u.startsWith("http")) preCacheFirstChunk(u, key)
+                    if (!LosslessStreamResolver.isLosslessUri(u) && !u.contains("monochrome.st/track/")) {
+                        val key = currentItem.mediaId.removePrefix("youtube_").takeIf { it.isNotBlank() }
+                        if (u.startsWith("http")) preCacheFirstChunk(u, key)
+                    }
                 }
                 resolved
             }
@@ -1551,8 +1559,10 @@ class DualPlayerEngine @Inject constructor(
                 val freshItem = withContext(Dispatchers.IO) {
                     val resolved = resolveMediaItem(currentItem.buildUpon().setUri(effectiveSourceUri).build())
                     resolved.localConfiguration?.uri?.toString()?.let { u ->
-                        val key = currentItem.mediaId.removePrefix("youtube_").takeIf { it.isNotBlank() }
-                        if (u.startsWith("http")) preCacheFirstChunk(u, key)
+                        if (!LosslessStreamResolver.isLosslessUri(u) && !u.contains("monochrome.st/track/")) {
+                            val key = currentItem.mediaId.removePrefix("youtube_").takeIf { it.isNotBlank() }
+                            if (u.startsWith("http")) preCacheFirstChunk(u, key)
+                        }
                     }
                     resolved
                 }
@@ -1782,16 +1792,16 @@ class DualPlayerEngine @Inject constructor(
 
             val resolvedPath = path?.takeIf { it.isNotBlank() } ?: return@withContext null
             when {
-                resolvedPath.contains("monochrome.st/track/") -> {
-                    val trackId = resolvedPath.substringAfterLast("/")
-                    val monoKey = "monochrome_$trackId"
-                    LosslessStreamResolver.markUriFresh(resolvedPath)
-                    preCacheFirstChunk(resolvedPath, monoKey)
+                LosslessStreamResolver.isLosslessUri(resolvedPath) ||
+                    resolvedPath.contains("monochrome.st/track/") ||
+                    LosslessSchemeRoutingDataSource.isCustomLosslessScheme(resolvedPath) ||
+                    resolvedPath.startsWith("file:") ||
+                    resolvedPath.startsWith("apple-pending:") -> {
+                    if (resolvedPath.contains("monochrome.st/track/")) {
+                        LosslessStreamResolver.markUriFresh(resolvedPath)
+                    }
                     Uri.parse(resolvedPath)
                 }
-                LosslessSchemeRoutingDataSource.isCustomLosslessScheme(resolvedPath) ||
-                    resolvedPath.startsWith("file:") ||
-                    resolvedPath.startsWith("apple-pending:") -> Uri.parse(resolvedPath)
                 !resolvedPath.startsWith("http") -> {
                     com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper
                         .registerLocalFilePath(youtubeId, resolvedPath)
@@ -2008,8 +2018,10 @@ class DualPlayerEngine @Inject constructor(
                             val freshItem = withContext(Dispatchers.IO) {
                                 val resolved = resolveMediaItem(bItem.buildUpon().setUri(sourceUri).build())
                                 resolved.localConfiguration?.uri?.toString()?.let { u ->
-                                    val key = bItem.mediaId.removePrefix("youtube_").takeIf { it.isNotBlank() }
-                                    if (u.startsWith("http")) preCacheFirstChunk(u, key)
+                                    if (!LosslessStreamResolver.isLosslessUri(u) && !u.contains("monochrome.st/track/")) {
+                                        val key = bItem.mediaId.removePrefix("youtube_").takeIf { it.isNotBlank() }
+                                        if (u.startsWith("http")) preCacheFirstChunk(u, key)
+                                    }
                                 }
                                 resolved
                             }

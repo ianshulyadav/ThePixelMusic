@@ -142,7 +142,12 @@ object QueuePreloadManager {
                     if (!streamUrl.isNullOrBlank() && streamUrl.startsWith("http")) {
                         val ytUri = "youtube://$videoId"
                         engineRef?.resolvedUriCache?.put(ytUri, android.net.Uri.parse(streamUrl))
-                        engineRef?.preCacheFirstChunk(streamUrl, videoId)
+                        if (!com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver.isLosslessUri(streamUrl) &&
+                            !streamUrl.contains("monochrome.st/track/") &&
+                            !streamUrl.endsWith(".flac", ignoreCase = true)
+                        ) {
+                            engineRef?.preCacheFirstChunk(streamUrl, videoId)
+                        }
                     }
                 } catch (_: Exception) {
                 }
