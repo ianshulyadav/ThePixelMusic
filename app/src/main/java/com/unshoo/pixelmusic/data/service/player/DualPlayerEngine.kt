@@ -117,7 +117,8 @@ class DualPlayerEngine @Inject constructor(
         // premature SocketTimeoutException on weak connections or during concurrent downloads.
         private const val HTTP_CONNECT_TIMEOUT_MS = 15_000
         private const val HTTP_READ_TIMEOUT_MS = 20_000
-        private const val FIRST_CHUNK_PRECACHE_BYTES = 1024L * 1024L // 1MB — BitChord parity (~50s audio cushion)
+        private const val FIRST_CHUNK_PRECACHE_BYTES = 1024L * 1024L // 1MB — standard audio (~50s audio cushion)
+        private const val LOSSLESS_CHUNK_PRECACHE_BYTES = 5L * 1024L * 1024L // 5MB — lossless/FLAC (~45-60s cushion for 40-50MB tracks)
         private val LOCAL_MEDIA_SCHEMES = setOf("content", "file", "android.resource")
         private val REMOTE_MEDIA_SCHEMES = setOf("http", "https", "telegram", "gdrive", "youtube", "monochrome")
     }
@@ -684,16 +685,21 @@ class DualPlayerEngine @Inject constructor(
      * Pre-cache the first chunk of a stream into SimpleCache for instant playback start.
      * Ported from SpatialFlow AudioPlaybackService.preCacheFirstChunk.
      */
-    fun preCacheFirstChunk(streamUrl: String, cacheKey: String? = null) {
+    fun preCacheFirstChunk(streamUrl: String, cacheKey: String? = null, isLossless: Boolean = false) {
         if (!streamUrl.startsWith("http")) return
-        if (cacheKey != null && runCatching { exoCache.cache.isCached(cacheKey, 0, FIRST_CHUNK_PRECACHE_BYTES) }.getOrDefault(false)) return
+        val chunkSize = if (isLossless || streamUrl.contains("monochrome.st/track/") || streamUrl.endsWith(".flac", ignoreCase = true)) {
+            LOSSLESS_CHUNK_PRECACHE_BYTES
+        } else {
+            FIRST_CHUNK_PRECACHE_BYTES
+        }
+        if (cacheKey != null && runCatching { exoCache.cache.isCached(cacheKey, 0, chunkSize) }.getOrDefault(false)) return
         scope.launch(Dispatchers.IO) {
             try {
                 val dataSource = preCacheDataSourceFactory.createDataSource()
                 val dataSpecBuilder = DataSpec.Builder()
                     .setUri(Uri.parse(streamUrl))
                     .setPosition(0)
-                    .setLength(FIRST_CHUNK_PRECACHE_BYTES)
+                    .setLength(chunkSize)
                 if (cacheKey != null) {
                     dataSpecBuilder.setKey(cacheKey)
                 }
@@ -715,7 +721,7 @@ class DualPlayerEngine @Inject constructor(
                 ).cache()
                 Timber.tag("DualPlayerEngine").d(
                     "Pre-cached first %dKB of stream for key=%s",
-                    FIRST_CHUNK_PRECACHE_BYTES / 1024,
+                    chunkSize / 1024,
                     cacheKey
                 )
             } catch (e: Exception) {
@@ -1223,6 +1229,7 @@ class DualPlayerEngine @Inject constructor(
                 if (scheme == "monochrome") {
                     val trackId = uri.host?.takeIf { it.isNotBlank() } ?: uriString.removePrefix("monochrome://")
                     val directUri = Uri.parse("https://tracks.monochrome.st/track/$trackId")
+                    LosslessStreamResolver.markUriFresh(directUri.toString())
                     activePlaybackResolvedUris[uriString] = directUri
                     resolvedUriCache.put(uriString, directUri)
                     if (cleanId != null) {
@@ -1658,7 +1665,10 @@ class DualPlayerEngine @Inject constructor(
         // Lossless-source URIs carry their own freshness window (Tidal/Qobuz/Deezer links expire,
         // flattened Apple files can be evicted); the resolver tracks it, never the googlevideo
         // `expire=` heuristic below.
-        if (LosslessStreamResolver.isLosslessUri(resolved)) {
+        if (LosslessStreamResolver.isLosslessUri(resolved) ||
+            resolved.contains("monochrome.st/track/") ||
+            originalUriString.startsWith("monochrome://")
+        ) {
             return LosslessStreamResolver.isFreshUri(resolved)
         }
         val isYoutubeResolution = originalUriString.startsWith("youtube://") ||
@@ -1773,7 +1783,10 @@ class DualPlayerEngine @Inject constructor(
             val resolvedPath = path?.takeIf { it.isNotBlank() } ?: return@withContext null
             when {
                 resolvedPath.contains("monochrome.st/track/") -> {
-                    preCacheFirstChunk(resolvedPath, youtubeId)
+                    val trackId = resolvedPath.substringAfterLast("/")
+                    val monoKey = "monochrome_$trackId"
+                    LosslessStreamResolver.markUriFresh(resolvedPath)
+                    preCacheFirstChunk(resolvedPath, monoKey)
                     Uri.parse(resolvedPath)
                 }
                 LosslessSchemeRoutingDataSource.isCustomLosslessScheme(resolvedPath) ||
@@ -1827,11 +1840,25 @@ class DualPlayerEngine @Inject constructor(
         if (resolvedUri == uri) return mediaItem
         
         val builder = mediaItem.buildUpon().setUri(resolvedUri)
-        if (resolvedUri.path?.endsWith(".flac", true) == true) {
-            builder.setMimeType("audio/flac")
+        val cleanId = when {
+            scheme == "youtube" -> uri.toString().removePrefix("youtube://")
+            scheme == "monochrome" -> "monochrome_" + (uri.host?.takeIf { it.isNotBlank() } ?: uri.toString().removePrefix("monochrome://"))
+            uri.toString().startsWith("monochrome://") -> "monochrome_" + uri.toString().removePrefix("monochrome://")
+            uri.toString().contains("monochrome.st/track/") -> "monochrome_" + uri.toString().substringAfterLast("/")
+            resolvedUri.toString().contains("monochrome.st/track/") -> "monochrome_" + resolvedUri.toString().substringAfterLast("/")
+            else -> mediaItem.mediaId.removePrefix("youtube_").takeIf { it.isNotBlank() }
+        }
+        if (cleanId != null) {
+            builder.setCustomCacheKey(cleanId)
+        }
+
+        if (resolvedUri.path?.endsWith(".flac", true) == true ||
+            scheme == "monochrome" ||
+            resolvedUri.toString().contains("monochrome.st/track/")
+        ) {
+            builder.setMimeType(androidx.media3.common.MimeTypes.AUDIO_FLAC)
         } else if (scheme == "youtube") {
             val videoId = uri.toString().removePrefix("youtube://")
-            builder.setCustomCacheKey(videoId)
             val cachedMime = com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.streamMimeTypeLruCache.let { cache ->
                 cache.get("${videoId}_high")
                     ?: cache.get("${videoId}_low")
@@ -1840,8 +1867,6 @@ class DualPlayerEngine @Inject constructor(
             if (cachedMime != null) {
                 builder.setMimeType(cachedMime)
             }
-        } else if (scheme == "monochrome" || resolvedUri.toString().contains("monochrome.st/track/")) {
-            builder.setMimeType(androidx.media3.common.MimeTypes.AUDIO_FLAC)
         }
         return builder.build()
     }

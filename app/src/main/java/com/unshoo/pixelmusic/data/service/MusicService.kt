@@ -1864,6 +1864,19 @@ class MusicService : MediaLibraryService() {
                     }
                     else -> null
                 }
+                val isMonochrome = currentUri.startsWith("monochrome://") ||
+                    currentUri.contains("monochrome.st/track/") ||
+                    currentItem?.mediaId?.startsWith("monochrome_") == true
+                val monoTrackId = if (isMonochrome) {
+                    currentItem?.mediaId?.removePrefix("monochrome_")
+                        ?: currentUri.removePrefix("monochrome://").substringAfterLast("/")
+                } else null
+                if (monoTrackId != null) {
+                    com.unshoo.pixelmusic.data.service.player.StreamChoice.forget("monochrome_$monoTrackId")
+                    com.unshoo.pixelmusic.data.service.player.StreamChoice.forget(monoTrackId)
+                    com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver.clearResolved(monoTrackId)
+                    engine.invalidateResolvedUri("monochrome://$monoTrackId")
+                }
                 if (youtubeVideoId != null) {
                     com.unshoo.pixelmusic.data.service.player.StreamChoice.forget(youtubeVideoId)
                     if (isLosslessStream) {
@@ -1942,11 +1955,24 @@ class MusicService : MediaLibraryService() {
                             com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.markStreamStalledOrThrottled(ytVideoId)
                         }
 
+                        val isMonochrome = rawUriString.startsWith("monochrome://") ||
+                            rawUriString.contains("monochrome.st/track/") ||
+                            rawItem.mediaId.startsWith("monochrome_")
+                        val monoTrackId = if (isMonochrome) {
+                            rawItem.mediaId.removePrefix("monochrome_")
+                                .takeIf { it.isNotBlank() }
+                                ?: rawUriString.removePrefix("monochrome://").substringAfterLast("/").takeIf { it.isNotBlank() }
+                        } else null
+
                         val item = if (
                             (rawUriString.contains("googlevideo.com") || rawIsLossless) && !ytVideoId.isNullOrBlank()
                         ) {
                             rawItem.buildUpon()
                                 .setUri(android.net.Uri.parse("youtube://$ytVideoId"))
+                                .build()
+                        } else if (isMonochrome && !monoTrackId.isNullOrBlank()) {
+                            rawItem.buildUpon()
+                                .setUri(android.net.Uri.parse("monochrome://$monoTrackId"))
                                 .build()
                         } else {
                             rawItem

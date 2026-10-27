@@ -263,9 +263,17 @@ object LosslessStreamResolver {
     /** Whether a URI produced by [resolve] may still be handed to the player without re-resolving. */
     fun isFreshUri(uri: String?): Boolean {
         if (uri.isNullOrBlank()) return false
-        val until = uriFreshness[uri] ?: return false
-        if (until <= System.currentTimeMillis()) {
-            uriFreshness.remove(uri)
+        val until = uriFreshness[uri]
+        if (until != null) {
+            if (until <= System.currentTimeMillis()) {
+                uriFreshness.remove(uri)
+                return false
+            }
+        } else if (uri.startsWith("monochrome://") || uri.contains("monochrome.st/track/")) {
+            // Monochrome track endpoints default to active freshness window unless server reports expiration
+            uriFreshness[uri] = System.currentTimeMillis() + URI_FRESHNESS_MS
+            return true
+        } else {
             return false
         }
         // Apple flattened files live in cacheDir/applemusic; the LRU may have evicted them.
@@ -277,6 +285,12 @@ object LosslessStreamResolver {
             }
         }
         return true
+    }
+
+    fun markUriFresh(uri: String, ttlMs: Long = URI_FRESHNESS_MS) {
+        if (uri.isNotBlank()) {
+            uriFreshness[uri] = System.currentTimeMillis() + ttlMs
+        }
     }
 
     fun resultFor(mediaId: String?): Result? = mediaId?.let { resolvedByMediaId[it] }
