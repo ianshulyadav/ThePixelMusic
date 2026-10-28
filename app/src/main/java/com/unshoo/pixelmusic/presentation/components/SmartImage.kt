@@ -30,6 +30,9 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.Alignment
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.unit.dp
+
+import androidx.compose.ui.unit.Dp
+import coil.imageLoader
 import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
 import coil.request.CachePolicy
@@ -66,11 +69,58 @@ private object SmartImageRegex {
     val youtubeViRegex = Regex("/vi(?:_webp)?/([^/]+)/")
 }
 
-val SmartImageCompactListTargetSize = Size(96, 96)
-val SmartImageListTargetSize = Size(128, 128)
-val SmartImageCardTargetSize = Size(512, 512)
-val SmartImageLargeCardTargetSize = Size(1024, 1024)
-private val DefaultSmartImageSize = Size(512, 512)
+object SmartImageBuckets {
+    const val COMPACT_PX = 96
+    const val LIST_ROW_PX = 128
+    const val INTERMEDIATE_PX = 256
+    const val EXPLORE_CARD_PX = 384
+    const val CARD_PX = 512
+    const val HERO_PX = 1024
+}
+
+val SmartImageCompactBucket = Size(SmartImageBuckets.COMPACT_PX, SmartImageBuckets.COMPACT_PX)
+val SmartImageListBucket = Size(SmartImageBuckets.LIST_ROW_PX, SmartImageBuckets.LIST_ROW_PX)
+val SmartImageIntermediateBucket = Size(SmartImageBuckets.INTERMEDIATE_PX, SmartImageBuckets.INTERMEDIATE_PX)
+val SmartImageExploreCardBucket = Size(SmartImageBuckets.EXPLORE_CARD_PX, SmartImageBuckets.EXPLORE_CARD_PX)
+val SmartImageCardBucket = Size(SmartImageBuckets.CARD_PX, SmartImageBuckets.CARD_PX)
+val SmartImageHeroBucket = Size(SmartImageBuckets.HERO_PX, SmartImageBuckets.HERO_PX)
+
+val SmartImageCompactListTargetSize = SmartImageCompactBucket
+val SmartImageListTargetSize = SmartImageListBucket
+val SmartImageIntermediateTargetSize = SmartImageIntermediateBucket
+val SmartImageExploreCardTargetSize = SmartImageExploreCardBucket
+val SmartImageCardTargetSize = SmartImageCardBucket
+val SmartImageLargeCardTargetSize = SmartImageHeroBucket
+private val DefaultSmartImageSize = SmartImageExploreCardTargetSize
+
+/**
+ * Snaps a raw pixel dimension to the nearest density-aware resolution ladder bucket.
+ * Standard ladder steps: 96px, 128px, 256px, 384px, 512px, 1024px.
+ */
+fun smartImageBucketForPx(rawPx: Int, isThumbnail: Boolean = false): Int {
+    if (isThumbnail) {
+        return if (rawPx <= 96) 96 else 128
+    }
+    return when {
+        rawPx <= 112 -> 96
+        rawPx <= 192 -> 128
+        rawPx <= 320 -> 256
+        rawPx <= 448 -> 384
+        rawPx <= 768 -> 512
+        else -> 1024
+    }
+}
+
+/**
+ * Interface contract provider for Explore Screen and other presentation composables:
+ * Maps card DP dimension and device display density into standard resolution buckets.
+ */
+fun smartImageTargetSizeFor(widthDp: Dp, density: Float, isThumbnail: Boolean = false): Size {
+    if (widthDp <= 0.dp) return if (isThumbnail) SmartImageListBucket else SmartImageExploreCardBucket
+    val rawPx = kotlin.math.round(widthDp.value * density).toInt()
+    val bucketDim = smartImageBucketForPx(rawPx, isThumbnail)
+    return Size(bucketDim, bucketDim)
+}
 
 @Composable
 fun SmartImage(
@@ -121,7 +171,7 @@ fun SmartImage(
 
     val density = LocalDensity.current.density
     val clippedModifier = modifier.clip(shape)
-    val requestTargetSize = remember(targetSize, effectiveQuality, isThumbnail) {
+    val requestTargetSize = remember(targetSize, effectiveQuality, isThumbnail, density) {
         val effectiveTargetSize = if (isThumbnail && targetSize == DefaultSmartImageSize) {
             SmartImageListTargetSize
         } else {
@@ -129,16 +179,18 @@ fun SmartImage(
         }
         val baseSize = safeAlbumArtTargetSize(effectiveTargetSize)
         val maxSize = if (isThumbnail) {
-            256
+            SmartImageBuckets.LIST_ROW_PX
         } else {
             effectiveQuality.maxSize
         }
         val rawW = (baseSize.width as? coil.size.Dimension.Pixels)?.px
         val rawH = (baseSize.height as? coil.size.Dimension.Pixels)?.px
         val limit = if (maxSize > 0) maxSize else MaxSafeAlbumArtDimensionPx
-        val finalW = if (rawW != null) rawW.coerceIn(1, limit) else limit
-        val finalH = if (rawH != null) rawH.coerceIn(1, limit) else limit
-        Size(finalW, finalH)
+        val boundedW = if (rawW != null) rawW.coerceIn(1, limit) else limit
+        val boundedH = if (rawH != null) rawH.coerceIn(1, limit) else limit
+        val maxDim = maxOf(boundedW, boundedH)
+        val bucketDim = smartImageBucketForPx(maxDim, isThumbnail)
+        Size(bucketDim, bucketDim)
     }
 
     // Handle direct models (Bitmap, Vector, etc) early to avoid ImageRequest overhead
@@ -198,16 +250,14 @@ fun SmartImage(
         isThumbnail
     ) {
         val optimizedModel = if (model is String && (model.contains("googleusercontent.com") || model.contains("ggpht.com"))) {
-            val widthPx = (requestTargetSize.width as? coil.size.Dimension.Pixels)?.px ?: (if (isThumbnail) 128 else 512)
-            val heightPx = (requestTargetSize.height as? coil.size.Dimension.Pixels)?.px ?: (if (isThumbnail) 128 else 512)
-            val sizeStr = if (isThumbnail) {
-                val thumbDim = maxOf(widthPx, heightPx).coerceIn(96, 256)
-                "=w$thumbDim-h$thumbDim-c-rj"
-            } else if (widthPx >= 800 || heightPx >= 800) {
-                "=w800-h800-l90-rj"
+            val widthPx = (requestTargetSize.width as? coil.size.Dimension.Pixels)?.px ?: (if (isThumbnail) SmartImageBuckets.LIST_ROW_PX else SmartImageBuckets.CARD_PX)
+            val heightPx = (requestTargetSize.height as? coil.size.Dimension.Pixels)?.px ?: (if (isThumbnail) SmartImageBuckets.LIST_ROW_PX else SmartImageBuckets.CARD_PX)
+            val targetDim = maxOf(widthPx, heightPx)
+            val bucketDim = smartImageBucketForPx(targetDim, isThumbnail)
+            val sizeStr = if (bucketDim >= 1024) {
+                "=w1024-h1024-l90-rj"
             } else {
-                val cardDim = maxOf(widthPx, heightPx).coerceIn(256, 512)
-                "=w$cardDim-h$cardDim-c-rj"
+                "=w$bucketDim-h$bucketDim-c-rj"
             }
             if (SmartImageRegex.sizeParamRegex.containsMatchIn(model)) {
                 model.replace(SmartImageRegex.sizeParamRegex, sizeStr)
@@ -236,7 +286,19 @@ fun SmartImage(
             model
         }
 
-        val effectiveCrossfade = crossfadeDurationMillis
+        val isInMemoryCache = if (useMemoryCache && memoryCacheKey != null) {
+            context.imageLoader.memoryCache?.get(memoryCacheKey) != null
+        } else {
+            false
+        }
+
+        val effectiveCrossfade = if (isThumbnail || isInMemoryCache) {
+            0
+        } else if (crossfadeDurationMillis == 220) {
+            120
+        } else {
+            crossfadeDurationMillis
+        }
 
         if (optimizedModel is ImageRequest) {
             optimizedModel.newBuilder(context)

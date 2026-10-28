@@ -48,6 +48,7 @@ import com.unshoo.pixelmusic.data.model.Genre
 import com.unshoo.pixelmusic.data.model.Song
 import com.unshoo.pixelmusic.presentation.components.SmartImage
 import com.unshoo.pixelmusic.presentation.components.SmartImageListTargetSize
+import com.unshoo.pixelmusic.presentation.components.SmartImageExploreCardTargetSize
 import racra.compose.smooth_corner_rect_library.AbsoluteSmoothCornerShape
 
 // ============================================================================
@@ -203,7 +204,7 @@ private fun ExploreHeroCard(
             modifier = Modifier.fillMaxSize(),
             shape = HeroCardShape,
             contentScale = ContentScale.Crop,
-            targetSize = SmartImageListTargetSize
+            targetSize = SmartImageExploreCardTargetSize
         )
 
         // Scrim so the text always passes contrast, regardless of artwork.
@@ -461,7 +462,7 @@ fun ExploreMadeForYou(
                         contentDescription = song.title,
                         modifier = Modifier.fillMaxSize(),
                         shape = MadeForYouShape,
-                        targetSize = SmartImageListTargetSize
+                        targetSize = SmartImageExploreCardTargetSize
                     )
                     if (song.id == currentSongId) {
                         Box(

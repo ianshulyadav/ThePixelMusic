@@ -178,6 +178,8 @@ import com.unshoo.pixelmusic.presentation.components.SmartImage
 import com.unshoo.pixelmusic.presentation.components.SmartImageCardTargetSize
 import com.unshoo.pixelmusic.presentation.components.SmartImageListTargetSize
 import com.unshoo.pixelmusic.presentation.components.SmartImageCompactListTargetSize
+import com.unshoo.pixelmusic.presentation.components.SmartImageIntermediateTargetSize
+import com.unshoo.pixelmusic.presentation.components.SmartImageExploreCardTargetSize
 import com.unshoo.pixelmusic.presentation.components.SmartImageLargeCardTargetSize
 import com.unshoo.pixelmusic.presentation.components.bounceClick
 import com.unshoo.pixelmusic.presentation.components.SongInfoBottomSheet
@@ -2210,7 +2212,7 @@ private fun FeedTrackCard(
                         contentDescription = title,
                         contentScale = ContentScale.Crop,
                         shape = cardShape,
-                        targetSize = SmartImageCardTargetSize,
+                        targetSize = SmartImageExploreCardTargetSize,
                         placeholderResId = 0,
                         errorResId = 0,
                         modifier = Modifier.fillMaxSize()
@@ -2355,7 +2357,7 @@ private fun FeedPlaylistCard(
                             contentDescription = title,
                             contentScale = ContentScale.Crop,
                             shape = cardShape,
-                            targetSize = SmartImageCardTargetSize,
+                            targetSize = SmartImageExploreCardTargetSize,
                             placeholderResId = 0,
                             errorResId = 0,
                             modifier = Modifier.fillMaxSize()
@@ -2495,7 +2497,7 @@ private fun ShelfArtistCard(
                         contentDescription = artist.name,
                         contentScale = ContentScale.Crop,
                         shape = artistAvatarShape,
-                        targetSize = SmartImageCardTargetSize,
+                        targetSize = SmartImageExploreCardTargetSize,
                         placeholderResId = 0,
                         errorResId = 0,
                         modifier = Modifier.fillMaxSize()
@@ -2622,7 +2624,7 @@ private fun RecentTrackCard(
                             contentDescription = track.name,
                             contentScale = ContentScale.Crop,
                             shape = cardShape,
-                            targetSize = SmartImageCardTargetSize,
+                            targetSize = SmartImageExploreCardTargetSize,
                             placeholderResId = 0,
                             errorResId = 0,
                             modifier = Modifier.fillMaxSize()
@@ -2932,7 +2934,7 @@ private fun SpotlightHeroCard(
                                     contentDescription = spotlight.artistName,
                                     contentScale = ContentScale.Crop,
                                     shape = heroAvatarShape,
-                                    targetSize = SmartImageCardTargetSize,
+                                    targetSize = SmartImageExploreCardTargetSize,
                                     modifier = Modifier.fillMaxSize()
                                 )
                             }
@@ -3037,7 +3039,7 @@ private fun ArtistAvatarCard(
                         contentDescription = artist.name,
                         contentScale = ContentScale.Crop,
                         shape = avatarShape,
-                        targetSize = SmartImageCardTargetSize,
+                        targetSize = SmartImageIntermediateTargetSize,
                         placeholderResId = 0,
                         errorResId = 0,
                         modifier = Modifier.fillMaxSize()
@@ -3692,7 +3694,7 @@ private fun LibraryCarouselCard(
                     SmartImage(
                         model = thumbnail,
                         contentDescription = title,
-                        targetSize = SmartImageCardTargetSize,
+                        targetSize = SmartImageExploreCardTargetSize,
                         modifier = Modifier.fillMaxSize(),
                         placeholderResId = 0,
                         errorResId = 0,
