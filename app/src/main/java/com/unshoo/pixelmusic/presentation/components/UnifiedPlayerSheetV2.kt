@@ -4,7 +4,6 @@ import android.widget.Toast
 import com.unshoo.pixelmusic.presentation.components.ExpressiveOfflineDialog
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.MutatorMutex
@@ -33,10 +32,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.graphics.toArgb
-import androidx.core.view.WindowCompat
-import com.unshoo.pixelmusic.ui.theme.findActivity
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.shadow
@@ -268,10 +263,9 @@ fun UnifiedPlayerSheetV2(
     val playerContentExpansionFraction = playerViewModel.playerContentExpansionFraction
     val visualOvershootScaleY = remember { Animatable(1f) }
     val initialFullPlayerOffsetY = remember(density) { with(density) { 24.dp.toPx() } }
-    val sheetExpandAnimSpec = remember { tween<Float>(durationMillis = 300, easing = CubicBezierEasing(0.05f, 0.70f, 0.10f, 1.0f)) }
-    val sheetCollapseAnimSpec = remember { tween<Float>(durationMillis = 240, easing = CubicBezierEasing(0.20f, 1.0f, 0.30f, 1.0f)) }
-    // Use expand spec as the default (collapse overrides it in SheetMotionController)
-    val sheetAnimationSpec = sheetExpandAnimSpec
+    val sheetAnimationSpec = remember {
+        tween<Float>(durationMillis = ANIMATION_DURATION_MS, easing = FastOutSlowInEasing)
+    }
     val sheetAnimationMutex = remember { MutatorMutex() }
     val sheetExpandedTargetY = 0f
     val initialY =
@@ -282,15 +276,13 @@ fun UnifiedPlayerSheetV2(
         currentSheetTranslationY,
         playerContentExpansionFraction,
         sheetAnimationMutex,
-        sheetExpandAnimSpec,
-        sheetCollapseAnimSpec
+        sheetAnimationSpec
     ) {
         SheetMotionController(
             translationY = currentSheetTranslationY,
             expansionFraction = playerContentExpansionFraction,
             mutex = sheetAnimationMutex,
-            expandAnimationSpec = sheetExpandAnimSpec,
-            collapseAnimationSpec = sheetCollapseAnimSpec,
+            defaultAnimationSpec = sheetAnimationSpec,
             expandedY = sheetExpandedTargetY
         )
     }
@@ -321,7 +313,7 @@ fun UnifiedPlayerSheetV2(
 
     suspend fun animatePlayerSheet(
         targetExpanded: Boolean,
-        animationSpec: androidx.compose.animation.core.AnimationSpec<Float>? = null,
+        animationSpec: androidx.compose.animation.core.AnimationSpec<Float> = sheetAnimationSpec,
         initialVelocity: Float = 0f
     ) {
         sheetMotionController.animateTo(
@@ -461,7 +453,9 @@ fun UnifiedPlayerSheetV2(
         offsetAnimatable = offsetAnimatable,
         screenWidthPx = screenWidthPx,
         onDismissPlaylistAndShowUndo = { playerViewModel.dismissPlaylistAndShowUndo() },
-        onDismissStarted = { playerViewModel.setMiniPlayerDismissing(true) }
+        onDismissStarted = { playerViewModel.setMiniPlayerDismissing(true) },
+        onPrevious = { playerViewModel.previousSong() },
+        onNext = { playerViewModel.nextSong() }
     )
 
     QueueSheetRuntimeEffects(
@@ -536,30 +530,7 @@ fun UnifiedPlayerSheetV2(
     val albumColorScheme = sheetThemeState.albumColorScheme
     val miniPlayerScheme = sheetThemeState.miniPlayerScheme
 
-    // Edge-to-edge system bar contrast adaptation:
-    // When the player expands past 50%, match system bar icon contrast to the player's dynamic album palette.
-    // When collapsed, seamlessly restore standard activity theme icons.
-    val view = LocalView.current
-    val isExpandedForSystemBars by remember {
-        derivedStateOf { playerContentExpansionFraction.value > 0.5f }
-    }
-    if (!view.isInEditMode && showPlayerContentArea) {
-        val playerIsDark = remember(albumColorScheme, isDarkTheme) {
-            val lum = androidx.core.graphics.ColorUtils.calculateLuminance(albumColorScheme.surface.toArgb())
-            if (isDarkTheme) true else lum <= 0.55
-        }
-        SideEffect {
-            val window = view.context.findActivity()?.window ?: return@SideEffect
-            val controller = WindowCompat.getInsetsController(window, view)
-            if (isExpandedForSystemBars) {
-                controller.isAppearanceLightStatusBars = !playerIsDark
-                controller.isAppearanceLightNavigationBars = !playerIsDark
-            } else {
-                controller.isAppearanceLightStatusBars = !isDarkTheme
-                controller.isAppearanceLightNavigationBars = !isDarkTheme
-            }
-        }
-    }
+
     val isPreparingPlayback = sheetThemeState.isPreparingPlayback
     val miniReadyAlpha = sheetThemeState.miniReadyAlpha
     val miniAppearScale = sheetThemeState.miniAppearScale

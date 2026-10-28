@@ -7,33 +7,28 @@ import androidx.compose.foundation.MutatorMutex
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
+/**
+ * Centralizes sheet motion updates so animation/snap logic lives in one place.
+ * This keeps behavior stable while enabling an incremental V2 rewrite.
+ */
 internal class SheetMotionController(
     private val translationY: Animatable<Float, AnimationVector1D>,
     private val expansionFraction: Animatable<Float, AnimationVector1D>,
     private val mutex: MutatorMutex,
-    private val expandAnimationSpec: AnimationSpec<Float>,
-    private val collapseAnimationSpec: AnimationSpec<Float> = expandAnimationSpec,
+    private val defaultAnimationSpec: AnimationSpec<Float>,
     private val expandedY: Float = 0f
 ) {
-    /**
-     * Animates the sheet to the target state. The correct easing curve is chosen
-     * automatically (expand vs collapse), so callers never need to pass a spec.
-     *
-     * [animationSpec] can be provided as an override for gesture-driven flings
-     * where [initialVelocity] must be matched to a tween duration.
-     */
     suspend fun animateTo(
         targetExpanded: Boolean,
         canExpand: Boolean,
         collapsedY: Float,
-        animationSpec: AnimationSpec<Float>? = null,
+        animationSpec: AnimationSpec<Float> = defaultAnimationSpec,
         initialVelocity: Float = 0f
     ) {
         val targetFraction = if (canExpand && targetExpanded) 1f else 0f
         val targetY = if (targetExpanded) expandedY else collapsedY
         val velocityScale = (collapsedY - expandedY).coerceAtLeast(1f)
 
-        // Already at target and not running — nothing to do.
         if (
             translationY.value == targetY &&
             expansionFraction.value == targetFraction &&
@@ -43,23 +38,20 @@ internal class SheetMotionController(
             return
         }
 
-        // Pick the right curve for expand vs collapse unless the caller overrides.
-        val spec = animationSpec ?: if (targetExpanded) expandAnimationSpec else collapseAnimationSpec
-
         mutex.mutate {
             coroutineScope {
                 launch {
                     translationY.animateTo(
                         targetValue = targetY,
                         initialVelocity = initialVelocity,
-                        animationSpec = spec
+                        animationSpec = animationSpec
                     )
                 }
                 launch {
                     expansionFraction.animateTo(
                         targetValue = targetFraction,
                         initialVelocity = initialVelocity / velocityScale,
-                        animationSpec = spec
+                        animationSpec = animationSpec
                     )
                 }
             }
@@ -76,11 +68,6 @@ internal class SheetMotionController(
             translationY.snapTo(translationYValue)
             expansionFraction.snapTo(expansionFractionValue)
         }
-    }
-
-    suspend fun snapToDirect(translationYValue: Float, expansionFractionValue: Float) {
-        translationY.snapTo(translationYValue)
-        expansionFraction.snapTo(expansionFractionValue)
     }
 
     suspend fun snapCollapsed(collapsedY: Float) {

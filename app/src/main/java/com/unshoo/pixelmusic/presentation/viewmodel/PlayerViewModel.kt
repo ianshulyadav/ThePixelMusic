@@ -1358,102 +1358,24 @@ class PlayerViewModel @Inject constructor(
         // read, the cloud-URI pre-fetch, and the palette quantization all
         // competed with the first frame; the runtime log shows a 51-frame
         // Choreographer skip during the very first interaction. We now
-        // suspend on AppReadinessSignal so the work runs after the first
-        // frame is committed (the signal is raised by MainActivity at
-        // line ~296 right after the contentVisible transition starts).
-        viewModelScope.launch(Dispatchers.IO) {
-            AppReadinessSignal.awaitReady()
-            // On cold start, the MediaController connects asynchronously, leaving stablePlayerState.currentSong
-            // and currentPlaybackQueue empty until that happens.
-            // PixelPlayer OSS pattern: Pre-load ONLY the single latest played song rather than restoring
-            // an obsolete multi-track queue built in past sessions.
+        viewModelScope.launch {
             val snapshot = runCatching {
                 userPreferencesRepository.getPlaybackQueueSnapshotOnce()
-            }.getOrNull()
+            }.getOrNull() ?: return@launch
 
-            val currentItem = snapshot?.let { snap ->
-                if (snap.currentMediaId != null) {
-                    snap.items.find { it.mediaId == snap.currentMediaId }
-                } else {
-                    snap.items.getOrNull(snap.currentIndex)
-                }
-            }
-
-            val restoredQueueList: List<Song> = snapshot?.items?.map { mapSnapshotItemToSong(it) }.orEmpty()
-            val resolvedIndex = when {
-                !snapshot?.currentMediaId.isNullOrBlank() -> {
-                    restoredQueueList.indexOfFirst { it.id == snapshot?.currentMediaId }.takeIf { it >= 0 }
-                        ?: (if (snapshot != null && snapshot.currentIndex in restoredQueueList.indices) snapshot.currentIndex else 0)
-                }
-                snapshot != null && snapshot.currentIndex in restoredQueueList.indices -> snapshot.currentIndex
-                else -> 0
-            }
-
-            // Device-friendly: only restore the left songs in the queue after the last played song
-            val remainingQueueList = if (restoredQueueList.isNotEmpty() && resolvedIndex in restoredQueueList.indices) {
-                restoredQueueList.subList(resolvedIndex, restoredQueueList.size)
-            } else if (restoredQueueList.isNotEmpty()) {
-                restoredQueueList
+            val currentItem = if (snapshot.currentMediaId != null) {
+                snapshot.items.find { it.mediaId == snapshot.currentMediaId }
             } else {
-                emptyList()
-            }
+                snapshot.items.getOrNull(snapshot.currentIndex)
+            } ?: return@launch
 
-            val latestSongResolved: Song = remainingQueueList.firstOrNull()
-                ?: runCatching { musicRepository.getLastPlayedSong() }.getOrNull()
-                ?: return@launch
+            val artworkUri = currentItem.artworkUri?.takeIf { it.isNotBlank() } ?: return@launch
 
-            val fullQueue = if (remainingQueueList.isNotEmpty()) {
-                remainingQueueList.toPersistentList()
-            } else {
-                persistentListOf(latestSongResolved)
-            }
-
-            _playerUiState.update { currentState ->
-                if (currentState.currentPlaybackQueue.isEmpty()) {
-                    currentState.copy(currentPlaybackQueue = fullQueue)
-                } else {
-                    currentState
-                }
-            }
-            _isSheetVisible.value = true
-
-            if (playbackStateHolder.stablePlayerState.value.currentSong == null) {
-                playbackStateHolder.updateStablePlayerState { state ->
-                    if (state.currentSong == null) {
-                        state.copy(
-                            currentSong = latestSongResolved,
-                            currentMediaItemIndex = 0,
-                            repeatMode = snapshot?.repeatMode ?: Player.REPEAT_MODE_OFF,
-                            isShuffleEnabled = snapshot?.shuffleEnabled ?: false,
-                            totalDuration = latestSongResolved.duration
-                        )
-                    } else {
-                        state
-                    }
-                }
-                playbackStateHolder.setCurrentPosition(snapshot?.currentPositionMs?.coerceAtLeast(0L) ?: 0L)
-            }
-
-            launch {
-                AppReadinessSignal.awaitReady()
-                val uriStr = latestSongResolved.contentUriString
-                if (uriStr.isNotBlank() && (
-                    uriStr.startsWith("youtube://") ||
-                    uriStr.startsWith("telegram:") ||
-                    uriStr.startsWith("gdrive:")
-                )) {
-                    runCatching { dualPlayerEngine.resolveCloudUri(uriStr.toUri()) }
-                }
-
-                val artworkUri = latestSongResolved.albumArtUriString?.takeIf { it.isNotBlank() }
-                if (artworkUri != null) {
-                    themeStateHolder.extractAndGenerateColorScheme(
-                        albumArtUriAsUri = artworkUri.toUri(),
-                        currentSongUriString = artworkUri,
-                        isPreload = false
-                    )
-                }
-            }
+            themeStateHolder.extractAndGenerateColorScheme(
+                albumArtUriAsUri = artworkUri.toUri(),
+                currentSongUriString = artworkUri,
+                isPreload = false
+            )
         }
 
         viewModelScope.launch {

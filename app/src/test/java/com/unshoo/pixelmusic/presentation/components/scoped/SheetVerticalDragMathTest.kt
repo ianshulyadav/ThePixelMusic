@@ -1,5 +1,6 @@
 package com.unshoo.pixelmusic.presentation.components.scoped
 
+import androidx.compose.animation.core.Spring
 import com.google.common.truth.Truth.assertThat
 import com.unshoo.pixelmusic.presentation.viewmodel.PlayerSheetState
 import org.junit.Test
@@ -10,10 +11,10 @@ class SheetVerticalDragMathTest {
     fun resolveVerticalSheetTargetState_highUpwardVelocity_expandsSheet() {
         val target = resolveVerticalSheetTargetState(
             currentSheetContentState = PlayerSheetState.COLLAPSED,
-            accumulatedDragY = -50f,
+            accumulatedDragY = 0f,
             minDragThresholdPx = 10f,
             verticalVelocity = -800f,
-            velocityThreshold = 350f,
+            velocityThreshold = 150f,
             currentFraction = 0.2f
         )
         assertThat(target).isEqualTo(PlayerSheetState.EXPANDED)
@@ -23,39 +24,37 @@ class SheetVerticalDragMathTest {
     fun resolveVerticalSheetTargetState_highDownwardVelocity_collapsesSheet() {
         val target = resolveVerticalSheetTargetState(
             currentSheetContentState = PlayerSheetState.EXPANDED,
-            accumulatedDragY = 50f,
+            accumulatedDragY = 5f,
             minDragThresholdPx = 10f,
             verticalVelocity = 900f,
-            velocityThreshold = 350f,
+            velocityThreshold = 150f,
             currentFraction = 0.85f
         )
         assertThat(target).isEqualTo(PlayerSheetState.COLLAPSED)
     }
 
     @Test
-    fun resolveVerticalSheetTargetState_expandedWithMinorDragDown_retainsExpanded() {
-        // Minor drag down (only down to 80% expansion) without high fling velocity
+    fun resolveVerticalSheetTargetState_dragUpPastThreshold_expandsSheet() {
         val target = resolveVerticalSheetTargetState(
-            currentSheetContentState = PlayerSheetState.EXPANDED,
-            accumulatedDragY = 30f,
+            currentSheetContentState = PlayerSheetState.COLLAPSED,
+            accumulatedDragY = -50f,
             minDragThresholdPx = 10f,
-            verticalVelocity = 50f,
-            velocityThreshold = 350f,
-            currentFraction = 0.80f
+            verticalVelocity = 0f,
+            velocityThreshold = 150f,
+            currentFraction = 0.3f
         )
         assertThat(target).isEqualTo(PlayerSheetState.EXPANDED)
     }
 
     @Test
-    fun resolveVerticalSheetTargetState_expandedWithSubstantialDragDown_collapsesSheet() {
-        // Dragged down past 35% (fraction 0.50 < 0.65)
+    fun resolveVerticalSheetTargetState_dragDownPastThreshold_collapsesSheet() {
         val target = resolveVerticalSheetTargetState(
             currentSheetContentState = PlayerSheetState.EXPANDED,
-            accumulatedDragY = 300f,
+            accumulatedDragY = 50f,
             minDragThresholdPx = 10f,
-            verticalVelocity = 100f,
-            velocityThreshold = 350f,
-            currentFraction = 0.50f
+            verticalVelocity = 0f,
+            velocityThreshold = 150f,
+            currentFraction = 0.8f
         )
         assertThat(target).isEqualTo(PlayerSheetState.COLLAPSED)
     }
@@ -68,50 +67,48 @@ class SheetVerticalDragMathTest {
             accumulatedDragY = -40f,
             minDragThresholdPx = 10f,
             verticalVelocity = 0f,
-            velocityThreshold = 350f,
+            velocityThreshold = 150f,
             currentFraction = 1.0f
         )
         assertThat(target).isEqualTo(PlayerSheetState.EXPANDED)
     }
 
     @Test
-    fun resolveVerticalSheetTargetState_collapsedMinorDragUp_retainsCollapsed() {
-        // Dragged up only slightly (fraction 0.20 <= 0.35)
-        val target = resolveVerticalSheetTargetState(
+    fun resolveVerticalSheetTargetState_midpointFallback() {
+        val aboveMidpoint = resolveVerticalSheetTargetState(
             currentSheetContentState = PlayerSheetState.COLLAPSED,
-            accumulatedDragY = -20f,
-            minDragThresholdPx = 10f,
-            verticalVelocity = -100f,
-            velocityThreshold = 350f,
-            currentFraction = 0.20f
+            accumulatedDragY = 0f,
+            minDragThresholdPx = 100f,
+            verticalVelocity = 0f,
+            velocityThreshold = 150f,
+            currentFraction = 0.6f
         )
-        assertThat(target).isEqualTo(PlayerSheetState.COLLAPSED)
+        assertThat(aboveMidpoint).isEqualTo(PlayerSheetState.EXPANDED)
+
+        val belowMidpoint = resolveVerticalSheetTargetState(
+            currentSheetContentState = PlayerSheetState.COLLAPSED,
+            accumulatedDragY = 0f,
+            minDragThresholdPx = 100f,
+            verticalVelocity = 0f,
+            velocityThreshold = 150f,
+            currentFraction = 0.4f
+        )
+        assertThat(belowMidpoint).isEqualTo(PlayerSheetState.COLLAPSED)
     }
 
     @Test
-    fun resolveVerticalSheetTargetState_collapsedSubstantialDragUp_expandsSheet() {
-        // Dragged up past 35% (fraction 0.45 > 0.35)
-        val target = resolveVerticalSheetTargetState(
-            currentSheetContentState = PlayerSheetState.COLLAPSED,
-            accumulatedDragY = -180f,
-            minDragThresholdPx = 10f,
-            verticalVelocity = -100f,
-            velocityThreshold = 350f,
-            currentFraction = 0.45f
-        )
-        assertThat(target).isEqualTo(PlayerSheetState.EXPANDED)
+    fun collapseSpringDampingForFraction_returnsCorrectInterpolation() {
+        val start = collapseSpringDampingForFraction(0f)
+        val stop = collapseSpringDampingForFraction(1f)
+        assertThat(start).isEqualTo(Spring.DampingRatioNoBouncy)
+        assertThat(stop).isEqualTo(Spring.DampingRatioLowBouncy)
     }
 
     @Test
-    fun collapseAnimationDurationForFraction_returnsPhysicalDurationInRange() {
-        val minDuration = collapseAnimationDurationForFraction(0f)
-        val maxDuration = collapseAnimationDurationForFraction(1f)
-        val midDuration = collapseAnimationDurationForFraction(0.5f)
-
-        assertThat(minDuration).isAtLeast(160)
-        assertThat(maxDuration).isAtMost(250)
-        assertThat(midDuration).isGreaterThan(minDuration)
-        assertThat(midDuration).isLessThan(maxDuration)
+    fun collapseInitialSquashForFraction_returnsCorrectRange() {
+        val start = collapseInitialSquashForFraction(0f)
+        val stop = collapseInitialSquashForFraction(1f)
+        assertThat(start).isEqualTo(1.0f)
+        assertThat(stop).isEqualTo(0.97f)
     }
 }
-

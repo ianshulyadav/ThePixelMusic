@@ -3,7 +3,8 @@ package com.unshoo.pixelmusic.presentation.components.scoped
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.AnimationVector1D
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -16,7 +17,6 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
-import kotlin.math.abs
 
 /**
  * Encapsulates vertical drag gesture state and target resolution for the player sheet.
@@ -47,8 +47,6 @@ internal class SheetVerticalDragGestureHandler(
     private var initialFractionOnDragStart = 0f
     private var initialYOnDragStart = 0f
     private var accumulatedDragYSinceStart = 0f
-    private var lastSnappedY = Float.NaN
-    private var lastSnappedFraction = Float.NaN
     private var dragSnapJob: Job? = null
 
     fun onDragStart() {
@@ -62,8 +60,6 @@ internal class SheetVerticalDragGestureHandler(
         initialFractionOnDragStart = playerContentExpansionFraction.value
         initialYOnDragStart = currentSheetTranslationY.value
         accumulatedDragYSinceStart = 0f
-        lastSnappedY = initialYOnDragStart
-        lastSnappedFraction = initialFractionOnDragStart
     }
 
     fun onVerticalDrag(
@@ -81,23 +77,12 @@ internal class SheetVerticalDragGestureHandler(
             initialFractionOnDragStart = initialFractionOnDragStart,
             initialYOnDragStart = initialYOnDragStart
         )
-        // Avoid dispatching work for tiny pointer deltas. Scroll/fling can deliver many
-        // sub-pixel moves; snapping each one steals frame budget from the page underneath.
-        if (abs(dragFrame.translationY - lastSnappedY) >= 0.5f ||
-            abs(dragFrame.expansionFraction - lastSnappedFraction) >= 0.0015f
-        ) {
-            val tY = dragFrame.translationY
-            val eF = dragFrame.expansionFraction
-            lastSnappedY = tY
-            lastSnappedFraction = eF
-            if (dragSnapJob?.isActive != true) {
-                dragSnapJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
-                    sheetMotionController.snapToDirect(
-                        translationYValue = tY,
-                        expansionFractionValue = eF
-                    )
-                }
-            }
+        dragSnapJob?.cancel()
+        dragSnapJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            sheetMotionController.snapTo(
+                translationYValue = dragFrame.translationY,
+                expansionFractionValue = dragFrame.expansionFraction
+            )
         }
         velocityTracker.addPosition(uptimeMillis, position)
     }
@@ -111,7 +96,7 @@ internal class SheetVerticalDragGestureHandler(
         val verticalVelocity = velocityTracker.calculateVelocity().y
         val currentFraction = playerContentExpansionFraction.value
         val minDragThresholdPx = with(densityProvider()) { 5.dp.toPx() }
-        val velocityThreshold = 350f
+        val velocityThreshold = 150f
 
         val targetState = resolveVerticalSheetTargetState(
             currentSheetContentState = currentSheetStateProvider(),
@@ -123,24 +108,34 @@ internal class SheetVerticalDragGestureHandler(
         )
 
         scope.launch {
-            val clampedVelocity = verticalVelocity.coerceIn(-2600f, 2600f)
             if (targetState == PlayerSheetState.EXPANDED) {
                 launch {
-                    onAnimateSheet(true, null, clampedVelocity)
+                    onAnimateSheet(true, null, 0f)
                 }
                 onExpandSheetState()
             } else {
-                val closeSpec = tween<Float>(
-                    durationMillis = collapseAnimationDurationForFraction(currentFraction),
-                    easing = androidx.compose.animation.core.CubicBezierEasing(0.20f, 1.0f, 0.30f, 1.0f)
-                )
-                // No scale squash — keep it at 1f to avoid any secondary bounce.
-                visualOvershootScaleY.snapTo(1f)
-                onAnimateSheet(
-                    false,
-                    closeSpec,
-                    clampedVelocity
-                )
+                val dynamicDamping = collapseSpringDampingForFraction(currentFraction)
+                launch {
+                    val initialSquash = collapseInitialSquashForFraction(currentFraction)
+                    visualOvershootScaleY.snapTo(initialSquash)
+                    visualOvershootScaleY.animateTo(
+                        targetValue = 1f,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                            stiffness = Spring.StiffnessVeryLow
+                        )
+                    )
+                }
+                launch {
+                    onAnimateSheet(
+                        false,
+                        spring(
+                            dampingRatio = dynamicDamping,
+                            stiffness = Spring.StiffnessLow
+                        ),
+                        verticalVelocity
+                    )
+                }
                 onCollapseSheetState()
             }
         }
@@ -149,21 +144,7 @@ internal class SheetVerticalDragGestureHandler(
     }
 
     fun onDragCancel() {
-        dragSnapJob?.cancel()
-        dragSnapJob = null
-        onDraggingChange(false)
-        onDraggingPlayerAreaChange(false)
-        accumulatedDragYSinceStart = 0f
-
-        val restoreExpanded = currentSheetStateProvider() == PlayerSheetState.EXPANDED
-        scope.launch {
-            visualOvershootScaleY.snapTo(1f)
-            onAnimateSheet(
-                restoreExpanded,
-                tween(durationMillis = 180, easing = androidx.compose.animation.core.CubicBezierEasing(0.20f, 1.0f, 0.30f, 1.0f)),
-                0f
-            )
-        }
+        onDragEnd()
     }
 }
 

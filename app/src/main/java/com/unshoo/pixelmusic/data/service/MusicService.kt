@@ -2818,11 +2818,6 @@ class MusicService : MediaLibraryService() {
     private suspend fun persistPlaybackSnapshot(playWhenReadyOverride: Boolean? = null) {
         if (isRestoringPlaybackSnapshot) return
         val snapshot = capturePlaybackSnapshot(playWhenReadyOverride)
-        // BUGFIX: Never overwrite or remove the persisted DataStore snapshot on transient idle/empty states.
-        // Doing so wipes the user's queue from DataStore on process teardown or restart.
-        if (snapshot == null || snapshot.items.isEmpty()) {
-            return
-        }
         runCatching {
             userPreferencesRepository.setPlaybackQueueSnapshot(snapshot)
         }.onFailure { e ->
@@ -3977,11 +3972,7 @@ class MusicService : MediaLibraryService() {
 
     private fun persistPlaybackSnapshotBlocking() {
         val snapshot = capturePlaybackSnapshotFromPlayer(playWhenReadyOverride = false)
-        if (snapshot != null && snapshot.items.isNotEmpty()) {
-            writePlaybackSnapshotBlocking(snapshot)
-        }
-        // Do NOT call clearPlaybackSnapshotBlocking() when player is already empty or idle;
-        // doing so destroys the user's saved last-played track and queue on process teardown.
+        writePlaybackSnapshotBlocking(snapshot)
     }
 
     private fun clearPlaybackSnapshotBlocking() {
