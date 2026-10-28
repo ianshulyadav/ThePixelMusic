@@ -2,6 +2,7 @@ package com.unshoo.pixelmusic.presentation.components.scoped
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.MonotonicFrameClock
@@ -114,13 +115,18 @@ internal class QueueSheetController(
         val durationMillis = if (targetExpanded) {
             (220f + (120f * travelFraction)).toInt()
         } else {
-            (190f + (110f * travelFraction)).toInt()
+            (160f + (80f * travelFraction)).toInt()
+        }
+        val easing = if (targetExpanded) {
+            CubicBezierEasing(0.05f, 0.70f, 0.10f, 1.0f)
+        } else {
+            CubicBezierEasing(0.30f, 0.0f, 0.80f, 0.15f)
         }
         queueSheetOffset.animateTo(
             targetValue = target,
             animationSpec = tween(
                 durationMillis = durationMillis,
-                easing = FastOutSlowInEasing
+                easing = easing
             )
         )
         onShowQueueSheetChange(targetExpanded)

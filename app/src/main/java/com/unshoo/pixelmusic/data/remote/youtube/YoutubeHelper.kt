@@ -746,7 +746,8 @@ object YoutubeHelper {
     suspend fun getSongPlayerUrl(
         context: Context,
         song: Song,
-        allowLocal: Boolean = false
+        allowLocal: Boolean = false,
+        allowLossless: Boolean = true
     ): String {
         val videoId = song.youtubeId
 
@@ -839,13 +840,15 @@ object YoutubeHelper {
         // ── LOSSLESS SOURCES GATE (Tidal / Qobuz / Deezer / Apple Music via the Source Pool) ──
         // Ported from ArchiveTune's resolveMultiSourceDataSpec: sits in front of JioSaavn and
         // YouTube so a lossless copy wins whenever a pool or user account can serve one.
-        resolveLosslessStreamUrl(
-            context = context,
-            song = song,
-            savedSong = savedSong,
-            cacheKeys = listOf(targetCacheKey, "${videoId}_high"),
-            lowDataMode = plan.quality == StreamingAudioQuality.LOW || plan.quality == StreamingAudioQuality.MEDIUM,
-        )?.let { return it }
+        if (allowLossless && !LosslessStreamResolver.isFailedForTrack(videoId)) {
+            resolveLosslessStreamUrl(
+                context = context,
+                song = song,
+                savedSong = savedSong,
+                cacheKeys = listOf(targetCacheKey, "${videoId}_high"),
+                lowDataMode = plan.quality == StreamingAudioQuality.LOW || plan.quality == StreamingAudioQuality.MEDIUM,
+            )?.let { return it }
+        }
 
         // ── JIOSAAVN HIGH-FIDELITY STREAMING GATE (3s timeout → YouTube fallback) ──
         if (isSaavnEnabled && plan.quality != StreamingAudioQuality.LOW) {
@@ -1168,7 +1171,7 @@ object YoutubeHelper {
     ): String? {
         val videoId = song.youtubeId
         return try {
-            if (lowDataMode || !LosslessStreamResolver.hasAnyActiveLosslessSource(context)) return null
+            if (lowDataMode || LosslessStreamResolver.isFailedForTrack(videoId) || !LosslessStreamResolver.hasAnyActiveLosslessSource(context)) return null
 
             // A previous resolve for this song that is still fresh wins immediately.
             LosslessStreamResolver.resultFor(videoId)?.let { previous ->

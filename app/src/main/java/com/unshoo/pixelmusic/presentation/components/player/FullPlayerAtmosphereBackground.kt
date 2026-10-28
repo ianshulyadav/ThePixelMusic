@@ -125,7 +125,7 @@ fun FullPlayerAtmosphereBackground(
                 AsyncImage(
                     model = ImageRequest.Builder(context)
                         .data(previousArtUri)
-                        .size(256, 256)
+                        .size(96, 96)
                         .build(),
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
@@ -138,7 +138,7 @@ fun FullPlayerAtmosphereBackground(
                 AsyncImage(
                     model = ImageRequest.Builder(context)
                         .data(displayedArtUri)
-                        .size(256, 256)
+                        .size(96, 96)
                         .build(),
                     contentDescription = null,
                     contentScale = ContentScale.Crop,

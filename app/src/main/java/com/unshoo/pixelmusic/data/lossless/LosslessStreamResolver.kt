@@ -306,6 +306,29 @@ object LosslessStreamResolver {
         AppleMusicDrm.clear(mediaId)
     }
 
+    private val failedMediaIds = ConcurrentHashMap<String, Long>()
+
+    /** Mark a track as failed for lossless streaming so it falls back to YouTube immediately without loops. */
+    fun markFailedForTrack(mediaId: String) {
+        clearResolved(mediaId)
+        val clean = mediaId.removePrefix("youtube_").removePrefix("monochrome_")
+        val expiry = System.currentTimeMillis() + 15 * 60 * 1000L
+        failedMediaIds[mediaId] = expiry
+        if (clean != mediaId) failedMediaIds[clean] = expiry
+    }
+
+    fun isFailedForTrack(mediaId: String?): Boolean {
+        if (mediaId == null) return false
+        val clean = mediaId.removePrefix("youtube_").removePrefix("monochrome_")
+        val until = failedMediaIds[mediaId] ?: failedMediaIds[clean] ?: return false
+        if (System.currentTimeMillis() > until) {
+            failedMediaIds.remove(mediaId)
+            failedMediaIds.remove(clean)
+            return false
+        }
+        return true
+    }
+
     fun clearAll() {
         directStreamCache.clear()
         resolvedByMediaId.clear()
@@ -464,6 +487,10 @@ object LosslessStreamResolver {
         lowDataMode: Boolean,
     ): Result? {
         val mediaId = request.mediaId
+        if (isFailedForTrack(mediaId)) {
+            Timber.tag(TAG).d("Lossless resolve skipped for %s (marked failed, falling back)", mediaId)
+            return null
+        }
         val settings = readSettings(context)
         val now = System.currentTimeMillis()
 
@@ -1252,6 +1279,21 @@ object LosslessStreamResolver {
                 if (match.accepted && match.score > bestScore) {
                     bestScore = match.score
                     bestStream = candidateStream
+                }
+            }
+            if (bestStream != null) {
+                // Verify candidate stream is reachable and does not return 404 or empty
+                val headReq = okhttp3.Request.Builder()
+                    .url(bestStream.uri)
+                    .head()
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                    .build()
+                val reachable = runCatching {
+                    httpClient.newCall(headReq).execute().use { resp -> resp.isSuccessful }
+                }.getOrDefault(false)
+                if (!reachable) {
+                    Timber.tag(TAG).w("Monochrome stream 404/unreachable for %s; skipping", request.title)
+                    return null
                 }
             }
             bestStream

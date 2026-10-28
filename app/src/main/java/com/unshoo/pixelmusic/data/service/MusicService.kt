@@ -1880,9 +1880,8 @@ class MusicService : MediaLibraryService() {
                 if (youtubeVideoId != null) {
                     com.unshoo.pixelmusic.data.service.player.StreamChoice.forget(youtubeVideoId)
                     if (isLosslessStream) {
-                        // Drop the resolver's cached decision so the re-resolve walks the source chain
-                        // again (fresh CDN link / next source) instead of replaying the dead stream.
-                        com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver.clearResolved(youtubeVideoId)
+                        // Drop cached decision and mark track failed so re-resolve falls back directly to YouTube
+                        com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver.markFailedForTrack(youtubeVideoId)
                         com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.invalidateStreamCache(youtubeVideoId)
                     }
                     if (effectiveAttempt >= 1) {
@@ -1965,7 +1964,7 @@ class MusicService : MediaLibraryService() {
                         } else null
 
                         val item = if (
-                            (rawUriString.contains("googlevideo.com") || rawIsLossless) && !ytVideoId.isNullOrBlank()
+                            (rawUriString.contains("googlevideo.com") || rawIsLossless || isMonochrome) && !ytVideoId.isNullOrBlank()
                         ) {
                             rawItem.buildUpon()
                                 .setUri(android.net.Uri.parse("youtube://$ytVideoId"))

@@ -1182,7 +1182,7 @@ private fun ShareableCard(
                             AsyncImage(
                                 model = ImageRequest.Builder(LocalContext.current)
                                     .data(song.albumArtUriString)
-                                    .size(512, 512)
+                                    .size(96, 96)
                                     .build(),
                                 contentDescription = null,
                                 contentScale = ContentScale.Crop,

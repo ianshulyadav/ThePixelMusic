@@ -264,8 +264,8 @@ fun UnifiedPlayerSheetV2(
     val playerContentExpansionFraction = playerViewModel.playerContentExpansionFraction
     val visualOvershootScaleY = remember { Animatable(1f) }
     val initialFullPlayerOffsetY = remember(density) { with(density) { 24.dp.toPx() } }
-    val sheetExpandAnimSpec = remember { tween<Float>(durationMillis = 280, easing = FastOutSlowInEasing) }
-    val sheetCollapseAnimSpec = remember { tween<Float>(durationMillis = 240, easing = FastOutSlowInEasing) }
+    val sheetExpandAnimSpec = remember { tween<Float>(durationMillis = 300, easing = CubicBezierEasing(0.05f, 0.70f, 0.10f, 1.0f)) }
+    val sheetCollapseAnimSpec = remember { tween<Float>(durationMillis = 220, easing = CubicBezierEasing(0.30f, 0.0f, 0.80f, 0.15f)) }
     // Use expand spec as the default (collapse overrides it in SheetMotionController)
     val sheetAnimationSpec = sheetExpandAnimSpec
     val sheetAnimationMutex = remember { MutatorMutex() }

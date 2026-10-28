@@ -14,6 +14,7 @@ import androidx.media3.common.AudioAttributes as Media3AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackParameters
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.common.TrackSelectionParameters
@@ -440,10 +441,27 @@ class DualPlayerEngine @Inject constructor(
                         )
                     } else {
                         scheduleAudioOffloadFallbackIfNeeded(playerA)
+                        scheduleLosslessStallFallbackIfNeeded(playerA)
                     }
                 }
-                Player.STATE_READY, Player.STATE_IDLE, Player.STATE_ENDED -> cancelAudioOffloadFallback()
+                Player.STATE_READY, Player.STATE_IDLE, Player.STATE_ENDED -> {
+                    cancelAudioOffloadFallback()
+                    cancelLosslessStallFallback()
+                }
             }
+        }
+
+        override fun onPlayerError(error: PlaybackException) {
+            val currentItem = if (::playerA.isInitialized) playerA.currentMediaItem else null
+            val currentUri = currentItem?.localConfiguration?.uri?.toString()
+            if (LosslessStreamResolver.isLosslessUri(currentUri) && currentItem != null) {
+                Timber.tag("DualPlayerEngine").w("Master player error on lossless stream (%s); triggering source failover to YouTube", error.message)
+                failoverLosslessToYoutube(currentItem, playerA, "Player error: ${error.message}")
+            }
+        }
+
+        override fun onPlayerError(eventTime: AnalyticsListener.EventTime, error: PlaybackException) {
+            onPlayerError(error)
         }
 
         override fun onPositionDiscontinuity(
@@ -978,6 +996,108 @@ class DualPlayerEngine @Inject constructor(
         bufferingFallbackJob = null
     }
 
+    private var losslessStallFallbackJob: Job? = null
+
+    private fun scheduleLosslessStallFallbackIfNeeded(player: ExoPlayer) {
+        cancelLosslessStallFallback()
+        if (transitionRunning || !player.playWhenReady) return
+        val currentItem = player.currentMediaItem ?: return
+        val currentUri = currentItem.localConfiguration?.uri?.toString() ?: return
+        if (!LosslessStreamResolver.isLosslessUri(currentUri)) return
+
+        val watchedMediaId = currentItem.mediaId
+        losslessStallFallbackJob = scope.launch {
+            delay(4_000L) // 4 seconds of stall on lossless triggers graceful YouTube fallback
+            if (transitionRunning || player !== playerA) return@launch
+            if (player.currentMediaItem?.mediaId != watchedMediaId) return@launch
+            if (player.playbackState != Player.STATE_BUFFERING || !player.playWhenReady || player.isPlaying) return@launch
+
+            Timber.tag("DualPlayerEngine").w("Lossless stream stalled for >4s on %s; triggering source failover to YouTube", watchedMediaId)
+            failoverLosslessToYoutube(currentItem, player, "Playback stall >4s")
+        }
+    }
+
+    private fun cancelLosslessStallFallback() {
+        losslessStallFallbackJob?.cancel()
+        losslessStallFallbackJob = null
+    }
+
+    fun failoverLosslessToYoutube(
+        mediaItem: MediaItem,
+        targetPlayer: ExoPlayer? = null,
+        reason: String = "Lossless stream failed or stalled"
+    ) {
+        val player = targetPlayer ?: if (::playerA.isInitialized) playerA else return
+        val rawUri = mediaItem.localConfiguration?.uri?.toString().orEmpty()
+        // shortcut: only tracks with 11-char YouTube IDs can failover to YouTube; pure custom streams are unhandled, upgrade if custom streaming services get alternate fallback mirrors
+        val videoId = mediaItem.mediaId.removePrefix("youtube_").takeIf { it.isNotBlank() && it.length == 11 && !it.contains("_") }
+            ?: when {
+                rawUri.startsWith("youtube://") -> rawUri.removePrefix("youtube://")
+                else -> null
+            } ?: queueSnapshot.firstOrNull { it.mediaId == mediaItem.mediaId }?.let {
+                it.mediaId.removePrefix("youtube_").takeIf { id -> id.length == 11 && !id.contains("_") }
+            }
+
+        if (videoId.isNullOrBlank()) {
+            Timber.tag("DualPlayerEngine").w("failoverLosslessToYoutube: could not determine YouTube videoId for %s", mediaItem.mediaId)
+            return
+        }
+
+        Timber.tag("DualPlayerEngine").w("Source Failover: switching %s from Lossless to YouTube (%s)", videoId, reason)
+        LosslessStreamResolver.markFailedForTrack(videoId)
+        invalidateResolvedUri("youtube://$videoId")
+        invalidateResolvedUri(rawUri)
+        com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.invalidateStreamCache(videoId)
+
+        scope.launch(Dispatchers.IO) {
+            try {
+                val song = com.unshoo.pixelmusic.data.model.youtube.Song(
+                    youtubeId = videoId,
+                    title = mediaItem.mediaMetadata.title?.toString().orEmpty(),
+                    artist = mediaItem.mediaMetadata.artist?.toString().orEmpty(),
+                    album = mediaItem.mediaMetadata.albumTitle?.toString().orEmpty()
+                )
+                val ytUrl = com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.getSongPlayerUrl(
+                    context = context,
+                    song = song,
+                    allowLocal = true,
+                    allowLossless = false
+                )
+                if (ytUrl.isBlank()) {
+                    Timber.tag("DualPlayerEngine").e("failoverLosslessToYoutube: YouTube fallback URL resolution returned blank for %s", videoId)
+                    return@launch
+                }
+
+                val fallbackUri = if (ytUrl.startsWith("http")) Uri.parse(ytUrl) else Uri.fromFile(java.io.File(ytUrl))
+                val replacement = mediaItem.buildUpon()
+                    .setUri(fallbackUri)
+                    .setCustomCacheKey(videoId)
+                    .build()
+
+                withContext(Dispatchers.Main.immediate) {
+                    val wasPlaying = player.playWhenReady
+                    val currentPos = player.currentPosition.coerceAtLeast(0L)
+                    val idx = player.currentMediaItemIndex
+                    if (idx != C.INDEX_UNSET && idx < player.mediaItemCount) {
+                        player.replaceMediaItem(idx, replacement)
+                        player.seekTo(idx, currentPos)
+                    } else if (player.mediaItemCount > 0) {
+                        player.replaceMediaItem(0, replacement)
+                        player.seekTo(0, currentPos)
+                    } else {
+                        player.setMediaItem(replacement, currentPos)
+                    }
+                    player.prepare()
+                    player.playWhenReady = wasPlaying
+                    if (wasPlaying) player.play()
+                    Timber.tag("DualPlayerEngine").i("Source Failover COMPLETE: %s successfully transitioned to YouTube stream at %dms", videoId, currentPos)
+                }
+            } catch (e: Exception) {
+                Timber.tag("DualPlayerEngine").e(e, "failoverLosslessToYoutube failed for %s", videoId)
+            }
+        }
+    }
+
     private fun isLikelyLocalMedia(mediaItem: MediaItem?): Boolean {
         val scheme = mediaItem?.localConfiguration?.uri?.scheme?.lowercase()
         return scheme == null || scheme in LOCAL_MEDIA_SCHEMES
@@ -1362,21 +1482,64 @@ class DualPlayerEngine @Inject constructor(
         )
 
         val baseDataSourceFactory = DefaultDataSource.Factory(context, chunkedHttpDataSourceFactory)
+        val directHttpDataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
         // Lossless sources (ArchiveTune port): route `deezer://` through the on-the-fly Blowfish
         // decryptor and `tidal-dash://` through the progressive DASH stitcher; everything else
-        // (http/https CDN links, flattened Apple Music files, local files) uses the default source.
-        // Lossless and custom audio streams bypass chunking completely via direct pure httpUpstream.
+        // (http/https CDN links, flattened Apple Music files, local files) uses the direct source.
+        // Lossless streams completely bypass chunking and CacheDataSource to prevent partial-span
+        // cache seam failures on servers that do not support arbitrary mid-stream HTTP Range requests.
         val losslessRoutingFactory = LosslessSchemeRoutingDataSource.create(
-            defaultFactory = baseDataSourceFactory,
+            defaultFactory = directHttpDataSourceFactory,
             httpUpstream = httpDataSourceFactory,
             httpClient = LosslessStreamResolver.httpClient,
         )
         val cacheDataSourceFactory = CacheDataSource.Factory()
             .setCache(exoCache.cache)
-            .setUpstreamDataSourceFactory(losslessRoutingFactory)
+            .setUpstreamDataSourceFactory(baseDataSourceFactory)
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
 
-        val resolvingFactory = ResolvingDataSource.Factory(cacheDataSourceFactory, resolver)
+        val selectiveDataSourceFactory = androidx.media3.datasource.DataSource.Factory {
+            object : androidx.media3.datasource.DataSource {
+                private var delegate: androidx.media3.datasource.DataSource? = null
+                private val transferListeners = mutableListOf<androidx.media3.datasource.TransferListener>()
+
+                override fun addTransferListener(transferListener: androidx.media3.datasource.TransferListener) {
+                    transferListeners.add(transferListener)
+                    delegate?.addTransferListener(transferListener)
+                }
+
+                override fun open(dataSpec: androidx.media3.datasource.DataSpec): Long {
+                    val uriStr = dataSpec.uri.toString()
+                    val isLossless = LosslessStreamResolver.isLosslessUri(uriStr) ||
+                        LosslessSchemeRoutingDataSource.isCustomLosslessScheme(dataSpec.uri) ||
+                        uriStr.contains("monochrome.st/track/") ||
+                        dataSpec.uri.path?.endsWith(".flac", ignoreCase = true) == true ||
+                        dataSpec.uri.scheme == "monochrome" ||
+                        dataSpec.uri.scheme == "apple-pending"
+
+                    val factory = if (isLossless) losslessRoutingFactory else cacheDataSourceFactory
+                    val source = factory.createDataSource()
+                    transferListeners.forEach(source::addTransferListener)
+                    delegate = source
+                    return source.open(dataSpec)
+                }
+
+                override fun read(buffer: ByteArray, offset: Int, length: Int): Int =
+                    delegate?.read(buffer, offset, length) ?: C.RESULT_END_OF_INPUT
+
+                override fun getUri(): Uri? = delegate?.uri
+
+                override fun getResponseHeaders(): Map<String, List<String>> =
+                    delegate?.responseHeaders ?: emptyMap()
+
+                override fun close() {
+                    delegate?.close()
+                    delegate = null
+                }
+            }
+        }
+
+        val resolvingFactory = ResolvingDataSource.Factory(selectiveDataSourceFactory, resolver)
         val extractorsFactory = DefaultExtractorsFactory()
             .setMp4ExtractorFlags(Mp4Extractor.FLAG_WORKAROUND_IGNORE_EDIT_LISTS)
             .setMp3ExtractorFlags(Mp3Extractor.FLAG_ENABLE_CONSTANT_BITRATE_SEEKING)
@@ -1850,6 +2013,13 @@ class DualPlayerEngine @Inject constructor(
         if (resolvedUri == uri) return mediaItem
         
         val builder = mediaItem.buildUpon().setUri(resolvedUri)
+        val isLossless = LosslessStreamResolver.isLosslessUri(resolvedUri.toString()) ||
+            LosslessStreamResolver.isLosslessUri(uri.toString()) ||
+            resolvedUri.path?.endsWith(".flac", true) == true ||
+            scheme == "monochrome" ||
+            resolvedUri.toString().contains("monochrome.st/track/") ||
+            LosslessSchemeRoutingDataSource.isCustomLosslessScheme(resolvedUri)
+
         val cleanId = when {
             scheme == "youtube" -> uri.toString().removePrefix("youtube://")
             scheme == "monochrome" -> "monochrome_" + (uri.host?.takeIf { it.isNotBlank() } ?: uri.toString().removePrefix("monochrome://"))
@@ -1858,7 +2028,8 @@ class DualPlayerEngine @Inject constructor(
             resolvedUri.toString().contains("monochrome.st/track/") -> "monochrome_" + resolvedUri.toString().substringAfterLast("/")
             else -> mediaItem.mediaId.removePrefix("youtube_").takeIf { it.isNotBlank() }
         }
-        if (cleanId != null) {
+        // ONLY attach custom cache key to YouTube streams; NEVER attach to Lossless streams
+        if (!isLossless && cleanId != null) {
             builder.setCustomCacheKey(cleanId)
         }
 
@@ -1909,6 +2080,18 @@ class DualPlayerEngine @Inject constructor(
             standbyPlayer.shuffleModeEnabled = playerA.shuffleModeEnabled
             standbyPlayer.volume = 0f
             standbyPlayer.playWhenReady = false
+
+            val standbyListener = object : Player.Listener {
+                override fun onPlayerError(error: PlaybackException) {
+                    val currentStandbyItem = standbyPlayer.currentMediaItem
+                    val currentStandbyUri = currentStandbyItem?.localConfiguration?.uri?.toString()
+                    if (LosslessStreamResolver.isLosslessUri(currentStandbyUri) && currentStandbyItem != null) {
+                        Timber.tag("TransitionDebug").w("standbyPlayer error on lossless; triggering source failover to YouTube")
+                        failoverLosslessToYoutube(currentStandbyItem, standbyPlayer, "Standby player error")
+                    }
+                }
+            }
+            standbyPlayer.addListener(standbyListener)
             standbyPlayer.prepare()
 
             onNextPlayerPreparedListeners.forEach { it(standbyPlayer) }
