@@ -33,6 +33,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import com.unshoo.pixelmusic.ui.theme.ExpressiveSprings
 import com.unshoo.pixelmusic.ui.theme.fastSpatial
 import com.unshoo.pixelmusic.ui.theme.defaultEffects
+import com.unshoo.pixelmusic.presentation.screens.expressive.ScallopFlowerShape
 import com.unshoo.pixelmusic.utils.ContentFilterUtils
 import androidx.compose.foundation.background
 import androidx.compose.material3.ContainedLoadingIndicator
@@ -117,6 +118,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -235,14 +237,14 @@ fun ExploreScreen(
     val isEffectivelyOnline = isOnline && !isLocalMode
     val state by feedViewModel.uiState.collectAsStateWithLifecycle()
     val exploreUiState by exploreViewModel.uiState.collectAsStateWithLifecycle()
+    val sectionsState by exploreViewModel.sectionsState.collectAsStateWithLifecycle()
     val quickPicksRaw by quickPicksViewModel.quickPicks.collectAsStateWithLifecycle()
     val ytHomeQuickPicks = exploreUiState.preparedYtHomeQuickPicks
     val isYtConnected = state.feedData.isYtConnected
     val effectiveQuickPicks = remember(
         quickPicksRaw,
         ytHomeQuickPicks,
-        state.feedData.quickPicks,
-        exploreUiState.homePageSections
+        state.feedData.quickPicks
     ) {
         if (quickPicksRaw.isNotEmpty()) {
             quickPicksRaw
@@ -251,18 +253,16 @@ fun ExploreScreen(
         } else if (state.feedData.quickPicks.isNotEmpty()) {
             state.feedData.quickPicks.map { it.toSong() }
         } else {
-            val fromHome = exploreUiState.homePageSections.flatMap { it.items }
-                .filterIsInstance<SongItem>()
-                .filterVideo(true)
-                .map { it.toNativeSong() }
-            if (fromHome.isNotEmpty()) {
-                fromHome.take(20)
-            } else emptyList()
+            emptyList()
         }
     }
-    val quickPicks = remember(effectiveQuickPicks, isEffectivelyOnline) {
-        if (!isEffectivelyOnline) {
-            effectiveQuickPicks.filter { com.unshoo.pixelmusic.utils.OfflineAudioResolver.hasOfflineAudio(context, it) }
+    val quickPicks by produceState(
+        initialValue = if (!isEffectivelyOnline && ytHomeQuickPicks.isNotEmpty()) ytHomeQuickPicks else effectiveQuickPicks,
+        effectiveQuickPicks,
+        isEffectivelyOnline
+    ) {
+        value = if (!isEffectivelyOnline) {
+            exploreViewModel.filterOfflineSongs(effectiveQuickPicks)
         } else {
             effectiveQuickPicks
         }
@@ -540,23 +540,14 @@ fun ExploreScreen(
     val otherHomeSections = remember(
         currentSections,
         exploreUiState.preparedOtherHomeSections,
-        exploreUiState.activeMoodChip,
-        albumsForYou.isNotEmpty(),
-        newReleases.isNotEmpty(),
-        pureYtMusicOnly
+        exploreUiState.activeMoodChip
     ) {
         if (exploreUiState.activeMoodChip != null) {
             currentSections
         } else if (exploreUiState.preparedOtherHomeSections.isNotEmpty()) {
             exploreUiState.preparedOtherHomeSections
         } else {
-            currentSections.filter { section ->
-                val t = section.title.lowercase()
-                !t.contains("quick pick") &&
-                !(albumsForYou.isNotEmpty() && t.contains("albums for you")) &&
-                !(newReleases.isNotEmpty() && (t.contains("new release") || t.contains("new for you"))) &&
-                !(pureYtMusicOnly && t.contains("video"))
-            }
+            currentSections
         }
     }
 
@@ -598,7 +589,7 @@ fun ExploreScreen(
             }
         ) {
             val isMoodFilter = !isLocalSelected && !selectedCategory.equals("All", ignoreCase = true)
-            val hasSections = currentSections.isNotEmpty() || exploreUiState.homePageSections.isNotEmpty()
+            val hasSections = sectionsState.isNotEmpty() || currentSections.isNotEmpty() || exploreUiState.homePageSections.isNotEmpty()
             val hasExploreContent = remember(
                 isLocalSelected,
                 isMoodFilter,
@@ -948,6 +939,7 @@ fun ExploreScreen(
                                         feedViewModel = feedViewModel,
                                         currentSongId = currentSongId,
                                         isPlaying = isPlaying,
+                                        pureYtMusicOnly = pureYtMusicOnly,
                                         onSongMoreClick = { song ->
                                             playerViewModel.selectSongForInfo(song)
                                             showSongInfoBottomSheet = true
@@ -1512,6 +1504,7 @@ fun ExploreScreen(
                                             feedViewModel = feedViewModel,
                                             currentSongId = currentSongId,
                                             isPlaying = isPlaying,
+                                            pureYtMusicOnly = pureYtMusicOnly,
                                             onSongMoreClick = { song ->
                                                 playerViewModel.selectSongForInfo(song)
                                                 showSongInfoBottomSheet = true
@@ -2191,7 +2184,7 @@ private fun FeedTrackCard(
     onMoreClick: () -> Unit
 ) {
     val haptics = LocalHapticFeedback.current
-    val cardShape = ShapeCache.smooth16
+    val cardShape = ShapeCache.smooth20
 
     Column(
         modifier = Modifier
@@ -2217,7 +2210,7 @@ private fun FeedTrackCard(
                         contentDescription = title,
                         contentScale = ContentScale.Crop,
                         shape = cardShape,
-                        targetSize = SmartImageCardTargetSize,
+                        targetSize = SmartImageListTargetSize,
                         placeholderResId = 0,
                         errorResId = 0,
                         modifier = Modifier.fillMaxSize()
@@ -2330,7 +2323,7 @@ private fun FeedPlaylistCard(
     onMoreClick: (() -> Unit)? = null
 ) {
     val haptics = LocalHapticFeedback.current
-    val cardShape = ShapeCache.smooth16
+    val cardShape = ShapeCache.smooth20
 
     Column(
         modifier = Modifier
@@ -2469,7 +2462,7 @@ private fun ShelfArtistCard(
     onRadioClick: (() -> Unit)? = null
 ) {
     val haptics = LocalHapticFeedback.current
-    val cardShape = ShapeCache.smooth16
+    val cardShape = ShapeCache.smooth20
 
     Column(
         modifier = Modifier
@@ -2486,8 +2479,9 @@ private fun ShelfArtistCard(
                 .background(MaterialTheme.colorScheme.surfaceContainerHigh),
             contentAlignment = Alignment.Center
         ) {
+            val artistAvatarShape = remember { ScallopFlowerShape(petals = 12, depthRatio = 0.08f) }
             Surface(
-                shape = CircleShape,
+                shape = artistAvatarShape,
                 color = MaterialTheme.colorScheme.surfaceContainerHighest,
                 border = androidx.compose.foundation.BorderStroke(
                     1.5.dp,
@@ -2500,7 +2494,7 @@ private fun ShelfArtistCard(
                         model = artist.artworkUrl,
                         contentDescription = artist.name,
                         contentScale = ContentScale.Crop,
-                        shape = CircleShape,
+                        shape = artistAvatarShape,
                         targetSize = SmartImageListTargetSize,
                         placeholderResId = 0,
                         errorResId = 0,
@@ -2605,6 +2599,8 @@ private fun RecentTrackCard(
         } else null
     }
 
+    val cardShape = ShapeCache.smooth20
+
     Column(
         modifier = Modifier
             .width(156.dp)
@@ -2615,7 +2611,7 @@ private fun RecentTrackCard(
     ) {
         Box(modifier = Modifier.size(156.dp)) {
             Surface(
-                shape = ShapeCache.smooth16,
+                shape = cardShape,
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 modifier = Modifier.fillMaxSize()
             ) {
@@ -2625,7 +2621,7 @@ private fun RecentTrackCard(
                             model = track.artworkUrl,
                             contentDescription = track.name,
                             contentScale = ContentScale.Crop,
-                            shape = ShapeCache.smooth16,
+                            shape = cardShape,
                             targetSize = SmartImageCardTargetSize,
                             placeholderResId = 0,
                             errorResId = 0,
@@ -2846,8 +2842,9 @@ private fun SpotlightHeroCard(
     onPlayRadio: () -> Unit,
     onOpenArtist: () -> Unit
 ) {
+    val heroAvatarShape = remember { ScallopFlowerShape(petals = 12, depthRatio = 0.08f) }
     Card(
-        shape = ShapeCache.smooth24,
+        shape = ShapeCache.smooth28,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
         elevation = CardDefaults.cardElevation(defaultElevation = if (isSystemInDarkTheme()) 2.dp else 0.dp),
         modifier = Modifier
@@ -2860,7 +2857,7 @@ private fun SpotlightHeroCard(
                     model = spotlight.artworkUrl,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
-                    targetSize = SmartImageLargeCardTargetSize,
+                    targetSize = SmartImageListTargetSize,
                     placeholderResId = 0,
                     errorResId = 0,
                     modifier = Modifier
@@ -2869,6 +2866,7 @@ private fun SpotlightHeroCard(
                             scaleX = 1.08f
                             scaleY = 1.08f
                             alpha = 0.22f
+                            translationY = (scrollOffsetProvider() * 0.15f).coerceIn(-40f, 40f)
                         }
                 )
             }
@@ -2924,7 +2922,7 @@ private fun SpotlightHeroCard(
                     ) {
                         Surface(
                             onClick = onOpenArtist,
-                            shape = CircleShape,
+                            shape = heroAvatarShape,
                             color = MaterialTheme.colorScheme.surfaceContainerHighest,
                             modifier = Modifier.size(72.dp)
                         ) {
@@ -2933,7 +2931,7 @@ private fun SpotlightHeroCard(
                                     model = spotlight.artworkUrl,
                                     contentDescription = spotlight.artistName,
                                     contentScale = ContentScale.Crop,
-                                    shape = CircleShape,
+                                    shape = heroAvatarShape,
                                     targetSize = SmartImageListTargetSize,
                                     modifier = Modifier.fillMaxSize()
                                 )
@@ -2970,7 +2968,7 @@ private fun SpotlightHeroCard(
                     ) {
                         Button(
                             onClick = onPlayRadio,
-                            shape = CircleShape,
+                            shape = ShapeCache.smoothPill,
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = MaterialTheme.colorScheme.primary,
                                 contentColor = MaterialTheme.colorScheme.onPrimary
@@ -2984,7 +2982,7 @@ private fun SpotlightHeroCard(
 
                         FilledTonalButton(
                             onClick = onOpenArtist,
-                            shape = CircleShape,
+                            shape = ShapeCache.smoothPill,
                             colors = ButtonDefaults.filledTonalButtonColors(
                                 containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                                 contentColor = MaterialTheme.colorScheme.onSurface
@@ -3007,6 +3005,10 @@ private fun ArtistAvatarCard(
     onClick: () -> Unit
 ) {
     val haptics = LocalHapticFeedback.current
+    val avatarShape = remember(isTop) {
+        if (isTop) ScallopFlowerShape(petals = 12, depthRatio = 0.09f)
+        else ScallopFlowerShape(petals = 10, depthRatio = 0.08f)
+    }
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
@@ -3018,7 +3020,7 @@ private fun ArtistAvatarCard(
     ) {
         Box(modifier = Modifier.size(88.dp), contentAlignment = Alignment.Center) {
             Surface(
-                shape = CircleShape,
+                shape = avatarShape,
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 border = if (isTop) androidx.compose.foundation.BorderStroke(
                     2.dp,
@@ -3034,7 +3036,7 @@ private fun ArtistAvatarCard(
                         model = artist.artworkUrl,
                         contentDescription = artist.name,
                         contentScale = ContentScale.Crop,
-                        shape = CircleShape,
+                        shape = avatarShape,
                         targetSize = SmartImageListTargetSize,
                         placeholderResId = 0,
                         errorResId = 0,
@@ -3557,7 +3559,7 @@ private fun LibraryCarouselCard(
     }
     val actionIcon = if (isCurrentPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow
 
-    val artShape = if (item is ArtistItem) CircleShape else ShapeCache.smooth16
+    val artShape = if (item is ArtistItem) ScallopFlowerShape(petals = 10, depthRatio = 0.08f) else ShapeCache.smooth20
 
     Card(
         modifier = Modifier
@@ -3690,6 +3692,7 @@ private fun LibraryCarouselCard(
                     SmartImage(
                         model = thumbnail,
                         contentDescription = title,
+                        targetSize = SmartImageCardTargetSize,
                         modifier = Modifier.fillMaxSize(),
                         placeholderResId = 0,
                         errorResId = 0,
@@ -3732,6 +3735,7 @@ private fun RegionalExploreSection(
     feedViewModel: FeedViewModel,
     currentSongId: String?,
     isPlaying: Boolean,
+    pureYtMusicOnly: Boolean,
     onSongMoreClick: (Song) -> Unit = {}
 ) {
     val songs = remember(section.items) { section.items.filterIsInstance<SongItem>() }
@@ -3745,6 +3749,12 @@ private fun RegionalExploreSection(
                 artworkUrl = s.thumbnail
             )
         }
+    }
+    val songTracksMap = remember(songTracks) {
+        songTracks.associateBy { it.videoId }
+    }
+    val songTrackIndexMap = remember(songTracks) {
+        songTracks.mapIndexed { idx, track -> track.videoId to idx }.toMap()
     }
 
     val subtitle = remember(section.title, section.label) {
@@ -3809,7 +3819,6 @@ private fun RegionalExploreSection(
         onAvatarClick = navigationAction
     )
 
-    val pureYtMusicOnly by feedViewModel.pureYtMusicOnly.collectAsStateWithLifecycle(initialValue = false)
     val isVideoSection = remember(section.title) {
         section.title.contains("video", ignoreCase = true)
     }
@@ -3838,14 +3847,14 @@ private fun RegionalExploreSection(
         ) { index, item ->
             when (item) {
                 is SongItem -> {
-                    val track = songTracks.firstOrNull { it.videoId == item.id } ?: YouTubeMusicTrack(
+                    val track = songTracksMap[item.id] ?: YouTubeMusicTrack(
                         videoId = item.id,
                         title = item.title,
                         artist = item.artists.firstOrNull()?.name ?: "Unknown artist",
                         album = item.album?.name,
                         artworkUrl = item.thumbnail
                     )
-                    val songIdx = songTracks.indexOfFirst { it.videoId == item.id }
+                    val songIdx = songTrackIndexMap[item.id] ?: -1
                     FeedTrackCard(
                         title = track.title,
                         subtitle = track.artist,
@@ -3964,7 +3973,7 @@ private fun ExploreCategoryChipsRow(
                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     onCategorySelect(category)
                 },
-                shape = CircleShape,
+                shape = ShapeCache.smoothPill,
                 color = containerColor,
                 contentColor = contentColor,
                 shadowElevation = 0.dp,

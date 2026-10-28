@@ -176,9 +176,8 @@ fun QuickPicksSection(
         val count = (songs.size / 3) * 3
         songs.take(count.coerceAtMost(QuickPicksLimit))
     }
-    val rows = remember(visible) { buildQuickPickRows(visible) }
-    val scrollState = rememberScrollState()
-    val actualRowsCount = rows.size
+    val columns = remember(visible) { buildQuickPickColumns(visible) }
+    val actualRowsCount = if (visible.isNotEmpty()) QuickPicksPillsPerColumn else 0
     val sectionHeight = if (actualRowsCount > 0) {
         QuickPicksPillHeight * actualRowsCount + QuickPicksPillSpacing * (actualRowsCount - 1)
     } else 0.dp
@@ -513,27 +512,30 @@ fun QuickPicksSection(
                 }
             }
         } else {
-            Column(
+            LazyRow(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(sectionHeight)
-                    .horizontalScroll(scrollState),
-                verticalArrangement = Arrangement.spacedBy(QuickPicksPillSpacing)
+                    .height(sectionHeight),
+                horizontalArrangement = Arrangement.spacedBy(QuickPicksPillSpacing),
+                contentPadding = PaddingValues(horizontal = 8.dp)
             ) {
-                rows.forEachIndexed { rowIndex, row ->
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(QuickPicksPillSpacing),
-                        modifier = Modifier.padding(start = 8.dp)
+                items(
+                    items = columns,
+                    key = { it.id },
+                    contentType = { "quick_picks_column" }
+                ) { col ->
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(QuickPicksPillSpacing)
                     ) {
-                        row.pills.forEachIndexed { colIndex, cell ->
-                            val absoluteIndex = colIndex * QuickPicksPillsPerColumn + rowIndex
+                        col.songs.forEachIndexed { rowIdx, song ->
+                            val absoluteIndex = col.colIndex * QuickPicksPillsPerColumn + rowIdx
                             val loadArtImmediately = absoluteIndex < 3
                             QuickPickPill(
-                                song = cell.song,
-                                width = cell.width,
-                                isPlaying = cell.song.id == activePlayingSongId,
+                                song = song,
+                                width = col.width,
+                                isPlaying = song.id == activePlayingSongId,
                                 loadArtImmediately = loadArtImmediately,
-                                onClick = { onSongClick(cell.song) }
+                                onClick = { onSongClick(song) }
                             )
                         }
                     }
@@ -1022,6 +1024,26 @@ private fun QuickPickPill(
                 )
             }
         }
+    }
+}
+
+private data class QuickPicksColumnModel(
+    val id: String,
+    val colIndex: Int,
+    val width: Dp,
+    val songs: List<Song>
+)
+
+private fun buildQuickPickColumns(songs: List<Song>): List<QuickPicksColumnModel> {
+    val groups = songs.chunked(QuickPicksPillsPerColumn).take(QuickPicksLimit / QuickPicksPillsPerColumn)
+    return groups.mapIndexed { colIndex, group ->
+        val widthStep = QuickPicksWidthSteps[colIndex % QuickPicksWidthSteps.size]
+        QuickPicksColumnModel(
+            id = group.firstOrNull()?.id ?: colIndex.toString(),
+            colIndex = colIndex,
+            width = widthStep,
+            songs = group
+        )
     }
 }
 

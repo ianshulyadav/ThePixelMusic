@@ -771,7 +771,6 @@ class ExploreViewModel @Inject constructor(
                     val personalizedAlbums = (dedicatedAlbums + otherHomeAlbums + authAccountAlbums)
                         .distinctBy { it.browseId }
 
-                    val uiSections = rawSections.map { it.toUiModel() }
                     val rawChips = initialHome.chips ?: emptyList()
                     val uiChips = rawChips.map { ExploreChipUiModel(it.title, it.endpoint?.browseId, it.endpoint?.params) }
 
@@ -780,11 +779,11 @@ class ExploreViewModel @Inject constructor(
                         val t = it.title.lowercase()
                         (t.contains("quick pick") || t.contains("quick picks")) && !t.contains("start radio")
                     }
-                    val ytHomeQuickPicks = quickShelf?.items
-                        ?.filterIsInstance<SongItem>()
-                        ?.filterVideo(true)
-                        ?.map { it.toNativeSong() }
-                        .orEmpty()
+                    val ytHomeQuickPicks = (quickShelf?.items?.filterIsInstance<SongItem>()
+                        ?: rawSections.flatMap { it.items }.filterIsInstance<SongItem>())
+                        .filterVideo(true)
+                        .map { it.toNativeSong() }
+                        .take(20)
 
                     // Artists for you extracted from Home
                     val artistsForYou = rawSections.flatMap { it.items }
@@ -841,6 +840,7 @@ class ExploreViewModel @Inject constructor(
                         !(newReleasesSummaries.isNotEmpty() && (t.contains("new release") || t.contains("new for you"))) &&
                         !t.contains("video")
                     }
+                    val uiSections = otherSections.map { it.toUiModel() }
 
                     // Discover songs for HomeScreen
                     val discoverSongs = rawSections
@@ -1336,6 +1336,10 @@ class ExploreViewModel @Inject constructor(
             label = label,
             items = uiItems
         )
+    }
+
+    suspend fun filterOfflineSongs(songs: List<Song>): List<Song> = withContext(Dispatchers.IO) {
+        songs.filter { com.unshoo.pixelmusic.utils.OfflineAudioResolver.hasOfflineAudio(context, it) }
     }
 }
 

@@ -25,6 +25,14 @@ fun ApplyBottomSheetWindowBlur(isBlurActive: Boolean) {
             } catch (_: Exception) {
             }
         }
-        onDispose { }
+        onDispose {
+            window?.let { win ->
+                try {
+                    win.clearFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+                    win.attributes.blurBehindRadius = 0
+                } catch (_: Exception) {
+                }
+            }
+        }
     }
 }

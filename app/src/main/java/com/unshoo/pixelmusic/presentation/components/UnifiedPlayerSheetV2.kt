@@ -680,7 +680,6 @@ fun UnifiedPlayerSheetV2(
                                 playerViewModel.togglePlayerSheetState()
                             }
                     ) {
-                        val playerConfig by playerViewModel.playerConfigSlice.collectAsStateWithLifecycle()
                         if (playerConfig.useBlurEffects && playerConfig.nowPlayingBlurEnabled && infrequentPlayerState.currentSong != null) {
                             FullPlayerAtmosphereBackground(
                                 currentSong = infrequentPlayerState.currentSong,

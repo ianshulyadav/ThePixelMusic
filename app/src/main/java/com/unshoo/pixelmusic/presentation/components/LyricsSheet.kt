@@ -505,11 +505,6 @@ fun LyricsSheet(
         animationSpec = spring(stiffness = Spring.StiffnessLow),
         label = "fontScale"
     )
-    
-    val scaledTextStyle = lyricsTextStyle.copy(
-        fontSize = lyricsTextStyle.fontSize * fontScale,
-        lineHeight = lyricsTextStyle.lineHeight * fontScale
-    )
 
     fun resetImmersiveTimer() {
         lastInteractionTime = System.currentTimeMillis()
@@ -784,6 +779,10 @@ fun LyricsSheet(
                             SyncedLyricsList(
                                 modifier = Modifier
                                     .fillMaxSize()
+                                    .graphicsLayer {
+                                        scaleX = fontScale
+                                        scaleY = fontScale
+                                    }
                                     .padding(horizontal = 24.dp),
                                 contentPadding = PaddingValues(top = 130.dp, bottom = 100.dp),
                                 lines = synced,
@@ -792,7 +791,7 @@ fun LyricsSheet(
                                 lyricsSyncOffset = lyricsSyncOffset,
                                 positionOverrideMs = previewSeekPositionMs,
                                 accentColor = lyricHighlightColor,
-                                textStyle = scaledTextStyle,
+                                textStyle = lyricsTextStyle,
                                 onLineClick = { syncedLine -> 
                                     onSeekTo(
                                         resolveSeekPositionMs(

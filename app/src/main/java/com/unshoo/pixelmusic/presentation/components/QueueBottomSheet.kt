@@ -191,6 +191,7 @@ import androidx.compose.material3.MediumTopAppBar
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalConfiguration
 import com.unshoo.pixelmusic.presentation.components.scoped.QueueItemDismissGestureHandler
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.zIndex
@@ -793,7 +794,7 @@ fun QueueBottomSheet(
                                         else -> Modifier
                                     }
                                 ) { isDragging ->
-                                    val scale by animateFloatAsState(
+                                    val scaleState = animateFloatAsState(
                                         targetValue = if (isDragging) 1.015f else 1f,
                                         animationSpec = spring(
                                             dampingRatio = Spring.DampingRatioNoBouncy,
@@ -807,8 +808,8 @@ fun QueueBottomSheet(
                                             .fillMaxWidth()
                                             .padding(horizontal = 0.dp)
                                             .graphicsLayer {
-                                                scaleX = scale
-                                                scaleY = scale
+                                                scaleX = scaleState.value
+                                                scaleY = scaleState.value
                                             },
                                         onClick = { onPlaySong(song) },
                                         song = song,
@@ -1975,7 +1976,7 @@ fun QueuePlaylistSongItem(
     val density = LocalDensity.current
 
     val dismissOffsetAnimatable = remember(swipeStateIdentity) { Animatable(0f) }
-    var itemWidthPx by remember { mutableStateOf(0f) }
+    val itemWidthPx = with(density) { LocalConfiguration.current.screenWidthDp.dp.toPx() }
 
     val dismissHandler = remember(swipeStateIdentity, dismissEnabled, itemWidthPx) {
         if (dismissEnabled && itemWidthPx > 0f) {
@@ -2014,45 +2015,38 @@ fun QueuePlaylistSongItem(
         label = "dismissIconScale"
     )
 
-    var surfaceHeightPx by remember { mutableStateOf(0f) }
-
     Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .then(
-                if (dismissEnabled) {
-                    Modifier.onGloballyPositioned { coordinates ->
-                        val measuredWidth = coordinates.size.width.toFloat()
-                        if (measuredWidth != itemWidthPx) itemWidthPx = measuredWidth
-                    }
-                } else Modifier
-            )
+        modifier = modifier.fillMaxWidth()
     ) {
-        if (dismissEnabled && revealWidthPx > 0f && surfaceHeightPx > 0f) {
+        if (dismissEnabled && revealWidthPx > 0f) {
             val revealWidthDp = with(density) { revealWidthPx.toDp() }
-            val surfaceHeightDp = with(density) { surfaceHeightPx.toDp() }
             Box(
                 modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .padding(end = 12.dp)
-                    .height(surfaceHeightDp)
-                    .width(revealWidthDp)
-                    .clip(CircleShape)
-                    .background(dismissBackgroundColor),
+                    .matchParentSize()
+                    .padding(end = 12.dp),
                 contentAlignment = Alignment.CenterEnd
             ) {
-                Icon(
-                    painter = painterResource(R.drawable.rounded_close_24),
-                    contentDescription = stringResource(R.string.presentation_batch_e_cd_dismiss_song),
+                Box(
                     modifier = Modifier
-                        .padding(end = 16.dp)
-                        .graphicsLayer {
-                            alpha = dismissIconAlpha
-                            scaleX = dismissIconScale
-                            scaleY = dismissIconScale
-                        },
-                    tint = colors.onErrorContainer
-                )
+                        .fillMaxHeight()
+                        .width(revealWidthDp)
+                        .clip(CircleShape)
+                        .background(dismissBackgroundColor),
+                    contentAlignment = Alignment.CenterEnd
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.rounded_close_24),
+                        contentDescription = stringResource(R.string.presentation_batch_e_cd_dismiss_song),
+                        modifier = Modifier
+                            .padding(end = 16.dp)
+                            .graphicsLayer {
+                                alpha = dismissIconAlpha
+                                scaleX = dismissIconScale
+                                scaleY = dismissIconScale
+                            },
+                        tint = colors.onErrorContainer
+                    )
+                }
             }
         }
 
@@ -2060,12 +2054,7 @@ fun QueuePlaylistSongItem(
             modifier = Modifier
                 .then(
                     if (dismissEnabled) {
-                        Modifier
-                            .graphicsLayer { translationX = currentOffsetPx }
-                            .onGloballyPositioned { coordinates ->
-                                val h = coordinates.size.height.toFloat()
-                                if (h != surfaceHeightPx) surfaceHeightPx = h
-                            }
+                        Modifier.graphicsLayer { translationX = currentOffsetPx }
                     } else Modifier
                 )
                 .padding(horizontal = 12.dp)

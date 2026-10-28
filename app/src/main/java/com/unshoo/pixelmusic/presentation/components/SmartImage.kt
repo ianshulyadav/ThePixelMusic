@@ -63,13 +63,14 @@ interface SmartImageEntryPoint {
 private object SmartImageRegex {
     val sizeParamRegex = Regex("=[ws]\\d+.*")
     val sizeParamRegex2 = Regex("/[ws]\\d+.*")
+    val youtubeViRegex = Regex("/vi(?:_webp)?/([^/]+)/")
 }
 
 val SmartImageCompactListTargetSize = Size(96, 96)
 val SmartImageListTargetSize = Size(128, 128)
-val SmartImageCardTargetSize = Size(512, 512)
+val SmartImageCardTargetSize = Size(192, 192)
 val SmartImageLargeCardTargetSize = Size(1024, 1024)
-private val DefaultSmartImageSize = Size(512, 512)
+private val DefaultSmartImageSize = Size(192, 192)
 
 @Composable
 fun SmartImage(
@@ -205,7 +206,7 @@ fun SmartImage(
             } else if (widthPx >= 800 || heightPx >= 800) {
                 "=w800-h800-l90-rj"
             } else {
-                val cardDim = maxOf(widthPx, heightPx).coerceIn(256, 512)
+                val cardDim = maxOf(widthPx, heightPx).coerceIn(128, 512)
                 "=w$cardDim-h$cardDim-c-rj"
             }
             if (SmartImageRegex.sizeParamRegex.containsMatchIn(model)) {
@@ -218,7 +219,7 @@ fun SmartImage(
                 "$model$sizeStr"
             }
         } else if (model is String && (model.contains("i.ytimg.com") || model.contains("img.youtube.com"))) {
-            val match = Regex("/vi(?:_webp)?/([^/]+)/").find(model)
+            val match = SmartImageRegex.youtubeViRegex.find(model)
             if (match != null) {
                 val videoId = match.groupValues[1]
                 if (isThumbnail) {
