@@ -197,6 +197,15 @@ object LosslessStreamResolver {
             .build()
     }
 
+    val probeHttpClient: OkHttpClient by lazy {
+        httpClient
+            .newBuilder()
+            .connectTimeout(4500, TimeUnit.MILLISECONDS)
+            .readTimeout(4500, TimeUnit.MILLISECONDS)
+            .callTimeout(4500, TimeUnit.MILLISECONDS)
+            .build()
+    }
+
     // ── Public helpers used by the player / YoutubeHelper ─────────────────────────────────────
 
     /** Master switch; defaults to on only when the build ships a pool key (see LosslessPreferenceKeys). */
@@ -312,7 +321,7 @@ object LosslessStreamResolver {
     fun markFailedForTrack(mediaId: String) {
         clearResolved(mediaId)
         val clean = mediaId.removePrefix("youtube_").removePrefix("monochrome_")
-        val expiry = System.currentTimeMillis() + 15 * 60 * 1000L
+        val expiry = System.currentTimeMillis() + 3 * 60 * 1000L
         failedMediaIds[mediaId] = expiry
         if (clean != mediaId) failedMediaIds[clean] = expiry
     }
@@ -334,6 +343,7 @@ object LosslessStreamResolver {
         resolvedByMediaId.clear()
         uriFreshness.clear()
         resolvedSourcesByMediaId.clear()
+        failedMediaIds.clear()
     }
 
     suspend fun setSongSourceOverride(
@@ -1289,10 +1299,10 @@ object LosslessStreamResolver {
                     .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
                     .build()
                 val reachable = runCatching {
-                    httpClient.newCall(headReq).execute().use { resp -> resp.isSuccessful }
+                    probeHttpClient.newCall(headReq).execute().use { resp -> resp.isSuccessful }
                 }.getOrDefault(false)
                 if (!reachable) {
-                    Timber.tag(TAG).w("Monochrome stream 404/unreachable for %s; skipping", request.title)
+                    Timber.tag(TAG).w("Monochrome stream unreachable/timeout (4.5s) for %s; skipping", request.title)
                     return null
                 }
             }
