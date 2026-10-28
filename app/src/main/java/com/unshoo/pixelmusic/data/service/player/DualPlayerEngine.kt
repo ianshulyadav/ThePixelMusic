@@ -451,18 +451,6 @@ class DualPlayerEngine @Inject constructor(
             }
         }
 
-        override fun onPlayerError(error: PlaybackException) {
-            val currentItem = if (::playerA.isInitialized) playerA.currentMediaItem else null
-            val currentUri = currentItem?.localConfiguration?.uri?.toString()
-            if (LosslessStreamResolver.isLosslessUri(currentUri) && currentItem != null) {
-                Timber.tag("DualPlayerEngine").w("Master player error on lossless stream (%s); triggering source failover to YouTube", error.message)
-                failoverLosslessToYoutube(currentItem, playerA, "Player error: ${error.message}")
-            }
-        }
-
-        override fun onPlayerError(eventTime: AnalyticsListener.EventTime, error: PlaybackException) {
-            onPlayerError(error)
-        }
 
         override fun onPositionDiscontinuity(
             oldPosition: Player.PositionInfo,
@@ -487,6 +475,19 @@ class DualPlayerEngine @Inject constructor(
 
     fun addPlayerSwapListener(listener: (Player) -> Unit) {
         onPlayerSwappedListeners.add(listener)
+    }
+
+    // Reusable listener for standby / preloading player errors (Fix 3)
+    private val standbyPlayerListener = object : Player.Listener {
+        override fun onPlayerError(error: PlaybackException) {
+            if (!::playerB.isInitialized) return
+            val currentStandbyItem = playerB.currentMediaItem ?: return
+            val currentStandbyUri = currentStandbyItem.localConfiguration?.uri?.toString()
+            if (LosslessStreamResolver.isLosslessUri(currentStandbyUri)) {
+                Timber.tag("TransitionDebug").w("standbyPlayer error on lossless (%s); triggering source failover to YouTube", error.message)
+                failoverLosslessToYoutube(currentStandbyItem, playerB, "Standby player error: ${error.message}")
+            }
+        }
     }
 
     fun removePlayerSwapListener(listener: (Player) -> Unit) {
@@ -1075,22 +1076,37 @@ class DualPlayerEngine @Inject constructor(
                     .build()
 
                 withContext(Dispatchers.Main.immediate) {
-                    val wasPlaying = player.playWhenReady
-                    val currentPos = player.currentPosition.coerceAtLeast(0L)
-                    val idx = player.currentMediaItemIndex
-                    if (idx != C.INDEX_UNSET && idx < player.mediaItemCount) {
-                        player.replaceMediaItem(idx, replacement)
-                        player.seekTo(idx, currentPos)
-                    } else if (player.mediaItemCount > 0) {
-                        player.replaceMediaItem(0, replacement)
-                        player.seekTo(0, currentPos)
-                    } else {
-                        player.setMediaItem(replacement, currentPos)
+                    val currentIdx = player.currentMediaItemIndex
+                    val currentItem = if (currentIdx != C.INDEX_UNSET && currentIdx < player.mediaItemCount) {
+                        player.getMediaItemAt(currentIdx)
+                    } else null
+
+                    // Verify if this track is the active playing item, or elsewhere in the timeline
+                    val targetIdx = when {
+                        currentItem?.mediaId == mediaItem.mediaId -> currentIdx
+                        else -> (0 until player.mediaItemCount).firstOrNull { player.getMediaItemAt(it).mediaId == mediaItem.mediaId }
                     }
-                    player.prepare()
-                    player.playWhenReady = wasPlaying
-                    if (wasPlaying) player.play()
-                    Timber.tag("DualPlayerEngine").i("Source Failover COMPLETE: %s successfully transitioned to YouTube stream at %dms", videoId, currentPos)
+
+                    if (targetIdx == null) {
+                        // User skipped away or the track was removed during async resolution; do not touch active track
+                        Timber.tag("DualPlayerEngine").w("failoverLosslessToYoutube: %s is no longer in player; aborting replacement", mediaItem.mediaId)
+                        return@withContext
+                    }
+
+                    if (targetIdx == currentIdx) {
+                        val wasPlaying = player.playWhenReady
+                        val currentPos = player.currentPosition.coerceAtLeast(0L)
+                        player.replaceMediaItem(targetIdx, replacement)
+                        player.seekTo(targetIdx, currentPos)
+                        player.prepare()
+                        player.playWhenReady = wasPlaying
+                        if (wasPlaying) player.play()
+                        Timber.tag("DualPlayerEngine").i("Source Failover COMPLETE: %s transitioned to YouTube at active index %d (%dms)", videoId, targetIdx, currentPos)
+                    } else {
+                        // Background / queued track replacement: update timeline entry without interrupting current playback
+                        player.replaceMediaItem(targetIdx, replacement)
+                        Timber.tag("DualPlayerEngine").i("Source Failover COMPLETE: queued item %s replaced with YouTube at index %d", videoId, targetIdx)
+                    }
                 }
             } catch (e: Exception) {
                 Timber.tag("DualPlayerEngine").e(e, "failoverLosslessToYoutube failed for %s", videoId)
@@ -2081,17 +2097,8 @@ class DualPlayerEngine @Inject constructor(
             standbyPlayer.volume = 0f
             standbyPlayer.playWhenReady = false
 
-            val standbyListener = object : Player.Listener {
-                override fun onPlayerError(error: PlaybackException) {
-                    val currentStandbyItem = standbyPlayer.currentMediaItem
-                    val currentStandbyUri = currentStandbyItem?.localConfiguration?.uri?.toString()
-                    if (LosslessStreamResolver.isLosslessUri(currentStandbyUri) && currentStandbyItem != null) {
-                        Timber.tag("TransitionDebug").w("standbyPlayer error on lossless; triggering source failover to YouTube")
-                        failoverLosslessToYoutube(currentStandbyItem, standbyPlayer, "Standby player error")
-                    }
-                }
-            }
-            standbyPlayer.addListener(standbyListener)
+            standbyPlayer.removeListener(standbyPlayerListener)
+            standbyPlayer.addListener(standbyPlayerListener)
             standbyPlayer.prepare()
 
             onNextPlayerPreparedListeners.forEach { it(standbyPlayer) }
@@ -2115,6 +2122,8 @@ class DualPlayerEngine @Inject constructor(
                 standbyPlayer.shuffleModeEnabled = playerA.shuffleModeEnabled
                 standbyPlayer.volume = 0f
                 standbyPlayer.playWhenReady = false
+                standbyPlayer.removeListener(standbyPlayerListener)
+                standbyPlayer.addListener(standbyPlayerListener)
                 standbyPlayer.prepare()
                 onNextPlayerPreparedListeners.forEach { it(standbyPlayer) }
             } catch (e: Exception) {
@@ -2139,11 +2148,14 @@ class DualPlayerEngine @Inject constructor(
         transitionRunning = false
         pendingTransitionTarget = null
         resetPreparedWindowState()
-        if (::playerB.isInitialized && playerB.mediaItemCount > 0) {
+        if (::playerB.isInitialized) {
             try {
-                playerB.stop()
-                playerB.clearMediaItems()
-                playerB.volume = 0f
+                playerB.removeListener(standbyPlayerListener)
+                if (playerB.mediaItemCount > 0) {
+                    playerB.stop()
+                    playerB.clearMediaItems()
+                    playerB.volume = 0f
+                }
             } catch (e: Exception) { /* Ignore */ }
         }
         if (::playerA.isInitialized) {
@@ -2344,6 +2356,8 @@ class DualPlayerEngine @Inject constructor(
         incomingPlayer.repeatMode = outgoingPlayer.repeatMode
         incomingPlayer.shuffleModeEnabled = outgoingPlayer.shuffleModeEnabled
 
+        incomingPlayer.removeListener(standbyPlayerListener)
+        outgoingPlayer.removeListener(standbyPlayerListener)
         outgoingPlayer.removeListener(masterPlayerListener)
         outgoingPlayer.removeAnalyticsListener(masterPlayerListener)
         outgoingPlayer.removeAudioOffloadListener(masterAudioOffloadListener)
