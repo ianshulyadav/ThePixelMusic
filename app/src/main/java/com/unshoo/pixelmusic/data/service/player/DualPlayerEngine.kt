@@ -37,6 +37,8 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver
 import com.unshoo.pixelmusic.data.lossless.applemusic.AppleMusicDrm
 import com.unshoo.pixelmusic.data.lossless.playback.LosslessSchemeRoutingDataSource
+import com.unshoo.pixelmusic.data.lossless.cache.LosslessCachingDataSource
+import com.unshoo.pixelmusic.data.lossless.cache.LosslessFileCache
 import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.extractor.flac.FlacExtractor
 import androidx.media3.extractor.mp3.Mp3Extractor
@@ -1509,6 +1511,10 @@ class DualPlayerEngine @Inject constructor(
             httpUpstream = httpDataSourceFactory,
             httpClient = LosslessStreamResolver.httpClient,
         )
+        // Complete-file caching layer: streams unhindered on first play while sequentially recording to disk;
+        // subsequent replays read 100% complete local FLAC files with 0 MB network data and instant seeking.
+        val losslessCachingFactory = LosslessCachingDataSource.Factory(context, losslessRoutingFactory)
+
         val cacheDataSourceFactory = CacheDataSource.Factory()
             .setCache(exoCache.cache)
             .setUpstreamDataSourceFactory(baseDataSourceFactory)
@@ -1533,7 +1539,7 @@ class DualPlayerEngine @Inject constructor(
                         dataSpec.uri.scheme == "monochrome" ||
                         dataSpec.uri.scheme == "apple-pending"
 
-                    val factory = if (isLossless) losslessRoutingFactory else cacheDataSourceFactory
+                    val factory = if (isLossless) losslessCachingFactory else cacheDataSourceFactory
                     val source = factory.createDataSource()
                     transferListeners.forEach(source::addTransferListener)
                     delegate = source
@@ -2044,6 +2050,15 @@ class DualPlayerEngine @Inject constructor(
             resolvedUri.toString().contains("monochrome.st/track/") -> "monochrome_" + resolvedUri.toString().substringAfterLast("/")
             else -> mediaItem.mediaId.removePrefix("youtube_").takeIf { it.isNotBlank() }
         }
+        // If this track is already 100% complete in the lossless disk cache, serve directly from file
+        val cachedComplete = cleanId?.let { LosslessFileCache.getCompleteFile(context, it) }
+        if (cachedComplete != null) {
+            return mediaItem.buildUpon()
+                .setUri(Uri.fromFile(cachedComplete))
+                .setMimeType(androidx.media3.common.MimeTypes.AUDIO_FLAC)
+                .build()
+        }
+
         // ONLY attach custom cache key to YouTube streams; NEVER attach to Lossless streams
         if (!isLossless && cleanId != null) {
             builder.setCustomCacheKey(cleanId)

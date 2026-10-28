@@ -35,6 +35,7 @@ import com.unshoo.pixelmusic.data.lossless.audiosource.DirectStream
 import com.unshoo.pixelmusic.data.lossless.audiosource.SongSourceOverride
 import com.unshoo.pixelmusic.data.lossless.audiosource.TitleMatch
 import com.unshoo.pixelmusic.data.lossless.audiosource.pcmBitrateOrNull
+import com.unshoo.pixelmusic.data.lossless.cache.LosslessFileCache
 import com.unshoo.pixelmusic.data.lossless.constants.AppleMusicQuality
 import com.unshoo.pixelmusic.data.lossless.constants.AppleMusicQualityKey
 import com.unshoo.pixelmusic.data.lossless.constants.AppleMusicMediaUserTokenKey
@@ -497,6 +498,26 @@ object LosslessStreamResolver {
         lowDataMode: Boolean,
     ): Result? {
         val mediaId = request.mediaId
+        // 1. Instant offline cache check: if a complete FLAC file exists on disk, play it directly
+        val cachedLossless = LosslessFileCache.getCompleteFile(context, mediaId)
+        if (cachedLossless != null) {
+            val fileUri = Uri.fromFile(cachedLossless).toString()
+            markUriFresh(fileUri)
+            val result = Result(
+                mediaId = mediaId,
+                uri = fileUri,
+                mimeType = "audio/flac",
+                codecs = "flac",
+                bitrate = 1411200,
+                sampleRate = 44100,
+                bitDepth = 16,
+                contentLength = cachedLossless.length(),
+                label = "FLAC (Cached)",
+                source = AudioSourceType.MONOCHROME
+            )
+            resolvedByMediaId[mediaId] = result
+            return result
+        }
         if (isFailedForTrack(mediaId)) {
             Timber.tag(TAG).d("Lossless resolve skipped for %s (marked failed, falling back)", mediaId)
             return null
