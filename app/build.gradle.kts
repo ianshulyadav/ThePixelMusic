@@ -102,6 +102,27 @@ android {
         }.standardOutput.asText.map { it.trim() }.getOrElse("")
         buildConfigField("String", "GIT_COMMIT_HASH", "\"$gitCommitHash\"")
 
+        // Release vs Nightly/Commit build detection:
+        // Official releases have clean version names (e.g. v1.8, 1.7.10), while
+        // nightly and regular commit builds include the git commit hash in About.
+        val hasReleaseProperty = (project.findProperty("IS_RELEASE_BUILD") as? String)?.toBoolean()
+            ?: (project.findProperty("pixelmusic.isReleaseBuild") as? String)?.toBoolean()
+        val isTaggedRelease = providers.exec {
+            commandLine("git", "tag", "--points-at", "HEAD")
+            isIgnoreExitValue = true
+        }.standardOutput.asText.map { output ->
+            output.lines().any { it.trim().matches(Regex("^v?[0-9].*")) }
+        }.getOrElse(false)
+        val isReleaseCommitMsg = providers.exec {
+            commandLine("git", "log", "-1", "--pretty=%B")
+            isIgnoreExitValue = true
+        }.standardOutput.asText.map { msg ->
+            msg.trim().startsWith("release:", ignoreCase = true)
+        }.getOrElse(false)
+
+        val isReleaseBuild = hasReleaseProperty ?: (isTaggedRelease || isReleaseCommitMsg)
+        buildConfigField("Boolean", "IS_RELEASE_BUILD", "$isReleaseBuild")
+
         // ── ArchiveTune Source Pool (lossless streaming) ───────────────────────────
         // SOURCE_PROVIDER_URL: base URL of the ArchivePool deployment (client appends
         //   /api/accounts, /api/sources, /api/report, /api/discovery/{tidal,qobuz}).
