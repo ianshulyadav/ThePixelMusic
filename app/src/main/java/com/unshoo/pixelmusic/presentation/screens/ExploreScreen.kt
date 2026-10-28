@@ -2210,7 +2210,7 @@ private fun FeedTrackCard(
                         contentDescription = title,
                         contentScale = ContentScale.Crop,
                         shape = cardShape,
-                        targetSize = SmartImageListTargetSize,
+                        targetSize = SmartImageCardTargetSize,
                         placeholderResId = 0,
                         errorResId = 0,
                         modifier = Modifier.fillMaxSize()
@@ -2495,7 +2495,7 @@ private fun ShelfArtistCard(
                         contentDescription = artist.name,
                         contentScale = ContentScale.Crop,
                         shape = artistAvatarShape,
-                        targetSize = SmartImageListTargetSize,
+                        targetSize = SmartImageCardTargetSize,
                         placeholderResId = 0,
                         errorResId = 0,
                         modifier = Modifier.fillMaxSize()
@@ -2857,7 +2857,7 @@ private fun SpotlightHeroCard(
                     model = spotlight.artworkUrl,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
-                    targetSize = SmartImageListTargetSize,
+                    targetSize = SmartImageLargeCardTargetSize,
                     placeholderResId = 0,
                     errorResId = 0,
                     modifier = Modifier
@@ -2932,7 +2932,7 @@ private fun SpotlightHeroCard(
                                     contentDescription = spotlight.artistName,
                                     contentScale = ContentScale.Crop,
                                     shape = heroAvatarShape,
-                                    targetSize = SmartImageListTargetSize,
+                                    targetSize = SmartImageCardTargetSize,
                                     modifier = Modifier.fillMaxSize()
                                 )
                             }
@@ -3037,7 +3037,7 @@ private fun ArtistAvatarCard(
                         contentDescription = artist.name,
                         contentScale = ContentScale.Crop,
                         shape = avatarShape,
-                        targetSize = SmartImageListTargetSize,
+                        targetSize = SmartImageCardTargetSize,
                         placeholderResId = 0,
                         errorResId = 0,
                         modifier = Modifier.fillMaxSize()

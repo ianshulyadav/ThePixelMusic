@@ -68,9 +68,9 @@ private object SmartImageRegex {
 
 val SmartImageCompactListTargetSize = Size(96, 96)
 val SmartImageListTargetSize = Size(128, 128)
-val SmartImageCardTargetSize = Size(192, 192)
+val SmartImageCardTargetSize = Size(512, 512)
 val SmartImageLargeCardTargetSize = Size(1024, 1024)
-private val DefaultSmartImageSize = Size(192, 192)
+private val DefaultSmartImageSize = Size(512, 512)
 
 @Composable
 fun SmartImage(
@@ -206,7 +206,7 @@ fun SmartImage(
             } else if (widthPx >= 800 || heightPx >= 800) {
                 "=w800-h800-l90-rj"
             } else {
-                val cardDim = maxOf(widthPx, heightPx).coerceIn(128, 512)
+                val cardDim = maxOf(widthPx, heightPx).coerceIn(256, 512)
                 "=w$cardDim-h$cardDim-c-rj"
             }
             if (SmartImageRegex.sizeParamRegex.containsMatchIn(model)) {
