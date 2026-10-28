@@ -31,8 +31,14 @@ object ShapeCache {
     /** 16dp smooth corners — album cards, playlist items */
     val smooth16 = AbsoluteSmoothCornerShape(cornerRadius = 16.dp, smoothnessAsPercent = 60)
 
+    /** 18dp smooth corners — concentric card inner shapes */
+    val smooth18 = AbsoluteSmoothCornerShape(cornerRadius = 18.dp, smoothnessAsPercent = 60)
+
     /** 20dp smooth corners — larger cards */
     val smooth20 = AbsoluteSmoothCornerShape(cornerRadius = 20.dp, smoothnessAsPercent = 60)
+
+    /** 22dp smooth corners */
+    val smooth22 = AbsoluteSmoothCornerShape(cornerRadius = 22.dp, smoothnessAsPercent = 60)
 
     /** 24dp smooth corners — dialog surfaces */
     val smooth24 = AbsoluteSmoothCornerShape(cornerRadius = 24.dp, smoothnessAsPercent = 60)
