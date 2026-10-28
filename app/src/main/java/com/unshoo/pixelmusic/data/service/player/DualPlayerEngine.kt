@@ -1336,7 +1336,7 @@ class DualPlayerEngine @Inject constructor(
                                 .apply {
                                     if (pinned.headers.isNotEmpty()) {
                                         setHttpRequestHeaders(pinned.headers)
-                                    } else {
+                                    } else if (pinned.url.contains("googlevideo.com") || pinned.url.contains("youtube.com")) {
                                         val profile = StreamClientUtils.resolveRequestProfile(pinned.url)
                                         setHttpRequestHeaders(
                                             buildMap {
@@ -1344,6 +1344,12 @@ class DualPlayerEngine @Inject constructor(
                                                 profile.origin?.let { put("Origin", it) }
                                                 profile.referer?.let { put("Referer", it) }
                                             }
+                                        )
+                                    } else if (pinned.url.startsWith("http")) {
+                                        setHttpRequestHeaders(
+                                            mapOf(
+                                                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+                                            )
                                         )
                                     }
                                 }
@@ -1407,7 +1413,8 @@ class DualPlayerEngine @Inject constructor(
 
                     fun DataSpec.Builder.applyStreamHeaders(resolvedUri: Uri): DataSpec.Builder {
                         val urlStr = resolvedUri.toString()
-                        if (urlStr.startsWith("http")) {
+                        val isYouTubeStream = urlStr.contains("googlevideo.com") || urlStr.contains("youtube.com")
+                        if (isYouTubeStream) {
                             val profile = StreamClientUtils.resolveRequestProfile(urlStr)
                             val headers = buildMap {
                                 put("User-Agent", profile.userAgent)
@@ -1418,6 +1425,12 @@ class DualPlayerEngine @Inject constructor(
                             if (cleanId != null) {
                                 StreamChoice.remember(cleanId, urlStr, headers)
                             }
+                        } else if (urlStr.startsWith("http")) {
+                            this.setHttpRequestHeaders(
+                                mapOf(
+                                    "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+                                )
+                            )
                         }
                         return this
                     }

@@ -1207,7 +1207,7 @@ object YoutubeHelper {
                 .filter { it.isNotBlank() }
                 .ifEmpty { listOf(effectiveArtist).filter { it.isNotBlank() } }
 
-            val result = withTimeoutOrNull(fastTimeoutMs ?: 2500L) {
+            val result = withTimeoutOrNull(fastTimeoutMs ?: 4000L) {
                 LosslessStreamResolver.resolve(
                     context = context,
                     request = LosslessStreamResolver.Request(
@@ -1353,7 +1353,7 @@ object YoutubeHelper {
         if (shouldTryLossless) {
             val localSongRepository = AppDatabase.getInstance(context).songRepository()
             val savedSong = try { localSongRepository.getSong(videoId) } catch (_: Exception) { null }
-            val fastTimeout = if (isAutoQuality) 1200L else if (isLowBandwidth) 2000L else 3000L
+            val fastTimeout = if (isAutoQuality) 3000L else if (isLowBandwidth) 3500L else 4500L
             resolveLosslessStreamUrl(
                 context = context,
                 song = song,

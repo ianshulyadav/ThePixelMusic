@@ -198,14 +198,6 @@ object LosslessStreamResolver {
             .build()
     }
 
-    val probeHttpClient: OkHttpClient by lazy {
-        httpClient
-            .newBuilder()
-            .connectTimeout(4500, TimeUnit.MILLISECONDS)
-            .readTimeout(4500, TimeUnit.MILLISECONDS)
-            .callTimeout(4500, TimeUnit.MILLISECONDS)
-            .build()
-    }
 
     // ── Public helpers used by the player / YoutubeHelper ─────────────────────────────────────
 
@@ -325,6 +317,12 @@ object LosslessStreamResolver {
         val expiry = System.currentTimeMillis() + 3 * 60 * 1000L
         failedMediaIds[mediaId] = expiry
         if (clean != mediaId) failedMediaIds[clean] = expiry
+    }
+
+    fun clearFailedForTrack(mediaId: String) {
+        val clean = mediaId.removePrefix("youtube_").removePrefix("monochrome_")
+        failedMediaIds.remove(mediaId)
+        failedMediaIds.remove(clean)
     }
 
     fun isFailedForTrack(mediaId: String?): Boolean {
@@ -1310,21 +1308,6 @@ object LosslessStreamResolver {
                 if (match.accepted && match.score > bestScore) {
                     bestScore = match.score
                     bestStream = candidateStream
-                }
-            }
-            if (bestStream != null) {
-                // Verify candidate stream is reachable and does not return 404 or empty
-                val headReq = okhttp3.Request.Builder()
-                    .url(bestStream.uri)
-                    .head()
-                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-                    .build()
-                val reachable = runCatching {
-                    probeHttpClient.newCall(headReq).execute().use { resp -> resp.isSuccessful }
-                }.getOrDefault(false)
-                if (!reachable) {
-                    Timber.tag(TAG).w("Monochrome stream unreachable/timeout (4.5s) for %s; skipping", request.title)
-                    return null
                 }
             }
             bestStream
