@@ -41,17 +41,22 @@ internal fun resolveVerticalSheetTargetState(
     currentFraction: Float
 ): PlayerSheetState {
     return when {
-        currentSheetContentState == PlayerSheetState.EXPANDED &&
-            accumulatedDragY <= 0f -> PlayerSheetState.EXPANDED
-
-        abs(accumulatedDragY) > minDragThresholdPx ->
-            if (accumulatedDragY < 0) PlayerSheetState.EXPANDED else PlayerSheetState.COLLAPSED
-
+        // High-velocity fling dictates direction immediately
         abs(verticalVelocity) > velocityThreshold ->
-            if (verticalVelocity < 0) PlayerSheetState.EXPANDED else PlayerSheetState.COLLAPSED
+            if (verticalVelocity < 0f) PlayerSheetState.EXPANDED else PlayerSheetState.COLLAPSED
 
+        // If user was expanded and dragged up into overscroll/rubberband past top edge
+        currentSheetContentState == PlayerSheetState.EXPANDED && accumulatedDragY <= 0f ->
+            PlayerSheetState.EXPANDED
+
+        // Positional settling with directional hysteresis when released with low velocity:
+        // From EXPANDED: must drag past 35% down (fraction < 0.65f) to collapse; otherwise snaps back
+        currentSheetContentState == PlayerSheetState.EXPANDED ->
+            if (currentFraction < 0.65f) PlayerSheetState.COLLAPSED else PlayerSheetState.EXPANDED
+
+        // From COLLAPSED: must pull up past 35% (fraction > 0.35f) to expand; otherwise settles back
         else ->
-            if (currentFraction > 0.5f) PlayerSheetState.EXPANDED else PlayerSheetState.COLLAPSED
+            if (currentFraction > 0.35f) PlayerSheetState.EXPANDED else PlayerSheetState.COLLAPSED
     }
 }
 

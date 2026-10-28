@@ -33,6 +33,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.graphics.toArgb
+import androidx.core.view.WindowCompat
+import com.unshoo.pixelmusic.ui.theme.findActivity
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.shadow
@@ -265,7 +269,7 @@ fun UnifiedPlayerSheetV2(
     val visualOvershootScaleY = remember { Animatable(1f) }
     val initialFullPlayerOffsetY = remember(density) { with(density) { 24.dp.toPx() } }
     val sheetExpandAnimSpec = remember { tween<Float>(durationMillis = 300, easing = CubicBezierEasing(0.05f, 0.70f, 0.10f, 1.0f)) }
-    val sheetCollapseAnimSpec = remember { tween<Float>(durationMillis = 220, easing = CubicBezierEasing(0.30f, 0.0f, 0.80f, 0.15f)) }
+    val sheetCollapseAnimSpec = remember { tween<Float>(durationMillis = 240, easing = CubicBezierEasing(0.20f, 1.0f, 0.30f, 1.0f)) }
     // Use expand spec as the default (collapse overrides it in SheetMotionController)
     val sheetAnimationSpec = sheetExpandAnimSpec
     val sheetAnimationMutex = remember { MutatorMutex() }
@@ -531,6 +535,31 @@ fun UnifiedPlayerSheetV2(
     )
     val albumColorScheme = sheetThemeState.albumColorScheme
     val miniPlayerScheme = sheetThemeState.miniPlayerScheme
+
+    // Edge-to-edge system bar contrast adaptation:
+    // When the player expands past 50%, match system bar icon contrast to the player's dynamic album palette.
+    // When collapsed, seamlessly restore standard activity theme icons.
+    val view = LocalView.current
+    val isExpandedForSystemBars by remember {
+        derivedStateOf { playerContentExpansionFraction.value > 0.5f }
+    }
+    if (!view.isInEditMode && showPlayerContentArea) {
+        val playerIsDark = remember(albumColorScheme, isDarkTheme) {
+            val lum = androidx.core.graphics.ColorUtils.calculateLuminance(albumColorScheme.surface.toArgb())
+            if (isDarkTheme) true else lum <= 0.55
+        }
+        SideEffect {
+            val window = view.context.findActivity()?.window ?: return@SideEffect
+            val controller = WindowCompat.getInsetsController(window, view)
+            if (isExpandedForSystemBars) {
+                controller.isAppearanceLightStatusBars = !playerIsDark
+                controller.isAppearanceLightNavigationBars = !playerIsDark
+            } else {
+                controller.isAppearanceLightStatusBars = !isDarkTheme
+                controller.isAppearanceLightNavigationBars = !isDarkTheme
+            }
+        }
+    }
     val isPreparingPlayback = sheetThemeState.isPreparingPlayback
     val miniReadyAlpha = sheetThemeState.miniReadyAlpha
     val miniAppearScale = sheetThemeState.miniAppearScale

@@ -111,7 +111,7 @@ internal class SheetVerticalDragGestureHandler(
         val verticalVelocity = velocityTracker.calculateVelocity().y
         val currentFraction = playerContentExpansionFraction.value
         val minDragThresholdPx = with(densityProvider()) { 5.dp.toPx() }
-        val velocityThreshold = 150f
+        val velocityThreshold = 350f
 
         val targetState = resolveVerticalSheetTargetState(
             currentSheetContentState = currentSheetStateProvider(),
@@ -123,17 +123,17 @@ internal class SheetVerticalDragGestureHandler(
         )
 
         scope.launch {
+            val clampedVelocity = verticalVelocity.coerceIn(-2600f, 2600f)
             if (targetState == PlayerSheetState.EXPANDED) {
                 launch {
-                    onAnimateSheet(true, null, 0f)
+                    onAnimateSheet(true, null, clampedVelocity)
                 }
                 onExpandSheetState()
             } else {
                 val closeSpec = tween<Float>(
                     durationMillis = collapseAnimationDurationForFraction(currentFraction),
-                    easing = androidx.compose.animation.core.FastOutSlowInEasing
+                    easing = androidx.compose.animation.core.CubicBezierEasing(0.20f, 1.0f, 0.30f, 1.0f)
                 )
-                val clampedVelocity = verticalVelocity.coerceIn(-2600f, 2600f)
                 // No scale squash — keep it at 1f to avoid any secondary bounce.
                 visualOvershootScaleY.snapTo(1f)
                 onAnimateSheet(
@@ -160,7 +160,7 @@ internal class SheetVerticalDragGestureHandler(
             visualOvershootScaleY.snapTo(1f)
             onAnimateSheet(
                 restoreExpanded,
-                tween(durationMillis = 180, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+                tween(durationMillis = 180, easing = androidx.compose.animation.core.CubicBezierEasing(0.20f, 1.0f, 0.30f, 1.0f)),
                 0f
             )
         }
