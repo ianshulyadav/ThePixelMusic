@@ -21,8 +21,8 @@ internal fun computeSheetVerticalDragFrame(
 ): SheetVerticalDragFrame {
     val newY = (currentTranslationY + dragAmount)
         .coerceIn(
-            expandedY - miniHeightPx * 0.2f,
-            collapsedY + miniHeightPx * 0.2f
+            expandedY,
+            collapsedY
         )
     val denominator = (collapsedY - expandedY).coerceAtLeast(1f)
     val dragRatio = (initialYOnDragStart - newY) / denominator

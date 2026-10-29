@@ -137,9 +137,6 @@ internal fun resolveNavBarOccupiedHeight(
     val contentHeight = resolveNavBarContentHeight(navBarStyle, compactMode, heightOffset)
     return if (navBarStyle == NavBarStyle.FULL_WIDTH) {
         contentHeight + systemNavBarInset
-    } else if (navBarStyle == NavBarStyle.FLOATING_PILL) {
-        val bottomMargin = if (systemNavBarInset > 0.dp) systemNavBarInset else 6.dp
-        contentHeight + bottomMargin
     } else {
         val bottomMargin = if (systemNavBarInset > 0.dp) systemNavBarInset else 14.dp
         contentHeight + bottomMargin

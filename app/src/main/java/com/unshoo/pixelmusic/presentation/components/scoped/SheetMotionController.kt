@@ -27,6 +27,7 @@ internal class SheetMotionController(
     ) {
         val targetFraction = if (canExpand && targetExpanded) 1f else 0f
         val targetY = if (targetExpanded) expandedY else collapsedY
+        val effectiveVelocity = if (targetExpanded) initialVelocity else 0f
         val velocityScale = (collapsedY - expandedY).coerceAtLeast(1f)
 
         if (
@@ -43,14 +44,14 @@ internal class SheetMotionController(
                 launch {
                     translationY.animateTo(
                         targetValue = targetY,
-                        initialVelocity = initialVelocity,
+                        initialVelocity = effectiveVelocity,
                         animationSpec = animationSpec
                     )
                 }
                 launch {
                     expansionFraction.animateTo(
                         targetValue = targetFraction,
-                        initialVelocity = initialVelocity / velocityScale,
+                        initialVelocity = effectiveVelocity / velocityScale,
                         animationSpec = animationSpec
                     )
                 }

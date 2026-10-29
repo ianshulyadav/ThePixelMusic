@@ -27,16 +27,12 @@ import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularWavyProgressIndicator
 import androidx.compose.material3.ColorScheme
-import androidx.compose.material3.LinearWavyProgressIndicator
-import androidx.compose.ui.semantics.clearAndSetSemantics
-import com.unshoo.pixelmusic.presentation.components.scoped.rememberSmoothProgress
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ripple
@@ -81,7 +77,7 @@ internal fun MiniPlayerContentInternal(
     currentPositionProvider: (() -> Long)? = null,
     onPlayPause: () -> Unit,
     onPrevious: () -> Unit,
-    cornerRadiusAlb: Dp = 10.dp,
+    cornerRadiusAlb: Dp = 12.dp,
     onNext: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -96,17 +92,8 @@ internal fun MiniPlayerContentInternal(
     val latestOnNext = rememberUpdatedState(onNext)
     val miniPlayerIndication = remember { ripple(bounded = false) }
 
-    // M3 Expressive shape morphing:
-    // When playing, artwork morphs to a 14dp expressive squircle; when paused, it smoothly morphs to a 24dp circular capsule.
-    val artCornerRadius by animateDpAsState(
-        targetValue = if (isPlaying) 14.dp else 24.dp,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioNoBouncy,
-            stiffness = Spring.StiffnessMediumLow
-        ),
-        label = "miniArtCorner"
-    )
-    val artShape = remember(artCornerRadius) { RoundedCornerShape(artCornerRadius) }
+    // Album art with clean rounded corners
+    val artShape = remember(cornerRadiusAlb) { RoundedCornerShape(cornerRadiusAlb) }
 
     // Hero Play/Pause button shape morphing:
     // Morphs between squircle (14dp) when playing and circle (22dp) when paused.
@@ -120,28 +107,6 @@ internal fun MiniPlayerContentInternal(
     )
     val playPauseShape = remember(playPauseCornerRadius) { RoundedCornerShape(playPauseCornerRadius) }
 
-    // Realtime smooth playback progress sampling for the wavy progress bar
-    val isPlayingProvider = rememberUpdatedState(isPlaying)
-    val (smoothProgress, _) = rememberSmoothProgress(
-        isPlayingProvider = { isPlayingProvider.value },
-        currentPositionProvider = currentPositionProvider ?: { 0L },
-        totalDuration = song.duration,
-        songId = song.id,
-        sampleWhilePlayingMs = 150L,
-        sampleWhilePausedMs = 800L,
-        isVisible = true
-    )
-
-    // Wavy progress wave animation: active sine wave when playing, straight line when paused
-    val animatedWaveAmplitude by animateFloatAsState(
-        targetValue = if (isPlaying) 1f else 0f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioNoBouncy,
-            stiffness = Spring.StiffnessMediumLow
-        ),
-        label = "miniWaveAmplitude"
-    )
-
     BoxWithConstraints(
         modifier = modifier
             .fillMaxWidth()
@@ -153,7 +118,7 @@ internal fun MiniPlayerContentInternal(
         Row(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(start = 10.dp, end = 12.dp, top = 6.dp, bottom = 8.dp),
+                .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             val albumArtModel = song.albumArtUriString?.takeIf { it.isNotBlank() }
@@ -309,23 +274,6 @@ internal fun MiniPlayerContentInternal(
                     )
                 }
             }
-        }
-
-        // M3 Expressive Linear Wavy Progress along the bottom edge
-        if (song.duration > 0L) {
-            LinearWavyProgressIndicator(
-                progress = { smoothProgress.value },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp)
-                    .height(3.5.dp)
-                    .align(Alignment.BottomCenter)
-                    .clip(RoundedCornerShape(50))
-                    .clearAndSetSemantics { },
-                color = LocalMaterialTheme.current.primary,
-                trackColor = LocalMaterialTheme.current.primary.copy(alpha = 0.20f),
-                amplitude = { animatedWaveAmplitude }
-            )
         }
     }
 }

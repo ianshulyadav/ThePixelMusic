@@ -3,8 +3,10 @@ package com.unshoo.pixelmusic.presentation.components.scoped
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.AnimationVector1D
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -115,18 +117,17 @@ internal class SheetVerticalDragGestureHandler(
                 }
                 onExpandSheetState()
             } else {
-                val dynamicDamping = collapseSpringDampingForFraction(currentFraction)
                 launch {
                     visualOvershootScaleY.snapTo(1f)
                 }
                 launch {
                     onAnimateSheet(
                         false,
-                        spring(
-                            dampingRatio = dynamicDamping,
-                            stiffness = Spring.StiffnessMediumLow
+                        tween(
+                            durationMillis = 260,
+                            easing = CubicBezierEasing(0.2f, 0.0f, 0.0f, 1.0f)
                         ),
-                        verticalVelocity
+                        0f
                     )
                 }
                 onCollapseSheetState()

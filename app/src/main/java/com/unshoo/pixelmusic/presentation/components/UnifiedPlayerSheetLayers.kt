@@ -91,7 +91,7 @@ internal fun BoxScope.UnifiedPlayerMiniAndFullLayers(
                 ) {
                     MiniPlayerContentInternal(
                         song = currentSongNonNull,
-                        cornerRadiusAlb = 10.dp,
+                        cornerRadiusAlb = 12.dp,
                         isPlaying = infrequentPlayerState.isPlaying,
                         isCastConnecting = isCastConnecting,
                         isPreparingPlayback = isPreparingPlayback,

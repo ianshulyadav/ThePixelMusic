@@ -81,8 +81,9 @@ internal fun rememberSheetVisualState(
     ) {
         {
             val progress = predictiveBackCollapseProgressState.value
-            currentSheetTranslationY.value * (1f - progress) +
+            val rawY = currentSheetTranslationY.value * (1f - progress) +
                 (sheetCollapsedTargetY * progress)
+            rawY.coerceIn(0f, sheetCollapsedTargetY)
         }
     }
 

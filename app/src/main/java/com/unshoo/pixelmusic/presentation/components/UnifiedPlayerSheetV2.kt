@@ -274,9 +274,9 @@ fun UnifiedPlayerSheetV2(
         )
     }
     val sheetCollapseAnimationSpec = remember {
-        spring<Float>(
-            dampingRatio = Spring.DampingRatioNoBouncy,
-            stiffness = Spring.StiffnessMediumLow
+        tween<Float>(
+            durationMillis = 260,
+            easing = CubicBezierEasing(0.2f, 0.0f, 0.0f, 1.0f)
         )
     }
     val sheetAnimationMutex = remember { MutatorMutex() }
