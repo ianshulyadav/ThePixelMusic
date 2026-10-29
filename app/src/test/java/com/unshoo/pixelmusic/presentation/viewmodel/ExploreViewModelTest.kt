@@ -15,6 +15,7 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkObject
 import io.mockk.unmockkObject
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -30,6 +31,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.DisplayName
@@ -423,6 +425,230 @@ class ExploreViewModelTest {
         coVerify(atLeast = 1) { YouTube.home(any(), any(), any()) }
         val updatedState = viewModel.uiState.value as ExploreScreenUiState.Content
         assertEquals("Fresh From Network", updatedState.dynamicShelves.firstOrNull()?.title)
+    }
+
+    @Test
+    @DisplayName("11: Rapid category switch from Category to 'All' while category fetch is in flight does NOT overwrite 'All' with stale category data")
+    fun selectCategory_whenSwitchedToAllWhileCategoryInFlight_doesNotOverwriteAllWithStaleData() = runTest(testDispatcher) {
+        // Given: Online initial load completes with base home feed and a "Relax" mood chip
+        val relaxChip = sampleChip("Relax", "FEmusic_relax", "wAEB_relax")
+        val homeFeed = createMockHomePage("Home Feed Shelf", 3, chips = listOf(relaxChip))
+        coEvery { YouTube.home(continuation = null, params = null, forceRefresh = any()) } returns Result.success(homeFeed)
+        coEvery { YouTube.newReleaseAlbums() } returns Result.success(emptyList())
+
+        // In-flight deferred for category fetch to simulate slow network response
+        val relaxDeferred = CompletableDeferred<Result<HomePage>>()
+        coEvery { YouTube.home(continuation = null, params = "wAEB_relax", forceRefresh = any()) } coAnswers {
+            relaxDeferred.await()
+        }
+
+        val viewModel = createViewModel()
+        advanceUntilIdle()
+
+        val initialContent = viewModel.uiState.value as ExploreScreenUiState.Content
+        assertEquals("All", initialContent.selectedCategory)
+        assertEquals("Home Feed Shelf", initialContent.dynamicShelves.first().title)
+
+        // When: User selects "Relax", suspending on in-flight network call
+        viewModel.selectCategory("Relax")
+        testScheduler.runCurrent()
+
+        // And immediately switches back to "All" before "Relax" network call returns
+        viewModel.selectCategory("All")
+        testScheduler.runCurrent()
+
+        val switchedBackContent = viewModel.uiState.value as ExploreScreenUiState.Content
+        assertEquals("All", switchedBackContent.selectedCategory)
+        assertEquals("Home Feed Shelf", switchedBackContent.dynamicShelves.first().title)
+
+        // Then: The slow "Relax" network call completes with stale category data
+        val relaxFeed = createMockHomePage("Peaceful Piano (Stale)", 4)
+        relaxDeferred.complete(Result.success(relaxFeed))
+        advanceUntilIdle()
+
+        // Invariant Verification:
+        // 1. UI state must remain on "All", not overwritten by stale "Relax" shelves
+        val finalState = viewModel.uiState.value
+        assertTrue(finalState is ExploreScreenUiState.Content, "Final state must remain Content")
+        val finalContent = finalState as ExploreScreenUiState.Content
+        assertEquals("All", finalContent.selectedCategory, "Category must remain 'All'")
+        assertEquals(1, finalContent.dynamicShelves.size, "Dynamic shelves count must be 1 (home feed only)")
+        assertEquals("Home Feed Shelf", finalContent.dynamicShelves.first().title, "Dynamic shelves must NOT be overwritten by stale category data")
+        assertFalse(finalContent.dynamicShelves.any { it.title.contains("Peaceful Piano") }, "Stale category shelf must NOT appear in dynamicShelves")
+
+        // 2. Legacy state consistency
+        assertEquals("All", viewModel.exploreUiState.value.selectedFilter)
+        assertTrue(viewModel.exploreUiState.value.explorePageSections.isEmpty(), "explorePageSections must remain empty when 'All' is active")
+    }
+
+    @Test
+    @DisplayName("12: loadMore() in a category appends continuation items to explorePageSections and dynamicShelves, preserving base homePageSections")
+    fun loadMore_whenInCategory_appendsToCategorySectionsAndPreservesHomeFeed() = runTest(testDispatcher) {
+        // Given: Home feed with base shelf and "Relax" mood chip
+        val relaxChip = sampleChip("Relax", "FEmusic_relax", "wAEB_relax")
+        val initialHome = createMockHomePage("Base Home Shelf", 3, chips = listOf(relaxChip), continuation = "home_token_initial")
+        coEvery { YouTube.home(continuation = null, params = null, forceRefresh = any()) } returns Result.success(initialHome)
+        coEvery { YouTube.newReleaseAlbums() } returns Result.success(emptyList())
+
+        // Category "Relax" initial page with continuation token
+        val relaxPage1 = createMockHomePage("Relax Shelf 1", 3, continuation = "relax_token_p2")
+        coEvery { YouTube.home(continuation = null, params = "wAEB_relax", forceRefresh = any()) } returns Result.success(relaxPage1)
+
+        // Category "Relax" continuation page
+        val relaxPage2 = createMockHomePage("Relax Shelf 2 (Continuation)", 2, continuation = null)
+        coEvery { YouTube.home(continuation = "relax_token_p2", params = null, forceRefresh = any()) } returns Result.success(relaxPage2)
+
+        val viewModel = createViewModel()
+        advanceUntilIdle()
+
+        // User navigates to "Relax" category
+        viewModel.selectCategory("Relax")
+        advanceUntilIdle()
+
+        val categoryContent = viewModel.uiState.value as ExploreScreenUiState.Content
+        assertEquals("Relax", categoryContent.selectedCategory)
+        assertEquals(1, categoryContent.dynamicShelves.size)
+        assertEquals("Relax Shelf 1", categoryContent.dynamicShelves[0].title)
+        assertTrue(categoryContent.hasMoreContent)
+
+        // When: User triggers loadMore() inside "Relax" category
+        viewModel.loadMore()
+        advanceUntilIdle()
+
+        // Then:
+        // 1. UI state dynamicShelves must append Relax continuation without showing or corrupting base home feed
+        val paginatedContent = viewModel.uiState.value as ExploreScreenUiState.Content
+        assertEquals("Relax", paginatedContent.selectedCategory)
+        assertEquals(2, paginatedContent.dynamicShelves.size, "Category dynamicShelves must contain both initial and continuation shelves")
+        assertEquals("Relax Shelf 1", paginatedContent.dynamicShelves[0].title)
+        assertEquals("Relax Shelf 2 (Continuation)", paginatedContent.dynamicShelves[1].title)
+        assertFalse(paginatedContent.hasMoreContent)
+        assertFalse(paginatedContent.dynamicShelves.any { it.title == "Base Home Shelf" }, "Base Home Shelf must NOT be mixed into category dynamicShelves")
+
+        // 2. Base homePageSections in legacy state must be completely preserved and uncontaminated
+        val legacy = viewModel.exploreUiState.value
+        assertEquals(1, legacy.homePageSections.size, "Base homePageSections count must remain 1")
+        assertEquals("Base Home Shelf", legacy.homePageSections[0].title, "Base homePageSections must NOT be contaminated with category continuation")
+        assertEquals(2, legacy.explorePageSections.size, "explorePageSections must contain the 2 category shelves")
+
+        // 3. Returning to "All" category must cleanly restore uncontaminated base home feed
+        viewModel.selectCategory("All")
+        advanceUntilIdle()
+
+        val restoredAllContent = viewModel.uiState.value as ExploreScreenUiState.Content
+        assertEquals("All", restoredAllContent.selectedCategory)
+        assertEquals(1, restoredAllContent.dynamicShelves.size, "Dynamic shelves on 'All' must contain exactly the base home feed")
+        assertEquals("Base Home Shelf", restoredAllContent.dynamicShelves[0].title)
+        assertFalse(restoredAllContent.dynamicShelves.any { it.title.contains("Relax Shelf 2") }, "Category continuation must NOT leak into base home feed")
+    }
+
+    @Test
+    @DisplayName("13: In-flight home refresh finishing after user category selection does NOT clobber the user's active category back to 'All'")
+    fun homeRefresh_whenFinishesAfterCategorySelection_doesNotClobberActiveCategory() = runTest(testDispatcher) {
+        // Given: Initial cached content so Explore loads immediately into Content state
+        val workoutChip = sampleChip("Workout", "FEmusic_workout", "wAEB_workout")
+        val cachedSection = sampleSection("Cached Initial Home", listOf(sampleSong("c1", "Track 1")))
+        writeCache(
+            sections = listOf(cachedSection),
+            chips = listOf(workoutChip),
+            ageMs = 5 * 60 * 1000L // 5 min (fresh cache loads immediately)
+        )
+
+        // Deferred for background refresh
+        val refreshDeferred = CompletableDeferred<Result<HomePage>>()
+        coEvery { YouTube.home(continuation = null, params = null, forceRefresh = any()) } coAnswers {
+            refreshDeferred.await()
+        }
+        coEvery { YouTube.newReleaseAlbums() } returns Result.success(emptyList())
+
+        // Workout category mock
+        val workoutFeed = createMockHomePage("Power Workout Gym", 4)
+        coEvery { YouTube.home(continuation = null, params = "wAEB_workout", forceRefresh = any()) } returns Result.success(workoutFeed)
+
+        val viewModel = createViewModel()
+        advanceUntilIdle()
+
+        // Cache loaded
+        val initialContent = viewModel.uiState.value as ExploreScreenUiState.Content
+        assertEquals("All", initialContent.selectedCategory)
+        assertEquals("Cached Initial Home", initialContent.dynamicShelves.first().title)
+
+        // When: Background refresh is triggered (e.g. manual pull-to-refresh or force refresh)
+        viewModel.refresh(force = true)
+        testScheduler.runCurrent() // Coroutine launches and suspends on refreshDeferred.await()
+
+        // User navigates to "Workout" category while background home refresh is still in-flight
+        viewModel.selectCategory("Workout")
+        advanceUntilIdle()
+
+        // Verify active state is Workout
+        val activeWorkoutState = viewModel.uiState.value as ExploreScreenUiState.Content
+        assertEquals("Workout", activeWorkoutState.selectedCategory)
+        assertEquals("Power Workout Gym", activeWorkoutState.dynamicShelves.first().title)
+
+        // Now the in-flight background home refresh completes with fresh network home feed
+        val freshHome = createMockHomePage("Fresh Network Home", 5)
+        refreshDeferred.complete(Result.success(freshHome))
+        advanceUntilIdle()
+
+        // Then:
+        // 1. User's active category view must NOT be clobbered back to "All" or have its shelves replaced
+        val stateAfterRefresh = viewModel.uiState.value as ExploreScreenUiState.Content
+        assertEquals("Workout", stateAfterRefresh.selectedCategory, "Active category must remain 'Workout', never clobbered to 'All'")
+        assertEquals(1, stateAfterRefresh.dynamicShelves.size)
+        assertEquals("Power Workout Gym", stateAfterRefresh.dynamicShelves.first().title, "Dynamic shelves must remain 'Power Workout Gym'")
+        assertFalse(stateAfterRefresh.dynamicShelves.any { it.title == "Fresh Network Home" }, "Fresh home shelves must NOT overwrite active category shelves")
+
+        // 2. The refreshed home data must update background cache/homePageSections
+        val legacy = viewModel.exploreUiState.value
+        assertEquals("Fresh Network Home", legacy.homePageSections.firstOrNull()?.title, "Background homePageSections should be updated with fresh home data")
+
+        // 3. When the user later navigates back to "All", they receive the fresh home feed
+        viewModel.selectCategory("All")
+        advanceUntilIdle()
+
+        val allContent = viewModel.uiState.value as ExploreScreenUiState.Content
+        assertEquals("All", allContent.selectedCategory)
+        assertEquals("Fresh Network Home", allContent.dynamicShelves.first().title)
+    }
+
+    @Test
+    @DisplayName("14: Category fetch failure emits ExploreScreenUiState.Error or updates UI state so error is observable")
+    fun selectCategory_whenNetworkFails_emitsErrorState() = runTest(testDispatcher) {
+        // Given: Initial home feed with "Focus" mood chip
+        val focusChip = sampleChip("Focus", "FEmusic_focus", "wAEB_focus")
+        val initialHome = createMockHomePage("Home Feed Shelf", 3, chips = listOf(focusChip))
+        coEvery { YouTube.home(continuation = null, params = null, forceRefresh = any()) } returns Result.success(initialHome)
+        coEvery { YouTube.newReleaseAlbums() } returns Result.success(emptyList())
+
+        // Category endpoints fail with IOException
+        coEvery { YouTube.home(continuation = null, params = "wAEB_focus", forceRefresh = any()) } throws IOException("503 Service Unavailable")
+        coEvery { YouTube.explore(browseId = any(), params = any()) } throws IOException("503 Service Unavailable")
+        coEvery { YouTube.search(any(), any()) } throws IOException("503 Service Unavailable")
+
+        val viewModel = createViewModel()
+        advanceUntilIdle()
+
+        val initialContent = viewModel.uiState.value as ExploreScreenUiState.Content
+        assertEquals("All", initialContent.selectedCategory)
+
+        // When: User selects "Focus" which fails
+        viewModel.selectCategory("Focus")
+        advanceUntilIdle()
+
+        // Then:
+        // 1. Single-source-of-truth UI state machine must transition to ExploreScreenUiState.Error
+        val state = viewModel.uiState.value
+        assertTrue(state is ExploreScreenUiState.Error, "Expected ExploreScreenUiState.Error on category failure, but was: $state")
+        val errorState = state as ExploreScreenUiState.Error
+        assertTrue(errorState.message.contains("503") || errorState.message.isNotBlank(), "Error message must be present and descriptive")
+        assertNotNull(errorState.cachedContent, "Prior content should be retained in cachedContent for graceful degradation")
+
+        // 2. Loading state must be dismissed
+        assertFalse(viewModel.isLoadingState.value, "isLoadingState must be false after error")
+
+        // 3. Legacy error state must also be populated
+        assertNotNull(viewModel.exploreUiState.value.error, "Legacy error state must be populated")
     }
 
     private class TestYTItemTypeAdapter : com.google.gson.JsonSerializer<YTItem>, com.google.gson.JsonDeserializer<YTItem> {

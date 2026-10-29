@@ -173,6 +173,7 @@ class ExploreViewModel @Inject constructor(
 
     private var stage2Job: Job? = null
     private var refreshCoordinatorJob: Job? = null
+    private var moodJob: Job? = null
     @Volatile
     private var currentRefreshGeneration: Long = 0L
     @Volatile
@@ -964,17 +965,28 @@ class ExploreViewModel @Inject constructor(
 
                 if (generation != currentRefreshGeneration) return
 
+                val currentScreenContent = _screenUiState.value as? ExploreScreenUiState.Content
+                val currentCategory = currentScreenContent?.selectedCategory ?: _uiState.value.selectedFilter
+                val isCategoryActive = !currentCategory.equals("All", ignoreCase = true)
+
                 // 3. Commit exactly once atomically to observable state
-                _sectionsState.value = prepared.uiSections
-                _moodChipsState.value = prepared.uiChips
-                _isLoadingState.value = false
+                if (!isCategoryActive) {
+                    _sectionsState.value = prepared.uiSections
+                }
+                val updatedChips = prepared.uiChips.map {
+                    it.copy(isSelected = it.title.equals(currentCategory, ignoreCase = true))
+                }
+                _moodChipsState.value = updatedChips
+
+                val isMoodInProgress = isCategoryActive && moodJob?.isActive == true
+                _isLoadingState.value = isMoodInProgress
                 _isRefreshingState.value = false
                 _isSettledState.value = true
                 _errorState.value = null
 
                 _uiState.update {
                     it.copy(
-                        isLoading = false,
+                        isLoading = if (isMoodInProgress) it.isLoading else false,
                         isRefreshing = false,
                         isSettled = true,
                         isContinuationLoading = false,
@@ -995,21 +1007,55 @@ class ExploreViewModel @Inject constructor(
                     )
                 }
 
-                _screenUiState.value = ExploreScreenUiState.Content(
-                    isRefreshing = false,
-                    isContinuationLoading = false,
-                    selectedCategory = "All",
-                    categories = prepared.uiChips,
-                    heroItems = prepared.heroItems,
-                    quickPicks = prepared.uiQuickPicks,
-                    newReleases = prepared.uiNewReleases,
-                    albumsForYou = prepared.uiAlbumsForYou,
-                    charts = null,
-                    artistsForYou = prepared.uiArtistsForYou,
-                    dynamicShelves = prepared.uiSections,
-                    hasMoreContent = prepared.currentContinuation != null,
-                    legacyState = _uiState.value
-                )
+                if (isCategoryActive && currentScreenContent != null) {
+                    // Preserve active user category and shelves while updating background feeds & chips
+                    _screenUiState.value = currentScreenContent.copy(
+                        isRefreshing = false,
+                        categories = updatedChips,
+                        heroItems = prepared.heroItems,
+                        quickPicks = prepared.uiQuickPicks,
+                        newReleases = prepared.uiNewReleases,
+                        albumsForYou = prepared.uiAlbumsForYou,
+                        artistsForYou = prepared.uiArtistsForYou,
+                        selectedCategory = currentScreenContent.selectedCategory,
+                        dynamicShelves = currentScreenContent.dynamicShelves,
+                        hasMoreContent = currentScreenContent.hasMoreContent,
+                        legacyState = _uiState.value
+                    )
+                } else if (isCategoryActive && currentScreenContent == null) {
+                    val activeShelves = _uiState.value.explorePageSections.map { it.toUiModel() }
+                    _screenUiState.value = ExploreScreenUiState.Content(
+                        isRefreshing = false,
+                        isContinuationLoading = false,
+                        selectedCategory = currentCategory,
+                        categories = updatedChips,
+                        heroItems = prepared.heroItems,
+                        quickPicks = prepared.uiQuickPicks,
+                        newReleases = prepared.uiNewReleases,
+                        albumsForYou = prepared.uiAlbumsForYou,
+                        charts = null,
+                        artistsForYou = prepared.uiArtistsForYou,
+                        dynamicShelves = activeShelves,
+                        hasMoreContent = _uiState.value.homePageContinuation != null && activeShelves.isNotEmpty(),
+                        legacyState = _uiState.value
+                    )
+                } else {
+                    _screenUiState.value = ExploreScreenUiState.Content(
+                        isRefreshing = false,
+                        isContinuationLoading = false,
+                        selectedCategory = "All",
+                        categories = updatedChips,
+                        heroItems = prepared.heroItems,
+                        quickPicks = prepared.uiQuickPicks,
+                        newReleases = prepared.uiNewReleases,
+                        albumsForYou = prepared.uiAlbumsForYou,
+                        charts = null,
+                        artistsForYou = prepared.uiArtistsForYou,
+                        dynamicShelves = prepared.uiSections,
+                        hasMoreContent = prepared.currentContinuation != null,
+                        legacyState = _uiState.value
+                    )
+                }
 
                 initialHomeContinuation = prepared.currentContinuation
                 lastFetchTimestamp = System.currentTimeMillis()
@@ -1145,14 +1191,21 @@ class ExploreViewModel @Inject constructor(
     }
 
     fun loadMore() {
+        val filter = _uiState.value.selectedFilter
+        if (filter.equals("Local", ignoreCase = true)) return
         val continuation = _uiState.value.homePageContinuation ?: return
         if (_uiState.value.isContinuationLoading || _uiState.value.isLoading || _uiState.value.isRefreshing) return
         if (!_uiState.value.isAdvancedExploreEnabled) return
 
-        val currentGen = currentRefreshGeneration
+        val capturedRefreshGen = currentRefreshGeneration
+        val capturedMoodGen = currentMoodGeneration
+        val capturedFilter = filter
+        val isCategory = !filter.equals("All", ignoreCase = true)
+
         viewModelScope.launch {
             _uiState.update { it.copy(isContinuationLoading = true) }
-            val current = _screenUiState.value as? ExploreScreenUiState.Content
+            val current = (_screenUiState.value as? ExploreScreenUiState.Content)
+                ?: (_screenUiState.value as? ExploreScreenUiState.Error)?.cachedContent
             if (current != null) {
                 _screenUiState.value = current.copy(isContinuationLoading = true)
             }
@@ -1161,7 +1214,12 @@ class ExploreViewModel @Inject constructor(
                     runCatching { YouTube.home(continuation = continuation).getOrNull() }.getOrNull()
                 }
 
-                if (currentGen != currentRefreshGeneration) return@launch
+                if (currentRefreshGeneration != capturedRefreshGen ||
+                    currentMoodGeneration != capturedMoodGen ||
+                    _uiState.value.selectedFilter != capturedFilter
+                ) {
+                    return@launch
+                }
 
                 if (continuationHome != null && continuationHome.sections.isNotEmpty()) {
                     val newRawSections = continuationHome.sections.map { section ->
@@ -1175,51 +1233,94 @@ class ExploreViewModel @Inject constructor(
                         section.items.isNotEmpty()
                     }
 
-                    val currentRaw = _uiState.value.homePageSections
-                    val mergedRaw = (currentRaw + newRawSections).distinctBy { it.title }
-                    val uiSections = mergedRaw.map { it.toUiModel() }
+                    if (isCategory) {
+                        // Category pagination: append to explorePageSections ONLY
+                        val currentRaw = _uiState.value.explorePageSections
+                        val mergedRaw = (currentRaw + newRawSections).distinctBy { it.title }
+                        val uiSections = mergedRaw.map { it.toUiModel() }
 
-                    _sectionsState.value = uiSections
-                    _uiState.update {
-                        it.copy(
-                            isContinuationLoading = false,
-                            homePageSections = mergedRaw,
-                            homePageContinuation = continuationHome.continuation
+                        _sectionsState.value = uiSections
+                        _uiState.update {
+                            it.copy(
+                                isContinuationLoading = false,
+                                explorePageSections = mergedRaw,
+                                homePageContinuation = continuationHome.continuation
+                            )
+                        }
+                        val currentContent = (_screenUiState.value as? ExploreScreenUiState.Content)
+                            ?: (_screenUiState.value as? ExploreScreenUiState.Error)?.cachedContent
+                        if (currentContent != null) {
+                            _screenUiState.value = currentContent.copy(
+                                isContinuationLoading = false,
+                                dynamicShelves = uiSections,
+                                hasMoreContent = continuationHome.continuation != null,
+                                legacyState = _uiState.value
+                            )
+                        }
+                        // DO NOT call persistToCacheAtomic here - prevents cache contamination
+                    } else {
+                        // Base Home feed pagination
+                        val currentRaw = _uiState.value.homePageSections
+                        val mergedRaw = (currentRaw + newRawSections).distinctBy { it.title }
+                        val uiSections = mergedRaw.map { it.toUiModel() }
+
+                        _sectionsState.value = uiSections
+                        _uiState.update {
+                            it.copy(
+                                isContinuationLoading = false,
+                                homePageSections = mergedRaw,
+                                homePageContinuation = continuationHome.continuation
+                            )
+                        }
+                        initialHomeContinuation = continuationHome.continuation
+                        val currentContent = (_screenUiState.value as? ExploreScreenUiState.Content)
+                            ?: (_screenUiState.value as? ExploreScreenUiState.Error)?.cachedContent
+                        if (currentContent != null) {
+                            _screenUiState.value = currentContent.copy(
+                                isContinuationLoading = false,
+                                dynamicShelves = uiSections,
+                                hasMoreContent = continuationHome.continuation != null,
+                                legacyState = _uiState.value
+                            )
+                        }
+                        persistToCacheAtomic(
+                            sections = mergedRaw,
+                            moodChips = _uiState.value.moodChips,
+                            newReleases = _uiState.value.newReleaseAlbums,
+                            albums = _uiState.value.albumsForYou,
+                            continuation = continuationHome.continuation
                         )
                     }
-                    val currentContent = _screenUiState.value as? ExploreScreenUiState.Content
-                    if (currentContent != null) {
-                        _screenUiState.value = currentContent.copy(
-                            isContinuationLoading = false,
-                            dynamicShelves = uiSections,
-                            hasMoreContent = continuationHome.continuation != null
-                        )
-                    }
-                    persistToCacheAtomic(
-                        sections = mergedRaw,
-                        moodChips = _uiState.value.moodChips,
-                        newReleases = _uiState.value.newReleaseAlbums,
-                        albums = _uiState.value.albumsForYou,
-                        continuation = continuationHome.continuation
-                    )
                 } else {
                     _uiState.update { it.copy(isContinuationLoading = false, homePageContinuation = null) }
-                    val currentContent = _screenUiState.value as? ExploreScreenUiState.Content
+                    if (!isCategory) {
+                        initialHomeContinuation = null
+                    }
+                    val currentContent = (_screenUiState.value as? ExploreScreenUiState.Content)
+                        ?: (_screenUiState.value as? ExploreScreenUiState.Error)?.cachedContent
                     if (currentContent != null) {
                         _screenUiState.value = currentContent.copy(
                             isContinuationLoading = false,
-                            hasMoreContent = false
+                            hasMoreContent = false,
+                            legacyState = _uiState.value
                         )
                     }
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                if (currentGen == currentRefreshGeneration) {
+                if (currentRefreshGeneration == capturedRefreshGen &&
+                    currentMoodGeneration == capturedMoodGen &&
+                    _uiState.value.selectedFilter == capturedFilter
+                ) {
                     _uiState.update { it.copy(isContinuationLoading = false) }
-                    val currentContent = _screenUiState.value as? ExploreScreenUiState.Content
+                    val currentContent = (_screenUiState.value as? ExploreScreenUiState.Content)
+                        ?: (_screenUiState.value as? ExploreScreenUiState.Error)?.cachedContent
                     if (currentContent != null) {
-                        _screenUiState.value = currentContent.copy(isContinuationLoading = false)
+                        _screenUiState.value = currentContent.copy(
+                            isContinuationLoading = false,
+                            legacyState = _uiState.value
+                        )
                     }
                 }
             }
@@ -1230,7 +1331,12 @@ class ExploreViewModel @Inject constructor(
         if (filter.equals("All", ignoreCase = true)) {
             selectMoodChip(null)
         } else if (filter.equals("Local", ignoreCase = true)) {
+            moodJob?.cancel()
+            moodJob = null
+            ++currentMoodGeneration
             _activeChipState.value = null
+            _isLoadingState.value = false
+            _errorState.value = null
             _uiState.update {
                 it.copy(
                     selectedFilter = "Local",
@@ -1255,7 +1361,13 @@ class ExploreViewModel @Inject constructor(
 
     fun selectMoodChip(chip: HomePage.Chip?) {
         if (chip == null) {
+            moodJob?.cancel()
+            moodJob = null
+            ++currentMoodGeneration
+
             _activeChipState.value = null
+            _isLoadingState.value = false
+            _errorState.value = null
             _uiState.update {
                 it.copy(
                     activeMoodChip = null,
@@ -1269,13 +1381,15 @@ class ExploreViewModel @Inject constructor(
             val restoredShelves = _uiState.value.homePageSections.map { it.toUiModel() }
             _sectionsState.value = restoredShelves
 
-            val currentContent = _screenUiState.value as? ExploreScreenUiState.Content
+            val currentContent = (_screenUiState.value as? ExploreScreenUiState.Content)
+                ?: (_screenUiState.value as? ExploreScreenUiState.Error)?.cachedContent
             if (currentContent != null) {
                 _screenUiState.value = currentContent.copy(
                     selectedCategory = "All",
                     categories = currentContent.categories.map { it.copy(isSelected = it.title.equals("All", ignoreCase = true)) },
                     dynamicShelves = restoredShelves,
-                    hasMoreContent = initialHomeContinuation != null
+                    hasMoreContent = initialHomeContinuation != null,
+                    legacyState = _uiState.value
                 )
             }
 
@@ -1288,8 +1402,9 @@ class ExploreViewModel @Inject constructor(
     }
 
     fun selectMoodChipByName(name: String, chip: HomePage.Chip? = null) {
-        viewModelScope.launch {
-            val moodGen = ++currentMoodGeneration
+        moodJob?.cancel()
+        val moodGen = ++currentMoodGeneration
+        moodJob = viewModelScope.launch {
             val effectiveChip = chip ?: _uiState.value.moodChips.firstOrNull {
                 it.title.equals(name, ignoreCase = true) ||
                 it.title.replace(" ", "").equals(name.replace(" ", ""), ignoreCase = true)
@@ -1307,11 +1422,13 @@ class ExploreViewModel @Inject constructor(
             _uiState.update { it.copy(activeMoodChip = effectiveChip, selectedFilter = effectiveChip.title, isLoading = true, error = null) }
             _isLoadingState.value = true
 
-            val current = _screenUiState.value as? ExploreScreenUiState.Content
+            val current = (_screenUiState.value as? ExploreScreenUiState.Content)
+                ?: (_screenUiState.value as? ExploreScreenUiState.Error)?.cachedContent
             if (current != null) {
                 _screenUiState.value = current.copy(
                     selectedCategory = name,
-                    categories = current.categories.map { it.copy(isSelected = it.title.equals(name, ignoreCase = true)) }
+                    categories = current.categories.map { it.copy(isSelected = it.title.equals(name, ignoreCase = true)) },
+                    legacyState = _uiState.value
                 )
             }
 
@@ -1336,11 +1453,13 @@ class ExploreViewModel @Inject constructor(
                                     homePageContinuation = homeResult.continuation
                                 )
                             }
-                            val updated = _screenUiState.value as? ExploreScreenUiState.Content
+                            val updated = (_screenUiState.value as? ExploreScreenUiState.Content)
+                                ?: (_screenUiState.value as? ExploreScreenUiState.Error)?.cachedContent
                             if (updated != null) {
                                 _screenUiState.value = updated.copy(
                                     dynamicShelves = uiSections,
-                                    hasMoreContent = homeResult.continuation != null
+                                    hasMoreContent = homeResult.continuation != null,
+                                    legacyState = _uiState.value
                                 )
                             }
                             return@withContext
@@ -1365,11 +1484,13 @@ class ExploreViewModel @Inject constructor(
                                     homePageContinuation = null
                                 )
                             }
-                            val updated = _screenUiState.value as? ExploreScreenUiState.Content
+                            val updated = (_screenUiState.value as? ExploreScreenUiState.Content)
+                                ?: (_screenUiState.value as? ExploreScreenUiState.Error)?.cachedContent
                             if (updated != null) {
                                 _screenUiState.value = updated.copy(
                                     dynamicShelves = uiSections,
-                                    hasMoreContent = false
+                                    hasMoreContent = false,
+                                    legacyState = _uiState.value
                                 )
                             }
                             return@withContext
@@ -1381,8 +1502,23 @@ class ExploreViewModel @Inject constructor(
                 throw e
             } catch (e: Exception) {
                 if (moodGen == currentMoodGeneration) {
+                    val errorMessage = e.localizedMessage ?: "Failed to load category $name"
                     _isLoadingState.value = false
-                    _uiState.update { it.copy(isLoading = false, error = e.localizedMessage) }
+                    _isSettledState.value = true
+                    _errorState.value = errorMessage
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            isSettled = true,
+                            error = errorMessage
+                        )
+                    }
+                    val currentContent = (_screenUiState.value as? ExploreScreenUiState.Content)
+                        ?: (_screenUiState.value as? ExploreScreenUiState.Error)?.cachedContent
+                    _screenUiState.value = ExploreScreenUiState.Error(
+                        message = errorMessage,
+                        cachedContent = currentContent?.copy(legacyState = _uiState.value)
+                    )
                 }
             }
         }
@@ -1428,20 +1564,48 @@ class ExploreViewModel @Inject constructor(
 
         if (moodGen != currentMoodGeneration) return
 
+        if (sections.isEmpty()) {
+            val errorMessage = "Unable to load content for $moodName"
+            _isLoadingState.value = false
+            _isSettledState.value = true
+            _errorState.value = errorMessage
+            _uiState.update {
+                it.copy(
+                    isLoading = false,
+                    isSettled = true,
+                    error = errorMessage,
+                    explorePageSections = emptyList()
+                )
+            }
+            val currentContent = (_screenUiState.value as? ExploreScreenUiState.Content)
+                ?: (_screenUiState.value as? ExploreScreenUiState.Error)?.cachedContent
+            _screenUiState.value = ExploreScreenUiState.Error(
+                message = errorMessage,
+                cachedContent = currentContent?.copy(legacyState = _uiState.value)
+            )
+            return
+        }
+
         val uiSections = sections.map { it.toUiModel() }
         _sectionsState.value = uiSections
         _isLoadingState.value = false
+        _isSettledState.value = true
+        _errorState.value = null
         _uiState.update {
             it.copy(
                 isLoading = false,
+                isSettled = true,
+                error = null,
                 explorePageSections = sections
             )
         }
-        val updated = _screenUiState.value as? ExploreScreenUiState.Content
+        val updated = (_screenUiState.value as? ExploreScreenUiState.Content)
+            ?: (_screenUiState.value as? ExploreScreenUiState.Error)?.cachedContent
         if (updated != null) {
             _screenUiState.value = updated.copy(
                 dynamicShelves = uiSections,
-                hasMoreContent = false
+                hasMoreContent = false,
+                legacyState = _uiState.value
             )
         }
     }
