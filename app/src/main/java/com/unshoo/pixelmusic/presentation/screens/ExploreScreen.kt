@@ -1812,22 +1812,17 @@ private fun QuickTileCard(
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
-    val shape = ShapeCache.smooth18
+    val shape = ShapeCache.smooth16
     Card(
         modifier = modifier
             .height(64.dp)
             .bounceClick(scaleDown = 0.96f) { onClick() },
         shape = shape,
         colors = CardDefaults.cardColors(
-            containerColor = if (tile.isLiked) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.38f)
-            else MaterialTheme.colorScheme.surfaceContainerLow
+            containerColor = if (tile.isLiked) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+            else MaterialTheme.colorScheme.surfaceContainerHigh
         ),
-        border = androidx.compose.foundation.BorderStroke(
-            1.dp,
-            if (tile.isLiked) MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
-            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.22f)
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxSize(),
@@ -2191,88 +2186,213 @@ private fun FeedTrackCard(
     onMoreClick: () -> Unit
 ) {
     val haptics = LocalHapticFeedback.current
-    val outerShape = ShapeCache.smooth24
-    val innerShape = ShapeCache.smooth18
+    val cardShape = ShapeCache.smooth20
 
-    Card(
-        shape = outerShape,
-        colors = CardDefaults.cardColors(
-            containerColor = if (isCurrentPlaying) {
-                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
-            } else {
-                MaterialTheme.colorScheme.surfaceContainerLow
-            }
-        ),
-        border = if (isCurrentPlaying) {
-            androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary)
-        } else {
-            androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.22f))
-        },
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    Column(
         modifier = Modifier
-            .width(158.dp)
+            .width(156.dp)
             .bounceClick(scaleDown = 0.96f) {
                 haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 onClick()
             }
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(7.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(1f)
+        Box(modifier = Modifier.size(156.dp)) {
+            Surface(
+                shape = cardShape,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                border = if (isCurrentPlaying) androidx.compose.foundation.BorderStroke(
+                    2.dp,
+                    MaterialTheme.colorScheme.primary
+                ) else null,
+                modifier = Modifier.fillMaxSize()
             ) {
+                Box(Modifier.fillMaxSize()) {
+                    SmartImage(
+                        model = artworkUrl,
+                        contentDescription = title,
+                        contentScale = ContentScale.Crop,
+                        shape = cardShape,
+                        targetSize = SmartImageExploreCardTargetSize,
+                        placeholderResId = 0,
+                        errorResId = 0,
+                        modifier = Modifier.fillMaxSize()
+                    )
+
+                    if (badgeText != null) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .padding(8.dp)
+                        ) {
+                            Text(
+                                badgeText,
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Black),
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+
+                    if (isCurrentPlaying) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Black.copy(alpha = 0.45f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            PlayingWaveBars(waveColor = Color.White, containerColor = Color.Transparent)
+                        }
+                    }
+                }
+            }
+
+            Surface(
+                onClick = onMoreClick,
+                shape = CircleShape,
+                color = Color.Black.copy(alpha = 0.55f),
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(6.dp)
+                    .size(28.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Rounded.MoreVert,
+                        contentDescription = "More",
+                        tint = Color.White,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+
+            if (!isCurrentPlaying) {
                 Surface(
-                    shape = innerShape,
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    modifier = Modifier.fillMaxSize()
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        if (onPlayClick != null) onPlayClick() else onClick()
+                    },
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    tonalElevation = 4.dp,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(8.dp)
+                        .size(36.dp)
                 ) {
-                    Box(Modifier.fillMaxSize()) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Filled.PlayArrow,
+                            contentDescription = "Play $title",
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+            color = if (isCurrentPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = subtitle,
+            style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+private fun FeedPlaylistCard(
+    title: String,
+    subtitle: String,
+    artworkUrl: String?,
+    badgeText: String? = null,
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
+    onPlayClick: (() -> Unit)? = null,
+    onMoreClick: (() -> Unit)? = null
+) {
+    val haptics = LocalHapticFeedback.current
+    val cardShape = ShapeCache.smooth20
+
+    Column(
+        modifier = Modifier
+            .width(156.dp)
+            .bounceClick(
+                scaleDown = 0.96f,
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onClick()
+                },
+                onLongClick = onLongClick?.let { action ->
+                    {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        action()
+                    }
+                }
+            )
+    ) {
+        Box(modifier = Modifier.size(156.dp)) {
+            Surface(
+                shape = cardShape,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                modifier = Modifier.fillMaxSize()
+            ) {
+                Box(Modifier.fillMaxSize()) {
+                    if (!artworkUrl.isNullOrBlank()) {
                         SmartImage(
                             model = artworkUrl,
                             contentDescription = title,
                             contentScale = ContentScale.Crop,
-                            shape = innerShape,
+                            shape = cardShape,
                             targetSize = SmartImageExploreCardTargetSize,
                             placeholderResId = 0,
                             errorResId = 0,
                             modifier = Modifier.fillMaxSize()
                         )
-
-                        if (badgeText != null) {
-                            Surface(
-                                shape = ShapeCache.smoothPill,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier
-                                    .align(Alignment.TopStart)
-                                    .padding(8.dp)
-                            ) {
-                                Text(
-                                    badgeText,
-                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Black),
-                                    color = MaterialTheme.colorScheme.onPrimary,
-                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
-                                )
-                            }
+                    } else {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Filled.Album,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(44.dp)
+                            )
                         }
+                    }
 
-                        if (isCurrentPlaying) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(Color.Black.copy(alpha = 0.45f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                PlayingWaveBars(waveColor = Color.White, containerColor = Color.Transparent)
-                            }
+                    if (badgeText != null) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .padding(8.dp)
+                        ) {
+                            Text(
+                                badgeText,
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Black),
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                            )
                         }
                     }
                 }
+            }
 
+            if (onMoreClick != null) {
                 Surface(
                     onClick = onMoreClick,
                     shape = CircleShape,
@@ -2291,219 +2411,49 @@ private fun FeedTrackCard(
                         )
                     }
                 }
-
-                if (!isCurrentPlaying) {
-                    Surface(
-                        onClick = {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            if (onPlayClick != null) onPlayClick() else onClick()
-                        },
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                        tonalElevation = 3.dp,
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(8.dp)
-                            .size(36.dp)
-                    ) {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Icon(
-                                Icons.Filled.PlayArrow,
-                                contentDescription = "Play $title",
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
-                }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Column(modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                    color = if (isCurrentPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun FeedPlaylistCard(
-    title: String,
-    subtitle: String,
-    artworkUrl: String?,
-    badgeText: String? = null,
-    onClick: () -> Unit,
-    onLongClick: (() -> Unit)? = null,
-    onPlayClick: (() -> Unit)? = null,
-    onMoreClick: (() -> Unit)? = null
-) {
-    val haptics = LocalHapticFeedback.current
-    val outerShape = ShapeCache.smooth24
-    val innerShape = ShapeCache.smooth18
-
-    Card(
-        shape = outerShape,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-        ),
-        border = androidx.compose.foundation.BorderStroke(
-            1.dp,
-            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.22f)
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        modifier = Modifier
-            .width(158.dp)
-            .bounceClick(
-                scaleDown = 0.96f,
+            Surface(
                 onClick = {
                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    onClick()
+                    if (onPlayClick != null) onPlayClick() else onClick()
                 },
-                onLongClick = onLongClick?.let { action ->
-                    {
-                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        action()
-                    }
-                }
-            )
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(7.dp)
-        ) {
-            Box(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primaryContainer,
+                tonalElevation = 4.dp,
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(1f)
+                    .align(Alignment.BottomEnd)
+                    .padding(8.dp)
+                    .size(36.dp)
             ) {
-                Surface(
-                    shape = innerShape,
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    modifier = Modifier.fillMaxSize()
-                ) {
-                    Box(Modifier.fillMaxSize()) {
-                        if (!artworkUrl.isNullOrBlank()) {
-                            SmartImage(
-                                model = artworkUrl,
-                                contentDescription = title,
-                                contentScale = ContentScale.Crop,
-                                shape = innerShape,
-                                targetSize = SmartImageExploreCardTargetSize,
-                                placeholderResId = 0,
-                                errorResId = 0,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        } else {
-                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Icon(
-                                    Icons.Filled.Album,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(44.dp)
-                                )
-                            }
-                        }
-
-                        if (badgeText != null) {
-                            Surface(
-                                shape = ShapeCache.smoothPill,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier
-                                    .align(Alignment.TopStart)
-                                    .padding(8.dp)
-                            ) {
-                                Text(
-                                    badgeText,
-                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Black),
-                                    color = MaterialTheme.colorScheme.onPrimary,
-                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
-                                )
-                            }
-                        }
-                    }
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Filled.PlayArrow,
+                        contentDescription = "Play $title",
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(20.dp)
+                    )
                 }
-
-                if (onMoreClick != null) {
-                    Surface(
-                        onClick = onMoreClick,
-                        shape = CircleShape,
-                        color = Color.Black.copy(alpha = 0.55f),
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(6.dp)
-                            .size(28.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                Icons.Rounded.MoreVert,
-                                contentDescription = "More",
-                                tint = Color.White,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
-                }
-
-                Surface(
-                    onClick = {
-                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        if (onPlayClick != null) onPlayClick() else onClick()
-                    },
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    tonalElevation = 3.dp,
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(8.dp)
-                        .size(36.dp)
-                ) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Icon(
-                            Icons.Filled.PlayArrow,
-                            contentDescription = "Play $title",
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Column(modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
             }
         }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = subtitle,
+            style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 
@@ -2514,142 +2464,119 @@ private fun ShelfArtistCard(
     onRadioClick: (() -> Unit)? = null
 ) {
     val haptics = LocalHapticFeedback.current
-    val outerShape = ShapeCache.smooth24
-    val artistAvatarShape = remember { ScallopFlowerShape(petals = 12, depthRatio = 0.08f) }
+    val cardShape = ShapeCache.smooth20
 
-    Card(
-        shape = outerShape,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-        ),
-        border = androidx.compose.foundation.BorderStroke(
-            1.dp,
-            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.22f)
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    Column(
         modifier = Modifier
-            .width(158.dp)
+            .width(156.dp)
             .bounceClick(scaleDown = 0.96f) {
                 haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 onClick()
             }
     ) {
-        Column(
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(7.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+                .size(156.dp)
+                .clip(cardShape)
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+            contentAlignment = Alignment.Center
         ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(1f)
-                    .clip(ShapeCache.smooth18)
-                    .background(MaterialTheme.colorScheme.surfaceContainerHigh),
-                contentAlignment = Alignment.Center
+            val artistAvatarShape = remember { ScallopFlowerShape(petals = 12, depthRatio = 0.08f) }
+            Surface(
+                shape = artistAvatarShape,
+                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                border = androidx.compose.foundation.BorderStroke(
+                    1.5.dp,
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                ),
+                modifier = Modifier.size(116.dp)
             ) {
-                Surface(
-                    shape = artistAvatarShape,
-                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    border = androidx.compose.foundation.BorderStroke(
-                        1.5.dp,
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-                    ),
-                    modifier = Modifier.size(116.dp)
-                ) {
-                    if (!artist.artworkUrl.isNullOrBlank()) {
-                        SmartImage(
-                            model = artist.artworkUrl,
-                            contentDescription = artist.name,
-                            contentScale = ContentScale.Crop,
-                            shape = artistAvatarShape,
-                            targetSize = SmartImageExploreCardTargetSize,
-                            placeholderResId = 0,
-                            errorResId = 0,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    } else {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text(
-                                text = artist.name.take(1).uppercase(),
-                                style = MaterialTheme.typography.headlineSmall,
-                                fontWeight = FontWeight.ExtraBold,
-                                fontFamily = GoogleSansRounded,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
-                }
-
-                Surface(
-                    shape = ShapeCache.smoothPill,
-                    color = MaterialTheme.colorScheme.secondaryContainer,
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(8.dp)
-                ) {
-                    Text(
-                        text = "ARTIST",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Black,
-                            letterSpacing = 0.8.sp
-                        ),
-                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                if (!artist.artworkUrl.isNullOrBlank()) {
+                    SmartImage(
+                        model = artist.artworkUrl,
+                        contentDescription = artist.name,
+                        contentScale = ContentScale.Crop,
+                        shape = artistAvatarShape,
+                        targetSize = SmartImageExploreCardTargetSize,
+                        placeholderResId = 0,
+                        errorResId = 0,
+                        modifier = Modifier.fillMaxSize()
                     )
-                }
-
-                if (onRadioClick != null) {
-                    Surface(
-                        onClick = {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onRadioClick()
-                        },
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                        tonalElevation = 3.dp,
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(8.dp)
-                            .size(36.dp)
-                    ) {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Icon(
-                                Icons.Filled.PlayArrow,
-                                contentDescription = "Play radio for ${artist.name}",
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
+                } else {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(
+                            text = artist.name.take(1).uppercase(),
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontFamily = GoogleSansRounded,
+                            color = MaterialTheme.colorScheme.primary
+                        )
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Column(
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.secondaryContainer,
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 4.dp, vertical = 2.dp)
+                    .align(Alignment.TopStart)
+                    .padding(8.dp)
             ) {
                 Text(
-                    text = artist.name,
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    text = "ARTIST",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 0.8.sp
+                    ),
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
                 )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = "Artist",
-                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+            }
+
+            if (onRadioClick != null) {
+                Surface(
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onRadioClick()
+                    },
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    tonalElevation = 4.dp,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(8.dp)
+                        .size(36.dp)
+                ) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Filled.PlayArrow,
+                            contentDescription = "Play radio for ${artist.name}",
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
             }
         }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Text(
+            text = artist.name,
+            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = "Artist",
+            style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 
@@ -2674,148 +2601,126 @@ private fun RecentTrackCard(
         } else null
     }
 
-    val outerShape = ShapeCache.smooth24
-    val innerShape = ShapeCache.smooth18
+    val cardShape = ShapeCache.smooth20
 
-    Card(
-        shape = outerShape,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-        ),
-        border = androidx.compose.foundation.BorderStroke(
-            1.dp,
-            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.22f)
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    Column(
         modifier = Modifier
-            .width(158.dp)
+            .width(156.dp)
             .bounceClick(scaleDown = 0.96f) {
                 haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 onClick()
             }
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(7.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(1f)
+        Box(modifier = Modifier.size(156.dp)) {
+            Surface(
+                shape = cardShape,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                modifier = Modifier.fillMaxSize()
             ) {
-                Surface(
-                    shape = innerShape,
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    modifier = Modifier.fillMaxSize()
-                ) {
-                    Box(Modifier.fillMaxSize()) {
-                        if (!track.artworkUrl.isNullOrBlank()) {
-                            SmartImage(
-                                model = track.artworkUrl,
-                                contentDescription = track.name,
-                                contentScale = ContentScale.Crop,
-                                shape = innerShape,
-                                targetSize = SmartImageExploreCardTargetSize,
-                                placeholderResId = 0,
-                                errorResId = 0,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        } else {
-                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Icon(
-                                    Icons.Filled.MusicNote,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(40.dp)
-                                )
-                            }
-                        }
-
-                        if (ago != null) {
-                            Surface(
-                                shape = ShapeCache.smoothPill,
-                                color = Color.Black.copy(alpha = 0.65f),
-                                modifier = Modifier
-                                    .align(Alignment.TopStart)
-                                    .padding(8.dp)
-                            ) {
-                                Text(
-                                    ago,
-                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold),
-                                    color = Color.White,
-                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-
-                if (onMoreClick != null) {
-                    Surface(
-                        onClick = onMoreClick,
-                        shape = CircleShape,
-                        color = Color.Black.copy(alpha = 0.55f),
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(6.dp)
-                            .size(28.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
+                Box(Modifier.fillMaxSize()) {
+                    if (!track.artworkUrl.isNullOrBlank()) {
+                        SmartImage(
+                            model = track.artworkUrl,
+                            contentDescription = track.name,
+                            contentScale = ContentScale.Crop,
+                            shape = cardShape,
+                            targetSize = SmartImageExploreCardTargetSize,
+                            placeholderResId = 0,
+                            errorResId = 0,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Icon(
-                                Icons.Rounded.MoreVert,
-                                contentDescription = "More",
-                                tint = Color.White,
-                                modifier = Modifier.size(16.dp)
+                                Icons.Filled.MusicNote,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(40.dp)
+                            )
+                        }
+                    }
+
+                    if (ago != null) {
+                        Surface(
+                            shape = CircleShape,
+                            color = Color.Black.copy(alpha = 0.65f),
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .padding(8.dp)
+                        ) {
+                            Text(
+                                ago,
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold),
+                                color = Color.White,
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
                             )
                         }
                     }
                 }
+            }
 
+            if (onMoreClick != null) {
                 Surface(
-                    onClick = {
-                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        onClick()
-                    },
+                    onClick = onMoreClick,
                     shape = CircleShape,
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    tonalElevation = 3.dp,
+                    color = Color.Black.copy(alpha = 0.55f),
                     modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(8.dp)
-                        .size(36.dp)
+                        .align(Alignment.TopEnd)
+                        .padding(6.dp)
+                        .size(28.dp)
                 ) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Box(contentAlignment = Alignment.Center) {
                         Icon(
-                            Icons.Filled.PlayArrow,
-                            contentDescription = "Play ${track.name}",
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.size(20.dp)
+                            Icons.Rounded.MoreVert,
+                            contentDescription = "More",
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
                         )
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Column(modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)) {
-                Text(
-                    text = track.name,
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = track.artist.displayName,
-                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+            Surface(
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onClick()
+                },
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primaryContainer,
+                tonalElevation = 4.dp,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(8.dp)
+                    .size(36.dp)
+            ) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Filled.PlayArrow,
+                        contentDescription = "Play ${track.name}",
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
         }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Text(
+            text = track.name,
+            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = track.artist.displayName,
+            style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 

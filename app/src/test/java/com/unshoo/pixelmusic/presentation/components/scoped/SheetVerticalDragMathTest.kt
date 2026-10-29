@@ -97,18 +97,18 @@ class SheetVerticalDragMathTest {
     }
 
     @Test
-    fun collapseSpringDampingForFraction_returnsCorrectInterpolation() {
+    fun collapseSpringDampingForFraction_returnsCriticallyDampedNoBounce() {
         val start = collapseSpringDampingForFraction(0f)
         val stop = collapseSpringDampingForFraction(1f)
         assertThat(start).isEqualTo(Spring.DampingRatioNoBouncy)
-        assertThat(stop).isEqualTo(Spring.DampingRatioLowBouncy)
+        assertThat(stop).isEqualTo(Spring.DampingRatioNoBouncy)
     }
 
     @Test
-    fun collapseInitialSquashForFraction_returnsCorrectRange() {
-        val start = collapseInitialSquashForFraction(0f)
-        val stop = collapseInitialSquashForFraction(1f)
+    fun collapseInitialStretchForFraction_returnsCorrectRange() {
+        val start = collapseInitialStretchForFraction(0f)
+        val stop = collapseInitialStretchForFraction(1f)
         assertThat(start).isEqualTo(1.0f)
-        assertThat(stop).isEqualTo(0.97f)
+        assertThat(stop).isEqualTo(1.04f)
     }
 }

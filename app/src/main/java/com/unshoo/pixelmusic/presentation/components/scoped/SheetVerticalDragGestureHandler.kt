@@ -110,19 +110,20 @@ internal class SheetVerticalDragGestureHandler(
         scope.launch {
             if (targetState == PlayerSheetState.EXPANDED) {
                 launch {
+                    visualOvershootScaleY.snapTo(1f)
                     onAnimateSheet(true, null, 0f)
                 }
                 onExpandSheetState()
             } else {
                 val dynamicDamping = collapseSpringDampingForFraction(currentFraction)
                 launch {
-                    val initialSquash = collapseInitialSquashForFraction(currentFraction)
-                    visualOvershootScaleY.snapTo(initialSquash)
+                    val initialStretch = collapseInitialStretchForFraction(currentFraction)
+                    visualOvershootScaleY.snapTo(initialStretch)
                     visualOvershootScaleY.animateTo(
                         targetValue = 1f,
                         animationSpec = spring(
-                            dampingRatio = Spring.DampingRatioMediumBouncy,
-                            stiffness = Spring.StiffnessVeryLow
+                            dampingRatio = Spring.DampingRatioNoBouncy,
+                            stiffness = Spring.StiffnessMediumLow
                         )
                     )
                 }
@@ -131,7 +132,7 @@ internal class SheetVerticalDragGestureHandler(
                         false,
                         spring(
                             dampingRatio = dynamicDamping,
-                            stiffness = Spring.StiffnessLow
+                            stiffness = Spring.StiffnessMediumLow
                         ),
                         verticalVelocity
                     )

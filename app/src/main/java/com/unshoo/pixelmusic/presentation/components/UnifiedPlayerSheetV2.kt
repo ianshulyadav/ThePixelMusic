@@ -4,6 +4,8 @@ import android.widget.Toast
 import com.unshoo.pixelmusic.presentation.components.ExpressiveOfflineDialog
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.spring
@@ -265,10 +267,16 @@ fun UnifiedPlayerSheetV2(
     val playerContentExpansionFraction = playerViewModel.playerContentExpansionFraction
     val visualOvershootScaleY = remember { Animatable(1f) }
     val initialFullPlayerOffsetY = remember(density) { with(density) { 24.dp.toPx() } }
-    val sheetAnimationSpec = remember {
+    val sheetExpandAnimationSpec = remember {
+        tween<Float>(
+            durationMillis = 320,
+            easing = CubicBezierEasing(0.2f, 0.0f, 0.0f, 1.0f)
+        )
+    }
+    val sheetCollapseAnimationSpec = remember {
         spring<Float>(
-            dampingRatio = ExpressiveSprings.DefaultSpatialDampingRatio,
-            stiffness = ExpressiveSprings.DefaultSpatialStiffness
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMediumLow
         )
     }
     val sheetAnimationMutex = remember { MutatorMutex() }
@@ -281,13 +289,13 @@ fun UnifiedPlayerSheetV2(
         currentSheetTranslationY,
         playerContentExpansionFraction,
         sheetAnimationMutex,
-        sheetAnimationSpec
+        sheetExpandAnimationSpec
     ) {
         SheetMotionController(
             translationY = currentSheetTranslationY,
             expansionFraction = playerContentExpansionFraction,
             mutex = sheetAnimationMutex,
-            defaultAnimationSpec = sheetAnimationSpec,
+            defaultAnimationSpec = sheetExpandAnimationSpec,
             expandedY = sheetExpandedTargetY
         )
     }
@@ -318,14 +326,15 @@ fun UnifiedPlayerSheetV2(
 
     suspend fun animatePlayerSheet(
         targetExpanded: Boolean,
-        animationSpec: androidx.compose.animation.core.AnimationSpec<Float> = sheetAnimationSpec,
+        animationSpec: androidx.compose.animation.core.AnimationSpec<Float>? = null,
         initialVelocity: Float = 0f
     ) {
+        val resolvedSpec = animationSpec ?: if (targetExpanded) sheetExpandAnimationSpec else sheetCollapseAnimationSpec
         sheetMotionController.animateTo(
             targetExpanded = targetExpanded,
             canExpand = showPlayerContentArea,
             collapsedY = sheetCollapsedTargetY,
-            animationSpec = animationSpec,
+            animationSpec = resolvedSpec,
             initialVelocity = initialVelocity
         )
     }
@@ -337,11 +346,37 @@ fun UnifiedPlayerSheetV2(
     var previousSheetState by remember { mutableStateOf<PlayerSheetState?>(null) }
     LaunchedEffect(showPlayerContentArea, currentSheetContentState) {
         if (currentSheetContentState == previousSheetState && previousSheetState != null) return@LaunchedEffect
+        val wasExpanded = previousSheetState == PlayerSheetState.EXPANDED
         previousSheetState = currentSheetContentState
         val targetExpanded = showPlayerContentArea && currentSheetContentState == PlayerSheetState.EXPANDED
-        // Scale stays exactly 1f — no secondary bounce pulse.
-        visualOvershootScaleY.snapTo(1f)
-        animatePlayerSheet(targetExpanded = targetExpanded)
+        if (targetExpanded) {
+            // When expanding, no spring bounce/oscillation and no scale distortion
+            visualOvershootScaleY.snapTo(1f)
+            animatePlayerSheet(
+                targetExpanded = true,
+                animationSpec = sheetExpandAnimationSpec
+            )
+        } else {
+            // When collapsing, make it stretched without bouncing
+            if (wasExpanded) {
+                launch {
+                    visualOvershootScaleY.snapTo(1.035f)
+                    visualOvershootScaleY.animateTo(
+                        targetValue = 1f,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioNoBouncy,
+                            stiffness = Spring.StiffnessMediumLow
+                        )
+                    )
+                }
+            } else {
+                visualOvershootScaleY.snapTo(1f)
+            }
+            animatePlayerSheet(
+                targetExpanded = false,
+                animationSpec = sheetCollapseAnimationSpec
+            )
+        }
     }
 
     val sheetVisualState = rememberSheetVisualState(
