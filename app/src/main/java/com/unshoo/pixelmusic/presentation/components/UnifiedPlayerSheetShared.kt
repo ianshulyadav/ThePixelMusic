@@ -25,12 +25,23 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularWavyProgressIndicator
 import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.LinearWavyProgressIndicator
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import com.unshoo.pixelmusic.presentation.components.scoped.rememberSmoothProgress
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -67,9 +78,10 @@ internal fun MiniPlayerContentInternal(
     isCastConnecting: Boolean,
     isPreparingPlayback: Boolean,
     isBuffering: Boolean = false,
+    currentPositionProvider: (() -> Long)? = null,
     onPlayPause: () -> Unit,
     onPrevious: () -> Unit,
-    cornerRadiusAlb: Dp,
+    cornerRadiusAlb: Dp = 10.dp,
     onNext: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -84,149 +96,235 @@ internal fun MiniPlayerContentInternal(
     val latestOnNext = rememberUpdatedState(onNext)
     val miniPlayerIndication = remember { ripple(bounded = false) }
 
-    Row(
+    // M3 Expressive shape morphing:
+    // When playing, artwork morphs to a 14dp expressive squircle; when paused, it smoothly morphs to a 24dp circular capsule.
+    val artCornerRadius by animateDpAsState(
+        targetValue = if (isPlaying) 14.dp else 24.dp,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "miniArtCorner"
+    )
+    val artShape = remember(artCornerRadius) { RoundedCornerShape(artCornerRadius) }
+
+    // Hero Play/Pause button shape morphing:
+    // Morphs between squircle (14dp) when playing and circle (22dp) when paused.
+    val playPauseCornerRadius by animateDpAsState(
+        targetValue = if (isPlaying) 14.dp else 22.dp,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "miniPlayPauseCorner"
+    )
+    val playPauseShape = remember(playPauseCornerRadius) { RoundedCornerShape(playPauseCornerRadius) }
+
+    // Realtime smooth playback progress sampling for the wavy progress bar
+    val isPlayingProvider = rememberUpdatedState(isPlaying)
+    val (smoothProgress, _) = rememberSmoothProgress(
+        isPlayingProvider = { isPlayingProvider.value },
+        currentPositionProvider = currentPositionProvider ?: { 0L },
+        totalDuration = song.duration,
+        songId = song.id,
+        sampleWhilePlayingMs = 150L,
+        sampleWhilePausedMs = 800L,
+        isVisible = true
+    )
+
+    // Wavy progress wave animation: active sine wave when playing, straight line when paused
+    val animatedWaveAmplitude by animateFloatAsState(
+        targetValue = if (isPlaying) 1f else 0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "miniWaveAmplitude"
+    )
+
+    BoxWithConstraints(
         modifier = modifier
             .fillMaxWidth()
             .height(MiniPlayerHeight)
-            .padding(start = 10.dp, end = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
     ) {
-        val albumArtModel = song.albumArtUriString?.takeIf { it.isNotBlank() }
-        Box(contentAlignment = Alignment.Center) {
-            key(song.id) {
-                SmartImage(
-                    model = albumArtModel,
-                    contentDescription = "Carátula de ${song.title}",
-                    shape = CircleShape,
-                    targetSize = Size(150, 150),
-                    modifier = Modifier.size(44.dp),
-                    placeholderModel = if (albumArtModel?.startsWith("telegram_art") == true) {
-                        "$albumArtModel?quality=thumb"
-                    } else null
-                )
+        val availableWidth = maxWidth
+        val showPreviousButton = availableWidth >= 380.dp
+
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(start = 10.dp, end = 12.dp, top = 6.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            val albumArtModel = song.albumArtUriString?.takeIf { it.isNotBlank() }
+            Box(
+                modifier = Modifier.size(48.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                key(song.id) {
+                    SmartImage(
+                        model = albumArtModel,
+                        contentDescription = "Carátula de ${song.title}",
+                        shape = artShape,
+                        targetSize = SmartImageIntermediateTargetSize,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(artShape),
+                        placeholderModel = if (albumArtModel?.startsWith("telegram_art") == true) {
+                            "$albumArtModel?quality=thumb"
+                        } else null
+                    )
+                }
+                if (isCastConnecting) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        strokeWidth = 2.dp,
+                        color = LocalMaterialTheme.current.onPrimaryContainer
+                    )
+                } else if (isPreparingPlayback) {
+                    CircularWavyProgressIndicator(modifier = Modifier.size(24.dp))
+                }
             }
-            if (isCastConnecting) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(24.dp),
-                    strokeWidth = 2.dp,
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(end = 8.dp),
+                verticalArrangement = Arrangement.Center
+            ) {
+                val titleStyle = MaterialTheme.typography.titleSmall.copy(
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = (-0.2).sp,
+                    fontFamily = GoogleSansRounded,
                     color = LocalMaterialTheme.current.onPrimaryContainer
                 )
-            } else if (isPreparingPlayback) {
-                CircularWavyProgressIndicator(modifier = Modifier.size(24.dp))
-            }
-        }
-        Spacer(modifier = Modifier.width(12.dp))
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.Center
-        ) {
-            val titleStyle = MaterialTheme.typography.titleSmall.copy(
-                fontSize = 15.sp,
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = (-0.2).sp,
-                fontFamily = GoogleSansRounded,
-                color = LocalMaterialTheme.current.onPrimaryContainer
-            )
-            val artistStyle = MaterialTheme.typography.bodySmall.copy(
-                fontSize = 13.sp,
-                letterSpacing = 0.sp,
-                fontFamily = GoogleSansRounded,
-                color = LocalMaterialTheme.current.onPrimaryContainer.copy(alpha = 0.7f)
-            )
-
-            AutoScrollingText(
-                text = when {
-                    isCastConnecting -> "Connecting to device…"
-                    else -> song.title
-                },
-                style = titleStyle,
-                gradientEdgeColor = LocalMaterialTheme.current.primaryContainer
-            )
-            AutoScrollingText(
-                text = song.displayArtist,
-                style = artistStyle,
-                gradientEdgeColor = LocalMaterialTheme.current.primaryContainer
-            )
-        }
-        Spacer(modifier = Modifier.width(8.dp))
-
-        Box(
-            modifier = Modifier
-                .size(36.dp)
-                .clip(CircleShape)
-                .background(LocalMaterialTheme.current.onPrimary)
-                .clickable(
-                    interactionSource = previousInteraction,
-                    indication = miniPlayerIndication,
-                    enabled = controlsEnabled
-                ) {
-                    hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    latestOnPrevious.value()
-                },
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.SkipPrevious,
-                contentDescription = "Anterior",
-                tint = LocalMaterialTheme.current.primary,
-                modifier = Modifier.size(22.dp)
-            )
-        }
-
-        Spacer(modifier = Modifier.width(8.dp))
-
-        Box(
-            modifier = Modifier
-                .size(36.dp)
-                .clip(CircleShape)
-                .background(LocalMaterialTheme.current.primary)
-                .clickable(
-                    interactionSource = playPauseInteraction,
-                    indication = miniPlayerIndication,
-                    enabled = controlsEnabled
-                ) {
-                    hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    latestOnPlayPause.value()
-                },
-            contentAlignment = Alignment.Center
-        ) {
-            if ((isPreparingPlayback || isBuffering) && !isPlaying) {
-                CircularWavyProgressIndicator(
-                    modifier = Modifier.size(20.dp),
-                    color = LocalMaterialTheme.current.onPrimary
+                val artistStyle = MaterialTheme.typography.bodySmall.copy(
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.Normal,
+                    letterSpacing = 0.sp,
+                    fontFamily = GoogleSansRounded,
+                    color = LocalMaterialTheme.current.onPrimaryContainer.copy(alpha = 0.72f)
                 )
-            } else {
-                Icon(
-                    imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                    contentDescription = if (isPlaying) "Pausar" else "Reproducir",
-                    tint = LocalMaterialTheme.current.onPrimary,
-                    modifier = Modifier.size(22.dp)
+
+                AutoScrollingText(
+                    text = when {
+                        isCastConnecting -> "Connecting to device…"
+                        else -> song.title
+                    },
+                    style = titleStyle,
+                    gradientEdgeColor = LocalMaterialTheme.current.primaryContainer
+                )
+                AutoScrollingText(
+                    text = song.displayArtist,
+                    style = artistStyle,
+                    gradientEdgeColor = LocalMaterialTheme.current.primaryContainer
                 )
             }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (showPreviousButton) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(LocalMaterialTheme.current.onPrimaryContainer.copy(alpha = 0.08f))
+                            .clickable(
+                                interactionSource = previousInteraction,
+                                indication = miniPlayerIndication,
+                                enabled = controlsEnabled
+                            ) {
+                                hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                latestOnPrevious.value()
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.SkipPrevious,
+                            contentDescription = "Anterior",
+                            tint = LocalMaterialTheme.current.onPrimaryContainer,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                }
+
+                // Primary Hero Play/Pause Button with morphing shape
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(playPauseShape)
+                        .background(LocalMaterialTheme.current.primary)
+                        .clickable(
+                            interactionSource = playPauseInteraction,
+                            indication = miniPlayerIndication,
+                            enabled = controlsEnabled
+                        ) {
+                            hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            latestOnPlayPause.value()
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    if ((isPreparingPlayback || isBuffering) && !isPlaying) {
+                        CircularWavyProgressIndicator(
+                            modifier = Modifier.size(22.dp),
+                            color = LocalMaterialTheme.current.onPrimary
+                        )
+                    } else {
+                        Icon(
+                            imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                            contentDescription = if (isPlaying) "Pausar" else "Reproducir",
+                            tint = LocalMaterialTheme.current.onPrimary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
+
+                // Next Button
+                val nextButtonSize = if (showPreviousButton) 36.dp else 40.dp
+                Box(
+                    modifier = Modifier
+                        .size(nextButtonSize)
+                        .clip(CircleShape)
+                        .background(LocalMaterialTheme.current.onPrimaryContainer.copy(alpha = 0.08f))
+                        .clickable(
+                            interactionSource = nextInteraction,
+                            indication = miniPlayerIndication,
+                            enabled = controlsEnabled
+                        ) {
+                            hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            latestOnNext.value()
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.SkipNext,
+                        contentDescription = "Siguiente",
+                        tint = LocalMaterialTheme.current.onPrimaryContainer,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
         }
 
-        Spacer(modifier = Modifier.width(8.dp))
-
-        Box(
-            modifier = Modifier
-                .size(36.dp)
-                .clip(CircleShape)
-                .background(LocalMaterialTheme.current.onPrimary)
-                .clickable(
-                    interactionSource = nextInteraction,
-                    indication = miniPlayerIndication,
-                    enabled = controlsEnabled
-                ) {
-                    hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    latestOnNext.value()
-                },
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.SkipNext,
-                contentDescription = "Siguiente",
-                tint = LocalMaterialTheme.current.primary,
-                modifier = Modifier.size(22.dp)
+        // M3 Expressive Linear Wavy Progress along the bottom edge
+        if (song.duration > 0L) {
+            LinearWavyProgressIndicator(
+                progress = { smoothProgress.value },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp)
+                    .height(3.5.dp)
+                    .align(Alignment.BottomCenter)
+                    .clip(RoundedCornerShape(50))
+                    .clearAndSetSemantics { },
+                color = LocalMaterialTheme.current.primary,
+                trackColor = LocalMaterialTheme.current.primary.copy(alpha = 0.20f),
+                amplitude = { animatedWaveAmplitude }
             )
         }
     }

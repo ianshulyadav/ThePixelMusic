@@ -60,16 +60,12 @@ internal fun rememberSheetInteractionState(
     val playerShadowShape = remember(
         overallSheetTopCornerRadiusProvider,
         playerContentActualBottomRadiusProvider,
-        playerContentExpansionFraction
+        useSmoothCorners
     ) {
         PlayerSheetDynamicShape(
             topRadiusProvider = overallSheetTopCornerRadiusProvider,
             bottomRadiusProvider = playerContentActualBottomRadiusProvider,
-            useSmoothShapeProvider = {
-                useSmoothCornersState.value &&
-                    !isDraggingState.value &&
-                    !playerContentExpansionFraction.isRunning
-            }
+            useSmoothShapeProvider = { useSmoothCornersState.value }
         )
     }
 

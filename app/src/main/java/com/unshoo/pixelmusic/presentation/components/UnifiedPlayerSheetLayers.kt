@@ -96,6 +96,7 @@ internal fun BoxScope.UnifiedPlayerMiniAndFullLayers(
                         isCastConnecting = isCastConnecting,
                         isPreparingPlayback = isPreparingPlayback,
                         isBuffering = infrequentPlayerState.isBuffering,
+                        currentPositionProvider = currentPositionProvider,
                         onPlayPause = { playerViewModel.playPause() },
                         onPrevious = { playerViewModel.previousSong() },
                         onNext = { playerViewModel.nextSong() },

@@ -357,21 +357,8 @@ fun UnifiedPlayerSheetV2(
                 animationSpec = sheetExpandAnimationSpec
             )
         } else {
-            // When collapsing, make it stretched without bouncing
-            if (wasExpanded) {
-                launch {
-                    visualOvershootScaleY.snapTo(1.035f)
-                    visualOvershootScaleY.animateTo(
-                        targetValue = 1f,
-                        animationSpec = spring(
-                            dampingRatio = Spring.DampingRatioNoBouncy,
-                            stiffness = Spring.StiffnessMediumLow
-                        )
-                    )
-                }
-            } else {
-                visualOvershootScaleY.snapTo(1f)
-            }
+            // When collapsing, keep scale stable at 1f so shape doesn't jump or glitch on settle
+            visualOvershootScaleY.snapTo(1f)
             animatePlayerSheet(
                 targetExpanded = false,
                 animationSpec = sheetCollapseAnimationSpec
@@ -579,14 +566,11 @@ fun UnifiedPlayerSheetV2(
     // miniReadyAlpha fades the shadow in during the initial song-appear animation.
     val visualCardShadowElevation by remember(showQueueSheet, miniReadyAlpha) {
         derivedStateOf {
-            if (
-                showQueueSheet ||
-                playerContentExpansionFraction.isRunning ||
-                playerContentExpansionFraction.value > 0.18f
-            ) {
+            if (showQueueSheet || playerContentExpansionFraction.value > 0.18f) {
                 0.dp
             } else {
-                (3f * miniReadyAlpha.value).dp
+                val elevationFactor = 1f - (playerContentExpansionFraction.value / 0.18f).coerceIn(0f, 1f)
+                (3f * elevationFactor * miniReadyAlpha.value).dp
             }
         }
     }
