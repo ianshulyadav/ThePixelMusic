@@ -340,21 +340,18 @@ fun ExploreScreen(
             exploreUiState.homePageSections
         }
     }
-    LaunchedEffect(listState, isLocalSelected) {
-        if (isLocalSelected) return@LaunchedEffect
-        snapshotFlow {
+    val shouldLoadMore by remember(listState) {
+        derivedStateOf {
             val layoutInfo = listState.layoutInfo
             val totalItems = layoutInfo.totalItemsCount
             val lastVisibleIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
             totalItems > 0 && lastVisibleIndex >= (totalItems - 2).coerceAtLeast(0)
         }
-            .distinctUntilChanged()
-            .filter { it }
-            .collect {
-                if (exploreUiState.homePageContinuation != null && !exploreUiState.isContinuationLoading) {
-                    exploreViewModel.loadMore()
-                }
-            }
+    }
+    LaunchedEffect(shouldLoadMore, isLocalSelected) {
+        if (!isLocalSelected && shouldLoadMore && exploreUiState.homePageContinuation != null && !exploreUiState.isContinuationLoading) {
+            exploreViewModel.loadMore()
+        }
     }
 
     var lastSelectedCategory by rememberSaveable { mutableStateOf<String?>(null) }
@@ -642,79 +639,64 @@ fun ExploreScreen(
                 !hasExploreContent && exploreUiState.error == null
             }
 
-            Crossfade(
-                targetState = when {
-                    showExploreLoading -> "loading"
-                    exploreUiState.error != null && !hasExploreContent -> "error"
-                    else -> "content"
-                },
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioNoBouncy,
-                    stiffness = ExpressiveSprings.DefaultEffectsStiffness
-                ),
-                label = "explore_screen_crossfade"
-            ) { stateKey ->
-                when (stateKey) {
-                    "loading" -> {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(
-                                    top = innerPadding.calculateTopPadding() + 32.dp,
-                                    bottom = bottomPadding + paddingValuesParent.calculateBottomPadding()
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            ContainedLoadingIndicator()
-                        }
-                    }
-                    "error" -> {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 24.dp)
-                                .padding(
-                                    top = innerPadding.calculateTopPadding(),
-                                    bottom = paddingValuesParent.calculateBottomPadding() + bottomPadding
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center
-                            ) {
-                                Text(
-                                    text = exploreUiState.error ?: "Unable to load content",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    fontFamily = GoogleSansRounded,
-                                    textAlign = TextAlign.Center
-                                )
-                                Spacer(modifier = Modifier.height(16.dp))
-                                FilledTonalButton(
-                                    onClick = {
-                                        scope.launch {
-                                            if (isMoodFilter) {
-                                                exploreViewModel.setSelectedFilter(selectedCategory)
-                                            } else {
-                                                exploreViewModel.loadData(forceRefresh = true)
-                                                quickPicksViewModel.refresh(force = true)
-                                            }
-                                        }
+            if (showExploreLoading) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(
+                            top = innerPadding.calculateTopPadding() + 32.dp,
+                            bottom = bottomPadding + paddingValuesParent.calculateBottomPadding()
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    ContainedLoadingIndicator()
+                }
+            } else if (exploreUiState.error != null && !hasExploreContent) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 24.dp)
+                        .padding(
+                            top = innerPadding.calculateTopPadding(),
+                            bottom = paddingValuesParent.calculateBottomPadding() + bottomPadding
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Text(
+                            text = exploreUiState.error ?: "Unable to load content",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontFamily = GoogleSansRounded,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        FilledTonalButton(
+                            onClick = {
+                                scope.launch {
+                                    if (isMoodFilter) {
+                                        exploreViewModel.setSelectedFilter(selectedCategory)
+                                    } else {
+                                        exploreViewModel.loadData(forceRefresh = true)
+                                        quickPicksViewModel.refresh(force = true)
                                     }
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.Refresh,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(text = "Retry", fontFamily = GoogleSansRounded)
                                 }
                             }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Refresh,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(text = "Retry", fontFamily = GoogleSansRounded)
                         }
                     }
-                    else -> {
+                }
+            } else {
                         LazyColumn(
                             state = listState,
                             modifier = Modifier
@@ -986,7 +968,6 @@ fun ExploreScreen(
                             item(key = "feed_spotlight", contentType = "spotlight") {
                                 SpotlightHeroCard(
                                     spotlight = spot,
-                                    scrollOffsetProvider = { listState.firstVisibleItemScrollOffset },
                                     onPlayRadio = {
                                         feedViewModel.playArtistRadio(
                                             FeedArtist(spot.artistName, spot.browseId, spot.artworkUrl),
@@ -1471,7 +1452,7 @@ fun ExploreScreen(
                         }
 
                         // 15. All real YouTube Home Shelves
-                        if (otherHomeSections.isNotEmpty()) {
+                        if (isAdvancedExplore && otherHomeSections.isNotEmpty()) {
                             items(otherHomeSections, key = { s -> "yt_section_${s.title}" }, contentType = { "yt_section" }) { section ->
                                 val isSimilar = section.title.startsWith("Similar to", ignoreCase = true) ||
                                     section.title.contains("Fans also like", ignoreCase = true) ||
@@ -1528,11 +1509,9 @@ fun ExploreScreen(
                             }
                         }
                     }
-                }
             }
         }
     }
-}
 }
 
     if (showSongInfoBottomSheet && selectedSongForInfo != null) {
@@ -2265,30 +2244,7 @@ private fun FeedTrackCard(
                 }
             }
 
-            if (!isCurrentPlaying) {
-                Surface(
-                    onClick = {
-                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        if (onPlayClick != null) onPlayClick() else onClick()
-                    },
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    tonalElevation = 4.dp,
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(8.dp)
-                        .size(36.dp)
-                ) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Icon(
-                            Icons.Filled.PlayArrow,
-                            contentDescription = "Play $title",
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                }
-            }
+
         }
 
         Spacer(modifier = Modifier.height(6.dp))
@@ -2411,28 +2367,7 @@ private fun FeedPlaylistCard(
                 }
             }
 
-            Surface(
-                onClick = {
-                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    if (onPlayClick != null) onPlayClick() else onClick()
-                },
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.primaryContainer,
-                tonalElevation = 4.dp,
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(8.dp)
-                    .size(36.dp)
-            ) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Icon(
-                        Icons.Filled.PlayArrow,
-                        contentDescription = "Play $title",
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
+
         }
 
         Spacer(modifier = Modifier.height(6.dp))
@@ -2479,7 +2414,7 @@ private fun ShelfArtistCard(
                 .background(MaterialTheme.colorScheme.surfaceContainerHigh),
             contentAlignment = Alignment.Center
         ) {
-            val artistAvatarShape = remember { ScallopFlowerShape(petals = 12, depthRatio = 0.08f) }
+            val artistAvatarShape = CircleShape
             Surface(
                 shape = artistAvatarShape,
                 color = MaterialTheme.colorScheme.surfaceContainerHighest,
@@ -2838,11 +2773,10 @@ private fun ChartTrackCard(
 @Composable
 private fun SpotlightHeroCard(
     spotlight: FeedSpotlight,
-    scrollOffsetProvider: () -> Int = { 0 },
     onPlayRadio: () -> Unit,
     onOpenArtist: () -> Unit
 ) {
-    val heroAvatarShape = remember { ScallopFlowerShape(petals = 12, depthRatio = 0.08f) }
+    val heroAvatarShape = CircleShape
     Card(
         shape = ShapeCache.smooth28,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
@@ -2862,12 +2796,7 @@ private fun SpotlightHeroCard(
                     errorResId = 0,
                     modifier = Modifier
                         .matchParentSize()
-                        .graphicsLayer {
-                            scaleX = 1.08f
-                            scaleY = 1.08f
-                            alpha = 0.22f
-                            translationY = (scrollOffsetProvider() * 0.15f).coerceIn(-40f, 40f)
-                        }
+                        .alpha(0.22f)
                 )
             }
             Box(
@@ -3005,10 +2934,7 @@ private fun ArtistAvatarCard(
     onClick: () -> Unit
 ) {
     val haptics = LocalHapticFeedback.current
-    val avatarShape = remember(isTop) {
-        if (isTop) ScallopFlowerShape(petals = 12, depthRatio = 0.09f)
-        else ScallopFlowerShape(petals = 10, depthRatio = 0.08f)
-    }
+    val avatarShape = CircleShape
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
@@ -3561,7 +3487,7 @@ private fun LibraryCarouselCard(
 
     val isArtist = item is ArtistItem
     val artShape = remember(isArtist) {
-        if (isArtist) ScallopFlowerShape(petals = 10, depthRatio = 0.08f) else ShapeCache.smooth20
+        if (isArtist) CircleShape else ShapeCache.smooth20
     }
 
     Card(
@@ -3682,12 +3608,6 @@ private fun LibraryCarouselCard(
             Box(
                 modifier = Modifier
                     .size(132.dp)
-                    .shadow(
-                        elevation = 6.dp,
-                        shape = artShape,
-                        spotColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.14f),
-                        ambientColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
-                    )
                     .clip(artShape)
                     .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             ) {
