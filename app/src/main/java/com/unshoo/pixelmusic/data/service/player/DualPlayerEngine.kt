@@ -238,6 +238,7 @@ class DualPlayerEngine @Inject constructor(
 
     private var lastPlayWhenReadyAtMs: Long = 0L
     private var lastPlayingAtMs: Long = 0L
+    private var lastPausedAtMs: Long = 0L
     // Used to distinguish a STATE_BUFFERING caused by a user seek from a real HAL offload
     // reset (where audio underflows mid-playback). Without this, seeking shortly after
     // playback starts re-enters BUFFERING within the HAL-reset window and triggers a full
@@ -297,7 +298,9 @@ class DualPlayerEngine @Inject constructor(
             if (playWhenReady) {
                 lastPlayWhenReadyAtMs = SystemClock.elapsedRealtime()
                 requestAudioFocus()
+                checkAndRecoverStalePlaybackOnResume()
             } else {
+                lastPausedAtMs = SystemClock.elapsedRealtime()
                 cancelAudioOffloadFallback()
                 // Keep focus across user pauses so a quick resume doesn't have to re-acquire it.
                 // Focus is abandoned explicitly on AUDIOFOCUS_LOSS and on release(); anything in
@@ -527,6 +530,42 @@ class DualPlayerEngine @Inject constructor(
      * than waiting for onPositionDiscontinuity, which is delivered on the next event
      * batch and can race with onPlaybackStateChanged on some Media3 versions.
      */
+
+    private fun checkAndRecoverStalePlaybackOnResume() {
+        val pausedAt = lastPausedAtMs
+        lastPausedAtMs = 0L
+        if (pausedAt <= 0L) return
+
+        val pauseDurationMs = SystemClock.elapsedRealtime() - pausedAt
+        // If paused for 20+ minutes, YouTube tokens / sockets are expiring or disconnected.
+        if (pauseDurationMs >= 20 * 60 * 1000L) {
+            val player = masterPlayer
+            val currentItem = player.currentMediaItem ?: return
+            val uriStr = currentItem.localConfiguration?.uri?.toString() ?: ""
+            val isRemoteStream = uriStr.startsWith("youtube://") ||
+                uriStr.contains("googlevideo.com") ||
+                uriStr.contains("saavncdn.com") ||
+                uriStr.contains("jiosaavn.com") ||
+                currentItem.mediaId.startsWith("youtube_")
+
+            if (isRemoteStream) {
+                Timber.tag("DualPlayerEngine").i(
+                    "Resumed after long pause (%d ms); proactively refreshing stream tokens to prevent buffer starvation mute",
+                    pauseDurationMs
+                )
+                val cleanId = currentItem.mediaId.removePrefix("youtube_")
+                invalidateResolvedUri(uriStr)
+                invalidateResolvedUri("youtube://$cleanId")
+                StreamChoice.forget(cleanId)
+
+                // Seek in-place and re-prepare so ResolvingDataSource requests fresh URLs
+                val currentPos = player.currentPosition.coerceAtLeast(0L)
+                player.seekTo(currentPos)
+                player.prepare()
+            }
+        }
+    }
+
     fun notifyExternalSeekInitiated() {
         lastSeekAtMs = SystemClock.elapsedRealtime()
     }
