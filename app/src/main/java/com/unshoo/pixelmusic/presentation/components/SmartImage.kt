@@ -137,7 +137,8 @@ fun SmartImage(
     // second, each forcing a recomposition of the surrounding card.
     // 120ms is long enough to look polished on the full-player cover,
     // and short enough that scrolling lists don't visibly queue.
-    crossfadeDurationMillis: Int = 220,
+    // In list/card contexts or thumbnails, disable crossfade to prevent frame jank during scrolling
+    crossfadeDurationMillis: Int = 0,
     useDiskCache: Boolean = true,
     useMemoryCache: Boolean = true,
     allowHardware: Boolean = true,
@@ -292,10 +293,8 @@ fun SmartImage(
             false
         }
 
-        val effectiveCrossfade = if (isThumbnail || isInMemoryCache) {
+        val effectiveCrossfade = if (isThumbnail || isInMemoryCache || crossfadeDurationMillis <= 0) {
             0
-        } else if (crossfadeDurationMillis == 220) {
-            120
         } else {
             crossfadeDurationMillis
         }

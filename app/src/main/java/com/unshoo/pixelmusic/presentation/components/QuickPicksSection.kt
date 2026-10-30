@@ -347,7 +347,7 @@ fun QuickPicksSection(
                                     contentDescription = song.title,
                                     contentScale = ContentScale.Crop,
                                     targetSize = SmartImageCardTargetSize,
-                                    crossfadeDurationMillis = 200,
+                                    crossfadeDurationMillis = 0,
                                     modifier = Modifier.fillMaxSize()
                                 )
                                 
@@ -459,7 +459,7 @@ fun QuickPicksSection(
                                     contentDescription = song.title,
                                     contentScale = ContentScale.Crop,
                                     targetSize = SmartImageCardTargetSize,
-                                    crossfadeDurationMillis = 200,
+                                    crossfadeDurationMillis = 0,
                                     modifier = Modifier.fillMaxSize()
                                 )
                                 
@@ -1004,7 +1004,7 @@ private fun QuickPickPill(
                 targetSize = SmartImageCompactListTargetSize,
                 placeholderResId = 0,
                 errorResId = 0,
-                crossfadeDurationMillis = 200,
+                crossfadeDurationMillis = 0,
                 modifier = Modifier.size(QuickPicksPillArtSize)
             )
             Column(modifier = Modifier.weight(1f)) {

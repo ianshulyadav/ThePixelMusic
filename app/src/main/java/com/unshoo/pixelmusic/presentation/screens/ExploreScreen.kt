@@ -327,11 +327,9 @@ fun ExploreScreen(
 
     val density = androidx.compose.ui.platform.LocalDensity.current
     val scrollThresholdPx = remember(density) { with(density) { 16.dp.toPx() } }
-    val slideDistancePx = remember(density) { with(density) { 16.dp.toPx() } }
     val isScrolled by remember {
         derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > scrollThresholdPx }
     }
-    val contentProgress = remember { Animatable(1f) }
 
     val bottomPadding = if (currentSongId != null) MiniPlayerHeight + 16.dp else 16.dp
 
@@ -3561,7 +3559,10 @@ private fun LibraryCarouselCard(
     }
     val actionIcon = if (isCurrentPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow
 
-    val artShape = if (item is ArtistItem) ScallopFlowerShape(petals = 10, depthRatio = 0.08f) else ShapeCache.smooth20
+    val isArtist = item is ArtistItem
+    val artShape = remember(isArtist) {
+        if (isArtist) ScallopFlowerShape(petals = 10, depthRatio = 0.08f) else ShapeCache.smooth20
+    }
 
     Card(
         modifier = Modifier
