@@ -2648,6 +2648,10 @@ class PlayerViewModel @Inject constructor(
      * instantly. This replaces the missing PlaybackSessionWarmer functionality.
      */
     private fun preWarmCurrentSongStream() {
+        if (playbackStateHolder.stablePlayerState.value.isPlaying) {
+            // Already actively playing sound without interruption; do not touch playback stream
+            return
+        }
         val currentSong = playbackStateHolder.stablePlayerState.value.currentSong ?: return
         val uri = com.unshoo.pixelmusic.utils.MediaItemBuilder.playbackUri(currentSong)
         val scheme = uri.scheme

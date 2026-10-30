@@ -425,7 +425,6 @@ class PlaybackStateHolder @Inject constructor(
             if (controller.isPlaying) {
                 controller.pause()
             } else {
-                _stablePlayerState.update { it.copy(isBuffering = true) }
                 scope.launch {
                     try {
                         dualPlayerEngine.ensureFreshStreamForResume()
@@ -444,8 +443,6 @@ class PlaybackStateHolder @Inject constructor(
                             val activeCtrl = mediaController ?: controller
                             activeCtrl.play()
                         }
-                    } finally {
-                        _stablePlayerState.update { it.copy(isBuffering = false) }
                     }
                 }
             }

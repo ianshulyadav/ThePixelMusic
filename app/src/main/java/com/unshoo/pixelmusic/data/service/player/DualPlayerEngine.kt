@@ -534,6 +534,7 @@ class DualPlayerEngine @Inject constructor(
 
     private fun checkAndRecoverStalePlaybackOnResume() {
         val player = if (::playerA.isInitialized) playerA else return
+        if (player.isPlaying) return
         val currentItem = player.currentMediaItem ?: return
         val uriStr = currentItem.localConfiguration?.uri?.toString() ?: ""
         val isRemoteStream = uriStr.startsWith("youtube://") ||
@@ -1729,6 +1730,15 @@ class DualPlayerEngine @Inject constructor(
      * (e.g. after a long pause or app reopening) and proactively re-resolves it in-place.
      */
     suspend fun ensureFreshStreamForResume() {
+        val isActivelyPlaying = withContext(Dispatchers.Main.immediate) {
+            if (::playerA.isInitialized) {
+                playerA.isPlaying || (playerA.playWhenReady && playerA.playbackState == Player.STATE_READY)
+            } else false
+        }
+        if (isActivelyPlaying) {
+            // Active stream is playing cleanly; never tear down the buffer or seek during live playback
+            return
+        }
         val (currentItem, currentUri) = withContext(Dispatchers.Main.immediate) {
             val item = if (::playerA.isInitialized) playerA.currentMediaItem else null
             val uri = item?.localConfiguration?.uri
@@ -1913,10 +1923,22 @@ class DualPlayerEngine @Inject constructor(
         ) {
             return LosslessStreamResolver.isFreshUri(resolved)
         }
+        if (resolvedUri.scheme == "file" || resolvedUri.scheme == "content") {
+            return true
+        }
+
         val isYoutubeResolution = originalUriString.startsWith("youtube://") ||
             resolved.contains("googlevideo.com", ignoreCase = true) ||
             resolved.contains("youtube.com", ignoreCase = true)
-        if (!isYoutubeResolution) return false
+        if (!isYoutubeResolution) {
+            val expireParam = resolvedUri.getQueryParameter("expire") ?: resolvedUri.getQueryParameter("expires")
+            if (expireParam != null) {
+                val expireSeconds = expireParam.toLongOrNull() ?: return true
+                val nowSeconds = System.currentTimeMillis() / 1000L
+                return expireSeconds > (nowSeconds + 900L)
+            }
+            return true
+        }
 
         val expireSeconds = resolvedUri.getQueryParameter("expire")?.toLongOrNull()
             ?: return false
