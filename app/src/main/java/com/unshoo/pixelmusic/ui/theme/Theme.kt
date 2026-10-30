@@ -7,9 +7,12 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MotionScheme
+import androidx.compose.material3.Shapes
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
@@ -677,7 +680,7 @@ fun PixelMusicTheme(
     )
 
     CompositionLocalProvider(LocalPixelMusicDarkTheme provides darkTheme) {
-        MaterialTheme(
+        androidx.compose.material3.MaterialExpressiveTheme(
             colorScheme = finalColorScheme,
             typography = Typography,
             shapes = Shapes,
@@ -686,3 +689,52 @@ fun PixelMusicTheme(
         )
     }
 }
+
+/**
+ * Material 3 Expressive Theme wrapper for PixelMusic.
+ * Applies the expressive motion scheme [MotionScheme.expressive()], expressive shapes,
+ * and sets LocalUsingExpressiveTheme to true.
+ */
+@Composable
+fun MaterialExpressiveTheme(
+    colorScheme: ColorScheme = MaterialTheme.colorScheme,
+    motionScheme: MotionScheme = MotionScheme.expressive(),
+    shapes: Shapes = MaterialTheme.shapes,
+    typography: Typography = MaterialTheme.typography,
+    content: @Composable () -> Unit
+) {
+    androidx.compose.material3.MaterialExpressiveTheme(
+        colorScheme = colorScheme,
+        motionScheme = motionScheme,
+        shapes = shapes,
+        typography = typography,
+        content = content
+    )
+}
+
+/**
+ * Material 3 Expressive Theme configuration wrapper for previews and custom configuration.
+ * Applies the expressive motion scheme [MotionScheme.expressive()], expressive shapes,
+ * and unified color palettes across the application.
+ */
+@Composable
+fun MaterialExpressiveTheme(
+    darkTheme: Boolean,
+    dynamicColor: Boolean = true,
+    colorSchemePairOverride: ColorSchemePair? = null,
+    colorPalette: String = "SAGE",
+    useSystemFont: Boolean = false,
+    pitchBlack: Boolean = false,
+    content: @Composable () -> Unit
+) {
+    PixelMusicTheme(
+        darkTheme = darkTheme,
+        dynamicColor = dynamicColor,
+        colorSchemePairOverride = colorSchemePairOverride,
+        colorPalette = colorPalette,
+        useSystemFont = useSystemFont,
+        pitchBlack = pitchBlack,
+        content = content
+    )
+}
+

@@ -1404,33 +1404,34 @@ class ExploreViewModel @Inject constructor(
     fun selectMoodChipByName(name: String, chip: HomePage.Chip? = null) {
         moodJob?.cancel()
         val moodGen = ++currentMoodGeneration
-        moodJob = viewModelScope.launch {
-            val effectiveChip = chip ?: _uiState.value.moodChips.firstOrNull {
-                it.title.equals(name, ignoreCase = true) ||
-                it.title.replace(" ", "").equals(name.replace(" ", ""), ignoreCase = true)
-            } ?: HomePage.Chip(
-                title = name,
-                endpoint = null,
-                deselectEndPoint = null
-            )
-            _activeChipState.value = ExploreChipUiModel(
-                title = effectiveChip.title,
-                isSelected = true,
-                browseId = effectiveChip.endpoint?.browseId,
-                params = effectiveChip.endpoint?.params
-            )
-            _uiState.update { it.copy(activeMoodChip = effectiveChip, selectedFilter = effectiveChip.title, isLoading = true, error = null) }
-            _isLoadingState.value = true
+        val effectiveChip = chip ?: _uiState.value.moodChips.firstOrNull {
+            it.title.equals(name, ignoreCase = true) ||
+            it.title.replace(" ", "").equals(name.replace(" ", ""), ignoreCase = true)
+        } ?: HomePage.Chip(
+            title = name,
+            endpoint = null,
+            deselectEndPoint = null
+        )
+        _activeChipState.value = ExploreChipUiModel(
+            title = effectiveChip.title,
+            isSelected = true,
+            browseId = effectiveChip.endpoint?.browseId,
+            params = effectiveChip.endpoint?.params
+        )
+        _uiState.update { it.copy(activeMoodChip = effectiveChip, selectedFilter = effectiveChip.title, isLoading = true, error = null) }
+        _isLoadingState.value = true
 
-            val current = (_screenUiState.value as? ExploreScreenUiState.Content)
-                ?: (_screenUiState.value as? ExploreScreenUiState.Error)?.cachedContent
-            if (current != null) {
-                _screenUiState.value = current.copy(
-                    selectedCategory = name,
-                    categories = current.categories.map { it.copy(isSelected = it.title.equals(name, ignoreCase = true)) },
-                    legacyState = _uiState.value
-                )
-            }
+        val current = (_screenUiState.value as? ExploreScreenUiState.Content)
+            ?: (_screenUiState.value as? ExploreScreenUiState.Error)?.cachedContent
+        if (current != null) {
+            _screenUiState.value = current.copy(
+                selectedCategory = name,
+                categories = current.categories.map { it.copy(isSelected = it.title.equals(name, ignoreCase = true)) },
+                legacyState = _uiState.value
+            )
+        }
+
+        moodJob = viewModelScope.launch {
 
             try {
                 withContext(ioDispatcher) {
