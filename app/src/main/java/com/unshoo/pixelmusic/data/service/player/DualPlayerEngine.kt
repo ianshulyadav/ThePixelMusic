@@ -327,9 +327,12 @@ class DualPlayerEngine @Inject constructor(
             initializedTimestampMs: Long,
             initializationDurationMs: Long
         ) {
-            val isHardware = AudioDecoderPolicy.isLikelyHardwareDecoder(decoderName)
-            _activeDecoderInfo.value = ActiveDecoderInfo(decoderName, isHardware)
-            Timber.tag("DualPlayerEngine").d("Audio decoder initialized: %s (Hardware: %b)", decoderName, isHardware)
+            val current = _activeDecoderInfo.value
+            if (current == null || current.name != decoderName) {
+                val isHardware = AudioDecoderPolicy.isLikelyHardwareDecoder(decoderName)
+                _activeDecoderInfo.value = ActiveDecoderInfo(decoderName, isHardware)
+                Timber.tag("DualPlayerEngine").d("Audio decoder initialized: %s (Hardware: %b)", decoderName, isHardware)
+            }
         }
 
         override fun onAudioSessionIdChanged(audioSessionId: Int) {
@@ -530,11 +533,9 @@ class DualPlayerEngine @Inject constructor(
      */
 
     private fun checkAndRecoverStalePlaybackOnResume() {
-        val player = masterPlayer
+        val player = if (::playerA.isInitialized) playerA else return
         val currentItem = player.currentMediaItem ?: return
         val uriStr = currentItem.localConfiguration?.uri?.toString() ?: ""
-        val cleanId = currentItem.mediaId.removePrefix("youtube_")
-
         val isRemoteStream = uriStr.startsWith("youtube://") ||
             uriStr.contains("googlevideo.com") ||
             uriStr.contains("saavncdn.com") ||
@@ -543,26 +544,15 @@ class DualPlayerEngine @Inject constructor(
 
         if (!isRemoteStream) return
 
-        // 1. Automatic Freshness Check: Check whether the current stream URL token is expired or expiring
+        val cleanId = currentItem.mediaId.removePrefix("youtube_")
         val resolvedUri = activePlaybackResolvedUris[uriStr]
             ?: resolvedUriCache.get(uriStr)
             ?: StreamChoice.of(cleanId)?.let { Uri.parse(it.url) }
 
-        val isFresh = resolvedUri != null && isResolvedUriFresh(uriStr, resolvedUri)
-
-        // 2. If the URL has expired or is invalid, automatically refresh tokens and reconnect
-        if (!isFresh) {
-            Timber.tag("DualPlayerEngine").i(
-                "Auto-detected expired/stale stream URL on resume for %s; seamlessly refreshing tokens",
-                cleanId
-            )
-            invalidateResolvedUri(uriStr)
-            invalidateResolvedUri("youtube://$cleanId")
-            StreamChoice.forget(cleanId)
-
-            val currentPos = player.currentPosition.coerceAtLeast(0L)
-            player.seekTo(currentPos)
-            player.prepare()
+        if (resolvedUri == null || !isResolvedUriFresh(uriStr, resolvedUri)) {
+            scope.launch(Dispatchers.Main.immediate) {
+                ensureFreshStreamForResume()
+            }
         }
     }
 
@@ -638,7 +628,7 @@ class DualPlayerEngine @Inject constructor(
     private var isReleased = false
     internal val resolvedUriCache = LruCache<String, Uri>(100)
     private val activePlaybackResolvedUris = java.util.concurrent.ConcurrentHashMap<String, Uri>()
-    private val localFilePathCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val localFilePathCache = LruCache<String, String>(200)
     private val activeResolutions = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.Deferred<Uri>>()
 
     /** Fire-and-forget stream resolve used by the non-blocking ResolvingDataSource path. */
@@ -799,7 +789,7 @@ class DualPlayerEngine @Inject constructor(
 
     fun registerLocalPath(youtubeUri: String, filePath: String) {
         if (filePath.isNotBlank()) {
-            localFilePathCache[youtubeUri] = filePath
+            localFilePathCache.put(youtubeUri, filePath)
         }
     }
 
@@ -829,7 +819,7 @@ class DualPlayerEngine @Inject constructor(
                         val diskFile = java.io.File(audioDir, "$videoId$ext")
                         if (diskFile.isFile && diskFile.length() > 0L) {
                             val path = diskFile.absolutePath
-                            localFilePathCache[uriString] = path
+                            localFilePathCache.put(uriString, path)
                             return Uri.fromFile(diskFile)
                         }
                     }
@@ -850,7 +840,7 @@ class DualPlayerEngine @Inject constructor(
                             !file.name.endsWith(".part") && !file.name.endsWith(".jpg") && !file.name.endsWith(".lrc")
                     }
                     if (match != null) {
-                        localFilePathCache[uriString] = match.absolutePath
+                        localFilePathCache.put(uriString, match.absolutePath)
                         return Uri.fromFile(match)
                     }
                 } catch (_: Exception) {}
@@ -2047,7 +2037,7 @@ class DualPlayerEngine @Inject constructor(
                 !resolvedPath.startsWith("http") -> {
                     com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper
                         .registerLocalFilePath(youtubeId, resolvedPath)
-                    localFilePathCache[uriString] = resolvedPath
+                    localFilePathCache.put(uriString, resolvedPath)
                     Uri.fromFile(java.io.File(resolvedPath))
                 }
                 else -> {
@@ -2605,6 +2595,10 @@ class DualPlayerEngine @Inject constructor(
             playerA.release()
         }
         if (::playerB.isInitialized) playerB.release()
+        resolvedUriCache.evictAll()
+        activePlaybackResolvedUris.clear()
+        localFilePathCache.evictAll()
+        activeResolutions.clear()
         isReleased = true
     }
 }
