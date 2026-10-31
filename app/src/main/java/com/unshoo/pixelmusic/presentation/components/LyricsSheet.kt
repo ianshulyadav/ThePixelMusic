@@ -506,6 +506,13 @@ fun LyricsSheet(
         label = "fontScale"
     )
 
+    val scaledTextStyle = remember(lyricsTextStyle, fontScale) {
+        lyricsTextStyle.copy(
+            fontSize = lyricsTextStyle.fontSize * fontScale,
+            lineHeight = lyricsTextStyle.lineHeight * fontScale
+        )
+    }
+
     fun resetImmersiveTimer() {
         lastInteractionTime = System.currentTimeMillis()
         immersiveMode = false
@@ -779,10 +786,6 @@ fun LyricsSheet(
                             SyncedLyricsList(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .graphicsLayer {
-                                        scaleX = fontScale
-                                        scaleY = fontScale
-                                    }
                                     .padding(horizontal = 24.dp),
                                 contentPadding = PaddingValues(top = 130.dp, bottom = 100.dp),
                                 lines = synced,
@@ -791,7 +794,7 @@ fun LyricsSheet(
                                 lyricsSyncOffset = lyricsSyncOffset,
                                 positionOverrideMs = previewSeekPositionMs,
                                 accentColor = lyricHighlightColor,
-                                textStyle = lyricsTextStyle,
+                                textStyle = scaledTextStyle,
                                 onLineClick = { syncedLine -> 
                                     onSeekTo(
                                         resolveSeekPositionMs(

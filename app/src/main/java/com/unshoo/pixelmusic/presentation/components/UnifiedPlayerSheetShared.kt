@@ -130,11 +130,11 @@ internal fun MiniPlayerContentInternal(
                     SmartImage(
                         model = albumArtModel,
                         contentDescription = "Carátula de ${song.title}",
-                        shape = artShape,
+                        shape = CircleShape,
                         targetSize = Size(150, 150),
                         modifier = Modifier
                             .fillMaxSize()
-                            .clip(artShape),
+                            .clip(CircleShape),
                         placeholderModel = if (albumArtModel?.startsWith("telegram_art") == true) {
                             "$albumArtModel?quality=thumb"
                         } else null
@@ -198,7 +198,7 @@ internal fun MiniPlayerContentInternal(
                         modifier = Modifier
                             .size(36.dp)
                             .clip(CircleShape)
-                            .background(LocalMaterialTheme.current.onPrimaryContainer.copy(alpha = 0.08f))
+                            .background(LocalMaterialTheme.current.onPrimary)
                             .clickable(
                                 interactionSource = previousInteraction,
                                 indication = miniPlayerIndication,
@@ -212,7 +212,7 @@ internal fun MiniPlayerContentInternal(
                         Icon(
                             imageVector = Icons.Rounded.SkipPrevious,
                             contentDescription = "Anterior",
-                            tint = LocalMaterialTheme.current.onPrimaryContainer,
+                            tint = LocalMaterialTheme.current.primary,
                             modifier = Modifier.size(22.dp)
                         )
                     }
@@ -254,7 +254,7 @@ internal fun MiniPlayerContentInternal(
                     modifier = Modifier
                         .size(36.dp)
                         .clip(CircleShape)
-                        .background(LocalMaterialTheme.current.onPrimaryContainer.copy(alpha = 0.08f))
+                        .background(LocalMaterialTheme.current.onPrimary)
                         .clickable(
                             interactionSource = nextInteraction,
                             indication = miniPlayerIndication,
@@ -268,7 +268,7 @@ internal fun MiniPlayerContentInternal(
                     Icon(
                         imageVector = Icons.Rounded.SkipNext,
                         contentDescription = "Siguiente",
-                        tint = LocalMaterialTheme.current.onPrimaryContainer,
+                        tint = LocalMaterialTheme.current.primary,
                         modifier = Modifier.size(22.dp)
                     )
                 }
