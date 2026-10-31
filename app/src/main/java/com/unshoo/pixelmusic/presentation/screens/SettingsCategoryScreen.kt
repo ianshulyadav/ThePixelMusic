@@ -75,6 +75,12 @@ import androidx.compose.material.icons.outlined.ClearAll
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Language
+import androidx.compose.material.icons.outlined.Dns
+import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import com.unshoo.pixelmusic.data.preferences.ProxyType
 import androidx.compose.material.icons.outlined.LightMode
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Person
@@ -248,6 +254,13 @@ fun SettingsCategoryScreen(
     var showRebuildDatabaseWarning by remember(categoryId) { mutableStateOf(false) }
     var showRegenerateDailyMixDialog by remember(categoryId) { mutableStateOf(false) }
     var showRegenerateStatsDialog by remember(categoryId) { mutableStateOf(false) }
+    var showProxyDialog by remember(categoryId) { mutableStateOf(false) }
+    var editProxyEnabled by remember(categoryId, showProxyDialog) { mutableStateOf(uiState.proxyEnabled) }
+    var editProxyType by remember(categoryId, showProxyDialog) { mutableStateOf(uiState.proxyType) }
+    var editProxyHost by remember(categoryId, showProxyDialog) { mutableStateOf(uiState.proxyHost) }
+    var editProxyPort by remember(categoryId, showProxyDialog) { mutableStateOf(uiState.proxyPort.toString()) }
+    var editProxyUsername by remember(categoryId, showProxyDialog) { mutableStateOf(uiState.proxyUsername) }
+    var editProxyPassword by remember(categoryId, showProxyDialog) { mutableStateOf(uiState.proxyPassword) }
     var showRegenerateAllPalettesDialog by remember(categoryId) { mutableStateOf(false) }
     var showExportDataDialog by remember(categoryId) { mutableStateOf(false) }
     var showImportFlow by remember(categoryId) { mutableStateOf(false) }
@@ -589,6 +602,25 @@ fun SettingsCategoryScreen(
                                      },
                                      leadingIcon = { Icon(Icons.Outlined.GridView, null, tint = MaterialTheme.colorScheme.secondary) }
                                  )
+                            }
+                            SettingsSubsection(title = stringResource(R.string.settings_network_section)) {
+                                val proxySubtitle = if (uiState.proxyEnabled && uiState.proxyHost.isNotBlank()) {
+                                    stringResource(
+                                        R.string.proxy_status_format,
+                                        uiState.proxyType.name,
+                                        uiState.proxyHost,
+                                        uiState.proxyPort
+                                    )
+                                } else {
+                                    stringResource(R.string.proxy_status_disabled)
+                                }
+                                SettingsItem(
+                                    title = stringResource(R.string.settings_proxy_title),
+                                    subtitle = proxySubtitle,
+                                    leadingIcon = { Icon(Icons.Outlined.Dns, null, tint = MaterialTheme.colorScheme.secondary) },
+                                    trailingIcon = { Icon(Icons.Rounded.ChevronRight, stringResource(R.string.cd_open), tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                                    onClick = { showProxyDialog = true }
+                                )
                             }
                         }
                         SettingsCategory.LIBRARY -> {
@@ -2198,6 +2230,111 @@ fun SettingsCategoryScreen(
                 }
             )
         }
+    }
+
+    if (showProxyDialog) {
+        AlertDialog(
+            onDismissRequest = { showProxyDialog = false },
+            icon = { Icon(Icons.Outlined.Dns, null, tint = MaterialTheme.colorScheme.secondary) },
+            title = { Text(stringResource(R.string.proxy_dialog_title)) },
+            text = {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = stringResource(R.string.proxy_enabled),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Switch(
+                            checked = editProxyEnabled,
+                            onCheckedChange = { editProxyEnabled = it }
+                        )
+                    }
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FilterChip(
+                            selected = editProxyType == ProxyType.HTTP,
+                            onClick = { editProxyType = ProxyType.HTTP },
+                            label = { Text("HTTP") }
+                        )
+                        FilterChip(
+                            selected = editProxyType == ProxyType.SOCKS,
+                            onClick = { editProxyType = ProxyType.SOCKS },
+                            label = { Text("SOCKS5") }
+                        )
+                    }
+                    
+                    OutlinedTextField(
+                        value = editProxyHost,
+                        onValueChange = { editProxyHost = it },
+                        label = { Text(stringResource(R.string.proxy_host)) },
+                        placeholder = { Text("e.g. 127.0.0.1") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    
+                    OutlinedTextField(
+                        value = editProxyPort,
+                        onValueChange = { editProxyPort = it.filter { ch -> ch.isDigit() } },
+                        label = { Text(stringResource(R.string.proxy_port)) },
+                        placeholder = { Text("8080") },
+                        singleLine = true,
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    
+                    OutlinedTextField(
+                        value = editProxyUsername,
+                        onValueChange = { editProxyUsername = it },
+                        label = { Text(stringResource(R.string.proxy_username)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    
+                    OutlinedTextField(
+                        value = editProxyPassword,
+                        onValueChange = { editProxyPassword = it },
+                        label = { Text(stringResource(R.string.proxy_password)) },
+                        singleLine = true,
+                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val portInt = editProxyPort.toIntOrNull() ?: 8080
+                        settingsViewModel.updateProxySettings(
+                            enabled = editProxyEnabled,
+                            type = editProxyType,
+                            host = editProxyHost.trim(),
+                            port = portInt,
+                            username = editProxyUsername.trim(),
+                            password = editProxyPassword
+                        )
+                        showProxyDialog = false
+                    }
+                ) {
+                    Text(stringResource(R.string.proxy_save))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showProxyDialog = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            }
+        )
     }
 
     if (showRegenerateAllPalettesDialog) {

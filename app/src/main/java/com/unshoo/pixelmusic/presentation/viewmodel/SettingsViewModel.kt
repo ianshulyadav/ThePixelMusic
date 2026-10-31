@@ -24,6 +24,7 @@ import com.unshoo.pixelmusic.data.preferences.PlayerStreamClient
 import com.unshoo.pixelmusic.data.preferences.PlaylistSuggestionSource
 import com.unshoo.pixelmusic.data.preferences.QuickPicks
 import com.unshoo.pixelmusic.data.preferences.QuickPicksDisplayMode
+import com.unshoo.pixelmusic.data.preferences.ProxyType
 import com.unshoo.pixelmusic.data.database.AiUsageDao
 import com.unshoo.pixelmusic.data.database.AiUsageEntity
 import com.unshoo.pixelmusic.data.preferences.AiPreferencesRepository
@@ -189,6 +190,12 @@ data class SettingsUiState(
     val exploreLastFmEnabled: Boolean = true,
     val filterCoverAndLofi: Boolean = true,
     val downloadAudioQuality: DownloadAudioQuality = DownloadAudioQuality.HIGH,
+    val proxyEnabled: Boolean = false,
+    val proxyType: ProxyType = ProxyType.HTTP,
+    val proxyHost: String = "",
+    val proxyPort: Int = 8080,
+    val proxyUsername: String = "",
+    val proxyPassword: String = "",
     val isLosslessAvailable: Boolean = false
 )
 
@@ -1068,6 +1075,36 @@ class SettingsViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
+            userPreferencesRepository.proxyEnabledFlow.collect { value ->
+                _uiState.update { it.copy(proxyEnabled = value) }
+            }
+        }
+        viewModelScope.launch {
+            userPreferencesRepository.proxyTypeFlow.collect { value ->
+                _uiState.update { it.copy(proxyType = value) }
+            }
+        }
+        viewModelScope.launch {
+            userPreferencesRepository.proxyHostFlow.collect { value ->
+                _uiState.update { it.copy(proxyHost = value) }
+            }
+        }
+        viewModelScope.launch {
+            userPreferencesRepository.proxyPortFlow.collect { value ->
+                _uiState.update { it.copy(proxyPort = value) }
+            }
+        }
+        viewModelScope.launch {
+            userPreferencesRepository.proxyUsernameFlow.collect { value ->
+                _uiState.update { it.copy(proxyUsername = value) }
+            }
+        }
+        viewModelScope.launch {
+            userPreferencesRepository.proxyPasswordFlow.collect { value ->
+                _uiState.update { it.copy(proxyPassword = value) }
+            }
+        }
+        viewModelScope.launch {
             datastoreRepository.ytUsername.collect { value ->
                 _uiState.update { it.copy(ytUsername = value) }
             }
@@ -1155,6 +1192,25 @@ class SettingsViewModel @Inject constructor(
     fun setQuickPicksDisplayMode(mode: QuickPicksDisplayMode) {
         viewModelScope.launch {
             userPreferencesRepository.setQuickPicksDisplayMode(mode)
+        }
+    }
+
+    fun setProxyEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            userPreferencesRepository.setProxyEnabled(enabled)
+        }
+    }
+
+    fun updateProxySettings(
+        enabled: Boolean,
+        type: ProxyType,
+        host: String,
+        port: Int,
+        username: String = "",
+        password: String = ""
+    ) {
+        viewModelScope.launch {
+            userPreferencesRepository.updateProxySettings(enabled, type, host, port, username, password)
         }
     }
 

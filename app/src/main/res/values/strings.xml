@@ -285,4 +285,18 @@
     <string name="settings_local_mode_title">Local Mode</string>
     <string name="settings_local_mode_desc">Pure offline player. Disconnects all YouTube online services, recommendations, and remote shelves without logging out. Shows only local and downloaded music.</string>
     <string name="in_your_library">In Your Library</string>
+    <!-- Network & Proxy Settings -->
+    <string name="settings_network_section">Network</string>
+    <string name="settings_proxy_title">Proxy Server</string>
+    <string name="settings_proxy_desc">Route network traffic through an HTTP or SOCKS proxy</string>
+    <string name="proxy_dialog_title">Proxy Configuration</string>
+    <string name="proxy_type">Proxy Type</string>
+    <string name="proxy_host">Host or IP</string>
+    <string name="proxy_port">Port</string>
+    <string name="proxy_username">Username (optional)</string>
+    <string name="proxy_password">Password (optional)</string>
+    <string name="proxy_enabled">Enable Proxy</string>
+    <string name="proxy_save">Save</string>
+    <string name="proxy_status_disabled">Disabled</string>
+    <string name="proxy_status_format">%1$s · %2$s:%3$d</string>
 </resources>

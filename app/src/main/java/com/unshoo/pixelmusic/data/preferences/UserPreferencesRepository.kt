@@ -117,6 +117,11 @@ enum class SearchSource {
     LOCAL, ONLINE
 }
 
+enum class ProxyType {
+    HTTP,
+    SOCKS
+}
+
 val LanguageCodeToName = mapOf(
     "en" to "English",
     "es" to "Español",
@@ -374,6 +379,12 @@ constructor(
         val TOP_SIZE = stringPreferencesKey("top_size")
         val DISCOVER = stringPreferencesKey("discover")
         val QUICK_PICKS_DISPLAY_MODE = stringPreferencesKey("quick_picks_display_mode")
+        val PROXY_ENABLED = booleanPreferencesKey("proxy_enabled")
+        val PROXY_TYPE = stringPreferencesKey("proxy_type")
+        val PROXY_HOST = stringPreferencesKey("proxy_host")
+        val PROXY_PORT = intPreferencesKey("proxy_port")
+        val PROXY_USERNAME = stringPreferencesKey("proxy_username")
+        val PROXY_PASSWORD = stringPreferencesKey("proxy_password")
         val SEARCH_SOURCE = stringPreferencesKey("search_source")
         val PERFORMANCE_MODE_ENABLED = booleanPreferencesKey("performance_mode_enabled")
         val AUDIO_OFFLOAD_ENABLED = booleanPreferencesKey("audio_offload_enabled")
@@ -3108,6 +3119,91 @@ constructor(
     suspend fun setSmartStorageIgnoreRecentDays(days: Int) {
         dataStore.edit { preferences ->
             preferences[PreferencesKeys.SMART_STORAGE_IGNORE_RECENT_DAYS] = days
+        }
+    }
+
+    val proxyEnabledFlow: Flow<Boolean> =
+        dataStore.data.map { preferences ->
+            preferences[PreferencesKeys.PROXY_ENABLED] ?: false
+        }.distinctUntilChanged()
+
+    suspend fun setProxyEnabled(enabled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.PROXY_ENABLED] = enabled
+        }
+    }
+
+    val proxyTypeFlow: Flow<ProxyType> =
+        dataStore.data.map { preferences ->
+            val typeStr = preferences[PreferencesKeys.PROXY_TYPE] ?: ProxyType.HTTP.name
+            runCatching { ProxyType.valueOf(typeStr) }.getOrDefault(ProxyType.HTTP)
+        }.distinctUntilChanged()
+
+    suspend fun setProxyType(type: ProxyType) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.PROXY_TYPE] = type.name
+        }
+    }
+
+    val proxyHostFlow: Flow<String> =
+        dataStore.data.map { preferences ->
+            preferences[PreferencesKeys.PROXY_HOST] ?: ""
+        }.distinctUntilChanged()
+
+    suspend fun setProxyHost(host: String) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.PROXY_HOST] = host.trim()
+        }
+    }
+
+    val proxyPortFlow: Flow<Int> =
+        dataStore.data.map { preferences ->
+            preferences[PreferencesKeys.PROXY_PORT] ?: 8080
+        }.distinctUntilChanged()
+
+    suspend fun setProxyPort(port: Int) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.PROXY_PORT] = port.coerceIn(1, 65535)
+        }
+    }
+
+    val proxyUsernameFlow: Flow<String> =
+        dataStore.data.map { preferences ->
+            preferences[PreferencesKeys.PROXY_USERNAME] ?: ""
+        }.distinctUntilChanged()
+
+    suspend fun setProxyUsername(username: String) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.PROXY_USERNAME] = username.trim()
+        }
+    }
+
+    val proxyPasswordFlow: Flow<String> =
+        dataStore.data.map { preferences ->
+            preferences[PreferencesKeys.PROXY_PASSWORD] ?: ""
+        }.distinctUntilChanged()
+
+    suspend fun setProxyPassword(password: String) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.PROXY_PASSWORD] = password
+        }
+    }
+
+    suspend fun updateProxySettings(
+        enabled: Boolean,
+        type: ProxyType,
+        host: String,
+        port: Int,
+        username: String = "",
+        password: String = ""
+    ) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.PROXY_ENABLED] = enabled
+            preferences[PreferencesKeys.PROXY_TYPE] = type.name
+            preferences[PreferencesKeys.PROXY_HOST] = host.trim()
+            preferences[PreferencesKeys.PROXY_PORT] = port.coerceIn(1, 65535)
+            preferences[PreferencesKeys.PROXY_USERNAME] = username.trim()
+            preferences[PreferencesKeys.PROXY_PASSWORD] = password
         }
     }
 }

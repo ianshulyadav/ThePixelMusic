@@ -287,6 +287,42 @@ class PixelMusicApplication : Application(), ImageLoaderFactory, Configuration.P
             secret = BuildConfig.LASTFM_SECRET
         )
 
+        // Bind Proxy settings to InnerTube/YouTube and NewPipe
+        startupScope.launch {
+            val prefs = userPreferencesRepository.get()
+            kotlinx.coroutines.flow.combine(
+                prefs.proxyEnabledFlow,
+                prefs.proxyTypeFlow,
+                prefs.proxyHostFlow,
+                prefs.proxyPortFlow
+            ) { enabled, type, host, port ->
+                if (enabled && host.isNotBlank()) {
+                    val javaType = if (type == com.unshoo.pixelmusic.data.preferences.ProxyType.SOCKS) {
+                        java.net.Proxy.Type.SOCKS
+                    } else {
+                        java.net.Proxy.Type.HTTP
+                    }
+                    java.net.Proxy(javaType, java.net.InetSocketAddress.createUnresolved(host, port))
+                } else {
+                    null
+                }
+            }.collect { proxy ->
+                unshoo.ianshulyadav.pixelmusic.innertube.YouTube.proxy = proxy
+            }
+        }
+        startupScope.launch {
+            val prefs = userPreferencesRepository.get()
+            kotlinx.coroutines.flow.combine(
+                prefs.proxyUsernameFlow,
+                prefs.proxyPasswordFlow
+            ) { username, password ->
+                username to password
+            }.collect { (username, password) ->
+                unshoo.ianshulyadav.pixelmusic.innertube.YouTube.proxyUsername = username.takeIf { it.isNotBlank() }
+                unshoo.ianshulyadav.pixelmusic.innertube.YouTube.proxyPassword = password.takeIf { it.isNotBlank() }
+            }
+        }
+
         // Bind Content Language and Country to YouTube.locale
         startupScope.launch {
             kotlinx.coroutines.flow.combine(
