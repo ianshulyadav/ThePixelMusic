@@ -1251,10 +1251,7 @@ fun SyncedLyricsList(
     var hasAlignedInitialLine by remember(lines) { mutableStateOf(false) }
     var lastAutoScrolledLineIndex by remember(lines) { mutableIntStateOf(-1) }
 
-    BoxWithConstraints(modifier = modifier) {
-        val metrics = remember(maxHeight, highlightZoneFraction, highlightOffsetDp) {
-            calculateHighlightMetrics(maxHeight, highlightZoneFraction, highlightOffsetDp)
-        }
+    Box(modifier = modifier) {
         val highlightOffsetPx = remember(highlightOffsetDp, density) { with(density) { highlightOffsetDp.toPx() } }
 
         val snapperLayoutInfo = rememberLazyListSnapperLayoutInfo(
@@ -1266,7 +1263,7 @@ fun SyncedLyricsList(
         )
         val flingBehavior = rememberSnapperFlingBehavior(layoutInfo = snapperLayoutInfo)
 
-        LaunchedEffect(currentLineIndex, lines.size, metrics, isPreviewSeeking) {
+        LaunchedEffect(currentLineIndex, lines.size, isPreviewSeeking) {
             if (lines.isEmpty()) return@LaunchedEffect
             if (currentLineIndex !in lines.indices) return@LaunchedEffect
             if (listState.layoutInfo.totalItemsCount == 0) return@LaunchedEffect
