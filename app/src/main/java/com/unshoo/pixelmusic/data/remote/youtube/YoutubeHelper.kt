@@ -65,7 +65,7 @@ object YoutubeHelper {
     private val backgroundScope = kotlinx.coroutines.CoroutineScope(
         kotlinx.coroutines.SupervisorJob() + Dispatchers.IO
     )
-    val client = OkHttpClient.Builder()
+    private val baseClientBuilder = OkHttpClient.Builder()
         .connectionPool(okhttp3.ConnectionPool(10, 5, java.util.concurrent.TimeUnit.MINUTES))
         // Fail fast on connect, but no callTimeout: a hard 12s whole-call cap killed
         // slow-but-working Innertube resolves on weak links, after which the quality-fallback
@@ -74,7 +74,37 @@ object YoutubeHelper {
         .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
         .writeTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
-        .build()
+
+    @Volatile
+    var client: OkHttpClient = baseClientBuilder.build()
+        private set
+
+    @Synchronized
+    fun updateProxy(proxy: java.net.Proxy?, username: String? = null, password: String? = null) {
+        val builder = baseClientBuilder.build().newBuilder()
+            .proxy(proxy)
+
+        if (proxy != null && proxy.type() == java.net.Proxy.Type.HTTP && !username.isNullOrBlank() && !password.isNullOrBlank()) {
+            builder.proxyAuthenticator { _, response ->
+                val credential = okhttp3.Credentials.basic(username, password)
+                response.request.newBuilder()
+                    .header("Proxy-Authorization", credential)
+                    .build()
+            }
+        } else {
+            builder.proxyAuthenticator(okhttp3.Authenticator.NONE)
+        }
+
+        val newClient = builder.build()
+        client = newClient
+
+        // Update NewPipe downloader instance with the new client
+        try {
+            org.schabi.newpipe.extractor.NewPipe.init(
+                com.unshoo.pixelmusic.data.remote.youtube.YoutubeExtractor(newClient)
+            )
+        } catch (_: Exception) {}
+    }
 
     /**
      * LRU cache for resolved YouTube stream URLs.

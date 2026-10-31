@@ -3122,6 +3122,25 @@ constructor(
         }
     }
 
+    val proxyConfigFlow: Flow<com.unshoo.pixelmusic.data.network.ProxyConfig> =
+        dataStore.data.map { preferences ->
+            val enabled = preferences[PreferencesKeys.PROXY_ENABLED] ?: false
+            val typeStr = preferences[PreferencesKeys.PROXY_TYPE] ?: ProxyType.HTTP.name
+            val type = runCatching { ProxyType.valueOf(typeStr) }.getOrDefault(ProxyType.HTTP)
+            val host = preferences[PreferencesKeys.PROXY_HOST] ?: ""
+            val port = preferences[PreferencesKeys.PROXY_PORT] ?: 8080
+            val username = preferences[PreferencesKeys.PROXY_USERNAME] ?: ""
+            val password = preferences[PreferencesKeys.PROXY_PASSWORD] ?: ""
+            com.unshoo.pixelmusic.data.network.ProxyConfig(
+                enabled = enabled,
+                type = type,
+                host = host,
+                port = port,
+                username = username,
+                password = password
+            )
+        }.distinctUntilChanged()
+
     val proxyEnabledFlow: Flow<Boolean> =
         dataStore.data.map { preferences ->
             preferences[PreferencesKeys.PROXY_ENABLED] ?: false

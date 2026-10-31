@@ -299,4 +299,8 @@
     <string name="proxy_save">Save</string>
     <string name="proxy_status_disabled">Disabled</string>
     <string name="proxy_status_format">%1$s · %2$s:%3$d</string>
+    <string name="proxy_test_connection">Test Connection</string>
+    <string name="proxy_testing">Testing proxy connection…</string>
+    <string name="proxy_test_success">Connection successful (%1$d ms)</string>
+    <string name="proxy_test_failed">Connection failed: %1$s</string>
 </resources>

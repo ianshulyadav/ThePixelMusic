@@ -81,6 +81,10 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import com.unshoo.pixelmusic.data.preferences.ProxyType
+import com.unshoo.pixelmusic.presentation.viewmodel.ProxyTestUiState
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.outlined.LightMode
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Person
@@ -2234,7 +2238,10 @@ fun SettingsCategoryScreen(
 
     if (showProxyDialog) {
         AlertDialog(
-            onDismissRequest = { showProxyDialog = false },
+            onDismissRequest = {
+                settingsViewModel.resetProxyTestState()
+                showProxyDialog = false
+            },
             icon = { Icon(Icons.Outlined.Dns, null, tint = MaterialTheme.colorScheme.secondary) },
             title = { Text(stringResource(R.string.proxy_dialog_title)) },
             text = {
@@ -2264,19 +2271,28 @@ fun SettingsCategoryScreen(
                     ) {
                         FilterChip(
                             selected = editProxyType == ProxyType.HTTP,
-                            onClick = { editProxyType = ProxyType.HTTP },
+                            onClick = {
+                                editProxyType = ProxyType.HTTP
+                                settingsViewModel.resetProxyTestState()
+                            },
                             label = { Text("HTTP") }
                         )
                         FilterChip(
                             selected = editProxyType == ProxyType.SOCKS,
-                            onClick = { editProxyType = ProxyType.SOCKS },
+                            onClick = {
+                                editProxyType = ProxyType.SOCKS
+                                settingsViewModel.resetProxyTestState()
+                            },
                             label = { Text("SOCKS5") }
                         )
                     }
                     
                     OutlinedTextField(
                         value = editProxyHost,
-                        onValueChange = { editProxyHost = it },
+                        onValueChange = {
+                            editProxyHost = it
+                            settingsViewModel.resetProxyTestState()
+                        },
                         label = { Text(stringResource(R.string.proxy_host)) },
                         placeholder = { Text("e.g. 127.0.0.1") },
                         singleLine = true,
@@ -2285,7 +2301,10 @@ fun SettingsCategoryScreen(
                     
                     OutlinedTextField(
                         value = editProxyPort,
-                        onValueChange = { editProxyPort = it.filter { ch -> ch.isDigit() } },
+                        onValueChange = {
+                            editProxyPort = it.filter { ch -> ch.isDigit() }
+                            settingsViewModel.resetProxyTestState()
+                        },
                         label = { Text(stringResource(R.string.proxy_port)) },
                         placeholder = { Text("8080") },
                         singleLine = true,
@@ -2295,7 +2314,10 @@ fun SettingsCategoryScreen(
                     
                     OutlinedTextField(
                         value = editProxyUsername,
-                        onValueChange = { editProxyUsername = it },
+                        onValueChange = {
+                            editProxyUsername = it
+                            settingsViewModel.resetProxyTestState()
+                        },
                         label = { Text(stringResource(R.string.proxy_username)) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
@@ -2303,12 +2325,93 @@ fun SettingsCategoryScreen(
                     
                     OutlinedTextField(
                         value = editProxyPassword,
-                        onValueChange = { editProxyPassword = it },
+                        onValueChange = {
+                            editProxyPassword = it
+                            settingsViewModel.resetProxyTestState()
+                        },
                         label = { Text(stringResource(R.string.proxy_password)) },
                         singleLine = true,
                         visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
                         modifier = Modifier.fillMaxWidth()
                     )
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    val isTesting = uiState.proxyTestState is ProxyTestUiState.Testing
+                    val canTest = editProxyHost.isNotBlank() && (editProxyPort.toIntOrNull() ?: 0) > 0 && !isTesting
+
+                    OutlinedButton(
+                        onClick = {
+                            val portInt = editProxyPort.toIntOrNull() ?: 8080
+                            settingsViewModel.testProxyConnection(
+                                type = editProxyType,
+                                host = editProxyHost.trim(),
+                                port = portInt,
+                                username = editProxyUsername.trim(),
+                                password = editProxyPassword
+                            )
+                        },
+                        enabled = canTest,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        if (isTesting) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(stringResource(R.string.proxy_testing))
+                        } else {
+                            Text(stringResource(R.string.proxy_test_connection))
+                        }
+                    }
+
+                    when (val state = uiState.proxyTestState) {
+                        is ProxyTestUiState.Success -> {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.CheckCircle,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = stringResource(R.string.proxy_test_success, state.latencyMs),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                        is ProxyTestUiState.Error -> {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.Top,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.ErrorOutline,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = stringResource(R.string.proxy_test_failed, state.message),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                            }
+                        }
+                        else -> {}
+                    }
                 }
             },
             confirmButton = {
@@ -2323,6 +2426,7 @@ fun SettingsCategoryScreen(
                             username = editProxyUsername.trim(),
                             password = editProxyPassword
                         )
+                        settingsViewModel.resetProxyTestState()
                         showProxyDialog = false
                     }
                 ) {
@@ -2330,7 +2434,10 @@ fun SettingsCategoryScreen(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showProxyDialog = false }) {
+                TextButton(onClick = {
+                    settingsViewModel.resetProxyTestState()
+                    showProxyDialog = false
+                }) {
                     Text(stringResource(R.string.cancel))
                 }
             }

@@ -196,8 +196,16 @@ data class SettingsUiState(
     val proxyPort: Int = 8080,
     val proxyUsername: String = "",
     val proxyPassword: String = "",
-    val isLosslessAvailable: Boolean = false
+    val isLosslessAvailable: Boolean = false,
+    val proxyTestState: ProxyTestUiState = ProxyTestUiState.Idle
 )
+
+sealed class ProxyTestUiState {
+    object Idle : ProxyTestUiState()
+    object Testing : ProxyTestUiState()
+    data class Success(val latencyMs: Long) : ProxyTestUiState()
+    data class Error(val message: String) : ProxyTestUiState()
+}
 
 data class FailedSongInfo(
     val id: String,
@@ -1212,6 +1220,39 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             userPreferencesRepository.updateProxySettings(enabled, type, host, port, username, password)
         }
+    }
+
+    fun testProxyConnection(
+        type: ProxyType,
+        host: String,
+        port: Int,
+        username: String = "",
+        password: String = ""
+    ) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(proxyTestState = ProxyTestUiState.Testing) }
+            val result = com.unshoo.pixelmusic.data.network.AppProxyManager.testProxyConnection(
+                type = type,
+                host = host,
+                port = port,
+                username = username,
+                password = password
+            )
+            _uiState.update {
+                it.copy(
+                    proxyTestState = when (result) {
+                        is com.unshoo.pixelmusic.data.network.ProxyTestResult.Success ->
+                            ProxyTestUiState.Success(result.latencyMs)
+                        is com.unshoo.pixelmusic.data.network.ProxyTestResult.Failure ->
+                            ProxyTestUiState.Error(result.errorMessage)
+                    }
+                )
+            }
+        }
+    }
+
+    fun resetProxyTestState() {
+        _uiState.update { it.copy(proxyTestState = ProxyTestUiState.Idle) }
     }
 
     fun onPlayerStreamClientChange(client: PlayerStreamClient) {
