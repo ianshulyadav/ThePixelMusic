@@ -44,8 +44,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
@@ -262,12 +260,25 @@ fun LyricsSheet(
     autoscrollAnimationSpec: AnimationSpec<Float>? = null // null = auto-detect from preference
 ) {
     // ─── Enter / Exit animation state ────────────────────────────────────────
-    // 0f = fully visible, 1f = dismissed.
-    var backProgress by remember { mutableFloatStateOf(0f) }
+    // Mirrors the player-sheet pattern: a plain Float in state drives graphicsLayer
+    // at draw-phase (no recomposition per frame). 0f = fully visible, 1f = dismissed.
+    var backProgress by remember { mutableFloatStateOf(1f) }
 
     // Draw-phase lambda provider — read only inside graphicsLayer so layout is never
     // re-triggered during the gesture (same technique as SheetVisualState).
     val backProgressProvider = rememberUpdatedState(backProgress)
+
+    // Enter animation: slide up from +6 % height + fade in.
+    LaunchedEffect(Unit) {
+        val anim = Animatable(1f)
+        anim.animateTo(
+            targetValue = 0f,
+            animationSpec = spring(
+                stiffness = Spring.StiffnessMediumLow,
+                dampingRatio = Spring.DampingRatioLowBouncy
+            )
+        ) { backProgress = value }
+    }
 
     // Predictive-back (Android 13+) or plain back on older devices.
     LyricsPredictiveBackHandler(
@@ -456,7 +467,6 @@ fun LyricsSheet(
     var immersiveMode by remember { mutableStateOf(false) }
     var lastInteractionTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var showMoreSheet by remember { mutableStateOf(false) }
-    @Suppress("DEPRECATION")
     val moreSheetState = rememberModalBottomSheetState(
         skipPartiallyExpanded = true
     )
@@ -505,13 +515,11 @@ fun LyricsSheet(
         animationSpec = spring(stiffness = Spring.StiffnessLow),
         label = "fontScale"
     )
-
-    val scaledTextStyle = remember(lyricsTextStyle, fontScale) {
-        lyricsTextStyle.copy(
-            fontSize = lyricsTextStyle.fontSize * fontScale,
-            lineHeight = lyricsTextStyle.lineHeight * fontScale
-        )
-    }
+    
+    val scaledTextStyle = lyricsTextStyle.copy(
+        fontSize = lyricsTextStyle.fontSize * fontScale,
+        lineHeight = lyricsTextStyle.lineHeight * fontScale
+    )
 
     fun resetImmersiveTimer() {
         lastInteractionTime = System.currentTimeMillis()
@@ -627,6 +635,7 @@ fun LyricsSheet(
                 scaleY = scale
                 translationY = lerp(0f, size.height * 0.08f, p)
             }
+            .clip(RoundedCornerShape(32.dp))
             .pointerInput(Unit) {
                 detectDragGestures(
                     onDragStart = {
@@ -674,11 +683,10 @@ fun LyricsSheet(
                     }
                 )
             },
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         containerColor = if (isLyricsBlurActive) Color.Transparent else containerColor,
         contentColor = contentColor,
         // Removed TopBar and FAB
-    ) { _ ->
+    ) { paddingValues ->
         Box(modifier = Modifier.fillMaxSize()) {
             if (isLyricsBlurActive) {
                 FullPlayerAtmosphereBackground(
@@ -691,7 +699,7 @@ fun LyricsSheet(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .statusBarsPadding()
+                    .padding(top = paddingValues.calculateTopPadding())
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null
@@ -864,7 +872,7 @@ fun LyricsSheet(
                     }
                 }
                 
-                // Top Gradient for fade (solid mode only)
+                // Top Gradient for fade
                 if (!isLyricsBlurActive) {
                     Box(
                         modifier = Modifier
@@ -879,7 +887,7 @@ fun LyricsSheet(
                     )
                 }
 
-                // Bottom Gradient for fade (solid mode only)
+                // Bottom Gradient for fade
                 if (!isLyricsBlurActive) {
                     Box(
                         modifier = Modifier
@@ -905,8 +913,7 @@ fun LyricsSheet(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(if (isLyricsBlurActive) Color.Transparent else containerColor)
-                        .navigationBarsPadding()
-                        .padding(bottom = 12.dp, end = 16.dp, start = 16.dp)
+                        .padding(bottom = paddingValues.calculateBottomPadding() + 10.dp, end = 16.dp, start = 16.dp)
                         .pointerInput(Unit) {
                             awaitPointerEventScope {
                                 while (true) {
@@ -1115,7 +1122,6 @@ fun LyricsSheet(
             exit = fadeOut() + slideOutVertically { it / 2 },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
                 .padding(bottom = 32.dp)
         ) {
             FilledIconButton(
@@ -1251,7 +1257,10 @@ fun SyncedLyricsList(
     var hasAlignedInitialLine by remember(lines) { mutableStateOf(false) }
     var lastAutoScrolledLineIndex by remember(lines) { mutableIntStateOf(-1) }
 
-    Box(modifier = modifier) {
+    BoxWithConstraints(modifier = modifier) {
+        val metrics = remember(maxHeight, highlightZoneFraction, highlightOffsetDp) {
+            calculateHighlightMetrics(maxHeight, highlightZoneFraction, highlightOffsetDp)
+        }
         val highlightOffsetPx = remember(highlightOffsetDp, density) { with(density) { highlightOffsetDp.toPx() } }
 
         val snapperLayoutInfo = rememberLazyListSnapperLayoutInfo(
@@ -1263,7 +1272,7 @@ fun SyncedLyricsList(
         )
         val flingBehavior = rememberSnapperFlingBehavior(layoutInfo = snapperLayoutInfo)
 
-        LaunchedEffect(currentLineIndex, lines.size, isPreviewSeeking) {
+        LaunchedEffect(currentLineIndex, lines.size, metrics, isPreviewSeeking) {
             if (lines.isEmpty()) return@LaunchedEffect
             if (currentLineIndex !in lines.indices) return@LaunchedEffect
             if (listState.layoutInfo.totalItemsCount == 0) return@LaunchedEffect
