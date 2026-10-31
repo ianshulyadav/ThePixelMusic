@@ -48,6 +48,13 @@ object AppProxyManager {
 
     private val currentConfigRef = AtomicReference<ProxyConfig>(ProxyConfig())
 
+    val currentConfig: ProxyConfig
+        get() = currentConfigRef.get()
+
+    fun clearProxy() {
+        applyProxy(ProxyConfig(enabled = false))
+    }
+
     @Volatile
     private var isJvmAuthenticatorInstalled = false
 
@@ -165,7 +172,8 @@ object AppProxyManager {
         host: String,
         port: Int,
         username: String = "",
-        password: String = ""
+        password: String = "",
+        testUrl: String = "https://music.youtube.com/generate_204"
     ): ProxyTestResult = withContext(Dispatchers.IO) {
         if (host.isBlank() || port !in 1..65535) {
             return@withContext ProxyTestResult.Failure("Invalid host or port")
@@ -200,8 +208,7 @@ object AppProxyManager {
         val testClient = clientBuilder.build()
         val startTime = System.currentTimeMillis()
 
-        // Test with YouTube Music 204 endpoint and standard google endpoint
-        val testUrl = "https://music.youtube.com/generate_204"
+        // Test with YouTube Music 204 endpoint or provided testUrl
         val request = Request.Builder()
             .url(testUrl)
             .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
