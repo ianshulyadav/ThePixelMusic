@@ -96,9 +96,9 @@ internal fun MiniPlayerContentInternal(
     val artShape = remember(cornerRadiusAlb) { RoundedCornerShape(cornerRadiusAlb) }
 
     // Hero Play/Pause button shape morphing:
-    // Morphs between squircle (14dp) when playing and circle (22dp) when paused.
+    // Morphs between squircle (12dp) when playing and circle (18dp) when paused for 36dp button.
     val playPauseCornerRadius by animateDpAsState(
-        targetValue = if (isPlaying) 14.dp else 22.dp,
+        targetValue = if (isPlaying) 12.dp else 18.dp,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioNoBouncy,
             stiffness = Spring.StiffnessMediumLow
@@ -118,12 +118,12 @@ internal fun MiniPlayerContentInternal(
         Row(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
+                .padding(start = 10.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             val albumArtModel = song.albumArtUriString?.takeIf { it.isNotBlank() }
             Box(
-                modifier = Modifier.size(48.dp),
+                modifier = Modifier.size(44.dp),
                 contentAlignment = Alignment.Center
             ) {
                 key(song.id) {
@@ -131,7 +131,7 @@ internal fun MiniPlayerContentInternal(
                         model = albumArtModel,
                         contentDescription = "Carátula de ${song.title}",
                         shape = artShape,
-                        targetSize = SmartImageIntermediateTargetSize,
+                        targetSize = Size(150, 150),
                         modifier = Modifier
                             .fillMaxSize()
                             .clip(artShape),
@@ -221,7 +221,7 @@ internal fun MiniPlayerContentInternal(
                 // Primary Hero Play/Pause Button with morphing shape
                 Box(
                     modifier = Modifier
-                        .size(44.dp)
+                        .size(36.dp)
                         .clip(playPauseShape)
                         .background(LocalMaterialTheme.current.primary)
                         .clickable(
@@ -236,7 +236,7 @@ internal fun MiniPlayerContentInternal(
                 ) {
                     if ((isPreparingPlayback || isBuffering) && !isPlaying) {
                         CircularWavyProgressIndicator(
-                            modifier = Modifier.size(22.dp),
+                            modifier = Modifier.size(20.dp),
                             color = LocalMaterialTheme.current.onPrimary
                         )
                     } else {
@@ -244,16 +244,15 @@ internal fun MiniPlayerContentInternal(
                             imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                             contentDescription = if (isPlaying) "Pausar" else "Reproducir",
                             tint = LocalMaterialTheme.current.onPrimary,
-                            modifier = Modifier.size(24.dp)
+                            modifier = Modifier.size(22.dp)
                         )
                     }
                 }
 
                 // Next Button
-                val nextButtonSize = if (showPreviousButton) 36.dp else 40.dp
                 Box(
                     modifier = Modifier
-                        .size(nextButtonSize)
+                        .size(36.dp)
                         .clip(CircleShape)
                         .background(LocalMaterialTheme.current.onPrimaryContainer.copy(alpha = 0.08f))
                         .clickable(
