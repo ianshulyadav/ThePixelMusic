@@ -198,6 +198,26 @@
     <string name="cd_contributor_avatar">Avatar of %1$s</string>
     <string name="cd_contributor_icon">Icon of %1$s</string>
 
+    <!-- Licenses & attribution -->
+    <string name="about_licenses_title">Licenses &amp; attribution</string>
+    <string name="about_licenses_subtitle">PixelPlayerOSS upstream base, libraries &amp; fonts</string>
+    <string name="about_licenses_sheet_subtitle">Derived from PixelPlayerOSS. Open-source software, fonts, and data.</string>
+    <string name="licenses_tab_all">All</string>
+    <string name="licenses_tab_upstream">Upstream</string>
+    <string name="licenses_tab_libraries">Libraries</string>
+    <string name="licenses_tab_fonts">Fonts</string>
+    <string name="licenses_tab_data">Data</string>
+    <string name="licenses_tab_raw_notice">Raw notice</string>
+    <string name="licenses_search_placeholder">Search libraries or licenses…</string>
+    <string name="licenses_cd_clear_search">Clear search</string>
+    <string name="licenses_empty_results">No licenses match \"%1$s\"</string>
+    <string name="licenses_detail_section">Section</string>
+    <string name="licenses_detail_source">Source</string>
+    <string name="licenses_detail_license">License</string>
+    <string name="licenses_toast_copied">License text copied to clipboard</string>
+    <string name="licenses_cd_close">Close</string>
+    <string name="licenses_cd_copy">Copy license text</string>
+
     <!-- Streaming / cloud dashboards -->
     <string name="screen_subsonic_dashboard_title">Subsonic</string>
     <string name="dash_playlists_synced_count">%1$d playlists synced</string>

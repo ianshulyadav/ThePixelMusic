@@ -1,6 +1,20 @@
 # Third-Party Notices
 
-This project includes portions derived from PixelPlayer.
+This project is an independent open-source fork based on PixelPlayerOSS, with lossless audio streaming derived from ArchiveTune and origins in PixelPlayer.
+
+## PixelPlayerOSS (upstream base)
+
+Project: PixelPlayerOSS  
+Repository: https://github.com/PixelPlayerHQ/PixelPlayerOSS  
+Original author / maintainers: Theo Vilardo and Duhan Yağmur Delikkulak (lostf1sh)  
+License: GNU General Public License v3.0 (GPL-3.0)
+
+PixelMusic is derived from and builds upon the open-source PixelPlayerOSS project under GPL-3.0.
+In compliance with GPL-3.0, the source code and all modifications remain free and open source.
+
+-------------------------------------------------------------------------------
+
+## PixelPlayer (original core)
 
 Project: PixelPlayer  
 Repository: https://github.com/theovilardo/PixelPlayer  
@@ -41,7 +55,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
 
 -------------------------------------------------------------------------------
 

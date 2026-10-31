@@ -56,6 +56,7 @@ sealed class Screen(val route: String) {
     }
 
     object About : Screen("about")
+    object Licenses : Screen("licenses")
     object EasterEgg : Screen("easter_egg")
     object BlurSettings : Screen("blur_settings")
 

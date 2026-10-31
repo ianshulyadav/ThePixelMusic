@@ -47,6 +47,7 @@ import com.unshoo.pixelmusic.presentation.screens.ArtistSettingsScreen
 import com.unshoo.pixelmusic.presentation.screens.DailyMixScreen
 import com.unshoo.pixelmusic.presentation.screens.EditTransitionScreen
 import com.unshoo.pixelmusic.presentation.screens.EasterEggScreen
+import com.unshoo.pixelmusic.presentation.screens.LicensesScreen
 import com.unshoo.pixelmusic.presentation.screens.ExperimentalSettingsScreen
 import com.unshoo.pixelmusic.presentation.screens.HomeScreen
 import com.unshoo.pixelmusic.presentation.screens.ExploreScreen
@@ -611,6 +612,19 @@ fun AppNavigation(
                     AboutScreen(
                         navController = navController,
                         viewModel = playerViewModel,
+                        onNavigationIconClick = { navController.popBackStackSafely() }
+                    )
+                }
+            }
+            composable(
+                Screen.Licenses.route,
+                enterTransition = { enterTransition() },
+                exitTransition = { exitTransition() },
+                popEnterTransition = { popEnterTransition() },
+                popExitTransition = { popExitTransition() },
+            ) {
+                ScreenWrapper(navController = navController, playerViewModel = playerViewModel) {
+                    LicensesScreen(
                         onNavigationIconClick = { navController.popBackStackSafely() }
                     )
                 }
