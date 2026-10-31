@@ -3055,6 +3055,10 @@ class MusicService : MediaLibraryService() {
             snapshotItem.mediaId.startsWith("-15") -> "youtube://${snapshotItem.mediaId}"
             snapshotItem.uri.startsWith("youtube://") -> snapshotItem.uri
             snapshotItem.uri.isNotBlank() && !snapshotItem.uri.startsWith("http") -> snapshotItem.uri
+            snapshotItem.mediaId.isNotBlank() && (snapshotItem.uri.contains("googlevideo.com") || snapshotItem.uri.contains("youtube.com")) -> {
+                val cleanId = snapshotItem.mediaId.removePrefix("youtube_")
+                "youtube://$cleanId"
+            }
             snapshotItem.uri.isNotBlank() -> snapshotItem.uri
             else -> snapshotItem.mediaId
         }
