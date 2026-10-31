@@ -7,9 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.11] - 2026-10-31
+
 ### ✨ What's New
 - **Custom Proxy Support:** Full HTTP & SOCKS5 proxy with authentication and connection testing in Settings.
 - **Edge-to-Edge Lyrics Blur:** Seamless Gaussian blur covering the full screen and transparent status bar.
+- **Licenses & Attribution:** Complete open-source licenses, attribution viewer, and third-party notices.
 
 ### ⚡ Fixes & Improvements
 - **Instant Resume:** Refreshes expired audio links after pauses to eliminate playback stalls.

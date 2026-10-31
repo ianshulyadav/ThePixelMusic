@@ -69,7 +69,7 @@ jobs:
           
           # Also check the target release repository tags using gh api
           EXISTS_REMOTE="false"
-          if gh api repos/ianshulyadav/PixelMusicApp/releases/tags/"$TAG" >/dev/null 2>&1; then
+          if gh api repos/ianshulyadav/PixelMusic/releases/tags/"$TAG" >/dev/null 2>&1; then
             EXISTS_REMOTE="true"
           fi
           
@@ -124,7 +124,7 @@ jobs:
           CURR_SHA: ${{ github.sha }}
         run: python3 .github/scripts/generate_changelog.py
 
-      # ── GitHub Release — Upload to PUBLIC repo ianshulyadav/PixelMusicApp ───
+      # ── GitHub Release — Upload to PUBLIC repo ianshulyadav/PixelMusic ───
       - name: Create GitHub Release in Public Repo
         if: >
           success() &&
@@ -132,7 +132,7 @@ jobs:
           (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         uses: softprops/action-gh-release@v2
         with:
-          repository: ianshulyadav/PixelMusicApp
+          repository: ianshulyadav/PixelMusic
           token: ${{ secrets.RELEASE_REPO_TOKEN || secrets.GITHUB_TOKEN }}
           tag_name: v${{ steps.version.outputs.version_name }}
           name: "PixelMusic v${{ steps.version.outputs.version_name }}"
