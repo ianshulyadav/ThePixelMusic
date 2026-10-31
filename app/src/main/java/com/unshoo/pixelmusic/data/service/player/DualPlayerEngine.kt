@@ -102,7 +102,7 @@ class DualPlayerEngine @Inject constructor(
     private val userPreferencesRepository: UserPreferencesRepository
 ) {
     private companion object {
-        private const val LOSSLESS_STALL_FALLBACK_TIMEOUT_MS = 6_000L
+        private const val LOSSLESS_STALL_FALLBACK_TIMEOUT_MS = 4_000L
         private const val AUDIO_OFFLOAD_BUFFERING_FALLBACK_MS = 4_000L
         private const val MAX_AUXILIARY_TIMELINE_ITEMS = 200
         private const val STREAM_RESOLVE_TIMEOUT_MS = 8_000L
@@ -1041,7 +1041,7 @@ class DualPlayerEngine @Inject constructor(
 
         val watchedMediaId = currentItem.mediaId
         losslessStallFallbackJob = scope.launch {
-            delay(LOSSLESS_STALL_FALLBACK_TIMEOUT_MS) // 6 seconds of stall on lossless triggers graceful YouTube fallback
+            delay(LOSSLESS_STALL_FALLBACK_TIMEOUT_MS) // 4 seconds of stall on lossless triggers graceful YouTube fallback
             if (transitionRunning || player !== playerA) return@launch
             if (player.currentMediaItem?.mediaId != watchedMediaId) return@launch
             if (player.playbackState != Player.STATE_BUFFERING || !player.playWhenReady || player.isPlaying) return@launch
