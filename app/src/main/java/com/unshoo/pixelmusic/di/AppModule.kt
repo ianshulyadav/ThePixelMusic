@@ -548,9 +548,18 @@ object AppModule {
     @Provides
     @Singleton
     fun provideRetrofit(@FastOkHttpClient okHttpClient: OkHttpClient): Retrofit {
+        val lrclibClient = okHttpClient.newBuilder()
+            .addInterceptor { chain ->
+                val request = chain.request().newBuilder()
+                    .header("Lrclib-App-Id", "IG5ZfRuBNoh4cPj5SwIpbSgESiSS9YZpDJNlB8FP98Q")
+                    .build()
+                chain.proceed(request)
+            }
+            .build()
+
         return Retrofit.Builder()
             .baseUrl("https://lrclib.net/")
-            .client(okHttpClient)
+            .client(lrclibClient)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
     }
