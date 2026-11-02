@@ -288,7 +288,7 @@
     <string name="settings_content_customization_section">Personnalisation du contenu</string>
     <string name="settings_filter_cover_lofi_title">Masquer les reprises et morceaux lo-fi</string>
     <string name="settings_filter_cover_lofi_desc">Masquer les reprises et morceaux lo-fi des suggestions et de la file.</string>
-    <string name="settings_lossless_audio_sources_title">Sources audio sans perte (ArchiveTune)</string>
+    <string name="settings_lossless_audio_sources_title">Sources audio sans perte</string>
     <string name="settings_lossless_streaming_sources_title">Sources de streaming sans perte</string>
     <string name="settings_lossless_streaming_sources_desc">Tidal, Qobuz, Deezer, Apple Music via le pool Archive et comptes</string>
     <string name="settings_options_section">Options</string>

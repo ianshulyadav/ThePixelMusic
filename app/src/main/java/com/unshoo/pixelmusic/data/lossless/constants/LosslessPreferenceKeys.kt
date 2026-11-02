@@ -189,8 +189,17 @@ fun DeezerAudioQuality.toFormatName(): String =
  */
 // ── Monochrome (FLAC) ──────────────────────────────────────────────────────────────────────
 val MonochromeEnabledKey = booleanPreferencesKey("monochromeEnabled")
+val MonochromeInstancesKey = stringPreferencesKey("monochromeInstances")
+
+// ── Addons & Unified Fallback Order ────────────────────────────────────────────────────────
+val AddonsEnabledKey = booleanPreferencesKey("addonsEnabled")
+val AddonsFastConcurrentKey = booleanPreferencesKey("addonsFastConcurrent")
+val AddonsTimeoutMsKey = androidx.datastore.preferences.core.longPreferencesKey("addonsTimeoutMs")
+/** Comma-separated unified fallback IDs (`addon:<id>`, `builtin:MONOCHROME`, ..., `builtin:YOUTUBE`). */
+val UnifiedSourceOrderKey = stringPreferencesKey("unifiedSourceOrder")
 
 enum class AudioSourceType {
+    ADDON,
     MONOCHROME,
     TIDAL,
     QOBUZ,

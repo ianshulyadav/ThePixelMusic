@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_category_addons_title">Addons</string>
+    <string name="settings_category_addons_subtitle">HTTP audio addons, JS modules, .arch packages &amp; unified fallback chain</string>
+    <string name="settings_addons_section_title">Audio Addons &amp; Modules</string>
+    <string name="settings_addons_row_title">Addons &amp; Source Chain</string>
+    <string name="settings_addons_row_desc">Install HTTP addons, JS modules, or .arch packages and reorder the unified fallback chain</string>
+</resources>

@@ -23,6 +23,7 @@ import android.os.SystemClock
 import android.provider.Settings
 import android.text.format.Formatter
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
@@ -384,7 +385,15 @@ fun SettingsCategoryScreen(
     val coroutineScope = rememberCoroutineScope()
     val lazyListState = remember(categoryId) { LazyListState() }
     
-    val categoryTitle = stringResource(category.titleRes)
+    var customCategoryTitle by remember(categoryId) { mutableStateOf<String?>(null) }
+    var customCategoryOnBack by remember(categoryId) { mutableStateOf<(() -> Unit)?>(null) }
+    var scrollResetTrigger by remember(categoryId) { mutableStateOf(0) }
+
+    BackHandler(enabled = customCategoryOnBack != null) {
+        customCategoryOnBack?.invoke()
+    }
+
+    val categoryTitle = customCategoryTitle ?: stringResource(category.titleRes)
     val isLongTitle = categoryTitle.length > 13
     
     val statusBarHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
@@ -405,6 +414,18 @@ fun SettingsCategoryScreen(
                         ((topBarHeight.value - minTopBarHeightPx) /
                                         (maxTopBarHeightPx - minTopBarHeightPx))
                                 .coerceIn(0f, 1f)
+    }
+
+    LaunchedEffect(customCategoryTitle) {
+        topBarHeight.snapTo(maxTopBarHeightPx)
+        lazyListState.scrollToItem(0)
+    }
+
+    LaunchedEffect(scrollResetTrigger) {
+        if (scrollResetTrigger > 0) {
+            topBarHeight.snapTo(maxTopBarHeightPx)
+            lazyListState.scrollToItem(0)
+        }
     }
 
     val nestedScrollConnection = remember {
@@ -2134,6 +2155,12 @@ fun SettingsCategoryScreen(
                         SettingsCategory.LOSSLESS_SOURCES -> {
                             com.unshoo.pixelmusic.presentation.screens.lossless.LosslessSourcesSettings(
                                 navController = navController,
+                                onSubNavChange = { onSubBack ->
+                                    customCategoryOnBack = onSubBack
+                                },
+                                onResetScroll = {
+                                    scrollResetTrigger++
+                                }
                             )
                         }
                         SettingsCategory.STORAGE -> {
@@ -2154,9 +2181,10 @@ fun SettingsCategoryScreen(
         CollapsibleCommonTopBar(
             collapseFraction = collapseFraction,
             headerHeight = currentTopBarHeightDp,
-            onBackClick = onBackClick,
+            onBackClick = customCategoryOnBack ?: onBackClick,
             title = categoryTitle,
-            maxLines = titleMaxLines
+            maxLines = titleMaxLines,
+            containerColor = if (collapseFraction > 0.05f) MaterialTheme.colorScheme.surfaceContainer else Color.Transparent
         )
 
 

@@ -281,7 +281,7 @@
     <string name="settings_content_customization_section">Personalización del contenido</string>
     <string name="settings_filter_cover_lofi_title">Ocultar versiones (covers) y pistas lo-fi</string>
     <string name="settings_filter_cover_lofi_desc">Ocultar versiones y pistas lo-fi de recomendaciones y colas.</string>
-    <string name="settings_lossless_audio_sources_title">Fuentes de audio sin pérdida (ArchiveTune)</string>
+    <string name="settings_lossless_audio_sources_title">Fuentes de audio sin pérdida</string>
     <string name="settings_lossless_streaming_sources_title">Fuentes de streaming sin pérdida</string>
     <string name="settings_lossless_streaming_sources_desc">Tidal, Qobuz, Deezer, Apple Music vía pool y cuentas de Archive</string>
     <string name="settings_options_section">Opciones</string>

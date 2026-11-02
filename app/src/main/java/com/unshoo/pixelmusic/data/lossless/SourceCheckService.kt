@@ -63,6 +63,11 @@ object SourceCheckService {
         val result =
             withContext(Dispatchers.IO) {
                 when (source) {
+                    AudioSourceType.ADDON ->
+                        SourceCheckResult(
+                            status = SourceCheckStatus.READY,
+                            summary = "Managed individually in Developer Options -> Addons.",
+                        )
                     AudioSourceType.MONOCHROME -> checkMonochrome()
                     AudioSourceType.TIDAL -> checkTidal(context)
                     AudioSourceType.QOBUZ -> checkQobuz(context)
@@ -79,10 +84,11 @@ object SourceCheckService {
                             status = SourceCheckStatus.UNSUPPORTED,
                             summary = "The Qobuz community backup relay was not ported into PixelMusic.",
                         )
-                    AudioSourceType.JIOSAAVN, AudioSourceType.YOUTUBE ->
+                    AudioSourceType.JIOSAAVN -> checkSaavn()
+                    AudioSourceType.YOUTUBE ->
                         SourceCheckResult(
                             status = SourceCheckStatus.READY,
-                            summary = "Handled by PixelMusic's built-in streaming paths.",
+                            summary = "YouTube stream resolver active (fallback destination).",
                         )
                 }
             }
@@ -347,34 +353,59 @@ object SourceCheckService {
         }
     }
 
-    private fun checkMonochrome(): SourceCheckResult {
-        return try {
-            val req = okhttp3.Request.Builder()
-                .url("https://tracks.monochrome.st/search/tracks?q=test&limit=1")
-                .header(
-                    "User-Agent",
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+    private suspend fun checkSaavn(): SourceCheckResult {
+        val start = System.currentTimeMillis()
+        return runCatching {
+            val results = com.unshoo.pixelmusic.data.remote.saavn.SaavnService.searchSongs("tum hi ho")
+            val latency = System.currentTimeMillis() - start
+            if (results.isSuccess && results.getOrNull()?.isNotEmpty() == true) {
+                val song = results.getOrNull()!!.first()
+                SourceCheckResult(
+                    status = SourceCheckStatus.READY,
+                    summary = "JioSaavn catalog answered in ${latency} ms · Ready (matched '${song.name}').",
                 )
-                .build()
-            val resp = LosslessStreamResolver.httpClient.newCall(req).execute()
-            if (resp.isSuccessful) {
+            } else {
+                SourceCheckResult(
+                    status = SourceCheckStatus.DEGRADED,
+                    summary = "JioSaavn answered in ${latency} ms but returned empty results.",
+                )
+            }
+        }.getOrElse { e ->
+            SourceCheckResult(
+                status = SourceCheckStatus.UNREACHABLE,
+                summary = "Failed to connect to JioSaavn API: ${e.message}",
+            )
+        }
+    }
+
+    private fun checkMonochrome(): SourceCheckResult {
+        val start = System.currentTimeMillis()
+        return try {
+            val stream = com.unshoo.pixelmusic.data.addons.MonochromeInstancePool.resolve(
+                httpClient = LosslessStreamResolver.httpClient,
+                title = "Get Lucky",
+                artists = listOf("Daft Punk"),
+                album = null,
+                durationMs = null,
+            )
+            val latency = System.currentTimeMillis() - start
+            if (stream != null) {
                 LosslessStreamResolver.markMonochromeUp()
                 SourceCheckResult(
                     status = SourceCheckStatus.READY,
-                    summary = "Monochrome FLAC endpoint answered (HTTP ${resp.code}). Free Lossless FLAC streaming active.",
+                    summary = "Monochrome pool answered in ${latency} ms · Ready [${stream.label}].",
                 )
             } else {
-                if (resp.code in 500..599) LosslessStreamResolver.markMonochromeDown()
                 SourceCheckResult(
                     status = SourceCheckStatus.DEGRADED,
-                    summary = "Monochrome returned HTTP ${resp.code}.",
+                    summary = "Monochrome instances reached (${latency} ms) but returned no stream.",
                 )
             }
         } catch (e: Exception) {
             LosslessStreamResolver.markMonochromeDown()
             SourceCheckResult(
                 status = SourceCheckStatus.UNREACHABLE,
-                summary = "Failed to connect to Monochrome: ${e.message}",
+                summary = "Failed to connect to Monochrome pool: ${e.message}",
             )
         }
     }

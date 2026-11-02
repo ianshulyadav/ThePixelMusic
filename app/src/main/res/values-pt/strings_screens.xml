@@ -269,7 +269,7 @@ Mix</string>
     <string name="settings_content_customization_section">Personalização de Conteúdo</string>
     <string name="settings_filter_cover_lofi_title">Ocultar covers e faixas lo-fi</string>
     <string name="settings_filter_cover_lofi_desc">Ocultar covers e faixas lo-fi de recomendações e filas.</string>
-    <string name="settings_lossless_audio_sources_title">Fontes de Áudio Lossless (ArchiveTune)</string>
+    <string name="settings_lossless_audio_sources_title">Fontes de Áudio Lossless</string>
     <string name="settings_lossless_streaming_sources_title">Fontes de Streaming Lossless</string>
     <string name="settings_lossless_streaming_sources_desc">Tidal, Qobuz, Deezer, Apple Music via pool e contas do Archive</string>
     <string name="settings_options_section">Opções</string>

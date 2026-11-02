@@ -162,6 +162,7 @@ import com.unshoo.pixelmusic.presentation.components.subcomps.EnhancedSongListIt
 import androidx.compose.ui.res.stringResource
 import com.unshoo.pixelmusic.presentation.screens.search.components.MoodGenreCatalog
 import com.unshoo.pixelmusic.presentation.screens.search.components.MoodGenreItem
+import com.unshoo.pixelmusic.presentation.screens.search.components.NullableMoodGenreItemSaver
 import com.unshoo.pixelmusic.presentation.screens.search.components.MoodGenreContentView
 import com.unshoo.pixelmusic.presentation.screens.search.components.MoodsAndGenresBrowseView
 import com.unshoo.pixelmusic.presentation.screens.search.components.BrowseDiscoverSection
@@ -191,9 +192,9 @@ fun SearchScreen(
     navController: NavHostController,
     onSearchBarActiveChange: (Boolean) -> Unit = {}
 ) {
-    var searchQuery by remember { mutableStateOf("") }
-    var selectedMoodGenre by remember { mutableStateOf<MoodGenreItem?>(null) }
-    var lastSelectedMoodGenre by remember { mutableStateOf<MoodGenreItem?>(null) }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    var selectedMoodGenre by rememberSaveable(stateSaver = NullableMoodGenreItemSaver) { mutableStateOf<MoodGenreItem?>(null) }
+    var lastSelectedMoodGenre by rememberSaveable(stateSaver = NullableMoodGenreItemSaver) { mutableStateOf<MoodGenreItem?>(null) }
     var isBrowsingAllMoodsAndGenres by rememberSaveable { mutableStateOf(false) }
     if (selectedMoodGenre != null) {
         lastSelectedMoodGenre = selectedMoodGenre
@@ -288,16 +289,9 @@ fun SearchScreen(
     val browseListState = rememberLazyListState()
     val searchListState = rememberLazyListState()
 
-    // On every visit to the search screen, clear the query + results so we
-    // always land on the clean Browse & Discover page.
+    // Initialize search history on initial entry
     LaunchedEffect(Unit) {
-        onSearchBarActiveChange(false)
-        searchQuery = ""
-        selectedMoodGenre = null
-        isBrowsingAllMoodsAndGenres = false
-        playerViewModel.performSearch("")
         playerViewModel.loadSearchHistory()
-        browseListState.scrollToItem(0, 0)
     }
 
     LaunchedEffect(playerViewModel, keyboardController) {

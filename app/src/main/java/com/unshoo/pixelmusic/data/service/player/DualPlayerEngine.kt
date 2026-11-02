@@ -655,7 +655,15 @@ class DualPlayerEngine @Inject constructor(
     fun getCachedResolvedMediaItem(mediaItem: MediaItem): MediaItem? {
         val uri = mediaItem.localConfiguration?.uri ?: return mediaItem
         val resolved = getCachedResolvedUri(uri) ?: return null
-        return mediaItem.buildUpon().setUri(resolved).build()
+        val builder = mediaItem.buildUpon().setUri(resolved)
+        val cleanId = mediaItem.mediaId.removePrefix("youtube_").removePrefix("monochrome_")
+        val containerMime = LosslessStreamResolver.resultFor(cleanId)?.containerMimeType
+            ?: com.unshoo.pixelmusic.data.addons.AddonStreamRegistry.metaFor(resolved.toString())
+                ?.let { com.unshoo.pixelmusic.data.addons.AddonStreamRegistry.containerMimeOf(it.transport) }
+        if (containerMime != null) {
+            builder.setMimeType(containerMime)
+        }
+        return builder.build()
     }
 
     /**
@@ -1081,8 +1089,13 @@ class DualPlayerEngine @Inject constructor(
             return
         }
 
-        Timber.tag("DualPlayerEngine").w("Source Failover: switching %s from Lossless to YouTube (%s)", videoId, reason)
-        LosslessStreamResolver.markFailedForTrack(videoId)
+        val shouldStepDown = LosslessStreamResolver.markCurrentSourceFailedForTrack(videoId, reason)
+        Timber.tag("DualPlayerEngine").w(
+            "Source Failover: %s (%s) -> stepDown=%s",
+            videoId,
+            reason,
+            shouldStepDown,
+        )
         invalidateResolvedUri("youtube://$videoId")
         invalidateResolvedUri(rawUri)
         com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.invalidateStreamCache(videoId)
@@ -1099,17 +1112,28 @@ class DualPlayerEngine @Inject constructor(
                     context = context,
                     song = song,
                     allowLocal = true,
-                    allowLossless = false
+                    allowLossless = shouldStepDown,
                 )
                 if (ytUrl.isBlank()) {
-                    Timber.tag("DualPlayerEngine").e("failoverLosslessToYoutube: YouTube fallback URL resolution returned blank for %s", videoId)
+                    Timber.tag("DualPlayerEngine").e("failoverLosslessToYoutube: fallback URL resolution returned blank for %s", videoId)
                     return@launch
                 }
 
-                val fallbackUri = if (ytUrl.startsWith("http")) Uri.parse(ytUrl) else Uri.fromFile(java.io.File(ytUrl))
+                val fallbackUri = if (ytUrl.startsWith("http") || ytUrl.contains("://")) {
+                    Uri.parse(ytUrl)
+                } else {
+                    Uri.fromFile(java.io.File(ytUrl))
+                }
+                val isStillLossless = LosslessStreamResolver.isLosslessUri(ytUrl)
+                val containerMime = LosslessStreamResolver.resultFor(videoId)?.containerMimeType
+                    ?: com.unshoo.pixelmusic.data.addons.AddonStreamRegistry.metaFor(ytUrl)
+                        ?.let { com.unshoo.pixelmusic.data.addons.AddonStreamRegistry.containerMimeOf(it.transport) }
                 val replacement = mediaItem.buildUpon()
                     .setUri(fallbackUri)
-                    .setCustomCacheKey(videoId)
+                    .apply {
+                        if (!isStillLossless) setCustomCacheKey(videoId)
+                        if (containerMime != null) setMimeType(containerMime)
+                    }
                     .build()
 
                 withContext(Dispatchers.Main.immediate) {
@@ -1443,8 +1467,18 @@ class DualPlayerEngine @Inject constructor(
 
                     fun DataSpec.Builder.applyStreamHeaders(resolvedUri: Uri): DataSpec.Builder {
                         val urlStr = resolvedUri.toString()
+                        val addonHeaders = com.unshoo.pixelmusic.data.addons.AddonStreamRegistry.headersFor(urlStr)
                         val isYouTubeStream = urlStr.contains("googlevideo.com") || urlStr.contains("youtube.com")
-                        if (isYouTubeStream) {
+                        if (addonHeaders.isNotEmpty()) {
+                            val merged = buildMap {
+                                put("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
+                                putAll(addonHeaders)
+                            }
+                            this.setHttpRequestHeaders(merged)
+                            if (cleanId != null) {
+                                StreamChoice.remember(cleanId, urlStr, merged)
+                            }
+                        } else if (isYouTubeStream) {
                             val profile = StreamClientUtils.resolveRequestProfile(urlStr)
                             val headers = buildMap {
                                 put("User-Agent", profile.userAgent)
@@ -1580,6 +1614,7 @@ class DualPlayerEngine @Inject constructor(
 
                 override fun open(dataSpec: androidx.media3.datasource.DataSpec): Long {
                     val uriStr = dataSpec.uri.toString()
+                    val bypassCompleteFile = com.unshoo.pixelmusic.data.addons.AddonStreamRegistry.shouldBypassCompleteFileCache(uriStr)
                     val isLossless = LosslessStreamResolver.isLosslessUri(uriStr) ||
                         LosslessSchemeRoutingDataSource.isCustomLosslessScheme(dataSpec.uri) ||
                         uriStr.contains("monochrome.st/track/") ||
@@ -1587,7 +1622,11 @@ class DualPlayerEngine @Inject constructor(
                         dataSpec.uri.scheme == "monochrome" ||
                         dataSpec.uri.scheme == "apple-pending"
 
-                    val factory = if (isLossless) losslessCachingFactory else cacheDataSourceFactory
+                    val factory = when {
+                        bypassCompleteFile -> losslessRoutingFactory
+                        isLossless -> losslessCachingFactory
+                        else -> cacheDataSourceFactory
+                    }
                     val source = factory.createDataSource()
                     transferListeners.forEach(source::addTransferListener)
                     delegate = source
@@ -2133,12 +2172,24 @@ class DualPlayerEngine @Inject constructor(
             builder.setCustomCacheKey(cleanId)
         }
 
-        if (resolvedUri.path?.endsWith(".flac", true) == true ||
+        val resolvedStr = resolvedUri.toString()
+        val containerMime = cleanId?.let { LosslessStreamResolver.resultFor(it)?.containerMimeType }
+            ?: com.unshoo.pixelmusic.data.addons.AddonStreamRegistry.metaFor(resolvedStr)
+                ?.let { com.unshoo.pixelmusic.data.addons.AddonStreamRegistry.containerMimeOf(it.transport) }
+            ?: when {
+                resolvedStr.lowercase(java.util.Locale.US).contains(".m3u8") -> androidx.media3.common.MimeTypes.APPLICATION_M3U8
+                resolvedStr.lowercase(java.util.Locale.US).contains(".mpd") -> androidx.media3.common.MimeTypes.APPLICATION_MPD
+                else -> null
+            }
+
+        if (containerMime != null) {
+            builder.setMimeType(containerMime)
+        } else if (resolvedUri.path?.endsWith(".flac", true) == true ||
             scheme == "monochrome" ||
-            resolvedUri.toString().contains("monochrome.st/track/")
+            resolvedStr.contains("monochrome.st/track/")
         ) {
             builder.setMimeType(androidx.media3.common.MimeTypes.AUDIO_FLAC)
-        } else if (scheme == "youtube") {
+        } else if (scheme == "youtube" && !isLossless) {
             val videoId = uri.toString().removePrefix("youtube://")
             val cachedMime = com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.streamMimeTypeLruCache.let { cache ->
                 cache.get("${videoId}_high")

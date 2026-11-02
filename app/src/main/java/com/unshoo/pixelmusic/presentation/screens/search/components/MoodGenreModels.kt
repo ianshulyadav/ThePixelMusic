@@ -1,6 +1,7 @@
 package com.unshoo.pixelmusic.presentation.screens.search.components
 
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.ui.graphics.Color
 import kotlinx.coroutines.CoroutineScope
@@ -74,6 +75,65 @@ data class MoodGenreItem(
     val browseId: String = "FEmusic_moods_and_genres_category",
     val params: String? = null,
     val stripeColor: Long? = null
+)
+
+
+val MoodGenreItemSaver: Saver<MoodGenreItem, Map<String, Any?>> = Saver(
+    save = { item ->
+        mapOf(
+            "id" to item.id,
+            "title" to item.title,
+            "category" to item.category.name,
+            "darkCardColor" to item.darkCardColor.value.toLong(),
+            "lightCardColor" to item.lightCardColor.value.toLong(),
+            "playlistImage1" to item.playlistImage1,
+            "playlistImage2" to item.playlistImage2,
+            "heroThumbnailUrl" to item.heroThumbnailUrl,
+            "browseId" to item.browseId,
+            "params" to item.params,
+            "stripeColor" to item.stripeColor
+        )
+    },
+    restore = { map ->
+        val catName = map["category"] as? String ?: MoodGenreCategory.GENRE.name
+        val cat = runCatching { MoodGenreCategory.valueOf(catName) }.getOrDefault(MoodGenreCategory.GENRE)
+        MoodGenreItem(
+            id = (map["id"] as? String).orEmpty(),
+            title = (map["title"] as? String).orEmpty(),
+            category = cat,
+            darkCardColor = Color(((map["darkCardColor"] as? Long) ?: 0L).toULong()),
+            lightCardColor = Color(((map["lightCardColor"] as? Long) ?: 0L).toULong()),
+            playlistImage1 = map["playlistImage1"] as? String,
+            playlistImage2 = map["playlistImage2"] as? String,
+            heroThumbnailUrl = map["heroThumbnailUrl"] as? String,
+            browseId = (map["browseId"] as? String) ?: "FEmusic_moods_and_genres_category",
+            params = map["params"] as? String,
+            stripeColor = map["stripeColor"] as? Long
+        )
+    }
+)
+
+val NullableMoodGenreItemSaver: Saver<MoodGenreItem?, Map<String, Any?>> = Saver(
+    save = { item ->
+        if (item == null) {
+            emptyMap()
+        } else {
+            mapOf(
+                "id" to item.id,
+                "title" to item.title,
+                "category" to item.category.name,
+                "darkCardColor" to item.darkCardColor.value.toLong(),
+                "lightCardColor" to item.lightCardColor.value.toLong(),
+                "playlistImage1" to item.playlistImage1,
+                "playlistImage2" to item.playlistImage2,
+                "heroThumbnailUrl" to item.heroThumbnailUrl,
+                "browseId" to item.browseId,
+                "params" to item.params,
+                "stripeColor" to item.stripeColor
+            )
+        }
+    },
+    restore = { map -> if (map.isEmpty()) null else MoodGenreItemSaver.restore(map) }
 )
 
 fun Long.toM3ExpressiveDarkTone(): Color {

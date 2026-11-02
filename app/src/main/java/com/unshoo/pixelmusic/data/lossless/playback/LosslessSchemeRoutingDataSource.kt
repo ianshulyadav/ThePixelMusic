@@ -15,14 +15,17 @@ package com.unshoo.pixelmusic.data.lossless.playback
 
 import android.net.Uri
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.ByteArrayDataSource
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.TransferListener
+import com.unshoo.pixelmusic.data.addons.AddonStreamRegistry
 import com.unshoo.pixelmusic.data.lossless.deezer.DeezerCrypto
 import com.unshoo.pixelmusic.data.lossless.deezer.DeezerDecryptingDataSource
 import com.unshoo.pixelmusic.data.lossless.tidal.TidalAudioProvider
 import com.unshoo.pixelmusic.data.lossless.tidal.TidalProgressiveDashDataSource
 import okhttp3.OkHttpClient
+import java.io.IOException
 import java.util.Locale
 
 @OptIn(UnstableApi::class)
@@ -41,6 +44,27 @@ class LosslessSchemeRoutingDataSource(
 
     override fun open(dataSpec: DataSpec): Long {
         val scheme = dataSpec.uri.scheme?.lowercase(Locale.US)
+        if (scheme == AddonStreamRegistry.INLINE_MANIFEST_SCHEME) {
+            val manifest = AddonStreamRegistry.manifestFor(dataSpec.uri.toString())
+                ?: throw IOException("Inline addon manifest expired or missing: ${dataSpec.uri}")
+            val byteSource = ByteArrayDataSource(manifest.bytes)
+            transferListeners.forEach(byteSource::addTransferListener)
+            delegate = byteSource
+            return byteSource.open(dataSpec)
+        }
+
+        val effectiveSpec = run {
+            val addonHeaders = AddonStreamRegistry.headersFor(dataSpec.uri.toString())
+            if (addonHeaders.isEmpty()) {
+                dataSpec
+            } else {
+                val merged = LinkedHashMap<String, String>()
+                merged.putAll(dataSpec.httpRequestHeaders)
+                merged.putAll(addonHeaders)
+                dataSpec.buildUpon().setHttpRequestHeaders(merged).build()
+            }
+        }
+
         val factory =
             when (scheme) {
                 DeezerCrypto.SCHEME -> deezerFactory
@@ -50,7 +74,7 @@ class LosslessSchemeRoutingDataSource(
         val selected = factory.createDataSource()
         transferListeners.forEach(selected::addTransferListener)
         delegate = selected
-        return selected.open(dataSpec)
+        return selected.open(effectiveSpec)
     }
 
     override fun read(
@@ -81,13 +105,16 @@ class LosslessSchemeRoutingDataSource(
         /** True for URIs that must bypass the HTTP cache / pre-fetch paths and go through this router. */
         fun isCustomLosslessScheme(uri: Uri?): Boolean {
             val scheme = uri?.scheme?.lowercase(Locale.US) ?: return false
-            return scheme == DeezerCrypto.SCHEME || scheme == TidalAudioProvider.PROGRESSIVE_DASH_SCHEME
+            return scheme == DeezerCrypto.SCHEME ||
+                scheme == TidalAudioProvider.PROGRESSIVE_DASH_SCHEME ||
+                scheme == AddonStreamRegistry.INLINE_MANIFEST_SCHEME
         }
 
         fun isCustomLosslessScheme(uri: String?): Boolean {
             val lower = uri?.lowercase(Locale.US) ?: return false
             return lower.startsWith("${DeezerCrypto.SCHEME}://") ||
-                lower.startsWith("${TidalAudioProvider.PROGRESSIVE_DASH_SCHEME}://")
+                lower.startsWith("${TidalAudioProvider.PROGRESSIVE_DASH_SCHEME}://") ||
+                lower.startsWith("${AddonStreamRegistry.INLINE_MANIFEST_SCHEME}://")
         }
 
         /**

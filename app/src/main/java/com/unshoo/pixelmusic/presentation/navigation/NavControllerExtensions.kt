@@ -46,7 +46,7 @@ fun NavController.navigateSafely(route: String): Boolean {
     }
     return try {
         navigate(route) {
-            launchSingleTop = true
+            launchSingleTop = !route.startsWith("settings_category/")
         }
         true
     } catch (e: Exception) {
@@ -62,7 +62,7 @@ fun NavController.navigateSafely(
     if (!isReadyForNavigation()) return false
     return try {
         navigate(route) {
-            launchSingleTop = true
+            launchSingleTop = !route.startsWith("settings_category/")
             builder()
         }
         true

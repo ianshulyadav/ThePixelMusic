@@ -60,6 +60,9 @@ object LosslessSources {
         val app = context.applicationContext
         val dataStore = app.dataStore
 
+        // Initialize the Addon / JS-Module / .arch registry on startup so unified order & modules are warm.
+        com.unshoo.pixelmusic.data.addons.AddonManager.initialize(app, scope)
+
         AppleMusicProvider.devTokenProvider = { appleMusicDevTokenCache.ifBlank { null } }
         AppleMusicProvider.mediaUserTokenProvider = {
             appleMusicMediaUserTokenCache.ifBlank { null }

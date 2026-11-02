@@ -184,22 +184,67 @@ object DownloadHelper {
                     throw IOException("Bypassing unwanted lossless stream for quality $downloadQuality")
                 }
 
+                val addonHeaders = com.unshoo.pixelmusic.data.addons.AddonStreamRegistry.headersFor(url)
+                val isSegmentedManifest = com.unshoo.pixelmusic.data.addons.ManifestSegmentAssembler.isSegmentedStream(url) ||
+                    com.unshoo.pixelmusic.data.addons.AddonStreamRegistry.metaFor(url)?.transport?.let {
+                        it == com.unshoo.pixelmusic.data.addons.AddonTransport.HLS ||
+                            it == com.unshoo.pixelmusic.data.addons.AddonTransport.DASH
+                    } == true
+
+                if (isSegmentedManifest) {
+                    val assembled = com.unshoo.pixelmusic.data.addons.ManifestSegmentAssembler.assembleToFile(
+                        httpClient = client,
+                        streamUri = url,
+                        outputFile = tempFile,
+                        extraHeaders = addonHeaders,
+                    )
+                    val segExt = assembled.extension
+                    val segMime = assembled.mimeType
+                    val segDynamicName = "$safeTitle - $safeArtist.$segExt"
+                    val segOutputFile = File(audioDir, "${song.youtubeId}.$segExt")
+
+                    if (!tempFile.exists() || tempFile.length() <= 0) {
+                        throw IOException("Assembled manifest file is zero bytes")
+                    }
+                    if (customPath.isNotBlank()) {
+                        val treeUri = Uri.parse(customPath)
+                        val documentDir = DocumentFile.fromTreeUri(context, treeUri)
+                        val file = documentDir?.createFile(segMime, segDynamicName)
+                        val outputUri = file?.uri
+                        if (outputUri != null) {
+                            context.contentResolver.openOutputStream(outputUri)?.use { out ->
+                                tempFile.inputStream().use { it.copyTo(out) }
+                            }
+                            cleanupTempFile()
+                            return@withContext outputUri.toString()
+                        }
+                    }
+                    if (!tempFile.renameTo(segOutputFile)) {
+                        tempFile.copyTo(segOutputFile, overwrite = true)
+                        cleanupTempFile()
+                    }
+                    enforceStorageLimit(context, keepFile = segOutputFile)
+                    return@withContext segOutputFile.absolutePath
+                }
+
                 val isSaavn = url.contains("saavncdn.com") || url.contains("jiosaavn.com")
-                val isM4a = isSaavn || url.contains(".mp4") || url.contains(".m4a")
+                val resolvedLosslessMeta = com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver.resultFor(song.youtubeId)
+                val isM4a = isSaavn || url.contains(".mp4") || url.contains(".m4a") ||
+                    resolvedLosslessMeta?.mimeType?.contains("mp4", true) == true
                 val ext = when {
-                    isLossless -> "flac"
+                    isLossless && !isM4a -> "flac"
                     isM4a -> "m4a"
                     else -> "webm"
                 }
                 val mimeType = when {
-                    isLossless -> "audio/flac"
-                    isM4a -> "audio/mp4"
+                    ext == "flac" -> "audio/flac"
+                    ext == "m4a" -> "audio/mp4"
                     else -> "audio/webm"
                 }
                 val dynamicFileName = "$safeTitle - $safeArtist.$ext"
                 val outputFile = File(audioDir, "${song.youtubeId}.$ext")
 
-                val userAgent = if (isSaavn) {
+                val userAgent = addonHeaders["User-Agent"] ?: if (isSaavn) {
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
                 } else {
                     Constants.YoutubeApi.USER_AGENT
@@ -212,6 +257,7 @@ object DownloadHelper {
                         .url(url)
                         .header("User-Agent", userAgent)
                         .apply {
+                            addonHeaders.forEach { (k, v) -> header(k, v) }
                             if (isSaavn) {
                                 header("Accept-Language", "en-IN,en;q=0.9")
                                 header("Cookie", "explicit_content=1")
@@ -247,6 +293,7 @@ object DownloadHelper {
                                     .url(url)
                                     .header("User-Agent", userAgent)
                                     .apply {
+                                        addonHeaders.forEach { (k, v) -> header(k, v) }
                                         if (isSaavn) {
                                             header("Accept-Language", "en-IN,en;q=0.9")
                                             header("Cookie", "explicit_content=1")
@@ -285,6 +332,7 @@ object DownloadHelper {
                         .url(url)
                         .header("User-Agent", userAgent)
                         .apply {
+                            addonHeaders.forEach { (k, v) -> header(k, v) }
                             if (isSaavn) {
                                 header("Accept-Language", "en-IN,en;q=0.9")
                                 header("Cookie", "explicit_content=1")

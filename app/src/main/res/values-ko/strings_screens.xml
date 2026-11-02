@@ -288,7 +288,7 @@
     <string name="settings_content_customization_section">콘텐츠 맞춤설정</string>
     <string name="settings_filter_cover_lofi_title">커버 및 로파이(Lo-Fi) 트랙 숨기기</string>
     <string name="settings_filter_cover_lofi_desc">추천 및 대기열에서 커버 곡과 Lo-Fi 트랙을 숨깁니다.</string>
-    <string name="settings_lossless_audio_sources_title">무손실 오디오 소스 (ArchiveTune)</string>
+    <string name="settings_lossless_audio_sources_title">무손실 오디오 소스</string>
     <string name="settings_lossless_streaming_sources_title">무손실 스트리밍 소스</string>
     <string name="settings_lossless_streaming_sources_desc">Archive 풀 및 계정을 통한 Tidal, Qobuz, Deezer, Apple Music</string>
     <string name="settings_options_section">옵션</string>

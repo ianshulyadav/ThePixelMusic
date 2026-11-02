@@ -48,6 +48,8 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material.icons.rounded.Extension
+import androidx.compose.material.icons.rounded.SurroundSound
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.FilledIconButton
@@ -184,6 +186,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.withContext
 
+private val TIDO_LABEL_REGEX = Regex("(?i)\\bTido\\s*[•·]?\\s*")
 private const val PREVIOUS_TRACK_RESTART_THRESHOLD_MS = 10_000L
 private const val SKIP_COMMAND_GUARD_MS = 96L
 
@@ -279,9 +282,10 @@ fun FullPlayerContent(
     var showShareSheet by remember { mutableStateOf(false) }
     var showArtistPicker by rememberSaveable { mutableStateOf(false) }
     var showAudioFormatInfoDialog by rememberSaveable { mutableStateOf(false) }
+    var showPlayFromSourceSheet by rememberSaveable { mutableStateOf(false) }
 
     val isAnyModalOpen = showLyricsSheet || showSongInfoBottomSheet || showPlaylistBottomSheet ||
-        showShareSheet || showArtistPicker || showAudioFormatInfoDialog
+        showShareSheet || showArtistPicker || showAudioFormatInfoDialog || showPlayFromSourceSheet
 
     LaunchedEffect(isAnyModalOpen) {
         playerViewModel.updateFullPlayerModalOpen(isAnyModalOpen)
@@ -309,6 +313,9 @@ fun FullPlayerContent(
     }
     androidx.activity.compose.BackHandler(enabled = showAudioFormatInfoDialog) {
         showAudioFormatInfoDialog = false
+    }
+    androidx.activity.compose.BackHandler(enabled = showPlayFromSourceSheet) {
+        showPlayFromSourceSheet = false
     }
     
     val lyricsSearchUiState by playerViewModel.lyricsSearchUiState.collectAsStateWithLifecycle()
@@ -628,6 +635,7 @@ fun FullPlayerContent(
             playbackMetadataSampleRate = playbackAudioMetadata.sampleRate,
             playbackMetadataBitDepth = playbackAudioMetadata.bitDepth,
             playbackMetadataFormatTag = playbackAudioMetadata.formatTag,
+            playbackMetadataSourceName = playbackAudioMetadata.sourceName,
             playbackMetadataIsConfirmed = playbackAudioMetadata.isConfirmed,
             onFormatBadgeClick = { showAudioFormatInfoDialog = true },
             currentPositionProvider = currentPositionProvider,
@@ -1134,7 +1142,23 @@ fun FullPlayerContent(
             filePath = if (song.isLocal) song.contentUriString else null,
             activeDecoderInfo = activeDecoderInfo,
             hiFiModeEnabled = isHiFiEnabled,
+            onSwitchSource = if (!song.isLocal) {
+                { showPlayFromSourceSheet = true }
+            } else null,
             onDismiss = { showAudioFormatInfoDialog = false }
+        )
+    }
+
+    if (showPlayFromSourceSheet && !song.isLocal) {
+        com.unshoo.pixelmusic.presentation.components.PlayFromSourceSheet(
+            song = song,
+            activeSourceName = playbackAudioMetadata.sourceName,
+            colorScheme = LocalMaterialTheme.current,
+            onDismiss = { showPlayFromSourceSheet = false },
+            onSelectSource = { unifiedSourceId ->
+                showPlayFromSourceSheet = false
+                playerViewModel.switchSongSource(song, unifiedSourceId)
+            }
         )
     }
 
@@ -1660,6 +1684,7 @@ fun FullPlayerContent(
                                 }
                             }
 
+
                             // Dismiss Queue / Close Menu
                             Surface(
                                 onClick = {
@@ -1919,6 +1944,7 @@ private fun FullPlayerProgressSection(
     playbackMetadataSampleRate: Int?,
     playbackMetadataBitDepth: Int? = null,
     playbackMetadataFormatTag: String? = null,
+    playbackMetadataSourceName: String? = null,
     playbackMetadataIsConfirmed: Boolean = false,
     onFormatBadgeClick: () -> Unit = {},
     currentPositionProvider: () -> Long,
@@ -1948,6 +1974,7 @@ private fun FullPlayerProgressSection(
     val audioSampleRate = if (isMetadataForCurrentSong) playbackMetadataSampleRate ?: local?.sampleRate else local?.sampleRate
     val audioBitDepth = if (isMetadataForCurrentSong) playbackMetadataBitDepth else null
     val audioFormatTag = if (isMetadataForCurrentSong) playbackMetadataFormatTag else null
+    val audioSourceName = if (isMetadataForCurrentSong) playbackMetadataSourceName else null
 
     PlayerProgressBarSection(
         songId = song.id,
@@ -1959,6 +1986,7 @@ private fun FullPlayerProgressSection(
         audioSampleRate = audioSampleRate,
         audioBitDepth = audioBitDepth,
         audioFormatTag = audioFormatTag,
+        audioSourceName = audioSourceName,
         onFormatBadgeClick = onFormatBadgeClick,
         showAudioFileInfo = showPlayerFileInfo,
         onSeek = onSeek,
@@ -2432,6 +2460,7 @@ private fun PlayerProgressBarSection(
     audioSampleRate: Int?,
     audioBitDepth: Int? = null,
     audioFormatTag: String? = null,
+    audioSourceName: String? = null,
     onFormatBadgeClick: () -> Unit = {},
     showAudioFileInfo: Boolean,
     onSeek: (Long) -> Unit,
@@ -2470,15 +2499,26 @@ private fun PlayerProgressBarSection(
         kotlin.math.abs(reportedDuration - hintDuration) <= 1500L -> reportedDuration
         else -> minOf(reportedDuration, hintDuration)
     }
-    val audioMetaLabel = remember(showAudioFileInfo, audioMimeType, audioBitrate, audioSampleRate, audioBitDepth, audioFormatTag) {
+    val audioMetaLabel = remember(
+        showAudioFileInfo,
+        audioMimeType,
+        audioBitrate,
+        audioSampleRate,
+        audioBitDepth,
+        audioFormatTag,
+        audioSourceName
+    ) {
         if (showAudioFileInfo) {
-            com.unshoo.pixelmusic.utils.AudioMetaUtils.formatAudioMetaLabel(
+            val baseLabel = com.unshoo.pixelmusic.utils.AudioMetaUtils.formatAudioMetaLabel(
                 mimeType = audioMimeType,
                 bitrate = audioBitrate,
                 sampleRate = audioSampleRate,
                 bitDepth = audioBitDepth,
                 formatTag = audioFormatTag
             )
+            val clean = baseLabel?.replace(TIDO_LABEL_REGEX, "")?.trim()
+                ?.removePrefix("•")?.removePrefix("·")?.trim()
+            clean?.takeIf { it.isNotBlank() }
         } else {
             null
         }
@@ -2769,16 +2809,36 @@ private fun EfficientTimeLabels(
                     color = textColor.copy(alpha = 0.14f),
                     contentColor = textColor.copy(alpha = 0.96f)
                 ) {
-                    Text(
-                        text = badge,
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontWeight = FontWeight.Medium,
-                            fontSize = 11.sp
-                        ),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
-                    )
+                    val isDolbyAtmos = remember(badge) {
+                        badge.contains("DOLBY", ignoreCase = true) ||
+                            badge.contains("ATMOS", ignoreCase = true) ||
+                            badge.contains("EAC3", ignoreCase = true) ||
+                            badge.contains("AC-4", ignoreCase = true)
+                    }
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        if (isDolbyAtmos) {
+                            Icon(
+                                imageVector = Icons.Rounded.SurroundSound,
+                                contentDescription = "Dolby Atmos",
+                                modifier = Modifier.size(14.dp),
+                                tint = textColor.copy(alpha = 0.96f)
+                            )
+                            Spacer(Modifier.width(4.dp))
+                        }
+                        Text(
+                            text = badge,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 11.sp
+                            ),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
         }

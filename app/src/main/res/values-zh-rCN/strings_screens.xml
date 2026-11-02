@@ -288,7 +288,7 @@
     <string name="settings_content_customization_section">内容自定义</string>
     <string name="settings_filter_cover_lofi_title">隐藏翻唱和 Lo-Fi 曲目</string>
     <string name="settings_filter_cover_lofi_desc">从推荐和队列中隐藏翻唱和低保真 (Lo-Fi) 歌曲。</string>
-    <string name="settings_lossless_audio_sources_title">无损音频源 (ArchiveTune)</string>
+    <string name="settings_lossless_audio_sources_title">无损音频源</string>
     <string name="settings_lossless_streaming_sources_title">无损流媒体源</string>
     <string name="settings_lossless_streaming_sources_desc">通过 Archive 共享池和账户使用 Tidal、Qobuz、Deezer、Apple Music</string>
     <string name="settings_options_section">选项</string>

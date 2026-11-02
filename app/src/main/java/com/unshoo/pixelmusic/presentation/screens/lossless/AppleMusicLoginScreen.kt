@@ -3,15 +3,16 @@
  *
  * Apple Music sign-in. The Music User Token is captured from BOTH places the web player puts it:
  * the `media-user-token` cookie on the music.apple.com origin (the primary source — the web
- * player writes it there right after the Apple ID handshake) and localStorage (the web app also
- * mirrors it there once the player SPA boots). Every candidate is handed to the AMP API for
+ * player writes it there right after the Apple ID handshake, including HttpOnly & URI-encoded forms)
+ * and MusicKit / localStorage once the player SPA boots. Every candidate is handed to the AMP API for
  * verification (`/v1/me/storefront` answers 200 only for a valid pairing), and the winner is
- * persisted (plus a developer token when the user hasn't pasted one — scraped from the web player).
+ * persisted alongside the verified developer token.
  */
 
 package com.unshoo.pixelmusic.presentation.screens.lossless
 
 import android.annotation.SuppressLint
+import android.net.Uri
 import android.webkit.CookieManager
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -27,6 +28,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.datastore.preferences.core.edit
 import com.unshoo.pixelmusic.R
+import com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver
 import com.unshoo.pixelmusic.data.lossless.applemusic.AppleMusicAudioProvider
 import com.unshoo.pixelmusic.data.lossless.applemusic.AppleMusicProvider
 import com.unshoo.pixelmusic.data.lossless.constants.AppleMusicDevTokenKey
@@ -40,42 +42,113 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
+import org.json.JSONObject
 import timber.log.Timber
 import java.util.concurrent.atomic.AtomicBoolean
 
 private const val LOGIN_URL = "https://music.apple.com/login"
-private const val COOKIE_ORIGIN = "https://music.apple.com"
+private val COOKIE_ORIGINS = listOf(
+    "https://music.apple.com",
+    "https://beta.music.apple.com",
+)
 private const val TAG = "AppleMusicLogin"
 
+private val MEDIA_TOKEN_JWT_REGEX = Regex("^eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$")
+private val MEDIA_TOKEN_CLASSIC_REGEX = Regex("^0\\.[A-Za-z0-9+/=_-]{40,}$")
+private val DEV_TOKEN_JWT_REGEX = Regex("^eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$")
+
 /**
- * Shape shared by every capture path: a JWT (three dot-separated base64url segments, `eyJ…`) or
- * the classic `0.` + base64 media-user-token.
+ * Standardized Apple Music WebView login & token manager:
+ *  - Reads `media-user-token` from CookieManager (raw, quoted, and URI-decoded, including HttpOnly).
+ *  - Detects Apple Music session cookies (`its.pod=`, `pxro=`, `media-user-token=`).
+ *  - Resolves developer JWT via user override -> live MusicKit JS -> `AppleMusicProvider.currentDevToken()` -> forced refresh.
+ *  - Verifies `(mediaToken, devToken)` against `/v1/me/storefront` via `AppleMusicAudioProvider.verifyTokens`.
  */
-private fun looksLikeMediaUserToken(value: String?): Boolean {
-    if (value.isNullOrBlank()) return false
-    if (value.length < 40 || value.length > 4096) return false
-    return MEDIA_TOKEN_JWT_REGEX.matches(value) || MEDIA_TOKEN_CLASSIC_REGEX.matches(value)
+object AppleMusicLoginManager {
+    val cookieManager: CookieManager
+        get() = CookieManager.getInstance()
+
+    fun looksLikeMediaUserToken(value: String?): Boolean {
+        if (value.isNullOrBlank()) return false
+        if (value.length < 40 || value.length > 4096) return false
+        return MEDIA_TOKEN_JWT_REGEX.matches(value) || MEDIA_TOKEN_CLASSIC_REGEX.matches(value)
+    }
+
+    fun looksLikeDeveloperJwt(value: String?): Boolean {
+        if (value.isNullOrBlank()) return false
+        return value.length in 80..4096 && DEV_TOKEN_JWT_REGEX.matches(value)
+    }
+
+    fun hasSessionCookie(): Boolean =
+        COOKIE_ORIGINS.any { origin ->
+            cookieManager.getCookie(origin)
+                ?.split(';')
+                ?.any { part ->
+                    val trimmed = part.trim()
+                    trimmed.startsWith("its.pod=", ignoreCase = true) ||
+                        trimmed.startsWith("pxro=", ignoreCase = true) ||
+                        trimmed.startsWith("media-user-token=", ignoreCase = true)
+                } == true
+        }
+
+    fun readMediaUserToken(): String? {
+        for (origin in COOKIE_ORIGINS) {
+            val jar = cookieManager.getCookie(origin) ?: continue
+            for (raw in jar.split(';')) {
+                val entry = raw.trim()
+                val eq = entry.indexOf('=')
+                if (eq <= 0) continue
+                if (!entry.substring(0, eq).equals("media-user-token", ignoreCase = true)) continue
+                val value = entry.substring(eq + 1).trim().trim('"')
+                if (looksLikeMediaUserToken(value)) return value
+                val decoded = runCatching { Uri.decode(value).trim().trim('"') }.getOrDefault(value)
+                if (looksLikeMediaUserToken(decoded)) return decoded
+            }
+        }
+        return null
+    }
+
+    suspend fun currentDevToken(pastedOverride: String = "", webScrapedCandidate: String? = null): String? =
+        withContext(Dispatchers.IO) {
+            pastedOverride.trim().takeIf { it.isNotBlank() }
+                ?: webScrapedCandidate?.trim()?.takeIf(::looksLikeDeveloperJwt)
+                ?: runCatching { AppleMusicProvider.currentDevToken() }.getOrNull()
+        }
+
+    suspend fun verifyTokens(mediaToken: String, devToken: String): Boolean =
+        withContext(Dispatchers.IO) {
+            AppleMusicAudioProvider.verifyTokens(mediaToken, devToken)
+        }
 }
 
-private val MEDIA_TOKEN_JWT_REGEX = Regex("^eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$")
-private val MEDIA_TOKEN_CLASSIC_REGEX = Regex("^0\\.[A-Za-z0-9+/=]{40,}$")
-
 /**
- * Collects every localStorage value that looks like a media-user-token, skipping obvious
- * developer / player tokens. Returns a JSON array (string[]).
+ * Probes both `MusicKit.getInstance()` (if initialized by the SPA) and `localStorage` for
+ * `media-user-token` candidates plus the active web-player developer JWT.
  */
 private const val TOKEN_PROBE_JS = """
 (function(){
-  function ok(v){
+  function okMedia(v){
     if(!v||typeof v!=='string')return false;
     if(v.length<40||v.length>4096)return false;
     return /^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(v)
-      || /^0\.[A-Za-z0-9+\/=]{40,}$/.test(v);
+      || /^0\.[A-Za-z0-9+\/=_-]{40,}$/.test(v);
   }
-  var out=[];
+  var media=[];
+  var dev="";
+  try{
+    if(window.MusicKit && typeof window.MusicKit.getInstance==='function'){
+      var mk=window.MusicKit.getInstance();
+      if(mk){
+        if(okMedia(mk.musicUserToken)) media.push(mk.musicUserToken);
+        if(typeof mk.developerToken==='string' && mk.developerToken.indexOf('eyJ')===0){
+          dev=mk.developerToken;
+        }
+      }
+    }
+  }catch(e){}
   try{
     var d=localStorage.getItem('media-user-token');
-    if(ok(d)) out.push(d);
+    if(okMedia(d)) media.push(d);
   }catch(e){}
   try{
     for(var i=0;i<localStorage.length;i++){
@@ -83,18 +156,24 @@ private const val TOKEN_PROBE_JS = """
       var lk=k.toLowerCase();
       if(lk.indexOf('token')===-1)continue;
       if(lk.indexOf('developer')>=0||lk.indexOf('dev-')>=0||lk.indexOf('devtoken')>=0
-        ||lk.indexOf('amtv')>=0||lk.indexOf('jwt')>=0||lk.indexOf('media-user-token')>=0)continue;
+        ||lk.indexOf('amtv')>=0||lk.indexOf('jwt')>=0||lk.indexOf('media-user-token')>=0){
+        if(!dev){
+          var dv=localStorage.getItem(k);
+          if(dv && typeof dv==='string' && dv.indexOf('eyJ')===0) dev=dv;
+        }
+        continue;
+      }
       var v=localStorage.getItem(k);
-      if(ok(v)) out.push(v);
+      if(okMedia(v)) media.push(v);
       else if(v&&v.length<2000&&v.charAt(0)==='{'){
         try{
           var j=JSON.parse(v);
-          for(var key in j){ if(ok(j[key])) out.push(j[key]); }
+          for(var key in j){ if(okMedia(j[key])) media.push(j[key]); }
         }catch(e2){}
       }
     }
   }catch(e){}
-  return out;
+  return JSON.stringify({media: media, dev: dev});
 })()
 """
 
@@ -111,57 +190,27 @@ fun AppleMusicLoginScreen(onBack: () -> Unit) {
         Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
     }
 
-    fun readSessionCookie(): Boolean =
-        CookieManager
-            .getInstance()
-            .getCookie(COOKIE_ORIGIN)
-            ?.split(';')
-            ?.any { it.trim().startsWith("its.pod=", ignoreCase = true) || it.trim().startsWith("pxro=", ignoreCase = true) }
-            ?: false
-
-    /**
-     * The primary capture path: the `media-user-token` cookie on the music.apple.com origin.
-     * CookieManager sees every cookie the WebView stored (including HttpOnly ones, which the
-     * in-page JS probe can never read). The value may arrive URI-encoded, so the decoded form is
-     * accepted too.
-     */
-    fun readMediaUserTokenCookie(): String? {
-        val jar = CookieManager.getInstance().getCookie(COOKIE_ORIGIN) ?: return null
-        for (raw in jar.split(';')) {
-            val entry = raw.trim()
-            val eq = entry.indexOf('=')
-            if (eq <= 0) continue
-            if (!entry.substring(0, eq).equals("media-user-token", ignoreCase = true)) continue
-            val value = entry.substring(eq + 1).trim().trim('"')
-            if (looksLikeMediaUserToken(value)) return value
-            val decoded = runCatching { android.net.Uri.decode(value) }.getOrDefault(value)
-            if (looksLikeMediaUserToken(decoded)) return decoded
-        }
-        return null
-    }
-
-    fun finishLogin(mediaToken: String) {
+    fun finishLogin(mediaToken: String, webDevToken: String? = null) {
         if (!handled.compareAndSet(false, true)) return
         scope.launch {
-            val devToken =
-                withContext(Dispatchers.IO) {
-                    val pasted = context.dataStore.getAsync(AppleMusicDevTokenKey, "").trim()
-                    if (pasted.isNotBlank()) {
-                        pasted
-                    } else {
-                        // Honour the "Developer token is optional" promise: use the app-scraped
-                        // web-player JWT so playback can engage without a pasted developer token.
-                        runCatching { AppleMusicProvider.currentDevToken() }.getOrNull()
-                    }
+            val pastedDev = withContext(Dispatchers.IO) {
+                context.dataStore.getAsync(AppleMusicDevTokenKey, "").trim()
+            }
+            var devToken = AppleMusicLoginManager.currentDevToken(pastedDev, webDevToken)
+            var verified = devToken != null && AppleMusicLoginManager.verifyTokens(mediaToken, devToken)
+
+            // If cached developer token was stale, force a fresh web-player JWT scrape and retry once.
+            if (!verified && pastedDev.isBlank()) {
+                val refreshed = withContext(Dispatchers.IO) {
+                    runCatching { AppleMusicProvider.refreshToken() }.getOrNull()
                 }
+                if (!refreshed.isNullOrBlank() && refreshed != devToken) {
+                    devToken = refreshed
+                    verified = AppleMusicLoginManager.verifyTokens(mediaToken, refreshed)
+                }
+            }
 
-            val verified =
-                devToken != null &&
-                    withContext(Dispatchers.IO) {
-                        AppleMusicAudioProvider.verifyTokens(mediaToken, devToken)
-                    }
-
-            if (!verified) {
+            if (!verified || devToken == null) {
                 Timber.tag(TAG).w("media-user-token captured but verification failed; not persisting")
                 handled.set(false)
                 toast(context.getString(R.string.lossless_applemusic_login_failed))
@@ -174,6 +223,8 @@ fun AppleMusicLoginScreen(onBack: () -> Unit) {
                 prefs[AppleMusicSourceEnabledKey] = true
                 prefs[LosslessStreamingEnabledKey] = true
             }
+            AppleMusicAudioProvider.clearStorefrontCache()
+            LosslessStreamResolver.clearAll()
             toast(context.getString(R.string.lossless_applemusic_login_success))
             onBack()
         }
@@ -181,36 +232,45 @@ fun AppleMusicLoginScreen(onBack: () -> Unit) {
 
     fun probeForToken(view: WebView) {
         if (handled.get()) return
-        // Cookie first: it is written by the Apple ID handshake itself and does not depend on the
-        // web app's JS booting.
-        readMediaUserTokenCookie()?.let { token ->
-            if (!handled.get()) {
-                finishLogin(token)
-                return
+        val cookieToken = AppleMusicLoginManager.readMediaUserToken()
+        view.evaluateJavascript(TOKEN_PROBE_JS) { rawJson ->
+            if (handled.get()) return@evaluateJavascript
+            var jsMediaToken: String? = null
+            var jsDevToken: String? = null
+            if (!rawJson.isNullOrBlank() && rawJson != "null") {
+                runCatching {
+                    val decoded = if (rawJson.startsWith("\"")) {
+                        JSONArray("[$rawJson]").optString(0)
+                    } else {
+                        rawJson
+                    }
+                    val obj = JSONObject(decoded)
+                    jsDevToken = obj.optString("dev").takeIf { it.isNotBlank() }
+                    val arr = obj.optJSONArray("media")
+                    if (arr != null) {
+                        for (i in 0 until arr.length()) {
+                            val cand = arr.optString(i).trim()
+                            if (AppleMusicLoginManager.looksLikeMediaUserToken(cand)) {
+                                jsMediaToken = cand
+                                break
+                            }
+                        }
+                    }
+                }
             }
-        }
-        view.evaluateJavascript(TOKEN_PROBE_JS) { result ->
-            if (result == null || result == "null" || result == "[]") return@evaluateJavascript
-            val candidates =
-                runCatching { JSONArray(result) }.getOrNull() ?: return@evaluateJavascript
-            val mediaToken =
-                (0 until candidates.length())
-                    .mapNotNull { i -> candidates.optString(i).takeIf { it.isNotBlank() } }
-                    .firstOrNull()
-            if (mediaToken != null && !handled.get()) {
-                finishLogin(mediaToken)
+            val winner = cookieToken ?: jsMediaToken
+            if (winner != null && !handled.get()) {
+                finishLogin(winner, jsDevToken)
             }
         }
     }
 
-    // The token can appear without any navigation once the web player boots after the Apple ID
-    // handshake, so polling is the only reliable trigger.
     LaunchedEffect(Unit) {
         while (true) {
             delay(2000)
             webView?.let { view ->
                 if (!handled.get()) {
-                    if (readMediaUserTokenCookie() != null || readSessionCookie()) {
+                    if (AppleMusicLoginManager.readMediaUserToken() != null || AppleMusicLoginManager.hasSessionCookie()) {
                         view.post { probeForToken(view) }
                     }
                 }
@@ -232,8 +292,8 @@ fun AppleMusicLoginScreen(onBack: () -> Unit) {
                             view: WebView,
                             url: String?,
                         ) {
-                            if (url == null || !url.startsWith("https://music.apple.com")) return
-                            if (!readSessionCookie() && readMediaUserTokenCookie() == null) return
+                            if (url == null || (!url.startsWith("https://music.apple.com") && !url.startsWith("https://beta.music.apple.com"))) return
+                            if (!AppleMusicLoginManager.hasSessionCookie() && AppleMusicLoginManager.readMediaUserToken() == null) return
                             probeForToken(view)
                         }
                     }

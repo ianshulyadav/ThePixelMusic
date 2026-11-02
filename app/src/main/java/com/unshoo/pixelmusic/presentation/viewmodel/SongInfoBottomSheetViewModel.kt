@@ -141,7 +141,7 @@ class SongInfoBottomSheetViewModel @Inject constructor(
             val cachedLossless = LosslessStreamResolver.resultFor(videoId)
                 ?: LosslessStreamResolver.resultFor(song.id)
             if (cachedLossless != null) {
-                val providerStr = "${cachedLossless.source.name} (${cachedLossless.label})"
+                val providerStr = formatResolvedProvider(cachedLossless)
                 _audioMeta.value = AudioMeta(
                     mimeType = cachedLossless.mimeType,
                     bitrate = cachedLossless.bitrate,
@@ -181,7 +181,7 @@ class SongInfoBottomSheetViewModel @Inject constructor(
                         lowDataMode = false
                     )
                     if (resolved != null) {
-                        val providerStr = "${resolved.source.name} (${resolved.label})"
+                        val providerStr = formatResolvedProvider(resolved)
                         _audioMeta.value = AudioMeta(
                             mimeType = resolved.mimeType,
                             bitrate = resolved.bitrate,
@@ -271,7 +271,7 @@ class SongInfoBottomSheetViewModel @Inject constructor(
             ?: if (song.youtubeId != null || song.id.startsWith("youtube_")) "YouTube Music" else null
 
         val providerName = when {
-            cachedLossless != null -> "${cachedLossless.source.name} (${cachedLossless.label})"
+            cachedLossless != null -> formatResolvedProvider(cachedLossless)
             cloudProvider != null -> cloudProvider
             localPath != null -> "Local Storage"
             else -> "YouTube Music"
@@ -483,4 +483,17 @@ class SongInfoBottomSheetViewModel @Inject constructor(
     }
 
     fun isLoggedIn(): Boolean = YouTube.hasLoginCookie()
+
+    private fun formatResolvedProvider(result: LosslessStreamResolver.Result): String {
+        val display = result.providerDisplayName?.takeIf { it.isNotBlank() }
+        if (display != null) {
+            val detail = result.label.removePrefix("$display · ").removePrefix("$display ").trim()
+            return if (detail.isNotBlank() && !detail.equals(display, ignoreCase = true)) {
+                "$display ($detail)"
+            } else {
+                display
+            }
+        }
+        return "${result.source.name} (${result.label})"
+    }
 }

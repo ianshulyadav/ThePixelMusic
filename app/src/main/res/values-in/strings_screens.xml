@@ -286,7 +286,7 @@
     <string name="settings_content_customization_section">Kustomisasi Konten</string>
     <string name="settings_filter_cover_lofi_title">Sembunyikan lagu cover dan lo-fi</string>
     <string name="settings_filter_cover_lofi_desc">Sembunyikan lagu cover dan lo-fi dari rekomendasi dan antrean.</string>
-    <string name="settings_lossless_audio_sources_title">Sumber Audio Lossless (ArchiveTune)</string>
+    <string name="settings_lossless_audio_sources_title">Sumber Audio Lossless</string>
     <string name="settings_lossless_streaming_sources_title">Sumber Streaming Lossless</string>
     <string name="settings_lossless_streaming_sources_desc">Tidal, Qobuz, Deezer, Apple Music melalui pool &amp; akun Archive</string>
     <string name="settings_options_section">Opsi</string>

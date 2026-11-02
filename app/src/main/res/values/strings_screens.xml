@@ -301,9 +301,9 @@
     <string name="settings_content_customization_section">Content Customization</string>
     <string name="settings_filter_cover_lofi_title">Hide cover and lo-fi tracks</string>
     <string name="settings_filter_cover_lofi_desc">Hide covers and lo-fi tracks from recommendations and queues.</string>
-    <string name="settings_lossless_audio_sources_title">Lossless Audio Sources (ArchiveTune)</string>
+    <string name="settings_lossless_audio_sources_title">Lossless Music &amp; Sources</string>
     <string name="settings_lossless_streaming_sources_title">Lossless Streaming Sources</string>
-    <string name="settings_lossless_streaming_sources_desc">Tidal, Qobuz, Deezer, Apple Music via Archive pool &amp; accounts</string>
+    <string name="settings_lossless_streaming_sources_desc">Lossless music sources, addons, Apple Music, and streaming pools</string>
     <string name="settings_options_section">Options</string>
     <string name="settings_explore_lastfm_title">Explore recommendations with Last.fm</string>
     <string name="settings_explore_lastfm_desc">Use your Last.fm listening history, top albums, and friends to personalize the Explore page.</string>

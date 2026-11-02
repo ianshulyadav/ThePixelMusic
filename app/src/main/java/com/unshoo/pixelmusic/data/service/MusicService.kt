@@ -1880,8 +1880,11 @@ class MusicService : MediaLibraryService() {
                 if (youtubeVideoId != null) {
                     com.unshoo.pixelmusic.data.service.player.StreamChoice.forget(youtubeVideoId)
                     if (isLosslessStream) {
-                        // Drop cached decision and mark track failed so re-resolve falls back directly to YouTube
-                        com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver.markFailedForTrack(youtubeVideoId)
+                        // Exclude ONLY the failing addon/source first so retry steps down the unified chain before falling back to YouTube
+                        com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver.markCurrentSourceFailedForTrack(
+                            youtubeVideoId,
+                            "Playback error ${error.errorCodeName}",
+                        )
                         com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.invalidateStreamCache(youtubeVideoId)
                     }
                     if (effectiveAttempt >= 1) {

@@ -20,6 +20,7 @@ import com.unshoo.pixelmusic.data.lossless.constants.AppleMusicSourceEnabledKey
 import com.unshoo.pixelmusic.data.lossless.constants.AudioSourceOrderKey
 import com.unshoo.pixelmusic.data.lossless.constants.AudioSourceType
 import com.unshoo.pixelmusic.data.lossless.constants.MonochromeEnabledKey
+import com.unshoo.pixelmusic.data.lossless.constants.MonochromeInstancesKey
 import com.unshoo.pixelmusic.data.lossless.constants.DeezerAccountNameKey
 import com.unshoo.pixelmusic.data.lossless.constants.DeezerAccountPremiumKey
 import com.unshoo.pixelmusic.data.lossless.constants.DeezerArlKey
@@ -109,6 +110,10 @@ data class LosslessSourcesUiState(
     val appleQuality: AppleMusicQuality = AppleMusicQuality.LOSSLESS,
     val appleMediaUserToken: String = "",
     val appleDevToken: String = "",
+    val saavnEnabled: Boolean = false,
+    val poolEnabled: Boolean = true,
+    val unifiedOrder: List<String> = emptyList(),
+    val monochromeCustomInstances: String = "",
 )
 
 data class PoolCounts(
@@ -169,6 +174,10 @@ class LosslessSourcesViewModel @Inject constructor(
                     appleQuality = enumOrDefault(p[AppleMusicQualityKey], AppleMusicQuality.LOSSLESS),
                     appleMediaUserToken = p[AppleMusicMediaUserTokenKey].orEmpty(),
                     appleDevToken = p[AppleMusicDevTokenKey].orEmpty(),
+                    saavnEnabled = p[androidx.datastore.preferences.core.booleanPreferencesKey("enable_saavn_streaming")] ?: false,
+                    poolEnabled = p[androidx.datastore.preferences.core.booleanPreferencesKey("sourcePoolEnabled")] ?: true,
+                    unifiedOrder = p[androidx.datastore.preferences.core.stringPreferencesKey("unifiedPlaybackOrder")]?.split(",")?.filter { it.isNotBlank() } ?: emptyList(),
+                    monochromeCustomInstances = p[MonochromeInstancesKey].orEmpty(),
                 )
             }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LosslessSourcesUiState())
 
@@ -484,6 +493,96 @@ class LosslessSourcesViewModel @Inject constructor(
                 prefs.remove(AppleMusicMediaUserTokenKey)
                 prefs.remove(AppleMusicDevTokenKey)
             }
+            LosslessStreamResolver.clearAll()
+        }
+    }
+
+    val installedAddons: kotlinx.coroutines.flow.StateFlow<List<com.unshoo.pixelmusic.data.addons.InstalledAddon>> =
+        com.unshoo.pixelmusic.data.addons.AddonManager.installedAddons
+
+    val checkReports: kotlinx.coroutines.flow.StateFlow<Map<String, com.unshoo.pixelmusic.data.addons.AddonCheckReport>> =
+        com.unshoo.pixelmusic.data.addons.AddonManager.checkReports
+
+    fun setSaavnEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            dataStore.edit { prefs ->
+                prefs[androidx.datastore.preferences.core.booleanPreferencesKey("enable_saavn_streaming")] = enabled
+            }
+        }
+    }
+
+    fun setAddonEnabled(addonId: String, enabled: Boolean) {
+        viewModelScope.launch {
+            com.unshoo.pixelmusic.data.addons.AddonManager.setAddonEnabled(context, addonId, enabled)
+        }
+    }
+
+    fun saveUnifiedOrder(order: List<String>) {
+        viewModelScope.launch {
+            com.unshoo.pixelmusic.data.addons.AddonManager.saveUnifiedOrder(context, order)
+        }
+    }
+
+    fun testAddon(addonId: String) =
+        withBusy("addon_$addonId") {
+            val report = com.unshoo.pixelmusic.data.addons.AddonManager.checkAddon(context, addonId)
+            _lastMessage.value = report.summary
+        }
+
+    fun refreshAddon(addonId: String) =
+        withBusy("addon_$addonId") {
+            runCatching {
+                val updated = com.unshoo.pixelmusic.data.addons.AddonManager.refreshAddon(context, addonId)
+                _lastMessage.value = "Updated " + updated.name + " (v" + updated.version + ")"
+            }.onFailure {
+                _lastMessage.value = "Refresh failed: " + it.message
+            }
+        }
+
+    fun removeAddon(addonId: String) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val name = com.unshoo.pixelmusic.data.addons.AddonManager.addonById(addonId)?.name ?: addonId
+            com.unshoo.pixelmusic.data.addons.AddonManager.removeAddon(context, addonId)
+            _lastMessage.value = "Removed " + name
+        }
+    }
+
+    fun saveMonochromeCustomInstances(rawLines: String) {
+        val cleaned = rawLines
+            .lineSequence()
+            .map { it.trim().trimEnd('/') }
+            .map { line ->
+                if (line.isNotEmpty() && !line.startsWith("http://", true) && !line.startsWith("https://", true)) {
+                    "https://$line"
+                } else {
+                    line
+                }
+            }
+            .filter { it.startsWith("http://", true) || it.startsWith("https://", true) }
+            .distinct()
+            .joinToString("\n")
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            dataStore.edit { prefs ->
+                if (cleaned.isBlank()) prefs.remove(MonochromeInstancesKey)
+                else prefs[MonochromeInstancesKey] = cleaned
+            }
+            LosslessStreamResolver.clearAll()
+            _lastMessage.value = "Monochrome mirrors updated"
+        }
+    }
+
+    fun setPoolEnabled(enabled: Boolean) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            dataStore.edit { prefs ->
+                prefs[androidx.datastore.preferences.core.booleanPreferencesKey("sourcePoolEnabled")] = enabled
+            }
+            LosslessStreamResolver.clearAll()
+        }
+    }
+
+    fun updateAddonSetting(addonId: String, key: String, value: String, forMobileNetwork: Boolean = false) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            com.unshoo.pixelmusic.data.addons.AddonManager.updateAddonSetting(context, addonId, key, value, forMobileNetwork)
             LosslessStreamResolver.clearAll()
         }
     }

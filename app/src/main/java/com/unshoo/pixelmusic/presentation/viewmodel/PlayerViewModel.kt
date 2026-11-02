@@ -1761,18 +1761,21 @@ class PlayerViewModel @Inject constructor(
                         _playbackAudioMetadata.value = monochromeMetadata(currentId, offered.bitrate, offered.sampleRate, offered.bitDepth)
                     } else {
                         val tag = when {
+                            offered.isDolbyAtmos -> "DOLBY ATMOS"
                             offered.isHiRes -> "HI-RES LOSSLESS"
                             offered.isLossless -> "LOSSLESS"
                             else -> null
                         }
+                        val srcName = offered.providerDisplayName?.takeIf { it.isNotBlank() }
+                            ?: offered.source.name
                         _playbackAudioMetadata.value = PlaybackAudioMetadata(
                             mediaId = currentId,
                             mimeType = offered.mimeType,
                             bitrate = offered.bitrate.takeIf { it > 0 } ?: 1411_200,
                             sampleRate = offered.sampleRate ?: 44100,
-                            bitDepth = offered.bitDepth ?: 16,
+                            bitDepth = offered.bitDepth ?: if (offered.isDolbyAtmos) null else 16,
                             formatTag = tag,
-                            sourceName = offered.source.name,
+                            sourceName = srcName,
                             isConfirmed = true
                         )
                     }
@@ -4970,15 +4973,17 @@ class PlayerViewModel @Inject constructor(
             ?: com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver.resultFor(mediaId)
         if (losslessResult != null) {
             val tag = when {
+                losslessResult.isDolbyAtmos -> "DOLBY ATMOS"
                 losslessResult.isHiRes -> "HI-RES LOSSLESS"
                 losslessResult.isLossless -> "LOSSLESS"
                 else -> null
             }
-            val srcName = if (losslessResult.source == com.unshoo.pixelmusic.data.lossless.constants.AudioSourceType.MONOCHROME) {
-                "Monochrome (FLAC)"
-            } else {
-                losslessResult.source.name
-            }
+            val srcName = losslessResult.providerDisplayName?.takeIf { it.isNotBlank() }
+                ?: if (losslessResult.source == com.unshoo.pixelmusic.data.lossless.constants.AudioSourceType.MONOCHROME) {
+                    "Monochrome (FLAC)"
+                } else {
+                    losslessResult.source.name
+                }
             _playbackAudioMetadata.value = PlaybackAudioMetadata(
                 mediaId = mediaId,
                 mimeType = losslessResult.mimeType,
@@ -5072,9 +5077,79 @@ class PlayerViewModel @Inject constructor(
             bitrate = bitrate.takeIf { it > 0 },
             sampleRate = sampleRate,
             bitDepth = bitDepth,
-            sourceName = source.name,
+            sourceName = providerDisplayName?.takeIf { it.isNotBlank() } ?: source.name,
             labelSaysHiRes = isHiRes,
+            isAtmos = isDolbyAtmos,
         )
+
+    /**
+     * Switches or pins [song] to a specific Addon or built-in source (`addon:<id>`, `builtin:<TYPE>`,
+     * or `null` for Automatic Unified Chain) and hot-reloads the active player item in place while
+     * preserving playback position and queue state!
+     */
+    fun switchSongSource(
+        song: Song,
+        unifiedSourceId: String?,
+        onPlayIfNotActive: (() -> Unit)? = null,
+    ) {
+        val videoId = song.youtubeId?.takeIf { it.isNotBlank() }
+            ?: song.contentUriString.substringAfter("youtube://").takeIf { it.isNotBlank() && !it.startsWith("http") }
+            ?: song.id.removePrefix("youtube_")
+        if (videoId.isBlank()) return
+
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver
+                    .setUnifiedSongSourceOverride(context, videoId, unifiedSourceId)
+                com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.invalidateStreamCache(videoId)
+                com.unshoo.pixelmusic.data.service.player.StreamChoice.forget(videoId)
+                dualPlayerEngine.invalidateResolvedUri("youtube://$videoId")
+                dualPlayerEngine.invalidateResolvedUri(videoId)
+            }
+
+            val controller = mediaController
+            val master = dualPlayerEngine.masterPlayer
+            val activeIdx = controller?.currentMediaItemIndex ?: C.INDEX_UNSET
+            val currentItem = if (controller != null && activeIdx != C.INDEX_UNSET && activeIdx < master.mediaItemCount) {
+                runCatching { master.getMediaItemAt(activeIdx) }.getOrNull()
+            } else {
+                null
+            }
+            val currentCleanId = currentItem?.mediaId?.removePrefix("youtube_")?.removePrefix("monochrome_")
+            val isCurrentlyActive = currentItem != null &&
+                (currentCleanId == videoId || currentItem.mediaId == song.id)
+
+            if (!isCurrentlyActive || controller == null) {
+                onPlayIfNotActive?.invoke()
+                return@launch
+            }
+
+            val savedPos = controller.currentPosition.coerceAtLeast(0L)
+            val wasPlaying = controller.playWhenReady || controller.isPlaying
+            currentItem.localConfiguration?.uri?.toString()?.let { dualPlayerEngine.invalidateResolvedUri(it) }
+
+            val baseItem = currentItem.buildUpon()
+                .setUri(Uri.parse("youtube://$videoId"))
+                .setMimeType(null)
+                .setCustomCacheKey(null)
+                .build()
+
+            val reResolved = withContext(Dispatchers.IO) {
+                runCatching { dualPlayerEngine.preResolveForPlayback(baseItem) }.getOrDefault(baseItem)
+            }
+
+            withContext(Dispatchers.Main.immediate) {
+                if (activeIdx in 0 until master.mediaItemCount) {
+                    master.replaceMediaItem(activeIdx, reResolved)
+                    controller.prepare()
+                    controller.seekTo(activeIdx, savedPos)
+                    controller.playWhenReady = wasPlaying
+                    if (wasPlaying) controller.play()
+                    refreshPlaybackAudioMetadata(controller)
+                }
+            }
+        }
+    }
 
     private fun extractBitDepthFromPcmEncoding(pcmEncoding: Int): Int? = when (pcmEncoding) {
         C.ENCODING_PCM_8BIT -> 8

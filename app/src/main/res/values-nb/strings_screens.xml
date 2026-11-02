@@ -288,7 +288,7 @@
     <string name="settings_content_customization_section">Tilpassing av innhold</string>
     <string name="settings_filter_cover_lofi_title">Skjul cover- og lo-fi-sanger</string>
     <string name="settings_filter_cover_lofi_desc">Skjul covere og lo-fi-spor fra anbefalinger og køer.</string>
-    <string name="settings_lossless_audio_sources_title">Tapsfrie lydkilder (ArchiveTune)</string>
+    <string name="settings_lossless_audio_sources_title">Tapsfrie lydkilder</string>
     <string name="settings_lossless_streaming_sources_title">Tapsfrie strømmekilder</string>
     <string name="settings_lossless_streaming_sources_desc">Tidal, Qobuz, Deezer, Apple Music via Archive-pool og kontoer</string>
     <string name="settings_options_section">Alternativer</string>

@@ -55,6 +55,7 @@ data class OfferedStream(
     val bitDepth: Int?,
     val sourceName: String?,
     val labelSaysHiRes: Boolean,
+    val isAtmos: Boolean = false,
 )
 
 /**
@@ -153,7 +154,12 @@ object PlaybackStreamReconciler {
             null
         }
 
+        val isConfirmedAtmos = confirmed.mimeType?.contains("eac3-joc", ignoreCase = true) == true ||
+            confirmed.mimeType?.contains("ac-4", ignoreCase = true) == true ||
+            (offer?.isAtmos == true && family == AudioFamily.OTHER)
+
         val formatTag = when {
+            isConfirmedAtmos -> "DOLBY ATMOS"
             !lossless -> null
             (sampleRate ?: 0) > 48_000 ||
                 (bitDepth ?: 0) >= 24 ||

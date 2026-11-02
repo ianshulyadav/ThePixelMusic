@@ -83,6 +83,7 @@ fun AudioFormatInfoDialog(
     filePath: String? = null,
     activeDecoderInfo: ActiveDecoderInfo? = null,
     hiFiModeEnabled: Boolean = false,
+    onSwitchSource: (() -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -257,19 +258,61 @@ fun AudioFormatInfoDialog(
             .fillMaxWidth(0.92f)
             .padding(vertical = 16.dp),
         confirmButton = {
-            FilledTonalButton(
-                onClick = onDismiss,
-                shape = RoundedCornerShape(20.dp),
-                colors = ButtonDefaults.filledTonalButtonColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "Close",
-                    fontFamily = GoogleSansRounded,
-                    fontWeight = FontWeight.Bold
-                )
+                if (onSwitchSource != null) {
+                    FilledTonalButton(
+                        onClick = {
+                            onDismiss()
+                            onSwitchSource()
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Tune,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = "Source",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontFamily = GoogleSansRounded,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1
+                        )
+                    }
+                }
+                FilledTonalButton(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                ) {
+                    Text(
+                        text = "Close",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontFamily = GoogleSansRounded,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
         },
         title = {

@@ -5,7 +5,9 @@ import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
+import kotlinx.coroutines.launch
 import android.net.Uri
 import android.widget.Toast
 import android.view.WindowManager
@@ -49,6 +51,7 @@ import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Block
+import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -57,6 +60,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
@@ -159,6 +163,11 @@ fun SongInfoBottomSheet(
     var showEditSheet by remember { mutableStateOf(false) }
     var showArtistPicker by remember { mutableStateOf(false) }
     var showAudioFormatInfoDialog by remember { mutableStateOf(false) }
+    var showPlayFromSourceSheet by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
+    val hostActivity = remember(context) { context.findComponentActivity() }
+    val activityPlayerViewModel: com.unshoo.pixelmusic.presentation.viewmodel.PlayerViewModel? =
+        if (hostActivity != null) hiltViewModel(hostActivity) else null
     val audioMeta by songInfoViewModel.audioMeta.collectAsStateWithLifecycle()
     val notInterestedSongIds by songInfoViewModel.notInterestedSongIds.collectAsStateWithLifecycle()
     val resolvedArtists by songInfoViewModel.resolvedArtists.collectAsStateWithLifecycle()
@@ -839,6 +848,8 @@ fun SongInfoBottomSheet(
                                             }
                                           }
 
+
+
                                         item {
                                             Spacer(Modifier.navigationBarsPadding().height(80.dp))
                                         }
@@ -1088,7 +1099,47 @@ fun SongInfoBottomSheet(
             formatTag = audioMeta?.formatLabel,
             provider = songLocationInfo.provider,
             filePath = songLocationInfo.filePath ?: song.path.takeIf { !it.isNullOrBlank() } ?: if (song.isLocal) song.contentUriString else null,
+            onSwitchSource = if (!song.isLocal) {
+                { showPlayFromSourceSheet = true }
+            } else null,
             onDismiss = { showAudioFormatInfoDialog = false }
+        )
+    }
+
+    if (showPlayFromSourceSheet && !song.isLocal) {
+        PlayFromSourceSheet(
+            song = song,
+            activeSourceName = songLocationInfo.provider?.substringBefore(" (")?.trim()?.takeIf { it.isNotEmpty() },
+            onDismiss = { showPlayFromSourceSheet = false },
+            onSelectSource = { unifiedSourceId ->
+                showPlayFromSourceSheet = false
+                if (activityPlayerViewModel != null) {
+                    activityPlayerViewModel.switchSongSource(
+                        song = song,
+                        unifiedSourceId = unifiedSourceId,
+                        onPlayIfNotActive = onPlaySong,
+                    )
+                    coroutineScope.launch {
+                        kotlinx.coroutines.delay(900)
+                        songInfoViewModel.loadAudioMeta(song)
+                    }
+                } else {
+                    coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                        val videoId = song.youtubeId?.takeIf { it.isNotBlank() }
+                            ?: song.contentUriString.substringAfter("youtube://").takeIf { it.isNotBlank() }
+                            ?: song.id.removePrefix("youtube_")
+                        if (videoId.isNotBlank()) {
+                            com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver.setUnifiedSongSourceOverride(
+                                context,
+                                videoId,
+                                unifiedSourceId,
+                            )
+                            com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver.clearResolved(videoId)
+                        }
+                        songInfoViewModel.loadAudioMeta(song)
+                    }
+                }
+            }
         )
     }
 
@@ -1145,3 +1196,10 @@ private fun SongInfoSegmentedListItem(
         )
     }
 }
+
+private tailrec fun Context.findComponentActivity(): androidx.activity.ComponentActivity? = when (this) {
+    is androidx.activity.ComponentActivity -> this
+    is ContextWrapper -> baseContext.findComponentActivity()
+    else -> null
+}
+

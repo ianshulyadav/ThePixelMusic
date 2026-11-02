@@ -288,7 +288,7 @@
     <string name="settings_content_customization_section">Inhaltsanpassung</string>
     <string name="settings_filter_cover_lofi_title">Cover- und Lo-Fi-Titel ausblenden</string>
     <string name="settings_filter_cover_lofi_desc">Cover und Lo-Fi-Titel aus Empfehlungen und Warteschlange ausblenden.</string>
-    <string name="settings_lossless_audio_sources_title">Lossless-Audioquellen (ArchiveTune)</string>
+    <string name="settings_lossless_audio_sources_title">Lossless-Audioquellen</string>
     <string name="settings_lossless_streaming_sources_title">Lossless-Streaming-Quellen</string>
     <string name="settings_lossless_streaming_sources_desc">Tidal, Qobuz, Deezer, Apple Music über Archive-Pool und Konten</string>
     <string name="settings_options_section">Optionen</string>

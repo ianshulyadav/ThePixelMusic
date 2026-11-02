@@ -26,6 +26,15 @@ package com.unshoo.pixelmusic.data.lossless
 import android.content.Context
 import android.net.Uri
 import androidx.datastore.preferences.core.edit
+import com.unshoo.pixelmusic.data.addons.AddonHealthTracker
+import com.unshoo.pixelmusic.data.addons.AddonManager
+import com.unshoo.pixelmusic.data.addons.AddonResolvedStream
+import com.unshoo.pixelmusic.data.addons.AddonStreamRegistry
+import com.unshoo.pixelmusic.data.addons.AddonTransport
+import com.unshoo.pixelmusic.data.addons.InstalledAddon
+import com.unshoo.pixelmusic.data.addons.MonochromeInstancePool
+import com.unshoo.pixelmusic.data.addons.UnifiedSongSourceOverride
+import com.unshoo.pixelmusic.data.addons.UnifiedSourceId
 import com.unshoo.pixelmusic.data.lossless.applemusic.AppleMusicAudioProvider
 import com.unshoo.pixelmusic.data.lossless.applemusic.AppleMusicDrm
 import com.unshoo.pixelmusic.data.lossless.applemusic.AppleMusicVirtualStream
@@ -36,6 +45,9 @@ import com.unshoo.pixelmusic.data.lossless.audiosource.SongSourceOverride
 import com.unshoo.pixelmusic.data.lossless.audiosource.TitleMatch
 import com.unshoo.pixelmusic.data.lossless.audiosource.pcmBitrateOrNull
 import com.unshoo.pixelmusic.data.lossless.cache.LosslessFileCache
+import com.unshoo.pixelmusic.data.lossless.constants.AddonsEnabledKey
+import com.unshoo.pixelmusic.data.lossless.constants.AddonsFastConcurrentKey
+import com.unshoo.pixelmusic.data.lossless.constants.AddonsTimeoutMsKey
 import com.unshoo.pixelmusic.data.lossless.constants.AppleMusicQuality
 import com.unshoo.pixelmusic.data.lossless.constants.AppleMusicQualityKey
 import com.unshoo.pixelmusic.data.lossless.constants.AppleMusicMediaUserTokenKey
@@ -43,6 +55,7 @@ import com.unshoo.pixelmusic.data.lossless.constants.AppleMusicSourceEnabledKey
 import com.unshoo.pixelmusic.data.lossless.constants.AudioSourceOrderKey
 import com.unshoo.pixelmusic.data.lossless.constants.AudioSourceType
 import com.unshoo.pixelmusic.data.lossless.constants.MonochromeEnabledKey
+import com.unshoo.pixelmusic.data.lossless.constants.MonochromeInstancesKey
 import com.unshoo.pixelmusic.data.lossless.constants.DeezerArlKey
 import com.unshoo.pixelmusic.data.lossless.constants.PoolApiKeyKey
 import com.unshoo.pixelmusic.data.lossless.constants.DeezerAudioQuality
@@ -126,7 +139,7 @@ object LosslessStreamResolver {
     data class Result(
         val mediaId: String,
         val uri: String,
-        /** Bare mime type, e.g. `audio/flac`, `audio/mp4`. */
+        /** Bare audio mime type, e.g. `audio/flac`, `audio/mp4`, `audio/eac3-joc`. */
         val mimeType: String,
         val codecs: String,
         /** Bits per second (measured from size/duration when possible, otherwise a label heuristic). */
@@ -134,20 +147,36 @@ object LosslessStreamResolver {
         val sampleRate: Int?,
         val bitDepth: Int?,
         val contentLength: Long?,
-        /** Human readable label, e.g. "Tidal HI_RES_LOSSLESS", "Qobuz FLAC 24/96", "Apple Music ctrp256". */
+        /** Human readable label, e.g. "Tidal HI_RES_LOSSLESS", "Addon FLAC 24-bit / 96 kHz". */
         val label: String,
         val source: AudioSourceType,
         val resolvedAtMs: Long = System.currentTimeMillis(),
+        val sourceId: String = UnifiedSourceId.forBuiltIn(source),
+        val providerDisplayName: String? = null,
+        /** Optional ExoPlayer container MediaItem MIME (`application/x-mpegURL` or `application/dash+xml`). */
+        val containerMimeType: String? = null,
+        val headers: Map<String, String> = emptyMap(),
+        val allowDownloads: Boolean = true,
+        val isAtmos: Boolean = false,
     ) {
+        val isDolbyAtmos: Boolean
+            get() = isAtmos ||
+                mimeType.contains("eac3-joc", ignoreCase = true) ||
+                codecs.contains("ec+3", ignoreCase = true) ||
+                codecs.contains("ac-4", ignoreCase = true) ||
+                label.contains("ATMOS", ignoreCase = true)
+
         val isLossless: Boolean
             get() =
                 codecs.contains("flac", ignoreCase = true) ||
                     codecs.contains("alac", ignoreCase = true) ||
                     mimeType.contains("flac", ignoreCase = true) ||
-                    label.uppercase(Locale.US).let { it.contains("LOSSLESS") || it.contains("FLAC") || it.contains("HI_RES") }
+                    label.uppercase(Locale.US).let { it.contains("LOSSLESS") || it.contains("FLAC") || it.contains("HI_RES") || it.contains("HI-RES") }
 
         val isHiRes: Boolean
-            get() = (sampleRate ?: 0) > 48_000 || label.uppercase(Locale.US).let { it.contains("HI_RES") || it.contains("HIRES") }
+            get() = (sampleRate ?: 0) > 48_000 ||
+                (bitDepth ?: 0) > 16 ||
+                label.uppercase(Locale.US).let { it.contains("HI_RES") || it.contains("HI-RES") || it.contains("HIRES") || it.contains("24-BIT") || it.contains("24/") }
     }
 
     /** Everything the chain needs to know about the wanted recording. */
@@ -165,7 +194,13 @@ object LosslessStreamResolver {
         val expiresAtMs: Long,
     )
 
+    private class CachedAddonResult(
+        val resolved: AddonResolvedStream,
+        val expiresAtMs: Long,
+    )
+
     private val directStreamCache = ConcurrentHashMap<String, CachedDirectStream>()
+    private val addonResultCache = ConcurrentHashMap<String, CachedAddonResult>()
 
     /** resolved URI → time after which the player must re-resolve. */
     private val uriFreshness = ConcurrentHashMap<String, Long>()
@@ -201,9 +236,22 @@ object LosslessStreamResolver {
 
     // ── Public helpers used by the player / YoutubeHelper ─────────────────────────────────────
 
-    /** Master switch; defaults to on only when the build ships a pool key (see LosslessPreferenceKeys). */
-    suspend fun isEnabled(context: Context): Boolean =
-        context.dataStore.getAsync(LosslessStreamingEnabledKey) ?: defaultEnabled()
+    private fun hasActiveInstalledAddons(context: Context?, p: androidx.datastore.preferences.core.Preferences): Boolean {
+        val addonsMaster = p[AddonsEnabledKey] ?: true
+        if (!addonsMaster) return false
+        val list = if (context != null) AddonManager.ensureLoadedBlocking(context) else AddonManager.installedAddons.value
+        return list.any { it.enabled }
+    }
+
+    /**
+     * Master switch: true when either Lossless Streaming is enabled OR the user has installed and
+     * enabled at least one Addon/JS module in Developer Options -> Addons.
+     */
+    suspend fun isEnabled(context: Context): Boolean {
+        val p = prefs(context)
+        if (p[LosslessStreamingEnabledKey] ?: defaultEnabled()) return true
+        return hasActiveInstalledAddons(context, p)
+    }
 
     fun isEnabledBlocking(context: Context): Boolean =
         runCatching { runBlocking(Dispatchers.IO) { isEnabled(context) } }.getOrDefault(false)
@@ -226,6 +274,9 @@ object LosslessStreamResolver {
     }
 
     fun hasAnyActiveLosslessSource(p: androidx.datastore.preferences.core.Preferences): Boolean {
+        if ((p[AddonsEnabledKey] ?: true) && AddonManager.installedAddons.value.any { it.enabled }) {
+            return true
+        }
         val masterEnabled = p[LosslessStreamingEnabledKey] ?: defaultEnabled()
         if (!masterEnabled) return false
 
@@ -242,20 +293,29 @@ object LosslessStreamResolver {
         return hasMonochrome || hasBuildKey || hasPoolKey || hasTidal || hasDeezer || hasApple || hasQobuz
     }
 
-    suspend fun hasAnyActiveLosslessSource(context: Context): Boolean =
-        hasAnyActiveLosslessSource(prefs(context))
+    suspend fun hasAnyActiveLosslessSource(context: Context): Boolean {
+        AddonManager.ensureLoadedBlocking(context)
+        return hasAnyActiveLosslessSource(prefs(context))
+    }
 
     /**
-     * Emits true when lossless streaming is enabled AND at least one lossless source is usable.
+     * Emits true when lossless streaming or at least one installed addon is usable.
      */
     fun isLosslessConfiguredOrSignedInFlow(context: Context): Flow<Boolean> =
-        context.dataStore.data.map { p -> hasAnyActiveLosslessSource(p) }
+        kotlinx.coroutines.flow.combine(
+            context.dataStore.data,
+            AddonManager.installedAddons,
+        ) { p, addons ->
+            val addonsActive = (p[AddonsEnabledKey] ?: true) && addons.any { it.enabled }
+            addonsActive || hasAnyActiveLosslessSource(p)
+        }
 
     /** True when [uri] came out of this resolver (any source, any scheme). */
     fun isLosslessUri(uri: String?): Boolean {
         if (uri.isNullOrBlank()) return false
         if (uriFreshness.containsKey(uri)) return true
         return LosslessSchemeRoutingDataSource.isCustomLosslessScheme(uri) ||
+            AddonStreamRegistry.isInlineManifestUri(uri) ||
             uri.startsWith("apple-pending:") ||
             uri.startsWith("monochrome://") ||
             uri.contains("monochrome.st/track/") ||
@@ -265,6 +325,10 @@ object LosslessStreamResolver {
     /** Whether a URI produced by [resolve] may still be handed to the player without re-resolving. */
     fun isFreshUri(uri: String?): Boolean {
         if (uri.isNullOrBlank()) return false
+        if (AddonStreamRegistry.isInlineManifestUri(uri) && AddonStreamRegistry.manifestFor(uri) == null) {
+            uriFreshness.remove(uri)
+            return false
+        }
         val until = uriFreshness[uri]
         if (until != null) {
             if (until <= System.currentTimeMillis()) {
@@ -272,13 +336,11 @@ object LosslessStreamResolver {
                 return false
             }
         } else if (uri.startsWith("monochrome://") || uri.contains("monochrome.st/track/")) {
-            // Monochrome track endpoints default to active freshness window unless server reports expiration
             uriFreshness[uri] = System.currentTimeMillis() + URI_FRESHNESS_MS
             return true
         } else {
             return false
         }
-        // Apple flattened files live in cacheDir/applemusic; the LRU may have evicted them.
         if (uri.startsWith("file:")) {
             val exists = runCatching { File(Uri.parse(uri).path.orEmpty()).let { it.isFile && it.length() > 0L } }.getOrDefault(false)
             if (!exists) {
@@ -295,20 +357,64 @@ object LosslessStreamResolver {
         }
     }
 
-    fun resultFor(mediaId: String?): Result? = mediaId?.let { resolvedByMediaId[it] }
+    fun resultFor(mediaId: String?): Result? {
+        if (mediaId == null) return null
+        resolvedByMediaId[mediaId]?.let { return it }
+        val clean = mediaId.removePrefix("youtube_").removePrefix("monochrome_")
+        return resolvedByMediaId[clean]
+    }
 
     fun availableSourcesForSong(mediaId: String): List<AudioSourceType> =
         resolvedSourcesByMediaId[mediaId]?.toList().orEmpty()
 
     /** Drop every cached decision for [mediaId] (used after a per-song source override changes). */
     fun clearResolved(mediaId: String) {
-        AudioSourceType.entries.forEach { directStreamCache.remove(sourceCacheKey(it, mediaId)) }
+        val clean = mediaId.removePrefix("youtube_").removePrefix("monochrome_")
+        AudioSourceType.entries.forEach {
+            directStreamCache.remove(sourceCacheKey(it, mediaId))
+            directStreamCache.remove(sourceCacheKey(it, clean))
+        }
+        addonResultCache.keys.removeIf { it.endsWith(":$mediaId") || it.endsWith(":$clean") }
         resolvedByMediaId.remove(mediaId)?.let { uriFreshness.remove(it.uri) }
+        if (clean != mediaId) {
+            resolvedByMediaId.remove(clean)?.let { uriFreshness.remove(it.uri) }
+        }
         resolvedSourcesByMediaId.remove(mediaId)
         AppleMusicDrm.clear(mediaId)
     }
 
     private val failedMediaIds = ConcurrentHashMap<String, Long>()
+    /** Per-track failed unified source IDs so playback errors step down to the next addon/source first! */
+    private val failedSourceIdsByTrack = ConcurrentHashMap<String, MutableSet<String>>()
+
+    /**
+     * Marks ONLY the currently active source (`addon:<id>` or `builtin:<TYPE>`) as failed for
+     * [mediaId] so an immediate re-resolve steps down to the NEXT addon/source in the unified chain!
+     * Returns `true` if a specific source was excluded and another attempt should run before
+     * abandoning lossless/addons completely.
+     */
+    fun markCurrentSourceFailedForTrack(mediaId: String, reason: String = "Playback stream error"): Boolean {
+        val clean = mediaId.removePrefix("youtube_").removePrefix("monochrome_")
+        val active = resolvedByMediaId[mediaId] ?: resolvedByMediaId[clean]
+        if (active == null) {
+            markFailedForTrack(mediaId)
+            return false
+        }
+        AddonHealthTracker.recordFailure(active.sourceId, reason)
+        val set = failedSourceIdsByTrack.getOrPut(clean) { ConcurrentHashMap.newKeySet() }
+        val newlyAdded = set.add(active.sourceId)
+        directStreamCache.remove(sourceCacheKey(active.source, mediaId))
+        directStreamCache.remove(sourceCacheKey(active.source, clean))
+        addonResultCache.remove("${active.sourceId}:$mediaId")
+        addonResultCache.remove("${active.sourceId}:$clean")
+        resolvedByMediaId.remove(mediaId)?.let { uriFreshness.remove(it.uri) }
+        resolvedByMediaId.remove(clean)?.let { uriFreshness.remove(it.uri) }
+        if (!newlyAdded || set.size >= 6) {
+            markFailedForTrack(mediaId)
+            return false
+        }
+        return true
+    }
 
     /** Mark a track as failed for lossless streaming so it falls back to YouTube immediately without loops. */
     fun markFailedForTrack(mediaId: String) {
@@ -323,6 +429,8 @@ object LosslessStreamResolver {
         val clean = mediaId.removePrefix("youtube_").removePrefix("monochrome_")
         failedMediaIds.remove(mediaId)
         failedMediaIds.remove(clean)
+        failedSourceIdsByTrack.remove(mediaId)
+        failedSourceIdsByTrack.remove(clean)
     }
 
     fun isFailedForTrack(mediaId: String?): Boolean {
@@ -332,6 +440,7 @@ object LosslessStreamResolver {
         if (System.currentTimeMillis() > until) {
             failedMediaIds.remove(mediaId)
             failedMediaIds.remove(clean)
+            failedSourceIdsByTrack.remove(clean)
             return false
         }
         return true
@@ -339,10 +448,12 @@ object LosslessStreamResolver {
 
     fun clearAll() {
         directStreamCache.clear()
+        addonResultCache.clear()
         resolvedByMediaId.clear()
         uriFreshness.clear()
         resolvedSourcesByMediaId.clear()
         failedMediaIds.clear()
+        failedSourceIdsByTrack.clear()
     }
 
     suspend fun setSongSourceOverride(
@@ -350,10 +461,26 @@ object LosslessStreamResolver {
         mediaId: String,
         source: AudioSourceType?,
     ) {
+        val unified = source?.let(UnifiedSourceId::forBuiltIn)
+        setUnifiedSongSourceOverride(context, mediaId, unified)
+    }
+
+    suspend fun setUnifiedSongSourceOverride(
+        context: Context,
+        mediaId: String,
+        unifiedSourceId: String?,
+    ) {
         context.dataStore.edit { prefs ->
-            prefs[SongSourceOverrideKey] = SongSourceOverride.withOverride(prefs[SongSourceOverrideKey], mediaId, source)
+            prefs[SongSourceOverrideKey] =
+                UnifiedSongSourceOverride.withOverride(prefs[SongSourceOverrideKey], mediaId, unifiedSourceId)
         }
+        clearFailedForTrack(mediaId)
         clearResolved(mediaId)
+    }
+
+    suspend fun getUnifiedSongSourceOverride(context: Context, mediaId: String): String? {
+        val raw = prefs(context)[SongSourceOverrideKey]
+        return UnifiedSongSourceOverride.get(raw, mediaId)
     }
 
     // ── Preference readers ────────────────────────────────────────────────────────────────────
@@ -378,8 +505,18 @@ object LosslessStreamResolver {
             .map { it.trim() }
             .filter { it.isNotEmpty() }
 
-    private class SourceSettings(
+    private val SaavnEnabledPrefKey = androidx.datastore.preferences.core.booleanPreferencesKey("enable_saavn_streaming")
+
+    class SourceSettings(
+        val losslessMasterEnabled: Boolean,
+        val addonsMasterEnabled: Boolean,
+        val addonsFastConcurrent: Boolean,
+        val addonTimeoutMs: Long,
+        val installedAddons: List<InstalledAddon>,
+        val unifiedOrder: List<String>,
+        val saavnEnabled: Boolean,
         val monochromeEnabled: Boolean,
+        val monochromeInstances: List<String>,
         val tidalEnabled: Boolean,
         val qobuzEnabled: Boolean,
         val deezerEnabled: Boolean,
@@ -396,10 +533,19 @@ object LosslessStreamResolver {
         val appleQuality: AppleMusicQuality,
     )
 
-    private suspend fun readSettings(context: Context): SourceSettings {
+    suspend fun readSettings(context: Context): SourceSettings {
+        val addons = AddonManager.ensureLoadedBlocking(context)
         val p = prefs(context)
         return SourceSettings(
+            losslessMasterEnabled = p[LosslessStreamingEnabledKey] ?: defaultEnabled(),
+            addonsMasterEnabled = p[AddonsEnabledKey] ?: true,
+            addonsFastConcurrent = p[AddonsFastConcurrentKey] ?: true,
+            addonTimeoutMs = (p[AddonsTimeoutMsKey] ?: AddonManager.DEFAULT_PER_ADDON_TIMEOUT_MS).coerceIn(2_000L, 20_000L),
+            installedAddons = addons,
+            unifiedOrder = AddonManager.readUnifiedOrder(p, addons),
+            saavnEnabled = p[SaavnEnabledPrefKey] ?: true,
             monochromeEnabled = p[MonochromeEnabledKey] ?: true,
+            monochromeInstances = parseMultiline(p[MonochromeInstancesKey]),
             tidalEnabled = p[TidalEnabledKey] ?: true,
             qobuzEnabled = p[QobuzEnabledKey] ?: false,
             deezerEnabled = p[DeezerEnabledKey] ?: false,
@@ -418,31 +564,65 @@ object LosslessStreamResolver {
     }
 
     /**
-     * ArchiveTune: `sourceResolutionChain()` — user order filtered by the per-source toggles with
-     * ArchiveTune's defaults (Tidal + Apple on, everything else off), cut before YOUTUBE.
-     * QOBUZ_BACKUP, AMAZON and JIOSAAVN never have a resolver here (see file header).
+     * Builds the unified candidate chain (`addon:<id>` + `builtin:<TYPE>`) up to the first enabled
+     * non-lossless built-in fallback (`builtin:JIOSAAVN` or `builtin:YOUTUBE`), respecting both the
+     * user's unified drag order and per-provider enable switches.
      */
-    private fun resolutionChain(s: SourceSettings): List<AudioSourceType> {
-        val enabledDefaults =
-            mapOf(
-                AudioSourceType.MONOCHROME to s.monochromeEnabled,
-                AudioSourceType.TIDAL to s.tidalEnabled,
-                AudioSourceType.QOBUZ to s.qobuzEnabled,
-                AudioSourceType.QOBUZ_BACKUP to false,
-                AudioSourceType.DEEZER to s.deezerEnabled,
-                AudioSourceType.APPLE to s.appleEnabled,
-                AudioSourceType.AMAZON to false,
-                AudioSourceType.JIOSAAVN to false,
-                AudioSourceType.YOUTUBE to true,
-            )
-        return AudioSourceConfig
-            .resolutionChain(rawOrder = s.rawOrder, enabledSet = null, defaults = enabledDefaults)
-            .takeWhile { it != AudioSourceType.YOUTUBE }
-            .filter { it != AudioSourceType.QOBUZ_BACKUP && it != AudioSourceType.AMAZON && it != AudioSourceType.JIOSAAVN }
+    private fun unifiedResolutionChain(s: SourceSettings, forDownload: Boolean = false): List<String> {
+        val addonById = s.installedAddons.associateBy { it.id }
+        val result = ArrayList<String>()
+        for (sourceId in s.unifiedOrder) {
+            if (UnifiedSourceId.isAddon(sourceId)) {
+                if (!s.addonsMasterEnabled) continue
+                val addonId = UnifiedSourceId.addonIdOrNull(sourceId) ?: continue
+                val addon = addonById[addonId] ?: continue
+                if (!addon.enabled) continue
+                if (forDownload && !addon.allowDownloads) continue
+                result += sourceId
+            } else {
+                val type = UnifiedSourceId.builtInTypeOrNull(sourceId) ?: continue
+                when (type) {
+                    AudioSourceType.YOUTUBE -> break
+                    AudioSourceType.JIOSAAVN -> if (s.saavnEnabled && !forDownload) break
+                    AudioSourceType.MONOCHROME,
+                    AudioSourceType.TIDAL,
+                    AudioSourceType.QOBUZ,
+                    AudioSourceType.DEEZER,
+                    AudioSourceType.APPLE -> {
+                        if (s.losslessMasterEnabled && isSourceEnabled(type, s)) {
+                            result += sourceId
+                        }
+                    }
+                    else -> {}
+                }
+            }
+        }
+        return result
+    }
+
+    private fun isUnifiedEntryUsableForOverride(sourceId: String, s: SourceSettings, forDownload: Boolean): Boolean {
+        if (UnifiedSourceId.isAddon(sourceId)) {
+            val addonId = UnifiedSourceId.addonIdOrNull(sourceId) ?: return false
+            val addon = s.installedAddons.firstOrNull { it.id == addonId } ?: return false
+            if (!addon.enabled) return false
+            if (forDownload && !addon.allowDownloads) return false
+            return true
+        }
+        val type = UnifiedSourceId.builtInTypeOrNull(sourceId) ?: return false
+        return when (type) {
+            AudioSourceType.YOUTUBE, AudioSourceType.JIOSAAVN -> true
+            AudioSourceType.MONOCHROME,
+            AudioSourceType.TIDAL,
+            AudioSourceType.QOBUZ,
+            AudioSourceType.DEEZER,
+            AudioSourceType.APPLE -> isSourceEnabled(type, s)
+            else -> false
+        }
     }
 
     private fun isSourceEnabled(source: AudioSourceType, s: SourceSettings): Boolean =
         when (source) {
+            AudioSourceType.ADDON -> s.addonsMasterEnabled && s.installedAddons.any { it.enabled }
             AudioSourceType.YOUTUBE -> true
             AudioSourceType.MONOCHROME -> s.monochromeEnabled
             AudioSourceType.TIDAL -> s.tidalEnabled
@@ -452,25 +632,24 @@ object LosslessStreamResolver {
             AudioSourceType.QOBUZ_BACKUP, AudioSourceType.AMAZON, AudioSourceType.JIOSAAVN -> false
         }
 
-    /** True when at least one lossless source is switched on (cheap pre-check for callers). */
+    /** True when at least one addon or lossless source is switched on (cheap pre-check for callers). */
     suspend fun anySourceEnabled(context: Context): Boolean {
         if (!isEnabled(context)) return false
         val s = readSettings(context)
-        return resolutionChain(s).isNotEmpty()
+        return unifiedResolutionChain(s).isNotEmpty()
     }
 
     // ── Main entry point ──────────────────────────────────────────────────────────────────────
 
     /**
-     * Port of `resolveMultiSourceDataSpec`. Returns the winning stream or null when every source
-     * either failed or was rejected by [TitleMatch]. Never throws.
-     *
-     * @param lowDataMode ArchiveTune skips the lossless chain entirely on low-data connections.
+     * Resolves a song across the Unified Fallback Chain (Installed Addons / JS Modules + Built-in
+     * Lossless Sources), using Fast Hedged Concurrent Waves when enabled. Never throws.
      */
     suspend fun resolve(
         context: Context,
         request: Request,
         lowDataMode: Boolean = false,
+        forDownload: Boolean = false,
     ): Result? =
         withContext(Dispatchers.IO) {
             val appContext = context.applicationContext
@@ -481,8 +660,8 @@ object LosslessStreamResolver {
             val mutex = inFlight.getOrPut(mediaId) { Mutex() }
             try {
                 mutex.withLock {
-                    runCatching { resolveLocked(appContext, request, lowDataMode) }
-                        .onFailure { Timber.tag(TAG).w(it, "Lossless resolve crashed for %s", mediaId) }
+                    runCatching { resolveLocked(appContext, request, lowDataMode, forDownload) }
+                        .onFailure { Timber.tag(TAG).w(it, "Unified stream resolve crashed for %s", mediaId) }
                         .getOrNull()
                 }
             } finally {
@@ -490,151 +669,164 @@ object LosslessStreamResolver {
             }
         }
 
+    private sealed interface CandidateOutcome {
+        data class BuiltInWin(val source: AudioSourceType, val stream: DirectStream) : CandidateOutcome
+        data class AddonWin(val resolved: AddonResolvedStream) : CandidateOutcome
+    }
+
     private suspend fun resolveLocked(
         context: Context,
         request: Request,
         lowDataMode: Boolean,
+        forDownload: Boolean,
     ): Result? {
         val mediaId = request.mediaId
-        // 1. Instant offline cache check: if a complete FLAC file exists on disk, play it directly
-        val cachedLossless = LosslessFileCache.getCompleteFile(context, mediaId)
-        if (cachedLossless != null) {
-            val fileUri = Uri.fromFile(cachedLossless).toString()
-            markUriFresh(fileUri)
-            val result = Result(
-                mediaId = mediaId,
-                uri = fileUri,
-                mimeType = "audio/flac",
-                codecs = "flac",
-                bitrate = 1411200,
-                sampleRate = 44100,
-                bitDepth = 16,
-                contentLength = cachedLossless.length(),
-                label = "FLAC (Cached)",
-                source = AudioSourceType.MONOCHROME
-            )
-            resolvedByMediaId[mediaId] = result
-            return result
-        }
-        if (isFailedForTrack(mediaId)) {
-            Timber.tag(TAG).d("Lossless resolve skipped for %s (marked failed, falling back)", mediaId)
-            return null
-        }
+        val cleanMediaId = mediaId.removePrefix("youtube_").removePrefix("monochrome_")
         val settings = readSettings(context)
+        val unifiedOverride = UnifiedSongSourceOverride.get(settings.overrideRaw, mediaId)
+
+        // 1. Instant offline cache check (only when no explicit source override is active)
+        if (!forDownload && unifiedOverride == null) {
+            val cachedLossless = LosslessFileCache.getCompleteFile(context, mediaId)
+            if (cachedLossless != null) {
+                val fileUri = Uri.fromFile(cachedLossless).toString()
+                markUriFresh(fileUri)
+                val result = Result(
+                    mediaId = mediaId,
+                    uri = fileUri,
+                    mimeType = "audio/flac",
+                    codecs = "flac",
+                    bitrate = 1411200,
+                    sampleRate = 44100,
+                    bitDepth = 16,
+                    contentLength = cachedLossless.length(),
+                    label = "FLAC (Cached)",
+                    source = AudioSourceType.MONOCHROME,
+                )
+                resolvedByMediaId[mediaId] = result
+                return result
+            }
+        }
+
+        if (isFailedForTrack(mediaId) && unifiedOverride == null) {
+            Timber.tag(TAG).d("Unified resolve skipped for %s (all sources failed recently)", mediaId)
+            return null
+        }
+
+        if (lowDataMode && unifiedOverride == null) {
+            Timber.tag(TAG).i("Low-data mode active; skipping lossless/addon chain for %s", mediaId)
+            return null
+        }
+
+        // Handle explicit per-song source pin ("Play from...")
+        if (unifiedOverride == "builtin:YOUTUBE" || unifiedOverride == "builtin:JIOSAAVN") {
+            Timber.tag(TAG).d("Per-song override: %s pinned to %s; yielding to YoutubeHelper", mediaId, unifiedOverride)
+            return null
+        }
+
+        val failedSourcesForSong = failedSourceIdsByTrack[cleanMediaId].orEmpty()
+        val isTrustedOverride = unifiedOverride != null && isUnifiedEntryUsableForOverride(unifiedOverride, settings, forDownload)
+
+        val candidateChain: List<String> = if (isTrustedOverride && unifiedOverride != null) {
+            listOf(unifiedOverride)
+        } else {
+            unifiedResolutionChain(settings, forDownload).filterNot { it in failedSourcesForSong }
+        }
+
+        if (candidateChain.isEmpty()) {
+            Timber.tag(TAG).d("Unified resolve skip for %s: candidate chain empty", mediaId)
+            return null
+        }
+
+        // 2. Fast in-memory stream cache check in priority order
         val now = System.currentTimeMillis()
-
-        val override = SongSourceOverride.get(settings.overrideRaw, mediaId)
-
-        // Cache probe (same order the chain would use), unless the connection is low-data.
-        val probeOrder =
-            when (override) {
-                null -> resolutionChain(settings)
-                AudioSourceType.YOUTUBE -> emptyList()
-                else -> listOf(override)
-            }
-        for (source in probeOrder) {
-            val cacheKey = sourceCacheKey(source, mediaId)
-            val cached = directStreamCache[cacheKey] ?: continue
-            if (cached.expiresAtMs <= now) {
-                directStreamCache.remove(cacheKey, cached)
-                continue
-            }
-            if (!lowDataMode && streamStillUsable(cached.stream)) {
-                Timber.tag(TAG).d("Multi-source cache HIT for %s: %s [%s]", mediaId, source.name, cached.stream.label)
-                recordResolvedSource(mediaId, source)
-                return publish(mediaId, cached.stream, fromCache = true)
-            }
-        }
-
-        val overrideStillEnabled =
-            override == null || override == AudioSourceType.YOUTUBE || isSourceEnabled(override, settings)
-        val chain =
-            when (override) {
-                null -> resolutionChain(settings)
-                AudioSourceType.YOUTUBE -> {
-                    Timber.tag(TAG).d("Per-song override: %s pinned to YouTube; skipping lossless", mediaId)
-                    emptyList()
-                }
-                else ->
-                    if (overrideStillEnabled) {
-                        Timber.tag(TAG).d("Per-song override: %s pinned to %s", mediaId, override.name)
-                        listOf(override)
-                    } else {
-                        Timber.tag(TAG).w(
-                            "Per-song override: %s pinned to %s but that source is now disabled; falling through to chain",
-                            mediaId,
-                            override.name,
-                        )
-                        resolutionChain(settings)
+        if (!forDownload) {
+            for (sourceId in candidateChain) {
+                if (UnifiedSourceId.isAddon(sourceId)) {
+                    val key = "$sourceId:$mediaId"
+                    val cached = addonResultCache[key] ?: continue
+                    if (cached.expiresAtMs <= now) {
+                        addonResultCache.remove(key, cached)
+                        continue
                     }
+                    if (!AddonStreamRegistry.isInlineManifestUri(cached.resolved.uri) || AddonStreamRegistry.manifestFor(cached.resolved.uri) != null) {
+                        recordResolvedSource(mediaId, AudioSourceType.ADDON)
+                        return publishAddonStream(mediaId, cached.resolved)
+                    }
+                } else {
+                    val builtIn = UnifiedSourceId.builtInTypeOrNull(sourceId) ?: continue
+                    val cacheKey = sourceCacheKey(builtIn, mediaId)
+                    val cached = directStreamCache[cacheKey] ?: continue
+                    if (cached.expiresAtMs <= now) {
+                        directStreamCache.remove(cacheKey, cached)
+                        continue
+                    }
+                    if (streamStillUsable(cached.stream)) {
+                        recordResolvedSource(mediaId, builtIn)
+                        return publish(mediaId, cached.stream, fromCache = true)
+                    }
+                }
             }
-        Timber.tag(TAG).d("Multi-source resolve for %s | chain=%s", mediaId, chain.joinToString(",") { it.name })
-        if (chain.isEmpty()) {
-            Timber.tag(TAG).d("Multi-source skip: no sources to try (chain empty)")
-            return null
-        }
-        if (lowDataMode) {
-            Timber.tag(TAG).i("Low-data mode active; skipping lossless sources for %s", mediaId)
-            return null
-        }
-        val p = prefs(context)
-        if (!hasAnyActiveLosslessSource(p)) {
-            Timber.tag(TAG).d("Multi-source skip: no active lossless sources (Monochrome down, no pool, no accounts)")
-            return null
         }
 
-        // Pool accounts are only needed if pool is configured/present
-        if (PoolAccountManager.hasReadKey || !p[PoolApiKeyKey].isNullOrBlank() || com.unshoo.pixelmusic.BuildConfig.SOURCE_PROVIDER_KEY.isNotBlank()) {
+        // Load pool accounts only when at least one built-in pool-backed provider is in the chain
+        val p = prefs(context)
+        val needsPool = candidateChain.any {
+            it in setOf("builtin:TIDAL", "builtin:QOBUZ", "builtin:DEEZER", "builtin:APPLE")
+        }
+        if (needsPool && (PoolAccountManager.hasReadKey || !p[PoolApiKeyKey].isNullOrBlank() || com.unshoo.pixelmusic.BuildConfig.SOURCE_PROVIDER_KEY.isNotBlank())) {
             runCatching { PoolAccountManager.loadCached(context) }
             runCatching { PoolAccountManager.refresh(context) }
         }
 
+        val addonMap = settings.installedAddons.associateBy { it.id }
         Timber.tag(TAG).d(
-            "Source query built: title=\"%s\" artists=%s durationMs=%s",
+            "Unified resolve for \"%s\" (%s) | chain=%s | fastConcurrent=%s",
             request.title,
-            request.artists.joinToString("/"),
-            request.durationMs?.toString() ?: "?",
+            mediaId,
+            candidateChain.joinToString(","),
+            settings.addonsFastConcurrent,
         )
 
-        val overrideIsSourceOverride = override != null && override != AudioSourceType.YOUTUBE
-        var best: DirectStream? = null
-        var bestSource: AudioSourceType? = null
-        var bestScore = 0.0
-        for (source in chain) {
-            Timber.tag(TAG).d("Trying source: %s for \"%s\"", source.name, request.title)
-            val stream: DirectStream? =
-                when (source) {
-                    AudioSourceType.MONOCHROME -> resolveMonochromeStream(request, settings)
+        val winner = AddonManager.executeOrderedCandidates(
+            candidates = candidateChain,
+            fastConcurrent = settings.addonsFastConcurrent,
+            perSourceTimeoutMs = settings.addonTimeoutMs,
+        ) { sourceId ->
+            if (UnifiedSourceId.isAddon(sourceId)) {
+                val addonId = UnifiedSourceId.addonIdOrNull(sourceId) ?: return@executeOrderedCandidates null
+                val addon = addonMap[addonId] ?: return@executeOrderedCandidates null
+                val resolved = AddonManager.resolveSingleAddon(
+                    context = context,
+                    addon = addon,
+                    title = request.title,
+                    artists = request.artists,
+                    album = request.album,
+                    durationMs = request.durationMs,
+                    isrc = request.isrc,
+                    preferLossless = !lowDataMode,
+                    forDownload = forDownload,
+                    trustedOverride = isTrustedOverride && unifiedOverride == sourceId,
+                    timeoutMs = settings.addonTimeoutMs,
+                ) ?: return@executeOrderedCandidates null
+                CandidateOutcome.AddonWin(resolved)
+            } else {
+                val builtIn = UnifiedSourceId.builtInTypeOrNull(sourceId) ?: return@executeOrderedCandidates null
+                val trusted = isTrustedOverride && unifiedOverride == sourceId
+                val stream: DirectStream? = when (builtIn) {
+                    AudioSourceType.MONOCHROME -> resolveMonochromeStream(request, settings, trusted)
                     AudioSourceType.TIDAL -> resolveTidalStream(context, request, settings)
                     AudioSourceType.QOBUZ -> resolveQobuzStream(request, settings)
                     AudioSourceType.DEEZER -> resolveDeezerStream(request, settings)
-                    AudioSourceType.APPLE ->
-                        resolveAppleStream(
-                            context,
-                            request,
-                            settings,
-                            trusted = overrideIsSourceOverride && override == AudioSourceType.APPLE,
-                        )
-                    // Amazon serves CENC-protected fragmented MP4 and ArchiveTune ships no
-                    // decryption step, so there is no provider to call — fall through.
+                    AudioSourceType.APPLE -> resolveAppleStream(context, request, settings, trusted = trusted)
+                    AudioSourceType.ADDON,
                     AudioSourceType.AMAZON,
                     AudioSourceType.QOBUZ_BACKUP,
                     AudioSourceType.JIOSAAVN,
-                    AudioSourceType.YOUTUBE,
-                    -> null
+                    AudioSourceType.YOUTUBE -> null
                 }
-            if (stream == null) {
-                Timber.tag(TAG).d("Source %s did not resolve \"%s\"", source.name, request.title)
-                continue
-            }
-            val match =
-                if (overrideIsSourceOverride && source == override) {
-                    Timber.tag(TAG).i(
-                        "Source %s ACCEPTED for \"%s\" via per-song override (skipping metadata gate) [%s]",
-                        source.name,
-                        request.title,
-                        stream.label,
-                    )
+                if (stream == null) return@executeOrderedCandidates null
+                val match = if (trusted) {
                     TitleMatch.Result(true, 1.0, 1.0, 1.0, 1.0, "per-song override bypass")
                 } else {
                     TitleMatch.evaluate(
@@ -645,62 +837,110 @@ object LosslessStreamResolver {
                         stream = stream,
                     )
                 }
-            if (!match.accepted) {
+                if (!match.accepted) {
+                    Timber.tag(TAG).i(
+                        "Source %s rejected for \"%s\": %s score=%.1f%% matched=\"%s\"",
+                        builtIn.name,
+                        request.title,
+                        match.reason,
+                        match.score * 100,
+                        stream.matchedTitle ?: "?",
+                    )
+                    return@executeOrderedCandidates null
+                }
+                CandidateOutcome.BuiltInWin(builtIn, stream)
+            }
+        }
+
+        if (winner == null) {
+            Timber.tag(TAG).w("Unified chain returned no matching stream for \"%s\"; yielding to fallback", request.title)
+            return null
+        }
+
+        return when (val outcome = winner.second) {
+            is CandidateOutcome.AddonWin -> {
+                val r = outcome.resolved
                 Timber.tag(TAG).i(
-                    "Source %s rejected for \"%s\": %s score=%.1f%% title=%.1f%% artist=%s duration=%s matched=\"%s\"",
-                    source.name,
+                    "Addon WIN: %s (%s) resolved \"%s\" [%s] transport=%s",
+                    r.addonName,
+                    r.addonId,
                     request.title,
-                    match.reason,
-                    match.score * 100,
-                    match.title * 100,
-                    match.artist?.let { "%.1f%%".format(it * 100) } ?: "?",
-                    match.duration?.let { "%.1f%%".format(it * 100) } ?: "?",
-                    stream.matchedTitle ?: "?",
+                    r.qualityLabel,
+                    r.transport.name,
                 )
-                continue
+                recordResolvedSource(mediaId, AudioSourceType.ADDON)
+                val cacheKey = "${UnifiedSourceId.forAddon(r.addonId)}:$mediaId"
+                addonResultCache[cacheKey] = CachedAddonResult(
+                    resolved = r,
+                    expiresAtMs = System.currentTimeMillis() + DIRECT_STREAM_CACHE_TTL_MS,
+                )
+                addonResultCache.trimTo(MAX_RESOLVED_ENTRIES) { it.expiresAtMs }
+                publishAddonStream(mediaId, r)
             }
-            Timber.tag(TAG).d(
-                "Source %s candidate for \"%s\": match %.1f%% (%s) [%s]",
-                source.name,
-                request.title,
-                match.score * 100,
-                match.reason,
-                stream.label,
-            )
-            recordResolvedSource(mediaId, source)
-            if (match.score > bestScore) {
-                best = stream
-                bestSource = source
-                bestScore = match.score
-            }
-            if (best != null) break
-        }
-
-        val winningStream = best
-        val winningSource = bestSource
-        if (winningStream != null && winningSource != null) {
-            Timber.tag(TAG).i(
-                "Source WIN: %s resolved \"%s\" [%s] metadata match %.1f%% (%s)",
-                winningSource.name,
-                request.title,
-                winningStream.label,
-                bestScore * 100,
-                winningStream.uri.take(80),
-            )
-            if (winningSource == AudioSourceType.TIDAL) {
-                TidalAudioProvider.lastResolvedTrackId?.takeIf { it.isNotBlank() }?.let { probe ->
-                    runCatching { context.dataStore.edit { prefs -> prefs[TidalLastProbeTrackKey] = probe } }
+            is CandidateOutcome.BuiltInWin -> {
+                val winningSource = outcome.source
+                val winningStream = outcome.stream
+                Timber.tag(TAG).i(
+                    "Built-in WIN: %s resolved \"%s\" [%s] (%s)",
+                    winningSource.name,
+                    request.title,
+                    winningStream.label,
+                    winningStream.uri.take(80),
+                )
+                recordResolvedSource(mediaId, winningSource)
+                if (winningSource == AudioSourceType.TIDAL) {
+                    TidalAudioProvider.lastResolvedTrackId?.takeIf { it.isNotBlank() }?.let { probe ->
+                        runCatching { context.dataStore.edit { prefs -> prefs[TidalLastProbeTrackKey] = probe } }
+                    }
+                } else if (winningSource == AudioSourceType.QOBUZ) {
+                    QobuzAudioProvider.lastResolvedTrackId?.takeIf { it.isNotBlank() }?.let { probe ->
+                        runCatching { context.dataStore.edit { prefs -> prefs[QobuzLastProbeTrackKey] = probe } }
+                    }
                 }
-            } else if (winningSource == AudioSourceType.QOBUZ) {
-                QobuzAudioProvider.lastResolvedTrackId?.takeIf { it.isNotBlank() }?.let { probe ->
-                    runCatching { context.dataStore.edit { prefs -> prefs[QobuzLastProbeTrackKey] = probe } }
+                applyDirectStream(mediaId, winningStream)
+            }
+        }
+    }
+
+    private fun publishAddonStream(mediaId: String, resolved: AddonResolvedStream): Result {
+        val effectiveUri = AddonStreamRegistry.register(resolved)
+        val containerMime = AddonStreamRegistry.containerMimeOf(resolved.transport)
+        val bitrate = resolved.bitrateBps
+            ?: run {
+                val sr = resolved.sampleRate ?: 44_100
+                val bd = resolved.bitDepth ?: 16
+                when {
+                    resolved.isAtmos -> 768_000
+                    resolved.codecs.contains("flac", true) || resolved.codecs.contains("alac", true) ->
+                        (sr * bd * 2 * 65) / 100
+                    else -> 320_000
                 }
             }
-            return applyDirectStream(mediaId, winningStream)
-        }
-
-        Timber.tag(TAG).w("No lossless source cleared the metadata match gate for \"%s\"; falling back", request.title)
-        return null
+        val label = "${resolved.addonName} · ${resolved.qualityLabel}"
+        val result = Result(
+            mediaId = mediaId,
+            uri = effectiveUri,
+            mimeType = resolved.audioMimeType,
+            codecs = resolved.codecs,
+            bitrate = bitrate,
+            sampleRate = resolved.sampleRate,
+            bitDepth = resolved.bitDepth,
+            contentLength = null,
+            label = label,
+            source = AudioSourceType.ADDON,
+            sourceId = UnifiedSourceId.forAddon(resolved.addonId),
+            providerDisplayName = resolved.addonName,
+            containerMimeType = containerMime,
+            headers = resolved.headers,
+            allowDownloads = resolved.allowDownloads,
+            isAtmos = resolved.isAtmos,
+        )
+        resolvedByMediaId[mediaId] = result
+        uriFreshness[effectiveUri] = System.currentTimeMillis() + URI_FRESHNESS_MS
+        resolvedByMediaId.trimTo(MAX_RESOLVED_ENTRIES) { it.resolvedAtMs }
+        uriFreshness.trimTo(MAX_RESOLVED_ENTRIES) { it }
+        _lastResolved.value = result
+        return result
     }
 
     private fun streamStillUsable(stream: DirectStream): Boolean {
@@ -1184,6 +1424,12 @@ object LosslessStreamResolver {
                     label.contains("HIGH") -> 320_000
                     else -> 0
                 }
+        val detectedContainerMime = AddonStreamRegistry.metaFor(stream.uri)?.let { AddonStreamRegistry.containerMimeOf(it.transport) }
+            ?: when {
+                stream.uri.lowercase(Locale.US).contains(".m3u8") -> androidx.media3.common.MimeTypes.APPLICATION_M3U8
+                stream.uri.lowercase(Locale.US).contains(".mpd") -> androidx.media3.common.MimeTypes.APPLICATION_MPD
+                else -> null
+            }
         val result =
             Result(
                 mediaId = mediaId,
@@ -1196,6 +1442,7 @@ object LosslessStreamResolver {
                 contentLength = knownContentLength,
                 label = stream.label,
                 source = stream.source,
+                containerMimeType = detectedContainerMime,
             )
         resolvedByMediaId[mediaId] = result
         uriFreshness[stream.uri] = System.currentTimeMillis() + URI_FRESHNESS_MS
@@ -1205,8 +1452,8 @@ object LosslessStreamResolver {
         _lastResolved.value = result
 
         // ArchiveTune back-fills the byte length with a HEAD request so the bitrate shown in the
-        // player is measured rather than guessed. Only meaningful for plain HTTP(S) streams.
-        if (!fromCache && knownContentLength == null && stream.uri.startsWith("http", ignoreCase = true)) {
+        // player is measured rather than guessed. Only meaningful for plain progressive HTTP(S) streams.
+        if (!fromCache && detectedContainerMime == null && knownContentLength == null && stream.uri.startsWith("http", ignoreCase = true)) {
             ioScope.launch {
                 runCatching {
                     val headRequest = okhttp3.Request.Builder().url(stream.uri).head().build()
@@ -1238,82 +1485,46 @@ object LosslessStreamResolver {
         return bitsPerSecond.takeIf { it in 1L..50_000_000L }?.toInt()
     }
 
-    private fun resolveMonochromeStream(request: Request, settings: SourceSettings): DirectStream? {
-        if (!settings.monochromeEnabled || !isMonochromeUp()) return null
+    private fun resolveMonochromeStream(
+        request: Request,
+        settings: SourceSettings,
+        trusted: Boolean = false,
+    ): DirectStream? {
+        if (!settings.monochromeEnabled && !trusted) return null
         return try {
-            val query = if (request.artists.isNotEmpty()) {
-                "${request.artists.first()} ${request.title}"
-            } else {
-                request.title
-            }
-            val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
-            val url = "https://tracks.monochrome.st/search/tracks?q=$encodedQuery&limit=5"
-            val req = okhttp3.Request.Builder()
-                .url(url)
-                .header(
-                    "User-Agent",
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
-                )
-                .build()
-            val resp = httpClient.newCall(req).execute()
-            if (!resp.isSuccessful) {
-                if (resp.code in 500..599) markMonochromeDown()
-                return null
-            }
-            markMonochromeUp()
-            val body = resp.body?.string().orEmpty()
-            if (body.isBlank()) return null
-            val json = org.json.JSONObject(body)
-            val tracks = json.optJSONArray("tracks") ?: return null
-
-            var bestStream: DirectStream? = null
-            var bestScore = 0.0
-
-            for (i in 0 until tracks.length()) {
-                val item = tracks.optJSONObject(i) ?: continue
-                if (item.optBoolean("playable", true) == false) continue
-                val trackId = item.optString("id").ifBlank { item.optString("trackId") }
-                if (trackId.isBlank()) continue
-                val title = item.optString("title")
-                val artistNamesArray = item.optJSONArray("artistNames")
-                val artists = mutableListOf<String>()
-                if (artistNamesArray != null) {
-                    for (a in 0 until artistNamesArray.length()) {
-                        artists.add(artistNamesArray.optString(a))
-                    }
+            val stream = MonochromeInstancePool.resolve(
+                httpClient = httpClient,
+                title = request.title,
+                artists = request.artists,
+                album = request.album,
+                durationMs = request.durationMs,
+                customInstancesRaw = settings.monochromeInstances.joinToString("\n"),
+                trustedOverride = trusted,
+            )
+            if (stream != null) {
+                markMonochromeUp()
+                // Detect DASH MPD vs HLS M3U8 returned by HiFi API v2 instances so ExoPlayer uses the right MediaSource
+                val lowerUri = stream.uri.lowercase(Locale.US)
+                val transport = when {
+                    lowerUri.contains(".mpd") -> AddonTransport.DASH
+                    lowerUri.contains(".m3u8") -> AddonTransport.HLS
+                    else -> AddonTransport.PROGRESSIVE
                 }
-                val durationMs = item.optLong("duration", 0L)
-                val effectiveDuration = if (durationMs > 10_000L) durationMs else durationMs * 1000L
-                val candidateStream = DirectStream(
-                    uri = "https://tracks.monochrome.st/track/$trackId",
-                    mimeType = androidx.media3.common.MimeTypes.AUDIO_FLAC,
-                    codecs = "flac",
-                    contentLength = null,
-                    label = "Monochrome FLAC (Free)",
-                    source = AudioSourceType.MONOCHROME,
-                    matchedTitle = title,
-                    matchedArtist = artists.firstOrNull(),
-                    matchedAlbum = item.optString("albumTitle").ifBlank { null },
-                    matchedDurationMs = effectiveDuration,
-                    sampleRate = 44100,
-                    bitDepth = 16
-                )
-                val match = TitleMatch.evaluate(
-                    wantedTitle = request.title,
-                    wantedArtists = request.artists,
-                    wantedAlbum = request.album,
-                    wantedDurationMs = request.durationMs,
-                    stream = candidateStream
-                )
-                if (match.accepted && match.score > bestScore) {
-                    bestScore = match.score
-                    bestStream = candidateStream
+                if (transport != AddonTransport.PROGRESSIVE) {
+                    AddonStreamRegistry.registerStreamMetadata(
+                        uri = stream.uri,
+                        headers = emptyMap(),
+                        sourceId = "builtin:MONOCHROME",
+                        addonName = "Monochrome",
+                        transport = transport,
+                        audioMimeType = stream.mimeType,
+                    )
                 }
             }
-            bestStream
+            stream
         } catch (e: Exception) {
             if (e is java.io.IOException) markMonochromeDown()
-            Timber.tag(TAG).w(e, "Monochrome stream resolve failed for %s", request.title)
+            Timber.tag(TAG).w(e, "Monochrome pool resolve failed for %s", request.title)
             null
         }
     }

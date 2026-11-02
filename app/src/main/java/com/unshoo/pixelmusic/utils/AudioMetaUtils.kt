@@ -220,6 +220,9 @@ object AudioMetaUtils {
         filePath: String? = null,
     ): String? {
         val pathLower = filePath?.lowercase(Locale.ROOT).orEmpty()
+        if (formatTag == "DOLBY ATMOS" || mimeType?.contains("eac3-joc", ignoreCase = true) == true || mimeType?.contains("ac-4", ignoreCase = true) == true) {
+            return "DOLBY ATMOS"
+        }
         // A codec that is lossy beyond doubt can never be Hi-Res / Lossless, whatever tag or
         // sample rate a caller (or stale state) hands us. See PlaybackStreamReconciler.
         val isDefinitelyLossy = AudioFamily.of(mimeType).isDefinitelyLossy
@@ -289,6 +292,9 @@ object AudioMetaUtils {
         bitDepth: Int? = null,
     ): String {
         val isDefinitelyLossy = AudioFamily.of(mimeType).isDefinitelyLossy
+        if (formatTag == "DOLBY ATMOS" || mimeType?.contains("eac3-joc", ignoreCase = true) == true || mimeType?.contains("ac-4", ignoreCase = true) == true) {
+            return "DOLBY ATMOS"
+        }
         // Drop lossless tags that contradict a lossy codec instead of echoing them onto the card.
         val tag = formatTag?.takeUnless {
             isDefinitelyLossy && (it == "HI-RES LOSSLESS" || it == "LOSSLESS")
