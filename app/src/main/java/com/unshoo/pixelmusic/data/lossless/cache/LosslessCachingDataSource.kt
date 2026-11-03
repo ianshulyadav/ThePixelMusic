@@ -41,7 +41,7 @@ class LosslessCachingDataSource(
         val uri = dataSpec.uri
 
         // 1. If already a local file or a segmented HLS/DASH manifest/CMAF chunk, delegate directly without recording .flac
-        if (uri.scheme == "file" || com.unshoo.pixelmusic.data.addons.AddonStreamRegistry.shouldBypassCompleteFileCache(uri.toString())) {
+        if (uri.scheme == "file" || uri.scheme == "data" || uri.host?.contains("apple.com") == true || com.unshoo.pixelmusic.data.addons.AddonStreamRegistry.shouldBypassCompleteFileCache(uri.toString())) {
             isPlayingFromCacheFile = false
             cachingAborted = true
             return upstream.open(dataSpec)

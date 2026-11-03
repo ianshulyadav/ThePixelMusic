@@ -34,9 +34,9 @@ object AppleMusicProvider {
 
     private val fallbackAppleMusicToken: String =
         "eyJ0eXAiOiJKV1QiLCJhbGciOiJFUzI1NiIsImtpZCI6IldlYlBsYXlLaWQifQ" +
-            ".eyJpc3MiOiJBTVBXZWJQbGF5IiwiaWF0IjoxNzg2NjMyOTI0LCJleHAiOjE3OTI2" +
-            "ODA5MjQsInJvb3RfaHR0cHNfb3JpZ2luIjpbImFwcGxlLmNvbSJdfQ" +
-            ".hBgj61sZf-y7bmuvT-joXAUAcf7TVJ51732xnH5vFkLHOmsQHxVqGMYUuI4h8c0-RX3fRY3moylhLW8fewFJyw"
+            ".eyJpc3MiOiJBTVBXZWJQbGF5IiwiaWF0IjoxNzkyNzgwNTM0LCJleHAiOjE3OTg4" +
+            "Mjg1MzQsInJvb3RfaHR0cHNfb3JpZ2luIjpbImFwcGxlLmNvbSJdfQ" +
+            ".wcf_7U-zcgUjY2L8d4HWFkdxP1YSJCkkqEpEtVPKpRARrlaag0DHyIpRcoUEWZU8kJlvx5Q7ZNp04OabfuiuAw"
 
     @Volatile
     private var appleMusicToken: String = fallbackAppleMusicToken
@@ -85,6 +85,19 @@ object AppleMusicProvider {
             fresh
         }
 
+    fun isJwtExpired(jwt: String, marginSec: Long = 60L): Boolean {
+        val exp = decodeJwtExpSec(jwt)
+        val nowSec = System.currentTimeMillis() / 1000L
+        return exp != 0L && exp <= (nowSec + marginSec)
+    }
+
+    fun getFreshDevToken(): String {
+        devTokenProvider?.invoke()?.trim()?.takeIf { it.isNotBlank() && !isJwtExpired(it) }?.let { return it }
+        val current = appleMusicToken
+        if (!isJwtExpired(current)) return current
+        return fallbackAppleMusicToken
+    }
+
     private suspend fun ensureTokenFresh(): String {
         devTokenProvider?.invoke()?.trim()?.takeIf { it.isNotBlank() }?.let { userDevToken ->
             return userDevToken
@@ -110,6 +123,8 @@ object AppleMusicProvider {
                     .Builder()
                     .url(url)
                     .header("User-Agent", APPLE_MUSIC_WEB_UA)
+                    .header("Origin", "https://music.apple.com")
+                    .header("Referer", "https://music.apple.com/")
                     .header("Accept", "text/html,application/xhtml+xml,application/javascript,*/*;q=0.8")
                     .header("Accept-Language", "en-US,en;q=0.9")
                     .get()
@@ -122,28 +137,17 @@ object AppleMusicProvider {
     private suspend fun scrapeTokenFromWeb(): String? =
         withContext(Dispatchers.IO) {
             try {
-                val (homeCode, html) = get(APPLE_MUSIC_WEB_HOME) ?: return@withContext null
-                if (homeCode !in 200..299) {
-                    Timber.tag(LOG_TAG).w("Apple Music home fetch failed: %d", homeCode)
-                    return@withContext null
-                }
-
-                pickAmpToken(html)?.let { return@withContext it }
-
-                val bundleUrls = jsBundleUrls(html)
-                if (bundleUrls.isEmpty()) {
-                    Timber.tag(LOG_TAG).w("Apple Music token: no JS bundle URL found in home HTML")
-                    return@withContext null
-                }
-
-                for (jsBundleUrl in bundleUrls) {
-                    val (jsCode, js) = get(jsBundleUrl) ?: continue
-                    if (jsCode !in 200..299) {
-                        Timber.tag(LOG_TAG).w("Apple Music token: JS bundle fetch failed: %d (%s)", jsCode, jsBundleUrl)
-                        continue
+                val targets = listOf("https://music.apple.com/us/browse", APPLE_MUSIC_WEB_HOME)
+                for (target in targets) {
+                    val (code, html) = get(target) ?: continue
+                    if (code !in 200..299) continue
+                    pickAmpToken(html)?.let { return@withContext it }
+                    val bundleUrls = jsBundleUrls(html)
+                    for (jsBundleUrl in bundleUrls) {
+                        val (jsCode, js) = get(jsBundleUrl) ?: continue
+                        if (jsCode !in 200..299) continue
+                        pickAmpToken(js)?.let { return@withContext it }
                     }
-                    pickAmpToken(js)?.let { return@withContext it }
-                    Timber.tag(LOG_TAG).w("Apple Music token: no usable JWT found in JS bundle %s", jsBundleUrl)
                 }
                 null
             } catch (e: CancellationException) {

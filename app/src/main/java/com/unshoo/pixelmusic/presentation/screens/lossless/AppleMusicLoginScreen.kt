@@ -46,12 +46,108 @@ import org.json.JSONObject
 import timber.log.Timber
 import java.util.concurrent.atomic.AtomicBoolean
 
-private const val LOGIN_URL = "https://music.apple.com/login"
+private const val LOGIN_URL = "https://music.apple.com/us/library/playlists"
 private val COOKIE_ORIGINS = listOf(
     "https://music.apple.com",
     "https://beta.music.apple.com",
 )
 private const val TAG = "AppleMusicLogin"
+
+private const val HOOK_JS = """
+(function() {
+  if (window.__appleHooked) return;
+  window.__appleHooked = true;
+  var wanted = { 'authorization': 1, 'media-user-token': 1 };
+  var seen = {};
+  function report(name, value, url) {
+    try {
+      name = String(name).toLowerCase();
+      if (!wanted[name] || !value) return;
+      var key = name + '|' + value;
+      if (seen[key]) return;
+      seen[key] = 1;
+      if (window.AppleLoginBridge && window.AppleLoginBridge.onHeader) {
+        window.AppleLoginBridge.onHeader(name, String(value), String(url || location.href));
+      }
+    } catch (e) {}
+  }
+  function scan(headers, url) {
+    try {
+      if (!headers) return;
+      if (typeof Headers !== 'undefined' && headers instanceof Headers) {
+        headers.forEach(function(v, k) { report(k, v, url); });
+      } else if (Array.isArray(headers)) {
+        headers.forEach(function(pair) { report(pair[0], pair[1], url); });
+      } else if (typeof headers === 'object') {
+        Object.keys(headers).forEach(function(k) { report(k, headers[k], url); });
+      }
+    } catch (e) {}
+  }
+  try {
+    var originalFetch = window.fetch;
+    if (originalFetch) {
+      window.fetch = function(input, init) {
+        try {
+          var url = (typeof input === 'string') ? input : (input && input.url);
+          if (input && typeof input === 'object' && input.headers) scan(input.headers, url);
+          if (init && init.headers) scan(init.headers, url);
+        } catch (e) {}
+        return originalFetch.apply(this, arguments);
+      };
+    }
+  } catch (e) {}
+  try {
+    var originalOpen = XMLHttpRequest.prototype.open;
+    var originalSet = XMLHttpRequest.prototype.setRequestHeader;
+    XMLHttpRequest.prototype.open = function(method, url) {
+      try { this.__appleUrl = url; } catch (e) {}
+      return originalOpen.apply(this, arguments);
+    };
+    XMLHttpRequest.prototype.setRequestHeader = function(name, value) {
+      report(name, value, this.__appleUrl);
+      return originalSet.apply(this, arguments);
+    };
+  } catch (e) {}
+})();
+"""
+
+private const val APPLE_AUTO_SIGN_IN_JS = """
+(function() {
+  try {
+    if (window.__appleSignInPressed) return 'pressed';
+    var m = window.MusicKit && MusicKit.getInstance && MusicKit.getInstance();
+    if (m && m.isAuthorized) return 'authorized';
+    var button = document.querySelector('[data-testid="sign-in-button"]');
+    if (!button) return 'waiting';
+    window.__appleSignInPressed = true;
+    button.click();
+    return 'pressed';
+  } catch (e) { return 'error'; }
+})();
+"""
+
+private const val APPLE_PAGE_PROBE_JS = """
+(function() {
+  try {
+    if (!window.MusicKit || !MusicKit.getInstance) return null;
+    var m = MusicKit.getInstance();
+    if (!m) return null;
+    return JSON.stringify({ dev: m.developerToken || null, user: m.musicUserToken || null });
+  } catch (e) { return null; }
+})();
+"""
+
+private class AppleLoginBridge(
+    private val onHeaderCaptured: (String, String) -> Unit,
+) {
+    @android.webkit.JavascriptInterface
+    fun onHeader(name: String?, value: String?, url: String?) {
+        if (!name.isNullOrBlank() && !value.isNullOrBlank()) {
+            onHeaderCaptured(name.trim().lowercase(), value.trim())
+        }
+    }
+}
+
 
 private val MEDIA_TOKEN_JWT_REGEX = Regex("^eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$")
 private val MEDIA_TOKEN_CLASSIC_REGEX = Regex("^0\\.[A-Za-z0-9+/=_-]{40,}$")
@@ -185,6 +281,8 @@ fun AppleMusicLoginScreen(onBack: () -> Unit) {
 
     val handled = remember { AtomicBoolean(false) }
     var webView by remember { mutableStateOf<WebView?>(null) }
+    var capturedDevToken by remember { mutableStateOf<String?>(null) }
+    var capturedUserToken by remember { mutableStateOf<String?>(null) }
 
     fun toast(message: String) {
         Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
@@ -196,10 +294,9 @@ fun AppleMusicLoginScreen(onBack: () -> Unit) {
             val pastedDev = withContext(Dispatchers.IO) {
                 context.dataStore.getAsync(AppleMusicDevTokenKey, "").trim()
             }
-            var devToken = AppleMusicLoginManager.currentDevToken(pastedDev, webDevToken)
+            var devToken = AppleMusicLoginManager.currentDevToken(pastedDev, webDevToken ?: capturedDevToken)
             var verified = devToken != null && AppleMusicLoginManager.verifyTokens(mediaToken, devToken)
 
-            // If cached developer token was stale, force a fresh web-player JWT scrape and retry once.
             if (!verified && pastedDev.isBlank()) {
                 val refreshed = withContext(Dispatchers.IO) {
                     runCatching { AppleMusicProvider.refreshToken() }.getOrNull()
@@ -232,47 +329,61 @@ fun AppleMusicLoginScreen(onBack: () -> Unit) {
 
     fun probeForToken(view: WebView) {
         if (handled.get()) return
+        view.evaluateJavascript(HOOK_JS, null)
+        view.evaluateJavascript(APPLE_AUTO_SIGN_IN_JS, null)
+        view.evaluateJavascript(APPLE_PAGE_PROBE_JS) { raw ->
+            if (handled.get() || raw.isNullOrBlank() || raw == "null") return@evaluateJavascript
+            runCatching {
+                val decoded = if (raw.startsWith("\"")) JSONArray("[$raw]").optString(0) else raw
+                val obj = JSONObject(decoded)
+                val user = obj.optString("user").takeIf { it.isNotBlank() && it != "null" }
+                val dev = obj.optString("dev").takeIf { it.isNotBlank() && it != "null" }
+                if (dev != null && AppleMusicLoginManager.looksLikeDeveloperJwt(dev)) {
+                    capturedDevToken = dev
+                }
+                if (user != null && AppleMusicLoginManager.looksLikeMediaUserToken(user)) {
+                    capturedUserToken = user
+                    finishLogin(user, dev)
+                    return@evaluateJavascript
+                }
+            }
+        }
+
         val cookieToken = AppleMusicLoginManager.readMediaUserToken()
+        if (cookieToken != null && !handled.get()) {
+            finishLogin(cookieToken, capturedDevToken)
+            return
+        }
+
         view.evaluateJavascript(TOKEN_PROBE_JS) { rawJson ->
-            if (handled.get()) return@evaluateJavascript
-            var jsMediaToken: String? = null
-            var jsDevToken: String? = null
-            if (!rawJson.isNullOrBlank() && rawJson != "null") {
-                runCatching {
-                    val decoded = if (rawJson.startsWith("\"")) {
-                        JSONArray("[$rawJson]").optString(0)
-                    } else {
-                        rawJson
-                    }
-                    val obj = JSONObject(decoded)
-                    jsDevToken = obj.optString("dev").takeIf { it.isNotBlank() }
-                    val arr = obj.optJSONArray("media")
-                    if (arr != null) {
-                        for (i in 0 until arr.length()) {
-                            val cand = arr.optString(i).trim()
-                            if (AppleMusicLoginManager.looksLikeMediaUserToken(cand)) {
-                                jsMediaToken = cand
-                                break
-                            }
+            if (handled.get() || rawJson.isNullOrBlank() || rawJson == "null") return@evaluateJavascript
+            runCatching {
+                val decoded = if (rawJson.startsWith("\"")) JSONArray("[$rawJson]").optString(0) else rawJson
+                val obj = JSONObject(decoded)
+                val dev = obj.optString("dev").takeIf { it.isNotBlank() }
+                if (dev != null && AppleMusicLoginManager.looksLikeDeveloperJwt(dev)) {
+                    capturedDevToken = dev
+                }
+                val arr = obj.optJSONArray("media")
+                if (arr != null) {
+                    for (i in 0 until arr.length()) {
+                        val cand = arr.optString(i).trim()
+                        if (AppleMusicLoginManager.looksLikeMediaUserToken(cand)) {
+                            finishLogin(cand, dev)
+                            break
                         }
                     }
                 }
-            }
-            val winner = cookieToken ?: jsMediaToken
-            if (winner != null && !handled.get()) {
-                finishLogin(winner, jsDevToken)
             }
         }
     }
 
     LaunchedEffect(Unit) {
         while (true) {
-            delay(2000)
+            delay(1500)
             webView?.let { view ->
                 if (!handled.get()) {
-                    if (AppleMusicLoginManager.readMediaUserToken() != null || AppleMusicLoginManager.hasSessionCookie()) {
-                        view.post { probeForToken(view) }
-                    }
+                    view.post { probeForToken(view) }
                 }
             }
         }
@@ -286,14 +397,37 @@ fun AppleMusicLoginScreen(onBack: () -> Unit) {
         factory = { ctx ->
             WebView(ctx).apply {
                 webView = this
+                addJavascriptInterface(
+                    AppleLoginBridge { name, value ->
+                        when (name) {
+                            "authorization" -> {
+                                val token = value.removePrefix("Bearer ").removePrefix("bearer ").trim()
+                                if (AppleMusicLoginManager.looksLikeDeveloperJwt(token)) {
+                                    capturedDevToken = token
+                                }
+                            }
+                            "media-user-token" -> {
+                                if (AppleMusicLoginManager.looksLikeMediaUserToken(value)) {
+                                    capturedUserToken = value
+                                    finishLogin(value, capturedDevToken)
+                                }
+                            }
+                        }
+                    },
+                    "AppleLoginBridge"
+                )
                 webViewClient =
                     object : WebViewClient() {
+                        override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
+                            super.onPageStarted(view, url, favicon)
+                            view.evaluateJavascript(HOOK_JS, null)
+                        }
+
                         override fun onPageFinished(
                             view: WebView,
                             url: String?,
                         ) {
-                            if (url == null || (!url.startsWith("https://music.apple.com") && !url.startsWith("https://beta.music.apple.com"))) return
-                            if (!AppleMusicLoginManager.hasSessionCookie() && AppleMusicLoginManager.readMediaUserToken() == null) return
+                            view.evaluateJavascript(HOOK_JS, null)
                             probeForToken(view)
                         }
                     }
@@ -301,7 +435,7 @@ fun AppleMusicLoginScreen(onBack: () -> Unit) {
                 settings.domStorageEnabled = true
                 CookieManager.getInstance().setAcceptCookie(true)
                 CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
-                resetAuthWebViewSession(ctx, this, clearCookies = true) {
+                resetAuthWebViewSession(ctx, this, clearCookies = false) {
                     loadUrl(LOGIN_URL)
                 }
             }

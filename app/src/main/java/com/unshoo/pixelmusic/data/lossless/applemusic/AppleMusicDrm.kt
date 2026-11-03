@@ -117,8 +117,10 @@ object AppleMusicDrm {
     /** Cheap, in-memory only: called on the player's application thread. */
     private fun mayResolveToApple(mediaItem: MediaItem): Boolean {
         if (!AppleMusicAudioProvider.isAvailable()) return false
+        val uriStr = mediaItem.localConfiguration?.uri?.toString().orEmpty()
+        if (uriStr.startsWith("data:application/vnd.apple.mpegurl") || uriStr.startsWith("data:application/x-mpegurl")) return true
         val scheme = mediaItem.localConfiguration?.uri?.scheme?.lowercase(java.util.Locale.US) ?: return false
-        return scheme == "youtube" || scheme == "file"
+        return scheme == "youtube" || scheme == "file" || scheme == "data" || scheme == "apple"
     }
 
     fun buildAppleDrmSessionManager(track: AppleTrackDrmInfo): DrmSessionManager? {
@@ -136,22 +138,12 @@ object AppleMusicDrm {
             ),
         )
 
-    private fun buildWidevineManager(callback: MediaDrmCallback): DrmSessionManager =
+    fun buildWidevineManager(callback: MediaDrmCallback): DrmSessionManager =
         DefaultDrmSessionManager
             .Builder()
-            .setUuidAndExoMediaDrmProvider(
-                C.WIDEVINE_UUID,
-                ExoMediaDrm.Provider { uuid ->
-                    // Apple's web player only ever gets L3 keys; forcing L3 avoids the HW-secure
-                    // decoder path which cannot be used with a flattened file anyway.
-                    val created =
-                        runCatching { FrameworkMediaDrm.newInstance(uuid) }.getOrNull()?.apply {
-                            runCatching { setPropertyString("securityLevel", "L3") }
-                                .recoverCatching { setPropertyString("securityLevel", "3") }
-                        }
-                    created ?: FrameworkMediaDrm.DEFAULT_PROVIDER.acquireExoMediaDrm(uuid)
-                },
-            ).build(callback)
+            .setUuidAndExoMediaDrmProvider(C.WIDEVINE_UUID, FrameworkMediaDrm.DEFAULT_PROVIDER)
+            .setMultiSession(true)
+            .build(callback)
 
     /**
      * @param trackProvider resolved when the key request is executed (see [drmSessionManagerProvider]).

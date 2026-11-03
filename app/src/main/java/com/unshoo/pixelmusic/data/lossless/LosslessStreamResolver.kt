@@ -37,7 +37,6 @@ import com.unshoo.pixelmusic.data.addons.UnifiedSongSourceOverride
 import com.unshoo.pixelmusic.data.addons.UnifiedSourceId
 import com.unshoo.pixelmusic.data.lossless.applemusic.AppleMusicAudioProvider
 import com.unshoo.pixelmusic.data.lossless.applemusic.AppleMusicDrm
-import com.unshoo.pixelmusic.data.lossless.applemusic.AppleMusicVirtualStream
 import com.unshoo.pixelmusic.data.lossless.applemusic.AppleTrackDrmInfo
 import com.unshoo.pixelmusic.data.lossless.audiosource.AudioSourceConfig
 import com.unshoo.pixelmusic.data.lossless.audiosource.DirectStream
@@ -126,7 +125,6 @@ object LosslessStreamResolver {
     /** How long a resolved URI is considered playable by the player-side freshness checks. */
     private const val URI_FRESHNESS_MS = 60 * 60 * 1000L
 
-    private const val APPLE_CACHE_LIMIT_BYTES = 300L * 1024 * 1024
 
     /**
      * Cap for the per-track resolver maps. They used to grow by one entry per distinct track played
@@ -317,6 +315,9 @@ object LosslessStreamResolver {
         return LosslessSchemeRoutingDataSource.isCustomLosslessScheme(uri) ||
             AddonStreamRegistry.isInlineManifestUri(uri) ||
             uri.startsWith("apple-pending:") ||
+            uri.startsWith("data:application/vnd.apple.mpegurl") ||
+            uri.startsWith("data:application/x-mpegurl") ||
+            uri.startsWith("data:") ||
             uri.startsWith("monochrome://") ||
             uri.contains("monochrome.st/track/") ||
             resolvedByMediaId.values.any { it.uri == uri }
@@ -336,6 +337,9 @@ object LosslessStreamResolver {
                 return false
             }
         } else if (uri.startsWith("monochrome://") || uri.contains("monochrome.st/track/")) {
+            uriFreshness[uri] = System.currentTimeMillis() + URI_FRESHNESS_MS
+            return true
+        } else if (uri.startsWith("data:application/vnd.apple.mpegurl") || uri.startsWith("data:application/x-mpegurl")) {
             uriFreshness[uri] = System.currentTimeMillis() + URI_FRESHNESS_MS
             return true
         } else {
@@ -1293,7 +1297,7 @@ object LosslessStreamResolver {
         trusted: Boolean,
     ): DirectStream? {
         if (AppleMusicAudioProvider.mediaUserToken() == null || AppleMusicAudioProvider.devToken() == null) {
-            Timber.tag(TAG).d("Apple Music source: missing tokens (sign in via Settings → Lossless Sources → Apple Music)")
+            Timber.tag(TAG).d("Apple Music source: missing tokens (sign in via Settings -> Lossless Sources -> Apple Music)")
             return null
         }
         val appleQuality = settings.appleQuality
@@ -1317,10 +1321,10 @@ object LosslessStreamResolver {
         for (candidate in candidates) {
             val stream =
                 DirectStream(
-                    uri = "apple-pending:${candidate.songId}",
-                    mimeType = "audio/mp4",
+                    uri = candidate.hlsDataUri,
+                    mimeType = "application/vnd.apple.mpegurl",
                     codecs = if (candidate.flavor.endsWith("ctrp64")) "mp4a.40.5" else "mp4a.40.2",
-                    contentLength = candidate.contentLength,
+                    contentLength = null,
                     label = "Apple Music ${candidate.flavor}",
                     source = AudioSourceType.APPLE,
                     matchedTitle = candidate.matchedTitle,
@@ -1345,50 +1349,19 @@ object LosslessStreamResolver {
                 bestScore = match.score
             }
         }
-        val (candidate, placeholder) = winner ?: return null
+        val (candidate, stream) = winner ?: return null
 
-        return try {
-            val file =
-                appleStreamFile(context, request.mediaId, appleQuality) {
-                    AppleMusicVirtualStream.build(httpClient, candidate.playlistUrl, candidate.keyIdHex).bytes
-                }
-            AppleMusicDrm.register(
-                request.mediaId,
-                AppleTrackDrmInfo(
-                    adamId = candidate.songId,
-                    drmUri = candidate.drmUri,
-                    mediaUserToken = candidate.mediaUserToken,
-                    developerToken = candidate.developerToken,
-                ),
-            )
-            Timber.tag(TAG).i("Apple Music resolved [%s] for \"%s\" (%d KB)", placeholder.label, request.title, file.length() / 1024)
-            placeholder.copy(uri = Uri.fromFile(file).toString(), contentLength = file.length())
-        } catch (err: Throwable) {
-            if (err is kotlinx.coroutines.CancellationException) throw err
-            Timber.tag(TAG).w(err, "Apple Music virtual stream failed for \"%s\"", request.title)
-            null
-        }
-    }
-
-    private fun appleStreamFile(
-        context: Context,
-        mediaId: String,
-        quality: AppleMusicQuality,
-        build: () -> ByteArray,
-    ): File {
-        val dir = File(context.cacheDir, "applemusic").apply { mkdirs() }
-        val files = dir.listFiles()?.sortedBy { it.lastModified() } ?: emptyList()
-        var total = files.sumOf { it.length() }
-        for (f in files) {
-            if (total <= APPLE_CACHE_LIMIT_BYTES) break
-            total -= f.length()
-            f.delete()
-        }
-        val safeId = mediaId.replace(Regex("[^A-Za-z0-9_-]"), "_")
-        val out = File(dir, "${safeId}_${quality.name.lowercase(Locale.US)}_v3.m4a")
-        if (out.exists() && out.length() > 0) return out
-        out.writeBytes(build())
-        return out
+        AppleMusicDrm.register(
+            request.mediaId,
+            AppleTrackDrmInfo(
+                adamId = candidate.songId,
+                drmUri = candidate.drmUri,
+                mediaUserToken = candidate.mediaUserToken,
+                developerToken = candidate.developerToken,
+            ),
+        )
+        Timber.tag(TAG).i("Apple Music resolved [%s] for \"%s\" (HLS)", stream.label, request.title)
+        return stream
     }
 
     // ── Result publication (port of applyDirectStream + persistDirectStreamFormat) ────────────
@@ -1422,12 +1395,16 @@ object LosslessStreamResolver {
                 ?: when {
                     label.contains("HI_RES") || label.contains("MASTER") || label.contains("MQA") -> 2_304_000
                     label.contains("LOSSLESS") || codecs.contains("flac", true) || codecs.contains("alac", true) -> 1_411_000
-                    label.contains("HIGH") -> 320_000
+                    label.contains("HIGH") || label.contains("256") -> 256_000
+                    label.contains("64") -> 64_000
                     else -> 0
                 }
         val detectedContainerMime = AddonStreamRegistry.metaFor(stream.uri)?.let { AddonStreamRegistry.containerMimeOf(it.transport) }
             ?: when {
-                stream.uri.lowercase(Locale.US).contains(".m3u8") -> androidx.media3.common.MimeTypes.APPLICATION_M3U8
+                stream.uri.startsWith("data:application/vnd.apple.mpegurl", ignoreCase = true) ||
+                    stream.uri.startsWith("data:application/x-mpegurl", ignoreCase = true) ||
+                    stream.mimeType.contains("mpegurl", ignoreCase = true) ||
+                    stream.uri.lowercase(Locale.US).contains(".m3u8") -> androidx.media3.common.MimeTypes.APPLICATION_M3U8
                 stream.uri.lowercase(Locale.US).contains(".mpd") -> androidx.media3.common.MimeTypes.APPLICATION_MPD
                 else -> null
             }

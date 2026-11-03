@@ -1615,13 +1615,17 @@ class DualPlayerEngine @Inject constructor(
 
                 override fun open(dataSpec: androidx.media3.datasource.DataSpec): Long {
                     val uriStr = dataSpec.uri.toString()
-                    val bypassCompleteFile = com.unshoo.pixelmusic.data.addons.AddonStreamRegistry.shouldBypassCompleteFileCache(uriStr)
+                    val bypassCompleteFile = uriStr.startsWith("data:") ||
+                        uriStr.contains("itunes.apple.com") ||
+                        uriStr.contains("apple.com") ||
+                        com.unshoo.pixelmusic.data.addons.AddonStreamRegistry.shouldBypassCompleteFileCache(uriStr)
                     val isLossless = LosslessStreamResolver.isLosslessUri(uriStr) ||
                         LosslessSchemeRoutingDataSource.isCustomLosslessScheme(dataSpec.uri) ||
                         uriStr.contains("monochrome.st/track/") ||
                         dataSpec.uri.path?.endsWith(".flac", ignoreCase = true) == true ||
                         dataSpec.uri.scheme == "monochrome" ||
-                        dataSpec.uri.scheme == "apple-pending"
+                        dataSpec.uri.scheme == "apple-pending" ||
+                        bypassCompleteFile
 
                     val factory = when {
                         bypassCompleteFile -> losslessRoutingFactory
@@ -2089,6 +2093,7 @@ class DualPlayerEngine @Inject constructor(
             val resolvedPath = path?.takeIf { it.isNotBlank() } ?: return@withContext null
             when {
                 LosslessStreamResolver.isLosslessUri(resolvedPath) ||
+                    resolvedPath.startsWith("data:") ||
                     resolvedPath.contains("monochrome.st/track/") ||
                     LosslessSchemeRoutingDataSource.isCustomLosslessScheme(resolvedPath) ||
                     resolvedPath.startsWith("file:") ||
@@ -2180,7 +2185,9 @@ class DualPlayerEngine @Inject constructor(
             ?: com.unshoo.pixelmusic.data.addons.AddonStreamRegistry.metaFor(resolvedStr)
                 ?.let { com.unshoo.pixelmusic.data.addons.AddonStreamRegistry.containerMimeOf(it.transport) }
             ?: when {
-                resolvedStr.lowercase(java.util.Locale.US).contains(".m3u8") -> androidx.media3.common.MimeTypes.APPLICATION_M3U8
+                resolvedStr.lowercase(java.util.Locale.US).contains(".m3u8") ||
+                    resolvedStr.startsWith("data:application/vnd.apple.mpegurl") ||
+                    resolvedStr.startsWith("data:application/x-mpegurl") -> androidx.media3.common.MimeTypes.APPLICATION_M3U8
                 resolvedStr.lowercase(java.util.Locale.US).contains(".mpd") -> androidx.media3.common.MimeTypes.APPLICATION_MPD
                 else -> null
             }
@@ -2202,6 +2209,11 @@ class DualPlayerEngine @Inject constructor(
             if (cachedMime != null) {
                 builder.setMimeType(cachedMime)
             }
+        }
+        if (AppleMusicDrm.infoFor(cleanId) != null || AppleMusicDrm.infoFor(mediaItem.mediaId) != null) {
+            builder.setDrmConfiguration(
+                MediaItem.DrmConfiguration.Builder(C.WIDEVINE_UUID).setMultiSession(true).build()
+            )
         }
         return builder.build()
     }

@@ -112,7 +112,11 @@ object AppleMusicAudioProvider {
         cachedStorefrontAtMs = 0L
     }
 
-    fun devToken(): String? = AppleMusicProvider.devTokenProvider?.invoke()?.trim()?.takeIf { it.isNotBlank() }
+    fun devToken(): String? {
+        val custom = AppleMusicProvider.devTokenProvider?.invoke()?.trim()?.takeIf { it.isNotBlank() && !AppleMusicProvider.isJwtExpired(it) }
+        if (custom != null) return custom
+        return AppleMusicProvider.getFreshDevToken().takeIf { it.isNotBlank() }
+    }
 
     fun mediaUserToken(): String? = AppleMusicProvider.mediaUserTokenProvider?.invoke()?.trim()?.takeIf { it.isNotBlank() }
 
@@ -295,13 +299,10 @@ object AppleMusicAudioProvider {
      */
     data class AppleMusicStream(
         val songId: String,
+        val hlsDataUri: String,
         val playlistUrl: String,
-        val mediaUrl: String,
-        val licenseUrl: String,
-        val keyIdHex: String?,
         val drmUri: String,
         val flavor: String,
-        val contentLength: Long?,
         val matchedTitle: String,
         val matchedArtist: String?,
         val matchedAlbum: String?,
@@ -443,7 +444,7 @@ object AppleMusicAudioProvider {
         storefront: String,
         quality: AppleMusicQuality,
     ): AppleMusicStream? {
-        val body = """{"salableAdamId":$songId,"language":"en-us"}""".toRequestBody(JSON_MEDIA)
+        val body = """{"salableAdamId":"$songId","language":"en-US"}""".toRequestBody(JSON_MEDIA)
         val request =
             Request.Builder()
                 .url(WEB_PLAYBACK_URL)
@@ -463,11 +464,8 @@ object AppleMusicAudioProvider {
             val root = runCatching { json.parseToJsonElement(response.body?.string().orEmpty()).jsonObject }
                 .getOrNull() ?: return null
             val song = root["songList"]?.jsonArray?.firstOrNull()?.jsonObject ?: return null
-            val licenseUrl = song["hls-key-server-url"]?.jsonPrimitive?.contentOrNull
             val assets = song["assets"]?.jsonArray ?: return null
 
-            // Pick the highest-bitrate ctrp (AES-CTR) asset. cbcp flavors are FairPlay
-            // (`skd://` keys) and cannot be decrypted on Android.
             data class Asset(val flavor: String, val url: String, val kbps: Int)
 
             val candidates =
@@ -479,28 +477,45 @@ object AppleMusicAudioProvider {
                     val kbps = Regex("(\\d+)$").find(flavor)?.groupValues?.last()?.toIntOrNull() ?: 0
                     Asset(flavor, url, kbps)
                 }.sortedByDescending { it.kbps }
-            // Web playback offers AAC, not ALAC. A lossless preference must not
-            // select ctrp64 or reinterpret a flavor's numeric prefix as bitrate.
-            val asset = candidates.firstOrNull { it.flavor.endsWith("ctrp256") }
+
+            val wantedFlavor = if (quality == AppleMusicQuality.AAC) "ctrp64" else "ctrp256"
+            val asset = candidates.firstOrNull { it.flavor.endsWith(wantedFlavor) }
+                ?: candidates.firstOrNull { it.flavor.endsWith("ctrp256") }
                 ?: candidates.firstOrNull() ?: return null
 
-            // The asset URL serves the HLS playlist; segments are byteranges of one mp4.
             val playlistUrl = asset.url
-            val parsed = parsePlaylist(playlistUrl) ?: return null
+            val playlistRequest = Request.Builder()
+                .url(playlistUrl)
+                .header("Origin", "https://music.apple.com")
+                .header("Referer", "https://music.apple.com/")
+                .header("User-Agent", UA)
+                .build()
+            val playlistText = client.newCall(playlistRequest).execute().use { res ->
+                if (!res.isSuccessful) return null
+                res.body?.string().orEmpty()
+            }
+            if (playlistText.isBlank()) return null
+
+            val (keyUri, keyId) = AppleHls.legacyKey(playlistText) ?: run {
+                Log.w(TAG, "Apple Music HLS playlist has no Widevine key for $songId")
+                return null
+            }
+            val pssh = AppleHls.psshFor(keyId)
+            val rewritten = AppleHls.rewriteLegacy(playlistText, playlistUrl, keyUri, pssh)
+            val hlsDataUri = "data:application/vnd.apple.mpegurl;base64," +
+                android.util.Base64.encodeToString(rewritten.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)
+
             val metadata = song["metadata"] as? JsonObject
             return AppleMusicStream(
                 songId = songId,
+                hlsDataUri = hlsDataUri,
                 playlistUrl = playlistUrl,
-                mediaUrl = parsed.mediaUrl,
-                licenseUrl = licenseUrl ?: WEB_PLAYBACK_URL.replace("webPlayback", "acquireWebPlaybackLicense"),
-                keyIdHex = parsed.keyIdHex,
+                drmUri = keyUri,
                 flavor = asset.flavor,
-                contentLength = parsed.contentLength,
                 matchedTitle = metadata?.title() ?: songId,
                 matchedArtist = metadata?.artist(),
                 matchedAlbum = metadata?.album(),
                 matchedDurationMs = metadata?.durationMs(),
-                drmUri = parsed.drmUri,
                 mediaUserToken = mediaToken,
                 developerToken = devToken,
             )
@@ -517,68 +532,4 @@ object AppleMusicAudioProvider {
 
     private fun JsonObject.durationMs(): Long? =
         this["trackDuration"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
-
-    private class ParsedPlaylist(
-        val mediaUrl: String,
-        val keyIdHex: String?,
-        val drmUri: String,
-        val contentLength: Long?,
-    )
-
-    /**
-     * Fetch the playlist and derive the absolute mp4 URL. The playlist's segments are
-     * byteranges of a single fMP4 next to it; the EXT-X-KEY `data:` URI carries the KID
-     * (verified to equal the tenc default_KID), and `#EXT-X-MAP` names the mp4 file.
-     */
-    private fun parsePlaylist(playlistUrl: String): ParsedPlaylist? {
-        val request = Request.Builder().url(playlistUrl).header("User-Agent", UA).get().build()
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                Log.w(TAG, "playlist fetch failed: %d".format(response.code))
-                return null
-            }
-            val text = response.body?.string().orEmpty()
-            var keyIdHex: String? = null
-            var drmUri: String? = null
-            var mediaName: String? = null
-            val dataLines = mutableListOf<String>()
-            for (rawLine in text.lineSequence()) {
-                val line = rawLine.trim()
-                when {
-                    line.startsWith("#EXT-X-KEY") && keyIdHex == null -> {
-                        // A playlist carries one #EXT-X-KEY per DRM system: FairPlay
-                        // (KEYFORMAT="com.apple.streamingkeydelivery", an skd:// URI), PlayReady,
-                        // and Widevine. Only the Widevine line is usable here — its data: URI
-                        // payload is the 16-byte tenc KID, and its raw URI is what Apple's licence
-                        // exchange expects as `uri`. Taking "the first line with a data: URI"
-                        // instead could latch onto PlayReady, whose payload is a WRM header rather
-                        // than a KID, or leave `drmUri` pointing at FairPlay's skd:// URI. Both
-                        // yielded a challenge Apple rejects, i.e. silent playback.
-                        if (line.contains(WIDEVINE_KEYFORMAT, ignoreCase = true)) {
-                            // The RAW data: URI is what Apple's license exchange expects as `uri`.
-                            Regex("URI=\"([^\"]+)\"").find(line)?.let { match -> drmUri = match.groupValues[1] }
-                            Regex("URI=\"data:[^\"]*base64,([^\"]+)\"").find(line)?.let { match ->
-                                keyIdHex =
-                                    runCatching {
-                                        java.util.Base64.getDecoder().decode(match.groupValues[1].trim())
-                                    }.getOrNull()
-                                        ?.takeIf { it.size == AppleMusicVirtualStream.KID_BYTES }
-                                        ?.joinToString("") { "%02x".format(it) }
-                            }
-                        }
-                    }
-                    line.startsWith("#EXT-X-MAP") && mediaName == null -> {
-                        Regex("URI=\"([^\"]+)\"").find(line)?.let { match -> mediaName = match.groupValues[1] }
-                    }
-                    !line.startsWith("#") && line.isNotBlank() -> dataLines += line
-                }
-            }
-            // Prefer the EXT-X-MAP name; segments reference the same file.
-            val name = mediaName ?: dataLines.firstOrNull() ?: return null
-            val mediaUrl = playlistUrl.toHttpUrl().resolve(name)?.toString() ?: return null
-            val widevineUri = drmUri?.takeIf { it.isNotBlank() } ?: return null
-            if (keyIdHex == null) return null
-            return ParsedPlaylist(mediaUrl, keyIdHex, widevineUri, null)
-        }
-    }
 }
