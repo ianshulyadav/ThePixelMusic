@@ -3825,8 +3825,29 @@ class MusicService : MediaLibraryService() {
             it.id == requestedSongId || it.id == cleanSongId || bare == requestedSongId || bare == cleanSongId
         }
 
+        // When playing from Android Auto search, set ONLY the tapped song into the playback queue
+        // and trigger the auto radio mix / related songs queue, exactly matching the in-app search behavior.
+        if (isSearchParent || inSearchSongs) {
+            val targetSong = carLibraryTree.lastSearchSongs.firstOrNull {
+                val bare = CarLibraryTree.songIdOf(it.id)
+                it.id == requestedSongId || it.id == cleanSongId || bare == requestedSongId || bare == cleanSongId
+            } ?: carLibraryTree.findSong(requestedSongId)
+
+            if (targetSong != null) {
+                val singleItem = MediaItemBuilder.buildForExternalController(this, targetSong)
+                grantArtworkUriPermissions(controller.packageName, listOf(singleItem))
+                serviceScope.launch(Dispatchers.Main) {
+                    kotlinx.coroutines.delay(150)
+                    AutoQueueManager.resetAndReseedFromCurrentSong()
+                }
+                return ContextQueueResolution(
+                    mediaItems = mutableListOf(singleItem),
+                    startIndex = 0
+                )
+            }
+        }
+
         val songs = when {
-            isSearchParent || inSearchSongs -> carLibraryTree.lastSearchSongs
             fromItem != null -> carLibraryTree.songsOf(fromItem.first, fromItem.second)
             parentId != null -> carLibraryTree.contextOf(parentId)?.let { carLibraryTree.songsOf(it.first, it.second) } ?: emptyList()
             else -> emptyList()
@@ -3838,20 +3859,6 @@ class MusicService : MediaLibraryService() {
         }
 
         if (foundIndex < 0) {
-            if (!isSearchParent && !inSearchSongs) {
-                val searchIdx = carLibraryTree.lastSearchSongs.indexOfFirst {
-                    val bare = CarLibraryTree.songIdOf(it.id)
-                    it.id == requestedSongId || it.id == cleanSongId || bare == requestedSongId || bare == cleanSongId
-                }
-                if (searchIdx >= 0) {
-                    return ContextQueueResolution(
-                        mediaItems = carLibraryTree.lastSearchSongs
-                            .map { MediaItemBuilder.buildForExternalController(this, it) }
-                            .toMutableList(),
-                        startIndex = searchIdx
-                    )
-                }
-            }
             return null
         }
 

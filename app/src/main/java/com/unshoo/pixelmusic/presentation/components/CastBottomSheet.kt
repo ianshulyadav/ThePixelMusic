@@ -66,6 +66,8 @@ import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material.icons.rounded.WifiOff
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Card
@@ -412,6 +414,10 @@ fun CastBottomSheet(
                             playerViewModel.refreshCastRoutes()
                             playerViewModel.refreshLocalConnectionInfo(refreshBluetoothDevices = true)
                         },
+                        isPlaying = isPlaying,
+                        onPrevious = { playerViewModel.previousSong() },
+                        onPlayPause = { playerViewModel.playPause() },
+                        onNext = { playerViewModel.nextSong() },
                         startWithControls = isRemoteSession
                     )
                 }
@@ -581,6 +587,10 @@ private fun CastSheetContent(
     onTurnOnWifi: () -> Unit,
     onOpenBluetoothSettings: () -> Unit,
     onRefresh: () -> Unit,
+    isPlaying: Boolean = false,
+    onPrevious: () -> Unit = {},
+    onPlayPause: () -> Unit = {},
+    onNext: () -> Unit = {},
     startWithControls: Boolean = true
 ) {
     val allConnectivityOff = !state.wifiEnabled && !state.isBluetoothEnabled
@@ -673,6 +683,10 @@ private fun CastSheetContent(
                         onTurnOnWifi = onTurnOnWifi,
                         onOpenBluetoothSettings = onOpenBluetoothSettings,
                         onRefresh = onRefresh,
+                        isPlaying = isPlaying,
+                        onPrevious = onPrevious,
+                        onPlayPause = onPlayPause,
+                        onNext = onNext,
                         bottomSpacing = 20.dp,
                     )
                     1 -> CastDevicesTabContent(
@@ -766,6 +780,10 @@ private fun CastControlsTabContent(
     onTurnOnWifi: () -> Unit,
     onOpenBluetoothSettings: () -> Unit,
     onRefresh: () -> Unit,
+    isPlaying: Boolean = false,
+    onPrevious: () -> Unit = {},
+    onPlayPause: () -> Unit = {},
+    onNext: () -> Unit = {},
     bottomSpacing: Dp,
 ) {
     Column(
@@ -777,7 +795,11 @@ private fun CastControlsTabContent(
         ActiveDeviceHero(
             device = state.activeDevice,
             onDisconnect = onDisconnect,
-            onVolumeChange = onVolumeChange
+            onVolumeChange = onVolumeChange,
+            isPlaying = isPlaying,
+            onPrevious = onPrevious,
+            onPlayPause = onPlayPause,
+            onNext = onNext
         )
 
         Column(
@@ -1282,7 +1304,11 @@ private fun DeviceSectionHeader(
 private fun ActiveDeviceHero(
     device: ActiveDeviceUi,
     onDisconnect: () -> Unit,
-    onVolumeChange: (Float) -> Unit
+    onVolumeChange: (Float) -> Unit,
+    isPlaying: Boolean = false,
+    onPrevious: () -> Unit = {},
+    onPlayPause: () -> Unit = {},
+    onNext: () -> Unit = {}
 ) {
     var sliderValue by remember(device.id, device.volume) { mutableFloatStateOf(device.volume) }
     LaunchedEffect(device.volume) { sliderValue = device.volume }
@@ -1384,34 +1410,10 @@ private fun ActiveDeviceHero(
                         color = MaterialTheme.colorScheme.onTertiaryContainer,
                         maxLines = 1
                     )
-                    if (device.isRemote) {
-                        Button(
-                            onClick = onDisconnect,
-                            enabled = !device.isConnecting,
-                            shape = RoundedCornerShape(50),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                                contentColor = MaterialTheme.colorScheme.onErrorContainer
-                            ),
-                            modifier = Modifier
-                                .height(46.dp)
-                                .padding(top = 4.dp)
-                        ) {
-                            Icon(
-                                modifier = Modifier.size(22.dp),
-                                painter = painterResource(R.drawable.rounded_mimo_disconnect_24),
-                                contentDescription = stringResource(R.string.presentation_batch_g_cast_cd_disconnect_icon),
-                            )
-                            Spacer(
-                                modifier = Modifier.width(6.dp)
-                            )
-                            Text(stringResource(R.string.presentation_batch_g_cast_disconnect))
-                        }
-                    }
                 }
             }
 
-            // Sección de Volumen (Sin cambios)
+            // Sección de Volumen
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1475,6 +1477,88 @@ private fun ActiveDeviceHero(
                     ),
                     modifier = Modifier.fillMaxWidth()
                 )
+            }
+
+            if (device.isRemote) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        FilledTonalIconButton(
+                            onClick = onPrevious,
+                            shape = CircleShape,
+                            colors = IconButtonDefaults.filledTonalIconButtonColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                                contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+                            ),
+                            modifier = Modifier.size(44.dp)
+                        ) {
+                            Icon(
+                                painter = painterResource(R.drawable.rounded_skip_previous_filled_24),
+                                contentDescription = "Previous Song",
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+
+                        FilledIconButton(
+                            onClick = onPlayPause,
+                            shape = CircleShape,
+                            colors = IconButtonDefaults.filledIconButtonColors(
+                                containerColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                                contentColor = MaterialTheme.colorScheme.tertiaryContainer
+                            ),
+                            modifier = Modifier.size(44.dp)
+                        ) {
+                            Icon(
+                                painter = painterResource(if (isPlaying) R.drawable.rounded_pause_filled_24 else R.drawable.rounded_play_arrow_filled_24),
+                                contentDescription = if (isPlaying) "Pause" else "Play",
+                                modifier = Modifier.size(26.dp)
+                            )
+                        }
+
+                        FilledTonalIconButton(
+                            onClick = onNext,
+                            shape = CircleShape,
+                            colors = IconButtonDefaults.filledTonalIconButtonColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                                contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+                            ),
+                            modifier = Modifier.size(44.dp)
+                        ) {
+                            Icon(
+                                painter = painterResource(R.drawable.rounded_skip_next_filled_24),
+                                contentDescription = "Next Song",
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                    }
+
+                    Button(
+                        onClick = onDisconnect,
+                        enabled = !device.isConnecting,
+                        shape = RoundedCornerShape(50),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                            contentColor = MaterialTheme.colorScheme.onErrorContainer
+                        ),
+                        modifier = Modifier.height(44.dp)
+                    ) {
+                        Icon(
+                            modifier = Modifier.size(20.dp),
+                            painter = painterResource(R.drawable.rounded_mimo_disconnect_24),
+                            contentDescription = stringResource(R.string.presentation_batch_g_cast_cd_disconnect_icon),
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(stringResource(R.string.presentation_batch_g_cast_disconnect))
+                    }
+                }
             }
         }
     }
