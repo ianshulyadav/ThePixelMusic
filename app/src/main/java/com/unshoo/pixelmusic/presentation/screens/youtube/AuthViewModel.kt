@@ -28,12 +28,28 @@ class AuthViewModel @Inject constructor(
     private val _eventsChannel = MutableSharedFlow<ScreenEvent.Out>()
     val eventFlow = _eventsChannel.asSharedFlow()
 
+    private var hasCookie = false
+
     fun onPageFinished(url: String?) {
         viewModelScope.launch {
             val cookieManager = CookieManager.getInstance()
             val cookies = cookieManager.getCookie("https://music.youtube.com").orEmpty()
             if ((cookies.contains("SAPISID") || cookies.contains("__Secure-3PAPISID")) && !_uiState.value.isLoggedIn) {
+                hasCookie = true
                 saveCookies(Cookies(cookies))
+                // Do NOT emit LoginCompleted yet — wait for ytcfg confirmation
+                // (window.ytcfg.get('LOGGED_IN') == 'true') via onYtcfgConfirmed().
+                // A cookie alone does not prove the page exposed a signed-in identity;
+                // multi-channel logins can sit on the profile-picker page with cookies
+                // but no confirmed identity, which previously left the user in Guest mode.
+            }
+        }
+    }
+
+    /** Called from the WebView after evaluating window.ytcfg. Only complete login when the page itself confirms signed-in state. */
+    fun onYtcfgConfirmed(loggedIn: Boolean) {
+        viewModelScope.launch {
+            if (loggedIn && hasCookie && !_uiState.value.isLoggedIn) {
                 _uiState.update { it.copy(isLoggedIn = true) }
                 _eventsChannel.emit(ScreenEvent.Out.LoginCompleted)
                 launch(kotlinx.coroutines.Dispatchers.IO) { youTubeLibrarySyncManager.syncNow(force = true) }

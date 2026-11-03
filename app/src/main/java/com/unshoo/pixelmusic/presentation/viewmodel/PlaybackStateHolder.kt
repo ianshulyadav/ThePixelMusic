@@ -8,6 +8,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import com.unshoo.pixelmusic.data.service.player.DualPlayerEngine
+import com.unshoo.pixelmusic.data.service.player.TransitionController
 import com.unshoo.pixelmusic.data.preferences.UserPreferencesRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -43,6 +44,7 @@ class PlaybackStateHolder @Inject constructor(
     private val userPreferencesRepository: UserPreferencesRepository,
     private val castStateHolder: CastStateHolder,
     private val queueStateHolder: QueueStateHolder,
+    private val transitionController: TransitionController,
     @param:ApplicationContext private val appContext: Context,
     @AppScope private val appScope: CoroutineScope
 ) {
@@ -499,6 +501,8 @@ class PlaybackStateHolder @Inject constructor(
             castStateHolder.castPlayer?.previous()
             return
         }
+        // FIX 4: Schedule crossfade on manual skip (previous song), like BitChord/Mochy-Music.
+        transitionController.onManualSkip()
         val controller = mediaController ?: return
 
         // If the song has been playing for more than 3 seconds, rewind to the beginning
@@ -539,6 +543,8 @@ class PlaybackStateHolder @Inject constructor(
         if (castSession != null && castSession.remoteMediaClient != null) {
             castStateHolder.castPlayer?.next()
         } else {
+            // FIX 4: Schedule crossfade on manual skip (next song), like BitChord/Mochy-Music.
+            transitionController.onManualSkip()
             val controller = mediaController ?: return
             if (controller.hasNextMediaItem()) {
                 controller.seekToNextMediaItem()
@@ -992,12 +998,15 @@ class PlaybackStateHolder @Inject constructor(
         currentIndex: Int,
         shuffleOthers: Boolean
     ): Pair<List<Song>, Int> {
-        if (queue.size <= 500) return queue to currentIndex
-        val currentItem = queue.getOrNull(currentIndex)
-            ?: return queue.take(500) to currentIndex.coerceAtMost(499)
-        val others = queue.filterIndexed { index, _ -> index != currentIndex }
-        val chosenOthers = if (shuffleOthers) others.shuffled().take(499) else others.take(499)
-        return (listOf(currentItem) + chosenOthers) to 0
+        // FIX 2: Removed 500-song cap that ruined shuffle for playlists/albums/local/songs list.
+        // Shuffle now operates on the full queue so every track has a chance to be heard.
+        val safeIndex = currentIndex.coerceIn(0, queue.lastIndex)
+        if (shuffleOthers && queue.size > 1) {
+            val currentItem = queue[safeIndex]
+            val others = queue.filterIndexed { index, _ -> index != safeIndex }.shuffled()
+            return (listOf(currentItem) + others) to 0
+        }
+        return queue to safeIndex
     }
 
     fun onCleared() {

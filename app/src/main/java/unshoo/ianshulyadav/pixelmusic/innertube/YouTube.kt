@@ -247,8 +247,8 @@ object YouTube {
     }
 
     suspend fun searchSummary(query: String): Result<SearchSummaryPage> = runCatching {
-        val response = innerTube.search(WEB_REMIX, query).body<SearchResponse>()
-        val contents =
+        var response = innerTube.search(WEB_REMIX, query).body<SearchResponse>()
+        var contents =
             response.contents
                 ?.tabbedSearchResultsRenderer
                 ?.tabs
@@ -258,6 +258,29 @@ object YouTube {
                 ?.sectionListRenderer
                 ?.contents
                 .orEmpty()
+
+        if (contents.isEmpty() && innerTube.locale.gl != "US") {
+            android.util.Log.w("YouTube", "Empty searchSummary for gl=${innerTube.locale.gl}. Retrying with US fallback.")
+            val originalLocale = innerTube.locale
+            innerTube.locale = originalLocale.copy(gl = "US")
+            try {
+                response = innerTube.search(WEB_REMIX, query).body<SearchResponse>()
+                contents =
+                    response.contents
+                        ?.tabbedSearchResultsRenderer
+                        ?.tabs
+                        ?.firstOrNull()
+                        ?.tabRenderer
+                        ?.content
+                        ?.sectionListRenderer
+                        ?.contents
+                        .orEmpty()
+            } catch (e: Exception) {
+                android.util.Log.w("YouTube", "US fallback failed for searchSummary: ${e.message}")
+            } finally {
+                innerTube.locale = originalLocale
+            }
+        }
         val topItems = mutableListOf<YTItem>()
         val summaries = mutableListOf<SearchSummary>()
 
@@ -313,8 +336,8 @@ object YouTube {
     }
 
     suspend fun search(query: String, filter: SearchFilter): Result<SearchResult> = runCatching {
-        val response = innerTube.search(WEB_REMIX, query, filter.value).body<SearchResponse>()
-        val contents =
+        var response = innerTube.search(WEB_REMIX, query, filter.value).body<SearchResponse>()
+        var contents =
             response.contents
                 ?.tabbedSearchResultsRenderer
                 ?.tabs
@@ -324,6 +347,29 @@ object YouTube {
                 ?.sectionListRenderer
                 ?.contents
                 .orEmpty()
+
+        if (contents.isEmpty() && innerTube.locale.gl != "US") {
+            android.util.Log.w("YouTube", "Empty search for gl=${innerTube.locale.gl}. Retrying with US fallback.")
+            val originalLocale = innerTube.locale
+            innerTube.locale = originalLocale.copy(gl = "US")
+            try {
+                response = innerTube.search(WEB_REMIX, query, filter.value).body<SearchResponse>()
+                contents =
+                    response.contents
+                        ?.tabbedSearchResultsRenderer
+                        ?.tabs
+                        ?.firstOrNull()
+                        ?.tabRenderer
+                        ?.content
+                        ?.sectionListRenderer
+                        ?.contents
+                        .orEmpty()
+            } catch (e: Exception) {
+                android.util.Log.w("YouTube", "US fallback failed for search: ${e.message}")
+            } finally {
+                innerTube.locale = originalLocale
+            }
+        }
         val shelves =
             contents.flatMap { content ->
                 buildList {
@@ -844,6 +890,40 @@ object YouTube {
             HomePage.Section.fromSectionListContent(it)
         }.orEmpty()).toMutableList()
         val chips = sectionListRender?.header?.chipCloudRenderer?.chips?.mapNotNull { HomePage.Chip.fromChipCloudChipRenderer(it) }
+
+        if (sections.isEmpty() && params == null && innerTube.locale.gl != "US") {
+            android.util.Log.w("YouTube", "Empty home sections for gl=${innerTube.locale.gl}. Retrying with US fallback.")
+            val originalLocale = innerTube.locale
+            innerTube.locale = originalLocale.copy(gl = "US")
+            try {
+                val fbResponse = innerTube.browse(
+                    WEB_REMIX,
+                    browseId = "FEmusic_home",
+                    params = null,
+                    setLogin = setLogin,
+                    forceAnonymous = forceAnon
+                ).body<BrowseResponse>()
+                val fbSectionList = fbResponse.contents?.singleColumnBrowseResultsRenderer?.tabs?.firstOrNull()
+                    ?.tabRenderer?.content?.sectionListRenderer
+                    ?: fbResponse.contents?.sectionListRenderer
+                val fbContinuation = fbSectionList?.continuations?.getContinuation()
+                    ?: fbResponse.continuationContents?.sectionListContinuation?.continuations?.getContinuation()
+                val fbSections = (fbSectionList?.contents?.mapNotNull {
+                    HomePage.Section.fromSectionListContent(it)
+                } ?: fbResponse.continuationContents?.sectionListContinuation?.contents?.mapNotNull {
+                    HomePage.Section.fromSectionListContent(it)
+                }.orEmpty()).toMutableList()
+                val fbChips = fbSectionList?.header?.chipCloudRenderer?.chips?.mapNotNull { HomePage.Chip.fromChipCloudChipRenderer(it) }
+                if (fbSections.isNotEmpty()) {
+                    return@runCatching HomePage(fbChips, fbSections, fbContinuation)
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("YouTube", "US fallback failed for home: ${e.message}")
+            } finally {
+                innerTube.locale = originalLocale
+            }
+        }
+
         HomePage(chips, sections, continuation)
     }
 

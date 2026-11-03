@@ -136,19 +136,66 @@ val LanguageCodeToName = mapOf(
     "hi" to "हिन्दी"
 )
 
-val CountryCodeToName = mapOf(
+val CountryCodeToName = linkedMapOf(
     "US" to "United States",
     "GB" to "United Kingdom",
     "CA" to "Canada",
     "AU" to "Australia",
     "DE" to "Germany",
     "FR" to "France",
+    "IT" to "Italy",
+    "ES" to "Spain",
+    "MX" to "Mexico",
+    "BR" to "Brazil",
+    "AR" to "Argentina",
     "JP" to "Japan",
     "KR" to "South Korea",
     "IN" to "India",
-    "BR" to "Brazil",
+    "ID" to "Indonesia",
+    "NL" to "Netherlands",
+    "PL" to "Poland",
+    "SE" to "Sweden",
+    "TR" to "Turkey",
     "RU" to "Russia"
 )
+
+val SupportedYouTubeCountryCodes: Set<String> = setOf(
+    "US", "GB", "CA", "AU", "DE", "FR", "JP", "KR", "IN", "BR", "RU",
+    "AT", "BE", "BG", "CH", "CL", "CO", "CR", "CY", "CZ", "DK", "DO",
+    "EC", "EE", "ES", "FI", "GR", "GT", "HK", "HN", "HR", "HU", "ID",
+    "IE", "IL", "IS", "IT", "KW", "LU", "LV", "MT", "MX", "MY", "NG",
+    "NL", "NO", "NZ", "PA", "PE", "PH", "PL", "PT", "QA", "RO", "SA",
+    "SE", "SG", "SK", "SV", "TH", "TR", "TW", "UA", "UY", "VN", "ZA",
+    "AE", "AR", "BO", "BH", "EG", "GH", "KE", "LB", "OM", "SN", "TZ",
+    "UG", "ZW", "BD", "NP", "LK"
+)
+
+fun getSafeDefaultContentCountry(): String {
+    val country = java.util.Locale.getDefault().country.trim().uppercase()
+    if (country.length == 2 && country in SupportedYouTubeCountryCodes) {
+        return country
+    }
+    val lang = java.util.Locale.getDefault().language.lowercase()
+    return when (lang) {
+        "es" -> "MX"
+        "hi" -> "IN"
+        "ja" -> "JP"
+        "ko" -> "KR"
+        "de" -> "DE"
+        "fr" -> "FR"
+        "it" -> "IT"
+        "pt" -> "BR"
+        "ru" -> "RU"
+        else -> "US"
+    }
+}
+
+fun getSafeDefaultContentLanguage(): String {
+    val loc = java.util.Locale.getDefault()
+    if (loc.country == "IN") return "en-IN"
+    val tag = loc.toLanguageTag().trim().replace('_', '-')
+    return if (tag.isNotBlank() && tag != "und") tag else "en"
+}
 
 
 @Singleton
@@ -2500,7 +2547,7 @@ constructor(
 
     val contentLanguageFlow: Flow<String> =
         dataStore.data.map { preferences ->
-            preferences[PreferencesKeys.CONTENT_LANGUAGE] ?: if (java.util.Locale.getDefault().country == "IN") "en-IN" else java.util.Locale.getDefault().toLanguageTag().ifBlank { "en" }
+            preferences[PreferencesKeys.CONTENT_LANGUAGE] ?: getSafeDefaultContentLanguage()
         }.distinctUntilChanged()
 
     suspend fun setContentLanguage(language: String) {
@@ -2511,12 +2558,22 @@ constructor(
 
     val contentCountryFlow: Flow<String> =
         dataStore.data.map { preferences ->
-            preferences[PreferencesKeys.CONTENT_COUNTRY] ?: java.util.Locale.getDefault().country.ifBlank { "IN" }
+            val stored = preferences[PreferencesKeys.CONTENT_COUNTRY]
+            if (!stored.isNullOrBlank() && stored.length == 2 && stored.uppercase() in SupportedYouTubeCountryCodes) {
+                stored.uppercase()
+            } else {
+                getSafeDefaultContentCountry()
+            }
         }.distinctUntilChanged()
 
     suspend fun setContentCountry(country: String) {
+        val sanitized = if (country.length == 2 && country.uppercase() in SupportedYouTubeCountryCodes) {
+            country.uppercase()
+        } else {
+            getSafeDefaultContentCountry()
+        }
         dataStore.edit { preferences ->
-            preferences[PreferencesKeys.CONTENT_COUNTRY] = country
+            preferences[PreferencesKeys.CONTENT_COUNTRY] = sanitized
         }
     }
 

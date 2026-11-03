@@ -159,7 +159,7 @@ data class SettingsUiState(
     val pureYtMusicOnly: Boolean = false,
     val localModeEnabled: Boolean = false,
     val contentLanguage: String = "en",
-    val contentCountry: String = java.util.Locale.getDefault().country.ifBlank { "IN" },
+    val contentCountry: String = com.unshoo.pixelmusic.data.preferences.getSafeDefaultContentCountry(),
     val playlistSuggestionSource: PlaylistSuggestionSource = PlaylistSuggestionSource.BOTH,
     val hideExplicit: Boolean = false,
     val hideVideo: Boolean = false,

@@ -1371,6 +1371,27 @@ class PlayerViewModel @Inject constructor(
 
             val artworkUri = currentItem.artworkUri?.takeIf { it.isNotBlank() } ?: return@launch
 
+            // FIX 1: Restore last recently played song as currentSong on cold start
+            // without permanently writing to PlaybackStatsRepository DB.
+            // Resolve stream URL exactly like BitChord/Mochy-Music (resolveCloudUri).
+            val allSongsById = libraryStateHolder.allSongsById.value
+            val restoredSong = mapSnapshotItemToSong(currentItem, allSongsById)
+            playbackStateHolder.updateStablePlayerState { it.copy(
+                currentSong = restoredSong,
+                isPlaying = false,
+                playWhenReady = false,
+                totalDuration = restoredSong.duration.coerceAtLeast(0L)
+            )}
+
+            // Pre-resolve stream URL for last recently played song so miniplayer can play immediately
+            val playbackUri = MediaItemBuilder.playbackUri(restoredSong)
+            val scheme = playbackUri.scheme
+            if (scheme == "youtube" || scheme == "telegram" || scheme == "gdrive" || scheme == "monochrome") {
+                viewModelScope.launch(Dispatchers.IO) {
+                    dualPlayerEngine.resolveCloudUri(playbackUri)
+                }
+            }
+
             themeStateHolder.extractAndGenerateColorScheme(
                 albumArtUriAsUri = artworkUri.toUri(),
                 currentSongUriString = artworkUri,
@@ -5905,15 +5926,21 @@ class PlayerViewModel @Inject constructor(
                 syncShuffleStateWithSession(false)
             }
 
-            // If shuffle is persistent and currently ON, we shuffle the new songs immediately
+            // FIX 2: BitChord QueueShuffle pattern — chosen song leads, the rest follow shuffled.
+            // No 500-song cap; works for playlists, albums, local, and songs list alike.
             val finalSongsToPlay = if (isPersistent && isShuffleOn) {
-                // Shuffle the list but ensure the chosen song starts first at index 0 and all other songs follow
                 withContext(Dispatchers.Default) {
-                    QueueUtils.buildAnchoredShuffleQueueSuspending(
-                        validSongs,
-                        validSongs.indexOfFirst { it.id == validStartSong.id }.coerceAtLeast(0),
-                        startAtZero = true
-                    )
+                    val startIdx = validSongs.indexOfFirst { it.id == validStartSong.id }.coerceAtLeast(0)
+                    val chosen = validSongs[startIdx]
+                    val rest = validSongs.filterIndexed { i, _ -> i != startIdx }
+                    val shuffledRest = rest.shuffled()
+                    // Ensure shuffled rest differs from original if possible
+                    val finalRest = if (shuffledRest == rest && rest.size > 1) {
+                        rest.drop(1) + rest.first()
+                    } else {
+                        shuffledRest
+                    }
+                    listOf(chosen) + finalRest
                 }
             } else {
                 // Otherwise, just use the normal sequential order
@@ -5959,11 +5986,8 @@ class PlayerViewModel @Inject constructor(
                     return@launch
                 }
 
-                val cappedSongs = if (offlineFilteredSongs.size > 500) {
-                    offlineFilteredSongs.shuffled().take(500)
-                } else {
-                    offlineFilteredSongs
-                }
+                // FIX 2: No 500-song cap — shuffle operates on full queue
+                val cappedSongs = offlineFilteredSongs
                 val result = queueStateHolder.prepareShuffledQueueSuspending(cappedSongs, startAtZero)
                 throwIfDirectPlaybackRequestIsStale(requestToken)
                 if (result == null) {

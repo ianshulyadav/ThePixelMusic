@@ -58,6 +58,17 @@ fun AuthScreen(
                         super.onPageFinished(view, url)
                         loadUrl("javascript:Android.onRetrieveDataSyncId(window.yt.config_.DATASYNC_ID)")
                         authViewModel.onPageFinished(url)
+                        // FIX 5: Evaluate ytcfg to confirm the page actually exposes a signed-in identity.
+                        // Cookies alone don't prove login (multi-channel profile picker leaves user in Guest mode).
+                        loadUrl("""
+                            javascript:(function() {
+                              try {
+                                var cfg = window.ytcfg || window.yt.config_;
+                                var loggedIn = cfg && cfg.get && String(!!cfg.get('LOGGED_IN'));
+                                if (Android && Android.onYtcfgConfirmed) Android.onYtcfgConfirmed(loggedIn === 'true');
+                              } catch(e) { if (Android && Android.onYtcfgConfirmed) Android.onYtcfgConfirmed(false); }
+                            })()
+                        """.trimIndent())
                     }
                 }
                 addJavascriptInterface(object {
@@ -67,6 +78,11 @@ fun AuthScreen(
                             val dataSyncId = newDataSyncId.substringBefore("||")
                             authViewModel.onDataSyncIdFound(dataSyncId)
                         }
+                    }
+
+                    @JavascriptInterface
+                    fun onYtcfgConfirmed(loggedIn: Boolean) {
+                        authViewModel.onYtcfgConfirmed(loggedIn)
                     }
                 }, "Android")
                 loadUrl(Constants.Auth.START_URL)

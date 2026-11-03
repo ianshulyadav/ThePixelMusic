@@ -122,6 +122,14 @@ class TransitionController @Inject constructor(
         engine.addPlayerSwapListener(swapListener)
     }
 
+    /** FIX 4: Called on manual skip (previous/next song) to schedule crossfade. */
+    fun onManualSkip() {
+        val currentItem = engine.masterPlayer.currentMediaItem
+        if (currentItem != null) {
+            scheduleTransitionFor(currentItem)
+        }
+    }
+
     private fun scheduleTransitionFor(currentMediaItem: MediaItem) {
         // Cancel any existing job first and reset pauseAtEnd so a stale `true`
         // from the previous job doesn't cause an unexpected pause.
