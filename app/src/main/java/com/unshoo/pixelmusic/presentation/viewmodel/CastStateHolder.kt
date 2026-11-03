@@ -1,321 +1,109 @@
 package com.unshoo.pixelmusic.presentation.viewmodel
 
-import android.content.Context
-import androidx.mediarouter.media.MediaControlIntent
-import androidx.mediarouter.media.MediaRouteSelector
 import androidx.mediarouter.media.MediaRouter
-import com.google.android.gms.cast.CastMediaControlIntent
-import com.google.android.gms.cast.MediaStatus
-import com.google.android.gms.cast.framework.CastContext
 import com.google.android.gms.cast.framework.CastSession
 import com.google.android.gms.cast.framework.SessionManager
-import com.unshoo.pixelmusic.data.model.Song
-import com.unshoo.pixelmusic.data.service.player.CastPlayer
-import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.launch
+import com.unshoo.pixelmusic.data.service.cast.CastController
+import com.unshoo.pixelmusic.data.service.cast.CastMirror
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Manages Cast/Chromecast state.
- * Extracted from PlayerViewModel to improve modularity.
- * 
- * Note: Complex session transfer logic remains in PlayerViewModel
- * due to tight coupling with playback state.
+ * @Deprecated shim. The cast implementation this class fronted is gone.
+ *
+ * Casting now lives entirely in `data/service/cast`: [CastController] owns routes
+ * and the session, `CastPlayback` owns what plays on the receiver, and
+ * `CastSessionPlayer` is the player the `MediaSession` hands out, so the session
+ * itself already reports the receiver's state to every surface — the app, the
+ * notification, Android Auto and the widgets.
+ *
+ * What is left here is only what the *legacy* code paths in `PlayerViewModel`
+ * and `PlaybackStateHolder` still name: an always-null `castSession`, a null
+ * `castPlayer`, and the three live flows the UI reads
+ * ([isRemotePlaybackActive], [isCastConnecting], [remotePosition]) which are
+ * mirrors of the real thing.
+ *
+ * Those legacy branches cannot run — `castSession` is never non-null, so every
+ * `if (castSession != null && ...)` guard is dead — and deleting the ~30 of them
+ * is a mechanical follow-up. Keeping this class until then is what stops this
+ * patch from being a blind rewrite of two 5000-line files: `PlaybackStateHolder`
+ * needs no edit at all, and `PlayerViewModel` loses only its transfer logic.
  */
+@Deprecated("Casting is owned by data/service/cast; delete the remaining legacy branches and this class.")
 @Singleton
-class CastStateHolder @Inject constructor(
-    @ApplicationContext private val context: Context
-) {
-    private val CAST_STATE_TAG = "CastStateHolder"
+class CastStateHolder @Inject constructor() {
 
-    // Cached SessionManager to avoid runBlocking and repeated lookups across threads
-    @Volatile
-    private var _sessionManager: SessionManager? = null
+    /** Never non-null. The real session lives in [CastController]. */
+    val castSession: StateFlow<CastSession?> = MutableStateFlow<CastSession?>(null).asStateFlow()
 
-    // Cast session manager - non-blocking property lookup.
-    // If not cached and called off-main-thread, returns null instead of blocking with runBlocking.
-    val sessionManager: SessionManager?
-        get() {
-            val cached = _sessionManager
-            if (cached != null) return cached
-            return try {
-                if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
-                    val manager = CastContext.getSharedInstance(context).sessionManager
-                    _sessionManager = manager
-                    manager
-                } else {
-                    // Non-blocking fallback: avoid runBlocking on background threads.
-                    // Returns null until initialized on the main thread or cached.
-                    null
-                }
-            } catch (e: Throwable) {
-                Timber.tag(CAST_STATE_TAG).e(e, "Failed to get CastContext/SessionManager")
-                null
-            }
-        }
-    
-    // Current cast session
-    private val _castSession = MutableStateFlow<CastSession?>(null)
-    val castSession: StateFlow<CastSession?> = _castSession.asStateFlow()
-    
-    // Cast player instance
-    private var _castPlayer: CastPlayer? = null
-    val castPlayer: CastPlayer? get() = _castPlayer
-    
-    // Is remote playback active
-    private val _isRemotePlaybackActive = MutableStateFlow(false)
-    val isRemotePlaybackActive: StateFlow<Boolean> = _isRemotePlaybackActive.asStateFlow()
-    
-    // Is currently connecting to cast
-    private val _isCastConnecting = MutableStateFlow(false)
-    val isCastConnecting: StateFlow<Boolean> = _isCastConnecting.asStateFlow()
-    
-    // Remote playback position
-    private val _remotePosition = MutableStateFlow(0L)
-    val remotePosition: StateFlow<Long> = _remotePosition.asStateFlow()
-    
-    // Pending cast route ID for connection
-    private var _pendingCastRouteId: String? = null
-    val pendingCastRouteId: String? get() = _pendingCastRouteId
-    
-    // Last known remote state
-    var lastRemoteMediaStatus: MediaStatus? = null
-        private set
-    var lastRemoteQueue: List<Song> = emptyList()
-        private set
-    var lastRemoteSongId: String? = null
-        private set
-    var lastRemoteStreamPosition: Long = 0L
-        private set
-    var lastRemoteRepeatMode: Int = androidx.media3.common.Player.REPEAT_MODE_OFF
-        private set
-    var lastRemoteItemId: Int? = null
-        private set
-    
-    // Pending remote song tracking
-    var pendingRemoteSongId: String? = null
-        private set
-    var pendingRemoteSongMarkedAt: Long = 0L
-        private set
-    
-    // Is currently seeking remotely
-    private val _isRemotelySeeking = MutableStateFlow(false)
-    val isRemotelySeeking: StateFlow<Boolean> = _isRemotelySeeking.asStateFlow()
-    
-    // Cast control category
-    private val castControlCategory = CastMediaControlIntent.categoryForCast(
-        CastMediaControlIntent.DEFAULT_MEDIA_RECEIVER_APPLICATION_ID
-    )
-    
-    /**
-     * Check if a route is a Cast route.
-     */
-    fun MediaRouter.RouteInfo.isCastRoute(): Boolean {
-        return supportsControlCategory(MediaControlIntent.CATEGORY_REMOTE_PLAYBACK) ||
-            supportsControlCategory(castControlCategory)
-    }
-    
-    /**
-     * Build a media route selector for Cast routes.
-     */
-    fun buildCastRouteSelector(): MediaRouteSelector {
-        return MediaRouteSelector.Builder()
-            .addControlCategory(MediaControlIntent.CATEGORY_REMOTE_PLAYBACK)
-            .addControlCategory(castControlCategory)
-            .build()
-    }
+    /** Never non-null. What plays on the receiver is `CastPlayback`. */
+    val castPlayer: LegacyCastPlayer? = null
 
-    // State setters
-    fun setCastSession(session: CastSession?) {
-        _castSession.value = session
-    }
-    
-    fun setCastPlayer(player: CastPlayer?) {
-        if (_castPlayer === player) return
-        _castPlayer?.release()
-        _castPlayer = player
-    }
-    
-    fun setRemotePlaybackActive(active: Boolean) {
-        _isRemotePlaybackActive.value = active
-    }
-    
-    fun setCastConnecting(connecting: Boolean) {
-        _isCastConnecting.value = connecting
-    }
-    
-    fun setRemotePosition(position: Long) {
-        _remotePosition.value = position
-    }
-    
-    fun setPendingCastRouteId(routeId: String?) {
-        _pendingCastRouteId = routeId
-    }
-    
-    fun setRemotelySeeking(seeking: Boolean) {
-        _isRemotelySeeking.value = seeking
-    }
-    
-    fun updateLastRemoteState(
-        mediaStatus: MediaStatus? = null,
-        queue: List<Song>? = null,
-        songId: String? = null,
-        streamPosition: Long? = null,
-        repeatMode: Int? = null,
-        itemId: Int? = null
-    ) {
-        mediaStatus?.let { lastRemoteMediaStatus = it }
-        queue?.let { lastRemoteQueue = it }
-        songId?.let { lastRemoteSongId = it }
-        streamPosition?.let { lastRemoteStreamPosition = it }
-        repeatMode?.let { lastRemoteRepeatMode = it }
-        itemId?.let { lastRemoteItemId = it }
-    }
-    
-    fun setPendingRemoteSong(songId: String?, markedAt: Long = System.currentTimeMillis()) {
-        pendingRemoteSongId = songId
-        pendingRemoteSongMarkedAt = markedAt
-    }
-    
-    fun clearRemoteState() {
-        _castSession.value = null
-        _castPlayer?.release()
-        _castPlayer = null
-        _isRemotePlaybackActive.value = false
-        _isCastConnecting.value = false
-        _pendingCastRouteId = null
-        lastRemoteMediaStatus = null
-        lastRemoteQueue = emptyList()
-        lastRemoteSongId = null
-        lastRemoteStreamPosition = 0L
-        lastRemoteItemId = null
-        pendingRemoteSongId = null
-    }
-    
-    // MediaRouter State
-    private val mediaRouter: MediaRouter = MediaRouter.getInstance(context)
-    private val mediaRouterCallback = object : MediaRouter.Callback() {
-        override fun onRouteAdded(router: MediaRouter, route: MediaRouter.RouteInfo) {
-            updateRoutes()
-            syncSelectedRouteFromRouter(router)
-        }
-        override fun onRouteRemoved(router: MediaRouter, route: MediaRouter.RouteInfo) {
-            updateRoutes()
-            syncSelectedRouteFromRouter(router)
-        }
-        override fun onRouteChanged(router: MediaRouter, route: MediaRouter.RouteInfo) {
-            updateRoutes()
-            syncSelectedRouteFromRouter(router)
-        }
-        override fun onRouteSelected(router: MediaRouter, route: MediaRouter.RouteInfo) {
-            updateRoutes()
-            syncSelectedRouteFromRouter(router)
-        }
-        override fun onRouteUnselected(router: MediaRouter, route: MediaRouter.RouteInfo, reason: Int) {
-            updateRoutes()
-            syncSelectedRouteFromRouter(router)
-        }
-        override fun onRouteVolumeChanged(router: MediaRouter, route: MediaRouter.RouteInfo) {
-             if (route.id == _selectedRoute.value?.id) {
-                _routeVolume.value = route.volume
-            }
-        }
-    }
+    /** Never non-null: nothing outside the service talks to a Cast session any more. */
+    val sessionManager: SessionManager? = null
 
-    private val _castRoutes = MutableStateFlow<List<MediaRouter.RouteInfo>>(emptyList())
-    val castRoutes: StateFlow<List<MediaRouter.RouteInfo>> = _castRoutes.asStateFlow()
+    val isRemotePlaybackActive: StateFlow<Boolean> = CastMirror.active
 
-    private val _selectedRoute = MutableStateFlow<MediaRouter.RouteInfo?>(null)
-    val selectedRoute: StateFlow<MediaRouter.RouteInfo?> = _selectedRoute.asStateFlow()
+    val isCastConnecting: StateFlow<Boolean> = CastMirror.connecting
 
-    private val _routeVolume = MutableStateFlow(0)
+    val remotePosition: StateFlow<Long> = CastMirror.positionMs
+
+    private val _remotelySeeking = MutableStateFlow(false)
+    val isRemotelySeeking: StateFlow<Boolean> = _remotelySeeking.asStateFlow()
+
+    private val _routeVolume = MutableStateFlow(100)
     val routeVolume: StateFlow<Int> = _routeVolume.asStateFlow()
 
-    private val _isRefreshingRoutes = MutableStateFlow(false)
-    val isRefreshingRoutes: StateFlow<Boolean> = _isRefreshingRoutes.asStateFlow()
-    
-    // Coroutine scope for delays (injected via initialize or use GlobalScope helper if Singleton? 
-    // Ideally we should have a scope. Since it is Singleton, we can use a custom scope or suspend functions.)
-    // But refreshRoutes was launched in ViewModel.
-    // We will make refreshRoutes suspend.
+    val isRefreshingRoutes: StateFlow<Boolean> = MutableStateFlow(false).asStateFlow()
 
-    private var refreshRoutesJob: kotlinx.coroutines.Job? = null
+    val castRoutes: StateFlow<List<MediaRouter.RouteInfo>> =
+        MutableStateFlow<List<MediaRouter.RouteInfo>>(emptyList()).asStateFlow()
 
-    fun refreshRoutes(scope: kotlinx.coroutines.CoroutineScope) {
-        refreshRoutesJob?.cancel()
-        refreshRoutesJob = scope.launch {
-            _isRefreshingRoutes.value = true
-            mediaRouter.removeCallback(mediaRouterCallback)
-            val mediaRouteSelector = buildCastRouteSelector()
-            mediaRouter.addCallback(
-                mediaRouteSelector,
-                mediaRouterCallback,
-                MediaRouter.CALLBACK_FLAG_REQUEST_DISCOVERY or MediaRouter.CALLBACK_FLAG_PERFORM_ACTIVE_SCAN
-            )
-            updateRoutes()
-            syncSelectedRouteFromRouter(mediaRouter)
+    val selectedRoute: StateFlow<MediaRouter.RouteInfo?> =
+        MutableStateFlow<MediaRouter.RouteInfo?>(null).asStateFlow()
 
-            kotlinx.coroutines.delay(1800)
+    fun startDiscovery() = Unit
 
-            mediaRouter.removeCallback(mediaRouterCallback)
-            mediaRouter.addCallback(mediaRouteSelector, mediaRouterCallback, MediaRouter.CALLBACK_FLAG_REQUEST_DISCOVERY)
-            updateRoutes()
-            syncSelectedRouteFromRouter(mediaRouter)
-            _isRefreshingRoutes.value = false
-        }
+    fun stopDiscovery() = Unit
+
+    fun setCastPlayer(player: LegacyCastPlayer?) = Unit
+
+    fun setRemotePlaybackActive(active: Boolean) = Unit
+
+    fun setRemotelySeeking(seeking: Boolean) {
+        _remotelySeeking.value = seeking
     }
 
-    fun startDiscovery() {
-        val mediaRouteSelector = buildCastRouteSelector()
-        mediaRouter.addCallback(mediaRouteSelector, mediaRouterCallback, MediaRouter.CALLBACK_FLAG_REQUEST_DISCOVERY)
-        updateRoutes()
-        syncSelectedRouteFromRouter(mediaRouter)
-    }
+    fun setRemotePosition(positionMs: Long) = Unit
 
-    fun stopDiscovery() {
-        try {
-            mediaRouter.removeCallback(mediaRouterCallback)
-        } catch (_: Exception) {}
-    }
+    fun setCastConnecting(connecting: Boolean) = Unit
 
-    private fun updateRoutes() {
-        _castRoutes.value = mediaRouter.routes.filter { it.isCastRoute() }.distinctBy { it.id }
-    }
-
-    private fun syncSelectedRouteFromRouter(router: MediaRouter) {
-        val selected = router.selectedRoute
-        _selectedRoute.value = selected
-        _routeVolume.value = selected.volume
-    }
-
-    fun selectRoute(route: MediaRouter.RouteInfo) {
-        mediaRouter.selectRoute(route)
-    }
+    fun setPendingCastRouteId(routeId: String?) = Unit
 
     fun setRouteVolume(volume: Int) {
         _routeVolume.value = volume
-        _selectedRoute.value?.requestSetVolume(volume)
-    }
-    
-    fun disconnect() {
-        mediaRouter.selectRoute(mediaRouter.defaultRoute)
-        syncSelectedRouteFromRouter(mediaRouter)
-        updateRoutes()
-    }
-    
-    fun onCleared() {
-        refreshRoutesJob?.cancel()
-        mediaRouter.removeCallback(mediaRouterCallback)
     }
 
-    init {
-        // Initial setup? No, we wait for refresh or explicit usage?
-        // ViewModel initialized it.
-        // We can attach callback passively? No, battery drain.
+    fun onCleared() {
+        _remotelySeeking.value = false
     }
+}
+
+/**
+ * The shape the legacy call sites expect of `CastPlayer` — which no longer
+ * exists. Nothing ever returns an instance, so these are never called; they are
+ * here so the dead branches around them still compile.
+ */
+@Deprecated("Use CastPlayback through CastSessionPlayer.")
+interface LegacyCastPlayer {
+    fun play()
+    fun pause()
+    fun seek(position: Long)
+    fun next()
+    fun previous()
+    fun jumpToItem(itemId: Int, position: Long)
+    fun setRepeatMode(repeatMode: Int)
 }

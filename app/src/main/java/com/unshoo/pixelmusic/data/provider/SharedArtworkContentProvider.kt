@@ -7,9 +7,13 @@ import android.content.res.AssetFileDescriptor
 import android.database.Cursor
 import android.net.Uri
 import android.os.ParcelFileDescriptor
+import coil.imageLoader
 import com.unshoo.pixelmusic.utils.AlbumArtUtils
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import java.io.File
 import java.io.FileNotFoundException
+import java.util.concurrent.TimeUnit
 
 class SharedArtworkContentProvider : ContentProvider() {
 
@@ -24,11 +28,11 @@ class SharedArtworkContentProvider : ContentProvider() {
     ): Cursor? = null
 
     override fun getType(uri: Uri): String? {
-        val appContext = context?.applicationContext ?: return null
-        return if (parseSongId(uri, appContext.packageName) != null) {
-            DEFAULT_CONTENT_TYPE
+        val url = uri.getQueryParameter("url") ?: uri.toString()
+        return if (url.contains(".png", ignoreCase = true)) {
+            "image/png"
         } else {
-            null
+            DEFAULT_CONTENT_TYPE
         }
     }
 
@@ -61,17 +65,118 @@ class SharedArtworkContentProvider : ContentProvider() {
 
     private fun resolveArtworkFile(uri: Uri): File? {
         val appContext = context?.applicationContext ?: return null
-        val songId = parseSongId(uri, appContext.packageName) ?: return null
-        return AlbumArtUtils.ensureAlbumArtCachedFile(
-            appContext = appContext,
-            songId = songId
-        )?.takeIf { it.exists() && it.isFile && it.canRead() }
+        val authority = authority(appContext.packageName)
+        if (uri.authority != authority) return null
+
+        val path = uri.path ?: return null
+        when {
+            path.startsWith("/$PATH_SONG/") -> {
+                val songId = parseSongId(uri, appContext.packageName)
+                if (songId != null) {
+                    val file = AlbumArtUtils.ensureAlbumArtCachedFile(
+                        appContext = appContext,
+                        songId = songId
+                    )
+                    if (file?.exists() == true && file.isFile && file.canRead()) {
+                        return file
+                    }
+                }
+                val rawId = path.removePrefix("/$PATH_SONG/").substringBefore('?').substringBefore('/')
+                if (rawId.isNotBlank()) {
+                    val cached = File(getArtworkCacheDir(appContext), "${rawId}.jpg")
+                    if (cached.exists() && cached.isFile && cached.canRead()) return cached
+                }
+            }
+            path.startsWith("/$PATH_REMOTE") -> {
+                val rawUrl = uri.getQueryParameter("url")
+                    ?: path.removePrefix("/$PATH_REMOTE/").takeIf { it.isNotBlank() }
+                if (!rawUrl.isNullOrBlank()) {
+                    return resolveRemoteArtwork(appContext, rawUrl)
+                }
+            }
+            path.startsWith("/$PATH_FILE") -> {
+                val rawPath = uri.getQueryParameter("path")
+                    ?: path.removePrefix("/$PATH_FILE/").takeIf { it.isNotBlank() }
+                if (!rawPath.isNullOrBlank()) {
+                    val file = File(rawPath)
+                    if (file.exists() && file.isFile && file.canRead()) return file
+                }
+            }
+        }
+        return null
+    }
+
+    private fun resolveRemoteArtwork(appContext: Context, rawUrl: String): File? {
+        val cacheDir = getArtworkCacheDir(appContext)
+        val hash = rawUrl.hashCode().toString() + "_" + rawUrl.takeLast(12).filter { it.isLetterOrDigit() } + ".jpg"
+        val targetFile = File(cacheDir, hash)
+        if (targetFile.exists() && targetFile.isFile && targetFile.length() > 0L) {
+            return targetFile
+        }
+
+        // Try reading from Coil disk cache if present
+        try {
+            appContext.imageLoader.diskCache?.openSnapshot(rawUrl)?.use { snapshot ->
+                val diskFile = snapshot.data.toFile()
+                if (diskFile.exists() && diskFile.isFile && diskFile.length() > 0L) {
+                    return diskFile
+                }
+            }
+        } catch (_: Throwable) {}
+
+        // Download and cache synchronously for external controller
+        return downloadAndCacheUrl(rawUrl, targetFile)
+    }
+
+    private fun downloadAndCacheUrl(rawUrl: String, targetFile: File): File? {
+        val tempFile = File(targetFile.parentFile, "${targetFile.name}.tmp_${System.currentTimeMillis()}")
+        return try {
+            val request = Request.Builder()
+                .url(rawUrl)
+                .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36")
+                .build()
+            artworkHttpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return null
+                val body = response.body ?: return null
+                tempFile.outputStream().use { out ->
+                    body.byteStream().copyTo(out)
+                }
+            }
+            if (tempFile.exists() && tempFile.length() > 0L) {
+                if (tempFile.renameTo(targetFile) || (targetFile.delete() && tempFile.renameTo(targetFile))) {
+                    targetFile
+                } else {
+                    tempFile
+                }
+            } else {
+                tempFile.delete()
+                null
+            }
+        } catch (e: Exception) {
+            tempFile.delete()
+            null
+        }
     }
 
     companion object {
         private const val AUTHORITY_SUFFIX = ".artwork"
         private const val PATH_SONG = "song"
+        private const val PATH_REMOTE = "remote"
+        private const val PATH_FILE = "file"
         private const val DEFAULT_CONTENT_TYPE = "image/jpeg"
+
+        private val artworkHttpClient: OkHttpClient by lazy {
+            OkHttpClient.Builder()
+                .connectTimeout(6, TimeUnit.SECONDS)
+                .readTimeout(12, TimeUnit.SECONDS)
+                .build()
+        }
+
+        private fun getArtworkCacheDir(context: Context): File {
+            val dir = File(context.cacheDir, "shared_artwork")
+            if (!dir.exists()) dir.mkdirs()
+            return dir
+        }
 
         fun authority(packageName: String): String = packageName + AUTHORITY_SUFFIX
 
@@ -99,6 +204,20 @@ class SharedArtworkContentProvider : ContentProvider() {
                 ?.takeIf { it.isNotBlank() }
                 ?.let { "$baseUri?t=$it" }
                 ?: baseUri
+        }
+
+        fun buildRemoteUri(
+            packageName: String,
+            remoteUrl: String
+        ): Uri {
+            return Uri.parse("content://${authority(packageName)}/$PATH_REMOTE?url=${Uri.encode(remoteUrl)}")
+        }
+
+        fun buildFileUri(
+            packageName: String,
+            file: File
+        ): Uri {
+            return Uri.parse("content://${authority(packageName)}/$PATH_FILE?path=${Uri.encode(file.absolutePath)}")
         }
 
         internal fun parseSongId(uri: Uri, packageName: String? = null): Long? {

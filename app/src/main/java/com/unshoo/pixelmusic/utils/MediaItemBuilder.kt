@@ -260,10 +260,18 @@ object MediaItemBuilder {
     }
 
     fun externalControllerArtworkUri(context: Context, rawArtworkUri: String?): Uri? {
+        if (rawArtworkUri.isNullOrBlank()) return null
+        val appContext = context.applicationContext
+        val pkg = applicationPackageName ?: appContext.packageName
+
+        if (rawArtworkUri.startsWith("content://${SharedArtworkContentProvider.authority(pkg)}")) {
+            return Uri.parse(rawArtworkUri)
+        }
+
         if (LocalArtworkUri.isLocalArtworkUri(rawArtworkUri)) {
-            val songId = rawArtworkUri?.let(LocalArtworkUri::parseSongId) ?: return null
+            val songId = LocalArtworkUri.parseSongId(rawArtworkUri) ?: return null
             return SharedArtworkContentProvider.buildSongUri(
-                context = context.applicationContext,
+                packageName = pkg,
                 songId = songId,
                 cacheBustToken = LocalArtworkUri.extractCacheBustToken(rawArtworkUri)
             )
@@ -271,20 +279,48 @@ object MediaItemBuilder {
 
         LocalArtworkUri.parseSongIdFromVolatileArtworkUri(rawArtworkUri)?.let { songId ->
             return SharedArtworkContentProvider.buildSongUri(
-                context = context.applicationContext,
+                packageName = pkg,
                 songId = songId,
                 cacheBustToken = LocalArtworkUri.extractCacheBustToken(rawArtworkUri)
             )
         }
 
+        if (rawArtworkUri.startsWith("http://") || rawArtworkUri.startsWith("https://")) {
+            return SharedArtworkContentProvider.buildRemoteUri(
+                packageName = pkg,
+                remoteUrl = rawArtworkUri
+            )
+        }
+
+        val cleanPath = when {
+            rawArtworkUri.startsWith("file://") -> rawArtworkUri.removePrefix("file://")
+            rawArtworkUri.startsWith("/") -> rawArtworkUri
+            else -> null
+        }
+        if (cleanPath != null) {
+            val file = File(cleanPath)
+            if (file.exists() && file.isFile && file.canRead()) {
+                return SharedArtworkContentProvider.buildFileUri(packageName = pkg, file = file)
+            }
+        }
+
         val normalizedUri = normalizeArtworkUri(rawArtworkUri, SUPPORTED_EXTERNAL_ARTWORK_SCHEMES)
             ?: return null
         return when (normalizedUri.scheme?.lowercase()) {
+            "http", "https" -> SharedArtworkContentProvider.buildRemoteUri(
+                packageName = pkg,
+                remoteUrl = rawArtworkUri
+            )
             "file" -> normalizedUri.path
                 ?.takeIf { it.isNotBlank() }
                 ?.let(::File)
-                ?.let { file -> providerBackedArtworkUri(context, file) ?: normalizedUri }
-                ?: normalizedUri
+                ?.let { file ->
+                    if (file.exists() && file.isFile && file.canRead()) {
+                        SharedArtworkContentProvider.buildFileUri(packageName = pkg, file = file)
+                    } else {
+                        providerBackedArtworkUri(context, file) ?: normalizedUri
+                    }
+                } ?: normalizedUri
             null -> null
             else -> normalizedUri
         }

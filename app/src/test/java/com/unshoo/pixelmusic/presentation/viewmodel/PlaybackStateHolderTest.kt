@@ -28,11 +28,14 @@ class PlaybackStateHolderTest {
     private val appContext: Context = mockk(relaxed = true)
     private val powerManager: PowerManager = mockk(relaxed = true)
 
+    private val transitionController: com.unshoo.pixelmusic.data.service.player.TransitionController = mockk(relaxed = true)
+
     private fun createHolder() = PlaybackStateHolder(
         dualPlayerEngine = dualPlayerEngine,
         userPreferencesRepository = userPreferencesRepository,
         castStateHolder = castStateHolder,
         queueStateHolder = queueStateHolder,
+        transitionController = transitionController,
         appContext = appContext,
         appScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined)
     )

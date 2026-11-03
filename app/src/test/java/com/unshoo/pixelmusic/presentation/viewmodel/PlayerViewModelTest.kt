@@ -86,7 +86,6 @@ class PlayerViewModelTest {
     private val mockDailyMixStateHolder: DailyMixStateHolder = mockk(relaxed = true)
     private val mockLyricsStateHolder: LyricsStateHolder = mockk(relaxed = true)
     private val mockCastStateHolder: CastStateHolder = mockk(relaxed = true)
-    private val mockCastRouteStateHolder: CastRouteStateHolder = mockk(relaxed = true)
     private val mockQueueStateHolder: QueueStateHolder = mockk(relaxed = true)
     private val mockQueueUndoStateHolder: QueueUndoStateHolder = mockk(relaxed = true)
     private val mockPlaylistDismissUndoStateHolder: PlaylistDismissUndoStateHolder = mockk(relaxed = true)
@@ -98,7 +97,6 @@ class PlayerViewModelTest {
     private val mockLibraryStateHolder: LibraryStateHolder = mockk(relaxed = true)
     private val mockFolderNavigationStateHolder: FolderNavigationStateHolder = mockk(relaxed = true)
     private val mockLibraryTabsStateHolder: LibraryTabsStateHolder = mockk(relaxed = true)
-    private val mockCastTransferStateHolder: CastTransferStateHolder = mockk(relaxed = true)
     private val mockMetadataEditStateHolder: MetadataEditStateHolder = mockk(relaxed = true)
     private val mockSongRemovalStateHolder: SongRemovalStateHolder = mockk(relaxed = true)
     private val mockExternalMediaStateHolder: ExternalMediaStateHolder = mockk(relaxed = true)
@@ -200,7 +198,6 @@ class PlayerViewModelTest {
  
         every { mockCastStateHolder.castSession } returns _castSessionFlow
         every { mockCastStateHolder.startDiscovery() } just runs // Added missing mock
-        every { mockCastStateHolder.selectedRoute } returns MutableStateFlow<androidx.mediarouter.media.MediaRouter.RouteInfo?>(null) // Added missing mock
 
         // Connectivity mocks removed as properties differ from expectations
         every { mockConnectivityStateHolder.initialize() } just runs
@@ -211,7 +208,6 @@ class PlayerViewModelTest {
 
         every { mockSleepTimerStateHolder.initialize(any(), any(), any(), any(), any()) } just runs // Added missing mock
         every { mockLibraryStateHolder.initialize(any()) } just runs // Added missing mock
-        every { mockCastTransferStateHolder.initialize(any(), any(), any(), any(), any(), any(), any(), any(), any()) } just runs
         
         // Mock MusicRepository Basic Returns
         every { mockMusicRepository.getSong(any()) } returns flowOf(null)
@@ -280,7 +276,6 @@ class PlayerViewModelTest {
             mockDailyMixStateHolder,
             mockLyricsStateHolder,
             mockCastStateHolder,
-            mockCastRouteStateHolder,
             mockQueueStateHolder,
             mockQueueUndoStateHolder,
             mockPlaylistDismissUndoStateHolder,
@@ -292,7 +287,6 @@ class PlayerViewModelTest {
             mockLibraryStateHolder,
             mockFolderNavigationStateHolder,
             mockLibraryTabsStateHolder,
-            mockCastTransferStateHolder,
             mockMetadataEditStateHolder,
             mockSongRemovalStateHolder,
             mockExternalMediaStateHolder,

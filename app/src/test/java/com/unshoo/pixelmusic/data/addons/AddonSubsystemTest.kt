@@ -2,6 +2,8 @@ package com.unshoo.pixelmusic.data.addons
 
 import com.unshoo.pixelmusic.data.lossless.constants.AudioSourceType
 import com.unshoo.pixelmusic.presentation.viewmodel.PlaybackStreamReconciler
+import com.unshoo.pixelmusic.presentation.viewmodel.ConfirmedAudioFormat
+import com.unshoo.pixelmusic.presentation.viewmodel.OfferedStream
 import com.unshoo.pixelmusic.utils.AudioMetaUtils
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -159,21 +161,27 @@ class AddonSubsystemTest {
 
         val reconciled = PlaybackStreamReconciler.reconcile(
             mediaId = "youtube_20115564",
-            offered = PlaybackStreamReconciler.OfferedStream(
-                mediaId = "youtube_20115564",
+            confirmed = ConfirmedAudioFormat(
+                sampleMimeType = "audio/flac",
+                containerMimeType = null,
+                bitrate = 2_304_000,
+                sampleRate = 96_000,
+                channelCount = 2,
+                bitDepth = 24,
+            ),
+            offered = OfferedStream(
                 mimeType = "audio/flac",
                 bitrate = 2_304_000,
                 sampleRate = 96_000,
                 bitDepth = 24,
                 sourceName = "Tidomeow",
-                isLossless = true,
+                labelSaysHiRes = true,
                 isAtmos = false,
             ),
-            decoded = null,
-            isConfirmed = true,
+            previous = null,
         )
         assertEquals("Tidomeow", reconciled.sourceName)
-        assertEquals("HI-RES", reconciled.formatTag)
+        assertTrue(reconciled.formatTag?.contains("HI-RES") == true)
         assertFalse(reconciled.mimeType.isNullOrBlank())
         assertEquals(AudioSourceType.ADDON, UnifiedSourceId.builtInTypeOrNull("ADDON"))
     }
