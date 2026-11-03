@@ -623,6 +623,7 @@ class DualPlayerEngine @Inject constructor(
             activePlaybackResolvedUris.remove(cleanId)
             resolvedUriCache.remove("youtube://$cleanId")
             resolvedUriCache.remove(cleanId)
+            com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.invalidateStreamCache(cleanId)
         }
     }
 

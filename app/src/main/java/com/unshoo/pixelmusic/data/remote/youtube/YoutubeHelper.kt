@@ -128,11 +128,18 @@ object YoutubeHelper {
      */
     val streamBitrateLruCache = LruCache<String, Int>(200)
 
-    /** Clear all resolved stream URL and format caches (e.g. when quality or Saavn toggle changes). */
+    /** Clear all resolved stream URL and format caches (e.g. when quality or Saavn toggle changes or app updates). */
     fun clearStreamCache() {
         streamUrlLruCache.evictAll()
         streamMimeTypeLruCache.evictAll()
         streamBitrateLruCache.evictAll()
+        resolvedCandidateUrlCache.clear()
+        localFilePathCache.evictAll()
+        playbackTrackingCache.clear()
+        watchtimeTrackingCache.clear()
+        throttledVideoIds.clear()
+        quarantinedClients.clear()
+        com.unshoo.pixelmusic.data.service.player.StreamChoice.clear()
     }
 
     /** Register a locally-available file path for a YouTube video ID so playback is instant. */
@@ -868,6 +875,10 @@ object YoutubeHelper {
         }
 
         // ── UNIFIED ADDONS & LOSSLESS SOURCES GATE ──
+        val isAutoQuality = plan.quality == StreamingAudioQuality.AUTO
+        val fastPlaybackForAuto = isAutoQuality || plan.preferLowFirst
+
+        // Unified addons & lossless sources gate
         val unifiedSongOverride = runCatching {
             LosslessStreamResolver.getUnifiedSongSourceOverride(context, videoId)
         }.getOrNull()
@@ -880,7 +891,8 @@ object YoutubeHelper {
             ytIdx >= 0 && saavnIdx >= 0 && ytIdx < saavnIdx
         }
 
-        if (allowLossless && (!LosslessStreamResolver.isFailedForTrack(videoId) || unifiedSongOverride != null)) {
+        // When quality is AUTO, avoid slow external scrapers so YouTube playback starts instantly
+        if (allowLossless && !fastPlaybackForAuto && (!LosslessStreamResolver.isFailedForTrack(videoId) || unifiedSongOverride != null)) {
             resolveLosslessStreamUrl(
                 context = context,
                 song = song,
@@ -891,10 +903,10 @@ object YoutubeHelper {
             )?.let { return it }
         }
 
-        // ── JIOSAAVN HIGH-FIDELITY STREAMING GATE (3s timeout → YouTube fallback) ──
+        // JioSaavn gate: only try if explicitly forced or not in AUTO mode
         val forceYoutubeOnly = unifiedSongOverride == "builtin:YOUTUBE" || (unifiedSongOverride == null && youtubeBeforeSaavn)
         val forceSaavn = unifiedSongOverride == "builtin:JIOSAAVN"
-        if (!forceYoutubeOnly && (forceSaavn || (isSaavnEnabled && plan.quality != StreamingAudioQuality.LOW))) {
+        if (!forceYoutubeOnly && !fastPlaybackForAuto && (forceSaavn || (isSaavnEnabled && plan.quality != StreamingAudioQuality.LOW))) {
             try {
                 var effectiveTitle = song.title.ifBlank { savedSong?.title.orEmpty() }
                 var effectiveArtist = song.artist.ifBlank { savedSong?.artist.orEmpty() }
@@ -1550,6 +1562,12 @@ object YoutubeHelper {
             streamMimeTypeLruCache.remove(it)
             streamBitrateLruCache.remove(it)
         }
+        val candidatePrefix = "$youtubeId|"
+        resolvedCandidateUrlCache.entries.removeIf { it.key.startsWith(candidatePrefix) }
+        localFilePathCache.remove(youtubeId)
+        playbackTrackingCache.remove(youtubeId)
+        watchtimeTrackingCache.remove(youtubeId)
+        com.unshoo.pixelmusic.data.service.player.StreamChoice.forget(youtubeId)
     }
 
 

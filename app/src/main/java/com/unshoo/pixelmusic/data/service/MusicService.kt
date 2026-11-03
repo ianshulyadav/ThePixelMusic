@@ -514,11 +514,18 @@ class MusicService : MediaLibraryService() {
         listeningStatsTracker.initialize(appScope)
         scrobbleManager = com.unshoo.pixelmusic.data.lastfm.ScrobbleManager(scope = serviceScope)
 
+        // Clear stale in-memory stream caches on service startup/update to avoid long buffering on old/expired URLs
+        try {
+            com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.clearStreamCache()
+            com.unshoo.pixelmusic.data.service.player.StreamChoice.clear()
+        } catch (_: Exception) {}
+
         // Ensure engine is ready (re-initialize if service was restarted)
         // ExoPlayer must be created on the thread that owns its Looper,
         // which is the main thread for a foreground service, so this has
         // to stay here.
         engine.initialize()
+        engine.resolvedUriCache.evictAll()
         engine.setOnPlayerAboutToBeReleasedListener { oldPlayer ->
             oldPlayer.removeListener(playerListener)
         }
@@ -1958,16 +1965,16 @@ class MusicService : MediaLibraryService() {
                 }
                 if (youtubeVideoId != null) {
                     com.unshoo.pixelmusic.data.service.player.StreamChoice.forget(youtubeVideoId)
+                    // Always purge failing stream cache immediately so retry resolves a fresh working stream
+                    com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.invalidateStreamCache(youtubeVideoId)
                     if (isLosslessStream) {
                         // Exclude ONLY the failing addon/source first so retry steps down the unified chain before falling back to YouTube
                         com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver.markCurrentSourceFailedForTrack(
                             youtubeVideoId,
                             "Playback error ${error.errorCodeName}",
                         )
-                        com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.invalidateStreamCache(youtubeVideoId)
                     }
                     if (effectiveAttempt >= 1) {
-                        com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.invalidateStreamCache(youtubeVideoId)
                         serviceScope.launch {
                             try {
                                 com.unshoo.pixelmusic.utils.potoken.BotGuardTokenGenerator.invalidatePlayerToken(youtubeVideoId)
