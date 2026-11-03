@@ -306,6 +306,8 @@ object AppleMusicAudioProvider {
         val matchedArtist: String?,
         val matchedAlbum: String?,
         val matchedDurationMs: Long?,
+        val mediaUserToken: String,
+        val developerToken: String,
     )
 
     /**
@@ -477,13 +479,10 @@ object AppleMusicAudioProvider {
                     val kbps = Regex("(\\d+)$").find(flavor)?.groupValues?.last()?.toIntOrNull() ?: 0
                     Asset(flavor, url, kbps)
                 }.sortedByDescending { it.kbps }
-            val asset = when (quality) {
-                AppleMusicQuality.AAC ->
-                    candidates.firstOrNull { it.kbps <= 320 } ?: candidates.minByOrNull { it.kbps }
-                AppleMusicQuality.LOSSLESS ->
-                    candidates.firstOrNull { it.kbps in 321..1411 } ?: candidates.lastOrNull()
-                AppleMusicQuality.HI_RES_LOSSLESS -> candidates.firstOrNull()
-            } ?: return null
+            // Web playback offers AAC, not ALAC. A lossless preference must not
+            // select ctrp64 or reinterpret a flavor's numeric prefix as bitrate.
+            val asset = candidates.firstOrNull { it.flavor.endsWith("ctrp256") }
+                ?: candidates.firstOrNull() ?: return null
 
             // The asset URL serves the HLS playlist; segments are byteranges of one mp4.
             val playlistUrl = asset.url
@@ -502,6 +501,8 @@ object AppleMusicAudioProvider {
                 matchedAlbum = metadata?.album(),
                 matchedDurationMs = metadata?.durationMs(),
                 drmUri = parsed.drmUri,
+                mediaUserToken = mediaToken,
+                developerToken = devToken,
             )
         }
     }
@@ -574,8 +575,10 @@ object AppleMusicAudioProvider {
             }
             // Prefer the EXT-X-MAP name; segments reference the same file.
             val name = mediaName ?: dataLines.firstOrNull() ?: return null
-            val mediaUrl = playlistUrl.substringBeforeLast('/').trimEnd('/') + "/" + name
-            return ParsedPlaylist(mediaUrl, keyIdHex, drmUri ?: "", null)
+            val mediaUrl = playlistUrl.toHttpUrl().resolve(name)?.toString() ?: return null
+            val widevineUri = drmUri?.takeIf { it.isNotBlank() } ?: return null
+            if (keyIdHex == null) return null
+            return ParsedPlaylist(mediaUrl, keyIdHex, widevineUri, null)
         }
     }
 }

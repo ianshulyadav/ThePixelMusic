@@ -1319,14 +1319,7 @@ object LosslessStreamResolver {
                 DirectStream(
                     uri = "apple-pending:${candidate.songId}",
                     mimeType = "audio/mp4",
-                    codecs =
-                        if (candidate.flavor.contains("ctrp", ignoreCase = true) &&
-                            candidate.flavor.filter(Char::isDigit).toIntOrNull()?.let { it > 320 } == true
-                        ) {
-                            "alac"
-                        } else {
-                            "mp4a.40.2"
-                        },
+                    codecs = if (candidate.flavor.endsWith("ctrp64")) "mp4a.40.5" else "mp4a.40.2",
                     contentLength = candidate.contentLength,
                     label = "Apple Music ${candidate.flavor}",
                     source = AudioSourceType.APPLE,
@@ -1359,7 +1352,15 @@ object LosslessStreamResolver {
                 appleStreamFile(context, request.mediaId, appleQuality) {
                     AppleMusicVirtualStream.build(httpClient, candidate.playlistUrl, candidate.keyIdHex).bytes
                 }
-            AppleMusicDrm.register(request.mediaId, AppleTrackDrmInfo(adamId = candidate.songId, drmUri = candidate.drmUri))
+            AppleMusicDrm.register(
+                request.mediaId,
+                AppleTrackDrmInfo(
+                    adamId = candidate.songId,
+                    drmUri = candidate.drmUri,
+                    mediaUserToken = candidate.mediaUserToken,
+                    developerToken = candidate.developerToken,
+                ),
+            )
             Timber.tag(TAG).i("Apple Music resolved [%s] for \"%s\" (%d KB)", placeholder.label, request.title, file.length() / 1024)
             placeholder.copy(uri = Uri.fromFile(file).toString(), contentLength = file.length())
         } catch (err: Throwable) {
@@ -1384,7 +1385,7 @@ object LosslessStreamResolver {
             f.delete()
         }
         val safeId = mediaId.replace(Regex("[^A-Za-z0-9_-]"), "_")
-        val out = File(dir, "${safeId}_${quality.name.lowercase(Locale.US)}_v2.m4a")
+        val out = File(dir, "${safeId}_${quality.name.lowercase(Locale.US)}_v3.m4a")
         if (out.exists() && out.length() > 0) return out
         out.writeBytes(build())
         return out

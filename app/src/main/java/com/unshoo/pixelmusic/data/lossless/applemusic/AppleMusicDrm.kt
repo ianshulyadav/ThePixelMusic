@@ -42,6 +42,8 @@ import java.util.concurrent.TimeUnit
 class AppleTrackDrmInfo(
     val adamId: String,
     val drmUri: String,
+    val mediaUserToken: String? = null,
+    val developerToken: String? = null,
 )
 
 @OptIn(UnstableApi::class)
@@ -120,8 +122,8 @@ object AppleMusicDrm {
     }
 
     fun buildAppleDrmSessionManager(track: AppleTrackDrmInfo): DrmSessionManager? {
-        val mediaToken = AppleMusicAudioProvider.mediaUserToken() ?: return null
-        val devToken = AppleMusicAudioProvider.devToken()
+        val mediaToken = track.mediaUserToken ?: AppleMusicAudioProvider.mediaUserToken() ?: return null
+        val devToken = track.developerToken ?: AppleMusicAudioProvider.devToken()
         return buildWidevineManager(AppleLicenseCallback({ track }, devToken, mediaToken))
     }
 
@@ -187,8 +189,8 @@ object AppleMusicDrm {
             request: ExoMediaDrm.KeyRequest,
         ): MediaDrmCallback.Response {
             val track = trackProvider() ?: fail("Apple license requested but no Apple Music track info is registered for this item")
-            val mediaToken = mediaToken ?: AppleMusicAudioProvider.mediaUserToken() ?: fail("Apple license requested without a Media-User-Token")
-            val devToken = devToken ?: AppleMusicAudioProvider.devToken()
+            val mediaToken = track.mediaUserToken ?: mediaToken ?: AppleMusicAudioProvider.mediaUserToken() ?: fail("Apple license requested without a Media-User-Token")
+            val devToken = track.developerToken ?: devToken ?: AppleMusicAudioProvider.devToken()
             val body =
                 JSONObject()
                     .put("challenge", android.util.Base64.encodeToString(request.data, android.util.Base64.NO_WRAP))

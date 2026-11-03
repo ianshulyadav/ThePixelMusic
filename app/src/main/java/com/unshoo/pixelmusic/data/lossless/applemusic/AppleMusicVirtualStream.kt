@@ -8,6 +8,7 @@
 package com.unshoo.pixelmusic.data.lossless.applemusic
 
 import android.util.Log
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
@@ -134,7 +135,8 @@ object AppleMusicVirtualStream {
                     Regex("URI=\"([^\"]+)\"").find(line)?.let { mediaName = it.groupValues[1] }
                 // The EXT-X-KEY URI is a data: URI carrying the key id. The RAW URI string is
                 // what Apple's license endpoint expects as the `uri` field of the exchange.
-                line.startsWith("#EXT-X-KEY") && drmUri == null ->
+                line.startsWith("#EXT-X-KEY") && drmUri == null &&
+                    line.contains("urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed", ignoreCase = true) ->
                     Regex("URI=\"([^\"]+)\"").find(line)?.let { drmUri = it.groupValues[1] }
                 line.startsWith("#EXTINF") ->
                     Regex("#EXTINF:([0-9.]+)").find(line)?.let {
@@ -147,7 +149,8 @@ object AppleMusicVirtualStream {
                 .firstOrNull { it.isNotEmpty() && !it.startsWith("#") }
         }
         val name = mediaName ?: throw IOException("playlist has no segments")
-        val mediaUrl = playlistUrl.substringBeforeLast('/').trimEnd('/') + "/" + name
+        val mediaUrl = playlistUrl.toHttpUrl().resolve(name)?.toString()
+            ?: throw IOException("invalid playlist media URL")
         return ParsedFile(mediaUrl, durations, drmUri ?: throw IOException("playlist has no EXT-X-KEY"))
     }
 
