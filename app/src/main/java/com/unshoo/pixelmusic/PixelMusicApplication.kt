@@ -211,6 +211,26 @@ class PixelMusicApplication : Application(), ImageLoaderFactory, Configuration.P
                 delay(1500L)
             }
 
+            // App update / version upgrade detection: purge stale cached streams and temporary ExoCache
+            try {
+                val versionPrefs = getSharedPreferences("app_version_tracker", android.content.Context.MODE_PRIVATE)
+                val lastVersionCode = versionPrefs.getLong("last_installed_version_code", -1L)
+                val currentVersionCode = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                    packageManager.getPackageInfo(packageName, 0).longVersionCode
+                } else {
+                    @Suppress("DEPRECATION")
+                    packageManager.getPackageInfo(packageName, 0).versionCode.toLong()
+                }
+                if (lastVersionCode != -1L && lastVersionCode != currentVersionCode) {
+                    timber.log.Timber.i("App update detected ($lastVersionCode to $currentVersionCode). Evicting stale stream caches.")
+                    com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.clearStreamCache()
+                    streamCacheManager.get().clearAllStreamCache()
+                }
+                versionPrefs.edit().putLong("last_installed_version_code", currentVersionCode).apply()
+            } catch (e: Exception) {
+                timber.log.Timber.w(e, "Version change check failed")
+            }
+
             // Stage 1 (Immediate): Pre-warm ExoCache lazy SimpleCache index and DNS resolution off the main thread
             try {
                 exoCache.get().cache

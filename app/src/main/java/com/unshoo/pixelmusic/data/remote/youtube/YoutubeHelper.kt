@@ -152,7 +152,7 @@ object YoutubeHelper {
     // Key: videoId|itag|clientName|authFp → (url, expiresAtMs). Lets a second resolution of the
     // same song skip NewPipe's signature/n-throttle deobfuscation entirely (ArchiveTune parity).
     private val resolvedCandidateUrlCache = ConcurrentHashMap<String, Pair<String, Long>>()
-    private const val CANDIDATE_URL_EXPIRY_SAFETY_MS = 60_000L
+    private const val CANDIDATE_URL_EXPIRY_SAFETY_MS = 10 * 60 * 1000L // 15 mins (BitChord parity)
     private const val DEFAULT_STREAM_EXPIRE_SECONDS = 300
     @Volatile private var lastSuccessfulClientKey: String? = null
     @Volatile private var lastSuccessfulClientKeyLoaded: Boolean = false
@@ -2277,8 +2277,8 @@ object YoutubeHelper {
             val expireTimeSecs = expireParam.toLongOrNull()
             if (expireTimeSecs != null) {
                 val currentTimeSecs = System.currentTimeMillis() / 1000
-                // Require at least 90s of remaining life so ExoPlayer can finish first buffer.
-                return@withContext expireTimeSecs > currentTimeSecs + 90
+                // Require at least 900s (15m) of remaining life matching DualPlayerEngine & StreamChoice
+                return@withContext expireTimeSecs > currentTimeSecs + 600
             }
         }
         // No expire param (rare): treat as valid and let ExoPlayer / error recovery handle it.
