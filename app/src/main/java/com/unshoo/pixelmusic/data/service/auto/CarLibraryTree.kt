@@ -64,6 +64,7 @@ class CarLibraryTree @Inject constructor(
         const val FAVORITES_ID = "favorites"
         const val PLAYLISTS_ID = "playlists"
         const val MORE_ID = "more"
+        const val HISTORY_ID = "history"
         const val DOWNLOADS_ID = "downloads"
         const val ALBUMS_ID = "albums"
         const val ARTISTS_ID = "artists"
@@ -81,6 +82,7 @@ class CarLibraryTree @Inject constructor(
         const val KEY_CONTEXT_PARENT = "com.unshoo.pixelmusic.auto.CONTEXT_PARENT"
 
         const val CONTEXT_RECENTS = "recents"
+        const val CONTEXT_HISTORY = "history"
         const val CONTEXT_FAVORITES = "favorites"
         const val CONTEXT_DOWNLOADS = "downloads"
         const val CONTEXT_ALL_SONGS = "all_songs"
@@ -191,58 +193,13 @@ class CarLibraryTree @Inject constructor(
 
     fun moreItems(): List<MediaItem> = listOf(
         folder(
-            mediaId = DOWNLOADS_ID,
-            title = "Downloaded songs",
-            mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_MIXED,
-            artworkUri = autoResourceUri(com.unshoo.pixelmusic.R.drawable.ic_auto_downloads),
-            isCategory = true
-        ),
-        folder(
-            mediaId = ALBUMS_ID,
-            title = "Albums",
-            mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_ALBUMS,
-            artworkUri = autoResourceUri(com.unshoo.pixelmusic.R.drawable.ic_auto_albums),
-            isCategory = true
-        ),
-        folder(
-            mediaId = ARTISTS_ID,
-            title = "Artists",
-            mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_ARTISTS,
-            artworkUri = autoResourceUri(com.unshoo.pixelmusic.R.drawable.ic_auto_artists),
-            isCategory = true
-        ),
-        folder(
-            mediaId = SONGS_ID,
-            title = "All Songs",
-            mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_MIXED,
-            artworkUri = autoResourceUri(com.unshoo.pixelmusic.R.drawable.ic_auto_songs),
-            isCategory = true
-        ),
-    )
-
-    fun rootItems(): List<MediaItem> = listOf(
-        folder(
-            mediaId = RECENTS_ID,
-            title = "For you",
+            mediaId = HISTORY_ID,
+            title = "Recently played",
             mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_MIXED,
             artworkUri = autoResourceUri(com.unshoo.pixelmusic.R.drawable.ic_auto_recents),
             isCategory = true
         ),
         folder(
-            mediaId = FAVORITES_ID,
-            title = "Liked",
-            mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_MIXED,
-            artworkUri = autoResourceUri(com.unshoo.pixelmusic.R.drawable.ic_auto_favorites),
-            isCategory = true
-        ),
-        folder(
-            mediaId = PLAYLISTS_ID,
-            title = "Playlists",
-            mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_PLAYLISTS,
-            artworkUri = autoResourceUri(com.unshoo.pixelmusic.R.drawable.ic_auto_playlists),
-            isCategory = true
-        ),
-        folder(
             mediaId = DOWNLOADS_ID,
             title = "Downloaded songs",
             mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_MIXED,
@@ -272,25 +229,97 @@ class CarLibraryTree @Inject constructor(
         ),
     )
 
+    fun rootItems(selectedId: String? = null): List<MediaItem> {
+        val forYouIcon = when (selectedId) {
+            FAVORITES_ID, PLAYLISTS_ID, MORE_ID, HISTORY_ID, DOWNLOADS_ID, ALBUMS_ID, ARTISTS_ID, SONGS_ID ->
+                com.unshoo.pixelmusic.R.drawable.ic_auto_for_you_outline
+            else -> com.unshoo.pixelmusic.R.drawable.ic_auto_for_you_filled
+        }
+        val likedIcon = when (selectedId) {
+            FAVORITES_ID -> com.unshoo.pixelmusic.R.drawable.ic_auto_favorites_filled
+            else -> com.unshoo.pixelmusic.R.drawable.ic_auto_favorites_outline
+        }
+        return listOf(
+            folder(
+                mediaId = RECENTS_ID,
+                title = "For you",
+                mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_MIXED,
+                artworkUri = autoResourceUri(forYouIcon),
+                isCategory = true
+            ),
+            folder(
+                mediaId = FAVORITES_ID,
+                title = "Liked",
+                mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_MIXED,
+                artworkUri = autoResourceUri(likedIcon),
+                isCategory = true
+            ),
+            folder(
+                mediaId = PLAYLISTS_ID,
+                title = "Playlists",
+                mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_PLAYLISTS,
+                artworkUri = autoResourceUri(com.unshoo.pixelmusic.R.drawable.ic_auto_playlists),
+                isCategory = true
+            ),
+            folder(
+                mediaId = HISTORY_ID,
+                title = "Recently played",
+                mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_MIXED,
+                artworkUri = autoResourceUri(com.unshoo.pixelmusic.R.drawable.ic_auto_recents),
+                isCategory = true
+            ),
+            folder(
+                mediaId = DOWNLOADS_ID,
+                title = "Downloaded songs",
+                mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_MIXED,
+                artworkUri = autoResourceUri(com.unshoo.pixelmusic.R.drawable.ic_auto_downloads),
+                isCategory = true
+            ),
+            folder(
+                mediaId = ALBUMS_ID,
+                title = "Albums",
+                mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_ALBUMS,
+                artworkUri = autoResourceUri(com.unshoo.pixelmusic.R.drawable.ic_auto_albums),
+                isCategory = true
+            ),
+            folder(
+                mediaId = ARTISTS_ID,
+                title = "Artists",
+                mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_ARTISTS,
+                artworkUri = autoResourceUri(com.unshoo.pixelmusic.R.drawable.ic_auto_artists),
+                isCategory = true
+            ),
+            folder(
+                mediaId = SONGS_ID,
+                title = "All Songs",
+                mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_MIXED,
+                artworkUri = autoResourceUri(com.unshoo.pixelmusic.R.drawable.ic_auto_songs),
+                isCategory = true
+            ),
+        )
+    }
+
     fun rootItem(isRecentRoot: Boolean = false): MediaItem = folder(
         mediaId = if (isRecentRoot) RECENTS_ID else ROOT_ID,
         title = if (isRecentRoot) "For you" else "PixelMusic",
         mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_MIXED,
-        artworkUri = if (isRecentRoot) autoResourceUri(com.unshoo.pixelmusic.R.drawable.ic_auto_recents) else null,
+        artworkUri = if (isRecentRoot) autoResourceUri(com.unshoo.pixelmusic.R.drawable.ic_auto_for_you_filled) else null,
         isCategory = isRecentRoot
     )
 
-    suspend fun children(parentId: String, page: Int, pageSize: Int): List<MediaItem> {
+    suspend fun children(parentId: String, page: Int, pageSize: Int, selectedId: String? = null): List<MediaItem> {
         val offset = (page.coerceAtLeast(0).toLong() * pageSize.coerceAtLeast(0).toLong())
             .coerceAtMost(Int.MAX_VALUE.toLong())
             .toInt()
         val limit = if (pageSize > 0) pageSize else Int.MAX_VALUE
 
         return when {
-            parentId == ROOT_ID -> rootItems()
+            parentId == ROOT_ID -> rootItems(selectedId)
             parentId == MORE_ID -> moreItems()
             parentId == RECENTS_ID -> forYouSongs().drop(offset).take(limit)
                 .map { song(it, CONTEXT_RECENTS, null, RECENTS_ID) }
+            parentId == HISTORY_ID -> recentSongs().drop(offset).take(limit)
+                .map { song(it, CONTEXT_HISTORY, null, HISTORY_ID) }
             parentId == FAVORITES_ID -> favoriteSongs().drop(offset).take(limit)
                 .map { song(it, CONTEXT_FAVORITES, null, FAVORITES_ID) }
             parentId == DOWNLOADS_ID -> downloadedSongs().drop(offset).take(limit)
@@ -316,8 +345,8 @@ class CarLibraryTree @Inject constructor(
 
     suspend fun item(mediaId: String): MediaItem? = when {
         mediaId == ROOT_ID || mediaId == RECENTS_ID -> rootItem(isRecentRoot = mediaId == RECENTS_ID)
-        mediaId == FAVORITES_ID || mediaId == PLAYLISTS_ID || mediaId == MORE_ID || mediaId == DOWNLOADS_ID ||
-            mediaId == ALBUMS_ID || mediaId == ARTISTS_ID || mediaId == SONGS_ID ->
+        mediaId == FAVORITES_ID || mediaId == PLAYLISTS_ID || mediaId == MORE_ID || mediaId == HISTORY_ID ||
+            mediaId == DOWNLOADS_ID || mediaId == ALBUMS_ID || mediaId == ARTISTS_ID || mediaId == SONGS_ID ->
             rootItems().firstOrNull { it.mediaId == mediaId } ?: moreItems().firstOrNull { it.mediaId == mediaId }
         mediaId.startsWith(ALBUM_PREFIX) -> {
             val id = mediaId.removePrefix(ALBUM_PREFIX).toLongOrNull() ?: return null
@@ -485,6 +514,7 @@ class CarLibraryTree @Inject constructor(
 
     suspend fun songsOf(contextType: String, contextId: String?): List<Song> = when (contextType) {
         CONTEXT_RECENTS -> forYouSongs()
+        CONTEXT_HISTORY -> recentSongs()
         CONTEXT_FAVORITES -> favoriteSongs()
         CONTEXT_DOWNLOADS -> downloadedSongs()
         CONTEXT_ALL_SONGS -> musicRepository.getAllSongsOnce().filter { isSongAllowed(it) }.onEach { rememberSong(it) }
@@ -517,6 +547,7 @@ class CarLibraryTree @Inject constructor(
 
     fun contextOf(parentId: String): Pair<String, String?>? = when {
         parentId == RECENTS_ID -> CONTEXT_RECENTS to null
+        parentId == HISTORY_ID -> CONTEXT_HISTORY to null
         parentId == FAVORITES_ID -> CONTEXT_FAVORITES to null
         parentId == DOWNLOADS_ID -> CONTEXT_DOWNLOADS to null
         parentId == SONGS_ID -> CONTEXT_ALL_SONGS to null
@@ -619,6 +650,11 @@ class CarLibraryTree @Inject constructor(
     private val forYouMutex = Mutex()
     private val FOR_YOU_CACHE_TTL_MS = 10 * 60 * 1000L // 10 minutes cache
 
+    fun invalidateForYouCache() {
+        cachedForYouSongs = emptyList()
+        lastForYouFetchTimeMs = 0L
+    }
+
     suspend fun forYouSongs(forceRefresh: Boolean = false): List<Song> {
         if (!forceRefresh && cachedForYouSongs.isNotEmpty() &&
             System.currentTimeMillis() - lastForYouFetchTimeMs < FOR_YOU_CACHE_TTL_MS
@@ -645,7 +681,7 @@ class CarLibraryTree @Inject constructor(
     }
 
     private suspend fun buildForYouMix(): List<Song> {
-        // 1. Most played songs according to the week
+        // 1. Most played songs of the user according to the week
         val weeklySummary = runCatching {
             playbackStatsRepository.loadSummary(
                 range = StatsTimeRange.WEEK,
@@ -655,7 +691,7 @@ class CarLibraryTree @Inject constructor(
 
         val weeklyTopIds = weeklySummary?.songs?.map { it.songId }.orEmpty()
         val allTimeTopIds = runCatching {
-            engagementDao.getTopPlayedSongs(20).map { it.songId }
+            engagementDao.getTopPlayedSongs(15).map { it.songId }
         }.getOrDefault(emptyList())
 
         val combinedTopIds = (weeklyTopIds + allTimeTopIds).distinct()
@@ -664,125 +700,168 @@ class CarLibraryTree @Inject constructor(
         // 2. Random liked songs
         val likedSongs = favoriteSongs().shuffled()
 
-        // 3. Random songs (from library / downloads)
-        val libraryPool = downloadedSongs().ifEmpty {
-            musicRepository.getAllSongsOnce().filter { isSongAllowed(it) }
-        }
-        val randomSongs = libraryPool.shuffled()
+        // 3. Downloaded songs only (mixed in, NOT local device library!)
+        val downloads = downloadedSongs().shuffled()
 
-        // 4. Similar fresh songs similar to most played songs
-        val seedSong = topSongs.firstOrNull() ?: recentSongs().firstOrNull() ?: likedSongs.firstOrNull()
-        val freshSimilarSongs = if (seedSong != null) {
-            fetchSimilarFreshSongs(seedSong)
-        } else {
-            emptyList()
+        // 4. Recent history
+        val recents = recentSongs()
+
+        // 5. Gather seeds to fetch fresh recommendations from YouTube
+        val seeds = mutableListOf<Song>()
+        topSongs.firstOrNull()?.let { seeds.add(it) }
+        likedSongs.firstOrNull()?.let { seeds.add(it) }
+        topSongs.getOrNull(1)?.let { seeds.add(it) }
+        if (seeds.size < 3) {
+            recents.firstOrNull()?.let { seeds.add(it) }
+        }
+        if (seeds.size < 3 && likedSongs.size > 1) {
+            seeds.add(likedSongs[1])
         }
 
-        // Interleave & blend smartly:
-        // - User's most played songs of the week
-        // - Fresh similar songs to the most played
-        // - Random liked songs
-        // - Random library songs
+        // Fetch fresh songs from YouTube
+        val freshYouTubeSongs = fetchFreshYouTubeMix(seeds)
+
         val result = mutableListOf<Song>()
-        val seenKeys = mutableSetOf<String>()
+        val seenIds = mutableSetOf<String>()
+        val seenSignatures = mutableSetOf<String>()
+
+        fun normalizeText(s: String): String = s.lowercase().replace(Regex("[^a-z0-9]"), "")
 
         fun tryAdd(song: Song?): Boolean {
             if (song == null) return false
-            val key = YouTubeIdUtils.extractVideoId(song.id).takeIf { it.isNotBlank() }
-                ?: song.id.removePrefix("youtube_")
-            if (seenKeys.add(key.lowercase())) {
-                result.add(song)
-                return true
-            }
-            return false
+            val cleanId = (song.youtubeId?.takeIf { it.isNotBlank() }
+                ?: YouTubeIdUtils.extractVideoId(song.contentUriString).takeIf { it.isNotBlank() }
+                ?: YouTubeIdUtils.extractVideoId(song.id).takeIf { it.isNotBlank() }
+                ?: song.id.removePrefix("youtube_")).lowercase()
+
+            val sig = "${normalizeText(song.title)}|${normalizeText(song.artist)}"
+
+            if (seenIds.contains(cleanId)) return false
+            if (sig.isNotBlank() && seenSignatures.contains(sig)) return false
+
+            seenIds.add(cleanId)
+            if (sig.isNotBlank()) seenSignatures.add(sig)
+            result.add(song)
+            return true
         }
 
         var topIndex = 0
-        var similarIndex = 0
+        var freshIndex = 0
         var likedIndex = 0
-        var randomIndex = 0
+        var downloadIndex = 0
 
-        // Ensure top slot is #1 most played of the week (if available)
+        // Slot 0: #1 top played song of the week (if available)
         if (topSongs.isNotEmpty()) {
             tryAdd(topSongs.getOrNull(topIndex++))
         }
 
-        while (result.size < 25 &&
-            (topIndex < topSongs.size || similarIndex < freshSimilarSongs.size ||
-             likedIndex < likedSongs.size || randomIndex < randomSongs.size)
+        // Interleave so that most songs (~75-80%) are fresh from YouTube
+        while (result.size < 28 &&
+            (freshIndex < freshYouTubeSongs.size || topIndex < topSongs.size ||
+             likedIndex < likedSongs.size || downloadIndex < downloads.size)
         ) {
-            var addedAnyInRound = false
+            var addedAny = false
 
-            // Fresh similar song
-            if (similarIndex < freshSimilarSongs.size) {
-                if (tryAdd(freshSimilarSongs.getOrNull(similarIndex++))) addedAnyInRound = true
+            // 2 fresh YouTube songs
+            repeat(2) {
+                if (freshIndex < freshYouTubeSongs.size) {
+                    if (tryAdd(freshYouTubeSongs.getOrNull(freshIndex++))) addedAny = true
+                }
             }
 
-            // Liked song
+            // 1 liked song
             if (likedIndex < likedSongs.size) {
-                if (tryAdd(likedSongs.getOrNull(likedIndex++))) addedAnyInRound = true
+                if (tryAdd(likedSongs.getOrNull(likedIndex++))) addedAny = true
             }
 
-            // Most played song
+            // 2 fresh YouTube songs
+            repeat(2) {
+                if (freshIndex < freshYouTubeSongs.size) {
+                    if (tryAdd(freshYouTubeSongs.getOrNull(freshIndex++))) addedAny = true
+                }
+            }
+
+            // 1 top played of week
             if (topIndex < topSongs.size) {
-                if (tryAdd(topSongs.getOrNull(topIndex++))) addedAnyInRound = true
+                if (tryAdd(topSongs.getOrNull(topIndex++))) addedAny = true
             }
 
-            // Random library song
-            if (randomIndex < randomSongs.size) {
-                if (tryAdd(randomSongs.getOrNull(randomIndex++))) addedAnyInRound = true
+            // 1 downloaded song
+            if (downloadIndex < downloads.size) {
+                if (tryAdd(downloads.getOrNull(downloadIndex++))) addedAny = true
             }
 
-            if (!addedAnyInRound) break
+            if (!addedAny) break
         }
 
-        // Fallback if user has no listening history yet
+        // Fill remaining slots with fresh YouTube songs
+        while (result.size < 28 && freshIndex < freshYouTubeSongs.size) {
+            tryAdd(freshYouTubeSongs.getOrNull(freshIndex++))
+        }
+
+        // Offline / fallback if needed (strictly downloads + recents, NO local library!)
         if (result.isEmpty()) {
-            val fallback = recentSongs().ifEmpty { libraryPool }
+            val fallback = (downloads + recents).distinctBy { it.id }
             fallback.take(20).forEach { tryAdd(it) }
         }
 
         return result
     }
 
-    private suspend fun fetchSimilarFreshSongs(seedSong: Song): List<Song> {
-        val videoId = seedSong.youtubeId?.takeIf { it.isNotBlank() }
-            ?: YouTubeIdUtils.extractVideoId(seedSong.contentUriString).takeIf { it.isNotBlank() }
-            ?: YouTubeIdUtils.extractVideoId(seedSong.id).takeIf { it.isNotBlank() }
+    private suspend fun fetchFreshYouTubeMix(seeds: List<Song>): List<Song> {
+        if (!hasInternet()) return emptyList()
 
-        if (videoId != null && videoId.length == 11 && hasInternet()) {
-            val onlineFresh = withTimeoutOrNull(2500L) {
+        val pureYt = runCatching { userPreferencesRepository.pureYtMusicOnlyFlow.first() }.getOrDefault(false)
+        val freshList = mutableListOf<Song>()
+        val seenVideoIds = mutableSetOf<String>()
+
+        for (seed in seeds) {
+            val videoId = seed.youtubeId?.takeIf { it.isNotBlank() }
+                ?: YouTubeIdUtils.extractVideoId(seed.contentUriString).takeIf { it.isNotBlank() }
+                ?: YouTubeIdUtils.extractVideoId(seed.id).takeIf { it.isNotBlank() }
+
+            if (videoId != null && videoId.length == 11 && seenVideoIds.add(videoId)) {
+                val songsFromSeed = withTimeoutOrNull(4000L) {
+                    try {
+                        val radioResult = YouTube.next(
+                            WatchEndpoint(playlistId = "RDAMVM$videoId", videoId = videoId)
+                        ).getOrNull()
+                        radioResult?.items
+                            ?.filterIsInstance<SongItem>()
+                            ?.filterVideo(pureYt)
+                            ?.map { it.toNativeSong() }
+                            ?.filter { isSongAllowed(it) }
+                            .orEmpty()
+                    } catch (e: Exception) {
+                        Timber.tag("CarLibraryTree").w(e, "Failed to fetch YouTube radio mix for $videoId")
+                        emptyList()
+                    }
+                }.orEmpty()
+
+                freshList.addAll(songsFromSeed)
+                if (freshList.size >= 40) break
+            }
+        }
+
+        // If no seeds or seeds returned empty, fetch top / trending music from YouTube
+        if (freshList.isEmpty()) {
+            withTimeoutOrNull(4000L) {
                 try {
-                    val pureYt = userPreferencesRepository.pureYtMusicOnlyFlow.first()
-                    val radioResult = YouTube.next(
-                        WatchEndpoint(playlistId = "RDAMVM$videoId", videoId = videoId)
-                    ).getOrNull()
-                    radioResult?.items
+                    val searchResult = YouTube.search("Top Songs", YouTube.SearchFilter.FILTER_SONG).getOrNull()
+                    val items = searchResult?.items
                         ?.filterIsInstance<SongItem>()
                         ?.filterVideo(pureYt)
                         ?.map { it.toNativeSong() }
                         ?.filter { isSongAllowed(it) }
                         .orEmpty()
+                    freshList.addAll(items)
                 } catch (e: Exception) {
-                    Timber.tag("CarLibraryTree").w(e, "Failed to fetch fresh similar songs for $videoId")
-                    emptyList()
+                    Timber.tag("CarLibraryTree").w(e, "Failed to fetch fallback YouTube songs")
                 }
-            }.orEmpty()
-
-            if (onlineFresh.isNotEmpty()) {
-                return onlineFresh.take(6)
             }
         }
 
-        // Offline / fallback: local related songs from Room DB
-        return runCatching {
-            val numericId = seedSong.id.toLongOrNull()
-            if (numericId != null) {
-                musicRepository.getRelatedSongs(numericId, 10).filter { isSongAllowed(it) }
-            } else {
-                emptyList()
-            }
-        }.getOrDefault(emptyList()).take(6)
+        return freshList
     }
 
     private fun hasInternet(): Boolean {

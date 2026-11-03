@@ -903,6 +903,7 @@ class MusicService : MediaLibraryService() {
                 browser: MediaSession.ControllerInfo,
                 params: MediaLibraryService.LibraryParams?
             ): ListenableFuture<LibraryResult<MediaItem>> {
+                carLibraryTree.invalidateForYouCache()
                 val wantsRecents = params?.isRecent == true ||
                     params?.isSuggested == true ||
                     params?.extras?.getBoolean(EXTRA_RECENT) == true ||
@@ -939,9 +940,20 @@ class MusicService : MediaLibraryService() {
             ): ListenableFuture<LibraryResult<com.google.common.collect.ImmutableList<MediaItem>>> {
                 return serviceScope.future {
                     try {
+                        val prevParent = getLastBrowsedParent(browser)
                         rememberLastBrowsedParent(browser, parentId)
-                        val children = carLibraryTree.children(parentId, page, pageSize)
+                        val selectedId = if (parentId == CarLibraryTree.ROOT_ID) {
+                            prevParent ?: CarLibraryTree.RECENTS_ID
+                        } else {
+                            parentId
+                        }
+                        val children = carLibraryTree.children(parentId, page, pageSize, selectedId)
                         grantArtworkUriPermissions(browser.packageName, children)
+                        if (parentId != CarLibraryTree.ROOT_ID && parentId != prevParent &&
+                            (parentId == CarLibraryTree.RECENTS_ID || parentId == CarLibraryTree.FAVORITES_ID)
+                        ) {
+                            session.notifyChildrenChanged(browser, CarLibraryTree.ROOT_ID, carLibraryTree.rootItems().size, null)
+                        }
                         LibraryResult.ofItemList(children, params)
                     } catch (e: CancellationException) {
                         throw e
