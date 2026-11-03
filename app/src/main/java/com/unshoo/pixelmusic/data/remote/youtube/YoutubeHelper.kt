@@ -660,6 +660,7 @@ object YoutubeHelper {
         val maxBitrateKbps: Int,
         /** When true, pick lowest bitrate first (Data Saver / weak nets). */
         val preferLowFirst: Boolean,
+        val preferFastDirect: Boolean = false,
     )
 
     private suspend fun resolveStreamQualityPlan(context: Context): StreamQualityPlan {
@@ -680,10 +681,20 @@ object YoutubeHelper {
                     quality = StreamingAudioQuality.LOW,
                     maxBitrateKbps = StreamingAudioQuality.LOW.maxBitrateKbps,
                     preferLowFirst = true,
+                    preferFastDirect = true,
                 )
             }
 
-            val targetQuality = if (isMetered && !forceHigh) {
+            if (isMetered && forceHigh) {
+                return StreamQualityPlan(
+                    quality = StreamingAudioQuality.HIGH,
+                    maxBitrateKbps = 0,
+                    preferLowFirst = false,
+                    preferFastDirect = true,
+                )
+            }
+
+            val targetQuality = if (isMetered) {
                 userPreferencesRepository.streamingAudioQualityMobileFlow.first()
             } else {
                 userPreferencesRepository.streamingAudioQualityWifiFlow.first()
@@ -706,17 +717,20 @@ object YoutubeHelper {
                         StreamingAudioQuality.LOW -> StreamQualityPlan(
                             quality = StreamingAudioQuality.LOW,
                             maxBitrateKbps = StreamingAudioQuality.LOW.maxBitrateKbps,
-                            preferLowFirst = true
+                            preferLowFirst = true,
+                            preferFastDirect = true,
                         )
                         StreamingAudioQuality.MEDIUM -> StreamQualityPlan(
                             quality = StreamingAudioQuality.MEDIUM,
                             maxBitrateKbps = 0,
-                            preferLowFirst = false
+                            preferLowFirst = false,
+                            preferFastDirect = true,
                         )
                         else -> StreamQualityPlan(
                             quality = StreamingAudioQuality.HIGH,
                             maxBitrateKbps = 0,
-                            preferLowFirst = false
+                            preferLowFirst = false,
+                            preferFastDirect = isMetered,
                         )
                     }
                 }
@@ -724,16 +738,19 @@ object YoutubeHelper {
                     quality = StreamingAudioQuality.HIGH,
                     maxBitrateKbps = 0, // no ceiling → highest available
                     preferLowFirst = false,
+                    preferFastDirect = false, // default per-source addon timeout
                 )
                 StreamingAudioQuality.MEDIUM -> StreamQualityPlan(
                     quality = StreamingAudioQuality.MEDIUM,
-                    maxBitrateKbps = 0, // YouTube high (or JioSaavn 320k HQ)
+                    maxBitrateKbps = 0, // YouTube standard/high direct stream
                     preferLowFirst = false,
+                    preferFastDirect = true,
                 )
                 StreamingAudioQuality.LOW -> StreamQualityPlan(
                     quality = StreamingAudioQuality.LOW,
                     maxBitrateKbps = StreamingAudioQuality.LOW.maxBitrateKbps,
                     preferLowFirst = true,
+                    preferFastDirect = true,
                 )
             }
         } catch (_: Exception) {
@@ -784,7 +801,8 @@ object YoutubeHelper {
         context: Context,
         song: Song,
         allowLocal: Boolean = false,
-        allowLossless: Boolean = true
+        allowLossless: Boolean = true,
+        isNextInQueue: Boolean = false,
     ): String {
         val videoId = song.youtubeId
 
@@ -891,22 +909,34 @@ object YoutubeHelper {
             ytIdx >= 0 && saavnIdx >= 0 && ytIdx < saavnIdx
         }
 
-        // When quality is AUTO, avoid slow external scrapers so YouTube playback starts instantly
-        if (allowLossless && !fastPlaybackForAuto && (!LosslessStreamResolver.isFailedForTrack(videoId) || unifiedSongOverride != null)) {
+        // Strict Lossless Gating:
+        // - LOW and MEDIUM bypass lossless completely (0ms delay, even if Master Lossless is ON)
+        // - HIGH engages lossless (if Master Lossless is ON)
+        // - Per user requirement: when high quality is selected use default per source timeout for addons
+        val isQualityEligibleForLossless = plan.quality == StreamingAudioQuality.HIGH
+        val allowLosslessForTrack = allowLossless && (isQualityEligibleForLossless || unifiedSongOverride != null)
+
+        if (allowLosslessForTrack && (!LosslessStreamResolver.isFailedForTrack(videoId) || unifiedSongOverride != null)) {
+            // When HIGH quality is selected, use default per-source timeout for addons (fastTimeoutMs = null).
+            // If preferFastDirect is active (e.g. mobile metered with forceHigh), apply a bounded fast timeout (4_000L).
+            val fastTimeout = if (plan.preferFastDirect) 4_000L else null
             resolveLosslessStreamUrl(
                 context = context,
                 song = song,
                 savedSong = savedSong,
                 cacheKeys = listOf(targetCacheKey, "${videoId}_high"),
-                lowDataMode = unifiedSongOverride == null &&
-                    (plan.quality == StreamingAudioQuality.LOW || plan.quality == StreamingAudioQuality.MEDIUM),
+                lowDataMode = false,
+                fastTimeoutMs = fastTimeout,
             )?.let { return it }
         }
 
-        // JioSaavn gate: only try if explicitly forced or not in AUTO mode
+        // JioSaavn gate: only try if explicitly forced or if on HIGH quality without fast-direct.
+        // For LOW and MEDIUM, JioSaavn is completely bypassed (0ms delay) to play fastest available YouTube stream.
         val forceYoutubeOnly = unifiedSongOverride == "builtin:YOUTUBE" || (unifiedSongOverride == null && youtubeBeforeSaavn)
         val forceSaavn = unifiedSongOverride == "builtin:JIOSAAVN"
-        if (!forceYoutubeOnly && !fastPlaybackForAuto && (forceSaavn || (isSaavnEnabled && plan.quality != StreamingAudioQuality.LOW))) {
+        val allowSaavn = forceSaavn || (!forceYoutubeOnly && !fastPlaybackForAuto && !plan.preferFastDirect && isSaavnEnabled && plan.quality == StreamingAudioQuality.HIGH)
+
+        if (allowSaavn) {
             try {
                 var effectiveTitle = song.title.ifBlank { savedSong?.title.orEmpty() }
                 var effectiveArtist = song.artist.ifBlank { savedSong?.artist.orEmpty() }
@@ -935,9 +965,9 @@ object YoutubeHelper {
                             artists = if (artistsList.isNotEmpty()) artistsList else listOf(effectiveArtist),
                             album = effectiveAlbum,
                             durationSeconds = effectiveDuration,
-                            streamingQuality = if (plan.quality == StreamingAudioQuality.MEDIUM) StreamingAudioQuality.HIGH else plan.quality,
-                            maxBitrateKbps = if (plan.quality == StreamingAudioQuality.MEDIUM) 0 else maxBitrate,
-                            saavnQuality = if (plan.quality == StreamingAudioQuality.MEDIUM) SaavnAudioQuality.QUALITY_320 else saavnQuality
+                            streamingQuality = plan.quality,
+                            maxBitrateKbps = maxBitrate,
+                            saavnQuality = saavnQuality
                         )
                     }
 
@@ -1271,7 +1301,7 @@ object YoutubeHelper {
                 .filter { it.isNotBlank() }
                 .ifEmpty { listOf(effectiveArtist).filter { it.isNotBlank() } }
 
-            val defaultTimeout = if (forDownload) 18_000L else 10_000L
+            val defaultTimeout = if (forDownload) 18_000L else 12_000L
             val result = withTimeoutOrNull(fastTimeoutMs ?: defaultTimeout) {
                 LosslessStreamResolver.resolve(
                     context = context,

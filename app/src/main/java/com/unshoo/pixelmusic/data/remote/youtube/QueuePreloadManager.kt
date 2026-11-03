@@ -138,7 +138,7 @@ object QueuePreloadManager {
                 var streamUrl: String? = null
                 try {
                     // Prefetch at the user's selected quality (HIGH → highest stream first).
-                    streamUrl = YoutubeHelper.getSongPlayerUrl(ctx, song, allowLocal = false)
+                    streamUrl = YoutubeHelper.getSongPlayerUrl(ctx, song, allowLocal = false, isNextInQueue = true)
                     if (!streamUrl.isNullOrBlank() && streamUrl.startsWith("http")) {
                         val ytUri = "youtube://$videoId"
                         engineRef?.resolvedUriCache?.put(ytUri, android.net.Uri.parse(streamUrl))

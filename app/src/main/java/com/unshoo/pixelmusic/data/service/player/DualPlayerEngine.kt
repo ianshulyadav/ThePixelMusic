@@ -1904,10 +1904,11 @@ class DualPlayerEngine @Inject constructor(
                     // resolveYoutubeUriAsync's own timeout (which also branches on metered)
                     // can complete before the outer fires. Previously the outer and inner
                     // used the same value, making the inner's fallback unreachable.
-                    val timeoutMs = if (connectivityStateHolder.isMeteredNetwork.value) {
-                        STREAM_RESOLVE_TIMEOUT_LOW_CONNECTIVITY_MS + 4_000L
-                    } else {
-                        STREAM_RESOLVE_TIMEOUT_MS + 4_000L
+                    val isLosslessActive = LosslessStreamResolver.isEnabled(context) && !connectivityStateHolder.isMeteredNetwork.value
+                    val timeoutMs = when {
+                        connectivityStateHolder.isMeteredNetwork.value -> STREAM_RESOLVE_TIMEOUT_LOW_CONNECTIVITY_MS + 4_000L
+                        isLosslessActive -> 18_000L
+                        else -> STREAM_RESOLVE_TIMEOUT_MS + 4_000L
                     }
                     val resolved: Uri? = withTimeoutOrNull(timeoutMs) {
                         when (uri.scheme) {
@@ -2063,10 +2064,11 @@ class DualPlayerEngine @Inject constructor(
             )
 
             // Never retry the full quality-aware resolver without an outer timeout.
-            val timeoutMs = if (connectivityStateHolder.isMeteredNetwork.value) {
-                STREAM_RESOLVE_TIMEOUT_LOW_CONNECTIVITY_MS
-            } else {
-                STREAM_RESOLVE_TIMEOUT_MS
+            val isLosslessActive = isLosslessEnabled && !connectivityStateHolder.isMeteredNetwork.value
+            val timeoutMs = when {
+                connectivityStateHolder.isMeteredNetwork.value -> STREAM_RESOLVE_TIMEOUT_LOW_CONNECTIVITY_MS
+                isLosslessActive -> 14_000L
+                else -> STREAM_RESOLVE_TIMEOUT_MS
             }
             // Reserve time for one emergency fallback; never launch a second unbounded full resolve.
             val fallbackBudgetMs = 3_000L
