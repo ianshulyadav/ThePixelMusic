@@ -12,12 +12,16 @@ import com.unshoo.pixelmusic.data.model.Artist
 import com.unshoo.pixelmusic.data.model.Playlist
 import com.unshoo.pixelmusic.data.model.Song
 import com.unshoo.pixelmusic.data.preferences.PlaylistPreferencesRepository
+import com.unshoo.pixelmusic.data.preferences.UserPreferencesRepository
 import com.unshoo.pixelmusic.data.remote.youtube.toNativeSong
 import com.unshoo.pixelmusic.data.repository.MusicRepository
+import com.unshoo.pixelmusic.utils.ContentFilterUtils
 import com.unshoo.pixelmusic.utils.MediaItemBuilder
 import com.unshoo.pixelmusic.utils.OfflineAudioResolver
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 import unshoo.ianshulyadav.pixelmusic.innertube.YouTube
 import unshoo.ianshulyadav.pixelmusic.innertube.models.SongItem
 import java.util.concurrent.ConcurrentHashMap
@@ -29,7 +33,8 @@ class CarLibraryTree @Inject constructor(
     @ApplicationContext private val context: Context,
     private val musicRepository: MusicRepository,
     private val playlistPreferencesRepository: PlaylistPreferencesRepository,
-    private val engagementDao: EngagementDao
+    private val engagementDao: EngagementDao,
+    private val userPreferencesRepository: UserPreferencesRepository
 ) {
 
     private val songCache = ConcurrentHashMap<String, Song>()
@@ -227,13 +232,6 @@ class CarLibraryTree @Inject constructor(
             isCategory = true
         ),
         folder(
-            mediaId = MORE_ID,
-            title = "More",
-            mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_MIXED,
-            artworkUri = autoResourceUri(com.unshoo.pixelmusic.R.drawable.ic_auto_more),
-            isCategory = true
-        ),
-        folder(
             mediaId = DOWNLOADS_ID,
             title = "Downloaded songs",
             mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_MIXED,
@@ -287,6 +285,7 @@ class CarLibraryTree @Inject constructor(
             parentId == DOWNLOADS_ID -> downloadedSongs().drop(offset).take(limit)
                 .map { song(it, CONTEXT_DOWNLOADS, null, DOWNLOADS_ID) }
             parentId == SONGS_ID -> musicRepository.getSongsPage(limit = limit, offset = offset)
+                .filter { isSongAllowed(it) }
                 .onEach { rememberSong(it) }
                 .map { song(it, CONTEXT_ALL_SONGS, null, SONGS_ID) }
             parentId == PLAYLISTS_ID -> playlists().drop(offset).take(limit).map(::playlistFolder)
@@ -324,12 +323,55 @@ class CarLibraryTree @Inject constructor(
         else -> findSong(mediaId)?.let { song(it, CONTEXT_ALL_SONGS, null, SONGS_ID) }
     }
 
-    suspend fun search(query: String): List<MediaItem> {
+
+    private suspend fun isSongAllowed(song: Song, query: String? = null): Boolean {
+        val minDuration = runCatching { userPreferencesRepository.minSongDurationFlow.first() }.getOrDefault(10000)
+        if (song.duration in 1 until minDuration) return false
+
+        val pureYtMusicOnly = runCatching { userPreferencesRepository.pureYtMusicOnlyFlow.first() }.getOrDefault(false)
+        val hideVideo = runCatching { userPreferencesRepository.hideVideoFlow.first() }.getOrDefault(false)
+        if ((pureYtMusicOnly || hideVideo) && ContentFilterUtils.isVideoSong(song)) {
+            return false
+        }
+
+        val blockedReleaseIds = runCatching { userPreferencesRepository.blockedReleaseIdsFlow.first() }.getOrDefault(emptySet())
+        if (blockedReleaseIds.contains(song.id) || (song.albumId != 0L && blockedReleaseIds.contains(song.albumId.toString()))) {
+            return false
+        }
+
+        val notInterestedSongIds = runCatching { userPreferencesRepository.notInterestedSongIdsFlow.first() }.getOrDefault(emptySet())
+        if (notInterestedSongIds.contains(song.id)) {
+            return false
+        }
+
+        val filterKeywords = runCatching { userPreferencesRepository.filterKeywordsFlow.first() }.getOrDefault(emptyList())
+        val queryLower = query?.trim()?.lowercase().orEmpty()
+        val activeFilterKeywords = if (queryLower.isNotEmpty()) {
+            filterKeywords.filterNot { queryLower.contains(it.lowercase()) }
+        } else {
+            filterKeywords
+        }
+
+        if (ContentFilterUtils.matchesFilterKeywords(song.title, song.artist, song.album, activeFilterKeywords)) {
+            return false
+        }
+
+        val filterCoverAndLofi = runCatching { userPreferencesRepository.filterCoverAndLofiFlow.first() }.getOrDefault(false)
+        if (filterCoverAndLofi && !queryLower.contains("cover") && !queryLower.contains("lofi") && !queryLower.contains("lo-fi")) {
+            if (ContentFilterUtils.isCoverOrLofi(song, activeFilterKeywords)) {
+                return false
+            }
+        }
+
+        return true
+    }
+
+    suspend fun search(query: String): List<MediaItem> = withContext(Dispatchers.IO) {
         val trimmed = query.trim()
-        if (trimmed.isEmpty()) return emptyList()
+        if (trimmed.isEmpty()) return@withContext emptyList()
 
         if (trimmed.equals(lastSearchQuery, ignoreCase = true) && lastSearchResults.isNotEmpty()) {
-            return lastSearchResults
+            return@withContext lastSearchResults
         }
 
         val results = LinkedHashMap<String, MediaItem>()
@@ -338,6 +380,7 @@ class CarLibraryTree @Inject constructor(
         // 1. Search local songs
         runCatching {
             musicRepository.searchSongs(trimmed).first()
+                .filter { isSongAllowed(it, trimmed) }
                 .take(MAX_SEARCH)
                 .forEach { s ->
                     rememberSong(s)
@@ -346,42 +389,62 @@ class CarLibraryTree @Inject constructor(
                 }
         }
 
-        // 2. Search YouTube Music online (FILTER_SONG -> searchSummary -> SongDataSource)
-        runCatching {
-            val ytResult = YouTube.search(trimmed, YouTube.SearchFilter.FILTER_SONG).getOrNull()
-            val ytSongs = ytResult?.items?.filterIsInstance<SongItem>()
-            if (!ytSongs.isNullOrEmpty()) {
-                ytSongs.take(MAX_SEARCH).forEach { item ->
-                    val nativeSong = item.toNativeSong()
-                    rememberSong(nativeSong)
-                    val key = SONG_PREFIX + nativeSong.id
-                    if (!results.containsKey(key)) {
-                        foundSongs.add(nativeSong)
-                        results[key] = song(nativeSong, CONTEXT_SEARCH, trimmed, "$SEARCH_ID:$trimmed")
-                    }
-                }
-            } else {
+        // 2. Search YouTube Music online
+        val isLocalMode = runCatching { userPreferencesRepository.localModeEnabledFlow.first() }.getOrDefault(false)
+        if (!isLocalMode) {
+            // First try searchSummary (InnerTube ranked search - same as in-app search!)
+            runCatching {
                 val summaryResult = YouTube.searchSummary(trimmed).getOrNull()
-                val summarySongs = summaryResult?.summaries?.flatMap { it.items }?.filterIsInstance<SongItem>()
-                if (!summarySongs.isNullOrEmpty()) {
-                    summarySongs.take(MAX_SEARCH).forEach { item ->
-                        val nativeSong = item.toNativeSong()
+                val summaryItems = summaryResult?.summaries?.flatMap { it.items }.orEmpty()
+                val songItems = summaryItems.filterIsInstance<SongItem>()
+                for (item in songItems) {
+                    val nativeSong = item.toNativeSong()
+                    if (isSongAllowed(nativeSong, trimmed)) {
                         rememberSong(nativeSong)
                         val key = SONG_PREFIX + nativeSong.id
                         if (!results.containsKey(key)) {
                             foundSongs.add(nativeSong)
                             results[key] = song(nativeSong, CONTEXT_SEARCH, trimmed, "$SEARCH_ID:$trimmed")
+                            if (foundSongs.size >= MAX_SEARCH) break
                         }
                     }
-                } else {
+                }
+            }
+
+            // If still less than 15 results, try FILTER_SONG
+            if (foundSongs.size < 15) {
+                runCatching {
+                    val ytResult = YouTube.search(trimmed, YouTube.SearchFilter.FILTER_SONG).getOrNull()
+                    val ytSongs = ytResult?.items?.filterIsInstance<SongItem>().orEmpty()
+                    for (item in ytSongs) {
+                        val nativeSong = item.toNativeSong()
+                        if (isSongAllowed(nativeSong, trimmed)) {
+                            rememberSong(nativeSong)
+                            val key = SONG_PREFIX + nativeSong.id
+                            if (!results.containsKey(key)) {
+                                foundSongs.add(nativeSong)
+                                results[key] = song(nativeSong, CONTEXT_SEARCH, trimmed, "$SEARCH_ID:$trimmed")
+                                if (foundSongs.size >= MAX_SEARCH) break
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Fallback to SongDataSource if still empty
+            if (foundSongs.isEmpty()) {
+                runCatching {
                     val rawSongs = com.unshoo.pixelmusic.data.remote.youtube.SongDataSource().search(trimmed)
-                    rawSongs.take(MAX_SEARCH).forEach { ytSong ->
+                    for (ytSong in rawSongs) {
                         val nativeSong = ytSong.toNativeSong()
-                        rememberSong(nativeSong)
-                        val key = SONG_PREFIX + nativeSong.id
-                        if (!results.containsKey(key)) {
-                            foundSongs.add(nativeSong)
-                            results[key] = song(nativeSong, CONTEXT_SEARCH, trimmed, "$SEARCH_ID:$trimmed")
+                        if (isSongAllowed(nativeSong, trimmed)) {
+                            rememberSong(nativeSong)
+                            val key = SONG_PREFIX + nativeSong.id
+                            if (!results.containsKey(key)) {
+                                foundSongs.add(nativeSong)
+                                results[key] = song(nativeSong, CONTEXT_SEARCH, trimmed, "$SEARCH_ID:$trimmed")
+                                if (foundSongs.size >= MAX_SEARCH) break
+                            }
                         }
                     }
                 }
@@ -404,7 +467,7 @@ class CarLibraryTree @Inject constructor(
         lastSearchQuery = trimmed
         lastSearchResults = list
         lastSearchSongs = foundSongs
-        return list
+        list
     }
 
     // ---- the queue a folder represents --------------------------------------
@@ -413,7 +476,7 @@ class CarLibraryTree @Inject constructor(
         CONTEXT_RECENTS -> recentSongs()
         CONTEXT_FAVORITES -> favoriteSongs()
         CONTEXT_DOWNLOADS -> downloadedSongs()
-        CONTEXT_ALL_SONGS -> musicRepository.getAllSongsOnce().onEach { rememberSong(it) }
+        CONTEXT_ALL_SONGS -> musicRepository.getAllSongsOnce().filter { isSongAllowed(it) }.onEach { rememberSong(it) }
         CONTEXT_SEARCH -> {
             val trimmed = contextId?.trim().orEmpty()
             if (trimmed.equals(lastSearchQuery, ignoreCase = true) && lastSearchSongs.isNotEmpty()) {
@@ -559,13 +622,16 @@ class CarLibraryTree @Inject constructor(
             }
         }
 
-        return ids.mapNotNull { byId[it] ?: songCache[it] }.also { list ->
-            list.forEach { rememberSong(it) }
-        }
+        return ids.mapNotNull { byId[it] ?: songCache[it] }
+            .filter { isSongAllowed(it) }
+            .also { list ->
+                list.forEach { rememberSong(it) }
+            }
     }
 
     private suspend fun favoriteSongs(): List<Song> {
         val favs = musicRepository.getFavoriteSongsOnce()
+            .filter { isSongAllowed(it) }
         favs.forEach { rememberSong(it) }
         return favs
     }
@@ -587,6 +653,7 @@ class CarLibraryTree @Inject constructor(
         }.getOrDefault(emptyList())
 
         val combined = (offlineYt + localDownloaded).distinctBy { it.id }
+            .filter { isSongAllowed(it) }
         combined.forEach { rememberSong(it) }
         return combined
     }

@@ -324,105 +324,55 @@ fun QueueBottomSheet(
 
     // Local order used only while previewing a drag reorder.
     var reorderPreviewOrder by remember { mutableStateOf<List<Int>?>(null) }
-    var reorderPreviewKeys by remember { mutableStateOf<List<Long>?>(null) }
+    var reorderPreviewKeys by remember { mutableStateOf<List<Any>?>(null) }
     var reorderPreviewBaseQueue by remember { mutableStateOf<List<Song>?>(null) }
     var pendingReorderExpectedIds by remember { mutableStateOf<List<String>?>(null) }
     var pendingReorderGraceUpdates by remember { mutableIntStateOf(0) }
 
-    // Stable keys for queue rows to prevent state recycling glitches on remove/reorder.
-    var committedDisplaySongIds by remember { mutableStateOf(displaySongs.map { it.id }) }
-    var committedDisplayKeys by remember { mutableStateOf(List(displaySongCount) { it.toLong() }) }
-    var nextStableQueueItemKey by remember { mutableLongStateOf(displaySongCount.toLong()) }
-
-    // Track queue order by content (not list identity) to avoid clearing preview
-    // when upstream emits equivalent list instances during drag.
-    var reorderPreviewQueueSignature by remember { mutableStateOf<Int?>(null) }
-    val displaySongsSignature = remember(displaySongs, queueIndexOffset) {
-        (queueIndexOffset * 31) + System.identityHashCode(displaySongs)
-    }
     val defaultDisplayOrder = remember(displaySongCount, queueIndexOffset) {
         List(displaySongCount) { queueIndexOffset + it }
     }
-    val defaultDisplayKeys = remember(displaySongCount, queueIndexOffset) {
-        List(displaySongCount) { (queueIndexOffset + it).toLong() }
+
+    // Stable keys for queue items derived directly from song IDs + occurrence count.
+    // This ensures existing items NEVER change their keys when items are appended or reordered,
+    // completely eliminating LazyColumn position resets / scroll jumping.
+    val stableDisplayKeys = remember(displaySongs) {
+        val occurrenceMap = HashMap<String, Int>(displaySongs.size)
+        displaySongs.map { song ->
+            val occ = occurrenceMap[song.id] ?: 0
+            occurrenceMap[song.id] = occ + 1
+            "${song.id}__$occ"
+        }
     }
+
     val activeOrder = reorderPreviewOrder ?: defaultDisplayOrder
-    val activeKeys = reorderPreviewKeys
-        ?: committedDisplayKeys.takeIf { it.size == displaySongCount }
-        ?: defaultDisplayKeys
+    val activeKeys: List<Any> = reorderPreviewKeys ?: stableDisplayKeys
     val activeSongSource = reorderPreviewBaseQueue ?: queue
     val activeKeyToLocalIndex = remember(activeKeys) {
-        HashMap<Long, Int>(activeKeys.size).apply {
+        HashMap<Any, Int>(activeKeys.size).apply {
             activeKeys.forEachIndexed { index, stableKey ->
                 put(stableKey, index)
             }
         }
     }
 
-    fun remapCommittedKeysForDisplay(newSongs: List<Song>) {
-        // Fast path: common queue-skip case where display list is just a suffix of previous display list.
-        if (committedDisplaySongIds.isNotEmpty() && newSongs.isNotEmpty()) {
-            val firstNewId = newSongs.first().id
-            val startIndex = committedDisplaySongIds.indexOf(firstNewId)
-            if (startIndex >= 0 && startIndex + newSongs.size <= committedDisplaySongIds.size) {
-                var suffixMatches = true
-                for (i in newSongs.indices) {
-                    if (committedDisplaySongIds[startIndex + i] != newSongs[i].id) {
-                        suffixMatches = false
-                        break
-                    }
-                }
-                if (suffixMatches) {
-                    committedDisplaySongIds = committedDisplaySongIds.subList(startIndex, startIndex + newSongs.size).toList()
-                    committedDisplayKeys = committedDisplayKeys.subList(startIndex, startIndex + newSongs.size).toList()
-                    return
-                }
-            }
-        }
-
-        val reusableKeysBySongId = mutableMapOf<String, ArrayDeque<Long>>()
-        committedDisplaySongIds.forEachIndexed { index, songId ->
-            val key = committedDisplayKeys.getOrNull(index) ?: return@forEachIndexed
-            reusableKeysBySongId.getOrPut(songId) { ArrayDeque() }.addLast(key)
-        }
-
-        var nextKey = nextStableQueueItemKey
-        val newKeys = ArrayList<Long>(newSongs.size)
-        newSongs.forEach { song ->
-            val bucket = reusableKeysBySongId[song.id]
-            val reusedKey = if (bucket != null && bucket.isNotEmpty()) bucket.removeFirst() else null
-            if (reusedKey != null) {
-                newKeys.add(reusedKey)
-            } else {
-                newKeys.add(nextKey)
-                nextKey++
-            }
-        }
-
-        committedDisplaySongIds = newSongs.map { it.id }
-        committedDisplayKeys = newKeys
-        nextStableQueueItemKey = nextKey
-    }
-
     // Reset local reorder preview only when the queue truly changes to something new.
+    val displaySongsSignature = remember(displaySongs, queueIndexOffset) {
+        (queueIndexOffset * 31) + System.identityHashCode(displaySongs)
+    }
+    var reorderPreviewQueueSignature by remember { mutableStateOf<Int?>(null) }
+
     LaunchedEffect(displaySongsSignature, queueIndexOffset) {
         val expectedIds = pendingReorderExpectedIds
 
         if (expectedIds != null) {
             val currentDisplayIds = displaySongs.map { it.id }
             if (currentDisplayIds == expectedIds) {
-                reorderPreviewKeys
-                    ?.takeIf { it.size == displaySongs.size }
-                    ?.let { previewKeys ->
-                        committedDisplaySongIds = currentDisplayIds
-                        committedDisplayKeys = previewKeys
-                    }
                 reorderPreviewOrder = null
                 reorderPreviewKeys = null
                 reorderPreviewBaseQueue = null
                 pendingReorderExpectedIds = null
                 pendingReorderGraceUpdates = 0
-                remapCommittedKeysForDisplay(displaySongs)
                 reorderPreviewQueueSignature = displaySongsSignature
                 return@LaunchedEffect
             }
@@ -446,7 +396,6 @@ fun QueueBottomSheet(
             reorderPreviewKeys = null
             reorderPreviewBaseQueue = null
         }
-        remapCommittedKeysForDisplay(displaySongs)
         reorderPreviewQueueSignature = displaySongsSignature
     }
 
@@ -456,9 +405,9 @@ fun QueueBottomSheet(
     var reorderHandleInUse by remember { mutableStateOf(false) }
     val updatedReorderHandleInUse by rememberUpdatedState(reorderHandleInUse)
 
-    fun mapKeyToLocalIndex(key: Any?, keyToLocalIndex: Map<Long, Int>): Int? {
-        val stableKey = key as? Long ?: return null
-        return keyToLocalIndex[stableKey]
+    fun mapKeyToLocalIndex(key: Any?, keyToLocalIndex: Map<Any, Int>): Int? {
+        if (key == null) return null
+        return keyToLocalIndex[key]
     }
 
     val reorderableState = rememberReorderableLazyListState(
@@ -492,23 +441,26 @@ fun QueueBottomSheet(
     val updatedIsReordering by rememberUpdatedState(isReordering)
     // ----------------------
 
-    // Only jump to current song when the actual current song changes (e.g. track skip).
-    // This prevents annoying jumps when adding/removing other items in the queue.
-    var isFirstScrollByCurrentSongId by remember(currentSongId) { mutableStateOf(true) }
+    // Only scroll to current song once when the song changes, and NEVER interrupt
+    // when the user is actively scrolling (isScrollInProgress).
+    var lastScrolledSongId by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(currentSongId) {
-        if (!isReordering && !reorderHandleInUse && currentSongDisplayIndex >= 0 && currentSongDisplayIndex < displaySongCount) {
+    LaunchedEffect(currentSongId, currentSongDisplayIndex) {
+        val targetId = currentSongId ?: return@LaunchedEffect
+        if (targetId == lastScrolledSongId) return@LaunchedEffect
+        if (isReordering || reorderHandleInUse || listState.isScrollInProgress) return@LaunchedEffect
+
+        if (currentSongDisplayIndex in 0 until displaySongCount) {
             val firstVisible = listState.firstVisibleItemIndex
             val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            
             if (currentSongDisplayIndex !in firstVisible..lastVisible) {
-                if (isFirstScrollByCurrentSongId || Math.abs(currentSongDisplayIndex - firstVisible) > 20) {
+                if (Math.abs(currentSongDisplayIndex - firstVisible) > 20) {
                     listState.scrollToItem(currentSongDisplayIndex)
                 } else {
                     listState.animateScrollToItem(currentSongDisplayIndex)
                 }
             }
-            isFirstScrollByCurrentSongId = false
+            lastScrolledSongId = targetId
         }
     }
 
@@ -771,13 +723,13 @@ fun QueueBottomSheet(
 
                             items(
                                 count = displaySongCount,
-                                key = { index -> activeKeys[index] },
+                                key = { index -> activeKeys.getOrNull(index) ?: index },
                                 contentType = { "queue_song" }
                             ) { index ->
                                 if (index >= activeOrder.size || index >= activeKeys.size) return@items
                                 val queueIndex = activeOrder[index]
                                 if (queueIndex !in activeSongSource.indices) return@items
-                                val itemStableKey = activeKeys[index]
+                                val itemStableKey = activeKeys.getOrNull(index) ?: index
                                 val song = activeSongSource[queueIndex]
                                 val canReorder = index > currentSongDisplayIndex
                                 ReorderableItem(
@@ -1953,7 +1905,7 @@ fun QueuePlaylistSongItem(
     isDragHandleVisible: Boolean,
     isRemoveButtonVisible: Boolean,
     enableSwipeToDismiss: Boolean = false,
-    swipeStateIdentity: Long = 0L,
+    swipeStateIdentity: Any = 0L,
     onDismissSong: () -> Unit = {},
     isFromPlaylist: Boolean
 ) {
