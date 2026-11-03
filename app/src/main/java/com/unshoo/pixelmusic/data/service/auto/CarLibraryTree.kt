@@ -84,6 +84,13 @@ class CarLibraryTree @Inject constructor(
 
         const val CONTENT_STYLE_LIST_ITEM_HINT_VALUE = 1
         const val CONTENT_STYLE_GRID_ITEM_HINT_VALUE = 2
+        const val CONTENT_STYLE_CATEGORY_LIST_ITEM_HINT_VALUE = 3
+        const val CONTENT_STYLE_CATEGORY_GRID_ITEM_HINT_VALUE = 4
+
+        private fun categoryStyle(isGrid: Boolean = false) = styleExtras(
+            if (isGrid) CONTENT_STYLE_CATEGORY_GRID_ITEM_HINT_VALUE else CONTENT_STYLE_CATEGORY_LIST_ITEM_HINT_VALUE,
+            CONTENT_STYLE_LIST_ITEM_HINT_VALUE
+        )
 
         fun styleExtras(browsableHint: Int, playableHint: Int): Bundle = Bundle().apply {
             putInt(EXTRA_CONTENT_STYLE_BROWSABLE_HINT, browsableHint)
@@ -153,22 +160,73 @@ class CarLibraryTree @Inject constructor(
         return null
     }
 
+    private fun autoResourceUri(resourceId: Int): Uri = Uri.Builder()
+        .scheme(android.content.ContentResolver.SCHEME_ANDROID_RESOURCE)
+        .authority(context.packageName)
+        .appendPath("drawable")
+        .appendPath(context.resources.getResourceEntryName(resourceId))
+        .build()
+
     // ---- browse -------------------------------------------------------------
 
     fun rootItems(): List<MediaItem> = listOf(
-        folder(RECENTS_ID, "Recently played", MediaMetadata.MEDIA_TYPE_FOLDER_MIXED),
-        folder(FAVORITES_ID, "Liked songs", MediaMetadata.MEDIA_TYPE_FOLDER_MIXED),
-        folder(PLAYLISTS_ID, "Playlists", MediaMetadata.MEDIA_TYPE_FOLDER_PLAYLISTS),
-        folder(DOWNLOADS_ID, "Downloaded songs", MediaMetadata.MEDIA_TYPE_FOLDER_MIXED),
-        folder(ALBUMS_ID, "Albums", MediaMetadata.MEDIA_TYPE_FOLDER_ALBUMS),
-        folder(ARTISTS_ID, "Artists", MediaMetadata.MEDIA_TYPE_FOLDER_ARTISTS),
-        folder(SONGS_ID, "All Songs", MediaMetadata.MEDIA_TYPE_FOLDER_MIXED),
+        folder(
+            mediaId = RECENTS_ID,
+            title = "Recents",
+            mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_MIXED,
+            artworkUri = autoResourceUri(com.unshoo.pixelmusic.R.drawable.ic_auto_recents),
+            isCategory = true
+        ),
+        folder(
+            mediaId = FAVORITES_ID,
+            title = "Liked",
+            mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_MIXED,
+            artworkUri = autoResourceUri(com.unshoo.pixelmusic.R.drawable.ic_auto_favorites),
+            isCategory = true
+        ),
+        folder(
+            mediaId = PLAYLISTS_ID,
+            title = "Playlists",
+            mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_PLAYLISTS,
+            artworkUri = autoResourceUri(com.unshoo.pixelmusic.R.drawable.ic_auto_playlists),
+            isCategory = true
+        ),
+        folder(
+            mediaId = DOWNLOADS_ID,
+            title = "Downloads",
+            mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_MIXED,
+            artworkUri = autoResourceUri(com.unshoo.pixelmusic.R.drawable.ic_auto_downloads),
+            isCategory = true
+        ),
+        folder(
+            mediaId = ALBUMS_ID,
+            title = "Albums",
+            mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_ALBUMS,
+            artworkUri = autoResourceUri(com.unshoo.pixelmusic.R.drawable.ic_auto_albums),
+            isCategory = true
+        ),
+        folder(
+            mediaId = ARTISTS_ID,
+            title = "Artists",
+            mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_ARTISTS,
+            artworkUri = autoResourceUri(com.unshoo.pixelmusic.R.drawable.ic_auto_artists),
+            isCategory = true
+        ),
+        folder(
+            mediaId = SONGS_ID,
+            title = "Songs",
+            mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_MIXED,
+            artworkUri = autoResourceUri(com.unshoo.pixelmusic.R.drawable.ic_auto_songs),
+            isCategory = true
+        ),
     )
 
     fun rootItem(isRecentRoot: Boolean = false): MediaItem = folder(
-        if (isRecentRoot) RECENTS_ID else ROOT_ID,
-        if (isRecentRoot) "Recently played" else "PixelMusic",
-        MediaMetadata.MEDIA_TYPE_FOLDER_MIXED
+        mediaId = if (isRecentRoot) RECENTS_ID else ROOT_ID,
+        title = if (isRecentRoot) "Recents" else "PixelMusic",
+        mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_MIXED,
+        artworkUri = if (isRecentRoot) autoResourceUri(com.unshoo.pixelmusic.R.drawable.ic_auto_recents) else null,
+        isCategory = isRecentRoot
     )
 
     suspend fun children(parentId: String, page: Int, pageSize: Int): List<MediaItem> {
@@ -330,14 +388,20 @@ class CarLibraryTree @Inject constructor(
         title: String,
         mediaType: Int,
         artworkUri: Uri? = null,
-        isGrid: Boolean = false
+        isGrid: Boolean = false,
+        isCategory: Boolean = false
     ): MediaItem {
+        val extras = when {
+            isCategory -> categoryStyle(isGrid)
+            isGrid -> gridStyle()
+            else -> listStyle()
+        }
         val metadata = MediaMetadata.Builder()
             .setTitle(title)
             .setIsBrowsable(true)
             .setIsPlayable(false)
             .setMediaType(mediaType)
-            .setExtras(if (isGrid) gridStyle() else listStyle())
+            .setExtras(extras)
         artworkUri?.let(metadata::setArtworkUri)
 
         return MediaItem.Builder()
