@@ -956,9 +956,7 @@ class MusicService : MediaLibraryService() {
                         }
                         val children = carLibraryTree.children(parentId, page, pageSize, selectedId)
                         grantArtworkUriPermissions(browser.packageName, children)
-                        if (parentId != CarLibraryTree.ROOT_ID && parentId != prevParent &&
-                            (parentId == CarLibraryTree.RECENTS_ID || parentId == CarLibraryTree.FAVORITES_ID)
-                        ) {
+                        if (parentId != CarLibraryTree.ROOT_ID && parentId != prevParent) {
                             session.notifyChildrenChanged(browser, CarLibraryTree.ROOT_ID, carLibraryTree.rootItems().size, null)
                         }
                         LibraryResult.ofItemList(children, params)

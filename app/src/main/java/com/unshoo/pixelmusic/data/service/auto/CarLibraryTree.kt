@@ -230,19 +230,34 @@ class CarLibraryTree @Inject constructor(
     )
 
     fun rootItems(selectedId: String? = null): List<MediaItem> {
+        val isLikedSelected = selectedId == FAVORITES_ID
+        val isForYouSelected = selectedId == null || selectedId == RECENTS_ID
+
+        val forYouIcon = if (isForYouSelected) {
+            com.unshoo.pixelmusic.R.drawable.ic_auto_for_you_filled
+        } else {
+            com.unshoo.pixelmusic.R.drawable.ic_auto_for_you_outline
+        }
+
+        val likedIcon = if (isLikedSelected) {
+            com.unshoo.pixelmusic.R.drawable.ic_auto_favorites_filled
+        } else {
+            com.unshoo.pixelmusic.R.drawable.ic_auto_favorites_outline
+        }
+
         return listOf(
             folder(
                 mediaId = RECENTS_ID,
                 title = "For you",
                 mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_MIXED,
-                artworkUri = autoResourceUri(com.unshoo.pixelmusic.R.drawable.ic_auto_for_you_filled),
+                artworkUri = autoResourceUri(forYouIcon),
                 isCategory = true
             ),
             folder(
                 mediaId = FAVORITES_ID,
                 title = "Liked",
                 mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_MIXED,
-                artworkUri = autoResourceUri(com.unshoo.pixelmusic.R.drawable.ic_auto_favorites_filled),
+                artworkUri = autoResourceUri(likedIcon),
                 isCategory = true
             ),
             folder(
@@ -639,7 +654,7 @@ class CarLibraryTree @Inject constructor(
     @Volatile private var cachedForYouSongs: List<Song> = emptyList()
     @Volatile private var lastForYouFetchTimeMs: Long = 0L
     private val forYouMutex = Mutex()
-    private val FOR_YOU_CACHE_TTL_MS = 10 * 60 * 1000L // 10 minutes cache
+    private val FOR_YOU_CACHE_TTL_MS = 2 * 60 * 1000L // 2 minutes (keeps it fresh and rotatory)
 
     fun invalidateForYouCache() {
         cachedForYouSongs = emptyList()
@@ -672,7 +687,7 @@ class CarLibraryTree @Inject constructor(
     }
 
     private suspend fun buildForYouMix(): List<Song> {
-        // 1. Most played songs of the user according to the week
+        // 1. Most played songs of the user according to the week and all time (top 20-25 candidates)
         val weeklySummary = runCatching {
             playbackStatsRepository.loadSummary(
                 range = StatsTimeRange.WEEK,
@@ -682,11 +697,15 @@ class CarLibraryTree @Inject constructor(
 
         val weeklyTopIds = weeklySummary?.songs?.map { it.songId }.orEmpty()
         val allTimeTopIds = runCatching {
-            engagementDao.getTopPlayedSongs(15).map { it.songId }
+            engagementDao.getTopPlayedSongs(25).map { it.songId }
         }.getOrDefault(emptyList())
 
         val combinedTopIds = (weeklyTopIds + allTimeTopIds).distinct()
-        val topSongs = resolveSongsByIds(combinedTopIds).filter { isSongAllowed(it) }
+        val topCandidates = resolveSongsByIds(combinedTopIds).filter { isSongAllowed(it) }
+
+        // Highly rotatory: Shuffle the top 15-20 most played songs so that each session/opening
+        // rotates dynamically among the user's top favorites instead of always anchoring on the single #1 track
+        val rotatedTopSongs = topCandidates.take(20).shuffled()
 
         // 2. Random liked songs
         val likedSongs = favoriteSongs().shuffled()
@@ -695,21 +714,20 @@ class CarLibraryTree @Inject constructor(
         val downloads = downloadedSongs().shuffled()
 
         // 4. Recent history
-        val recents = recentSongs()
+        val recents = recentSongs().shuffled()
 
-        // 5. Gather seeds to fetch fresh recommendations from YouTube
+        // 5. Gather rotating seeds to fetch fresh recommendations from YouTube
+        // Pick 2 random seeds from rotatedTopSongs and 1 from likedSongs
         val seeds = mutableListOf<Song>()
-        topSongs.firstOrNull()?.let { seeds.add(it) }
+        rotatedTopSongs.firstOrNull()?.let { seeds.add(it) }
         likedSongs.firstOrNull()?.let { seeds.add(it) }
-        topSongs.getOrNull(1)?.let { seeds.add(it) }
-        if (seeds.size < 3) {
-            recents.firstOrNull()?.let { seeds.add(it) }
-        }
-        if (seeds.size < 3 && likedSongs.size > 1) {
-            seeds.add(likedSongs[1])
+        if (rotatedTopSongs.size > 1) {
+            seeds.add(rotatedTopSongs[1])
+        } else if (recents.isNotEmpty()) {
+            seeds.add(recents.first())
         }
 
-        // Fetch fresh songs from YouTube
+        // Fetch fresh songs from YouTube using the rotating seeds
         val freshYouTubeSongs = fetchFreshYouTubeMix(seeds)
 
         val result = mutableListOf<Song>()
@@ -741,14 +759,14 @@ class CarLibraryTree @Inject constructor(
         var likedIndex = 0
         var downloadIndex = 0
 
-        // Slot 0: #1 top played song of the week (if available)
-        if (topSongs.isNotEmpty()) {
-            tryAdd(topSongs.getOrNull(topIndex++))
+        // Slot 0: Rotating top played song (dynamically chosen from top 10-20)
+        if (rotatedTopSongs.isNotEmpty()) {
+            tryAdd(rotatedTopSongs.getOrNull(topIndex++))
         }
 
         // Interleave so that most songs (~75-80%) are fresh from YouTube
         while (result.size < 28 &&
-            (freshIndex < freshYouTubeSongs.size || topIndex < topSongs.size ||
+            (freshIndex < freshYouTubeSongs.size || topIndex < rotatedTopSongs.size ||
              likedIndex < likedSongs.size || downloadIndex < downloads.size)
         ) {
             var addedAny = false
@@ -772,9 +790,9 @@ class CarLibraryTree @Inject constructor(
                 }
             }
 
-            // 1 top played of week
-            if (topIndex < topSongs.size) {
-                if (tryAdd(topSongs.getOrNull(topIndex++))) addedAny = true
+            // 1 rotated top played song
+            if (topIndex < rotatedTopSongs.size) {
+                if (tryAdd(rotatedTopSongs.getOrNull(topIndex++))) addedAny = true
             }
 
             // 1 downloaded song
@@ -806,6 +824,7 @@ class CarLibraryTree @Inject constructor(
         val freshList = mutableListOf<Song>()
         val seenVideoIds = mutableSetOf<String>()
 
+        val perSeedResults = mutableListOf<List<Song>>()
         for (seed in seeds) {
             val videoId = seed.youtubeId?.takeIf { it.isNotBlank() }
                 ?: YouTubeIdUtils.extractVideoId(seed.contentUriString).takeIf { it.isNotBlank() }
@@ -829,9 +848,21 @@ class CarLibraryTree @Inject constructor(
                     }
                 }.orEmpty()
 
-                freshList.addAll(songsFromSeed)
-                if (freshList.size >= 40) break
+                if (songsFromSeed.isNotEmpty()) {
+                    perSeedResults.add(songsFromSeed.shuffled())
+                }
             }
+        }
+
+        // Interleave songs from each rotating seed so recommendations are diverse and balanced
+        val maxSeedLen = perSeedResults.maxOfOrNull { it.size } ?: 0
+        for (i in 0 until maxSeedLen) {
+            for (seedList in perSeedResults) {
+                if (i < seedList.size) {
+                    freshList.add(seedList[i])
+                }
+            }
+            if (freshList.size >= 40) break
         }
 
         // If no seeds or seeds returned empty, fetch top / trending music from YouTube
