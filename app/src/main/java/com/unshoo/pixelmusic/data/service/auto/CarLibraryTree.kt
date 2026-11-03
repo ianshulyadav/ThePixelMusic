@@ -230,34 +230,19 @@ class CarLibraryTree @Inject constructor(
     )
 
     fun rootItems(selectedId: String? = null): List<MediaItem> {
-        val isLikedSelected = selectedId == FAVORITES_ID
-        val isForYouSelected = selectedId == null || selectedId == RECENTS_ID
-
-        val forYouIcon = if (isForYouSelected) {
-            com.unshoo.pixelmusic.R.drawable.ic_auto_for_you_filled
-        } else {
-            com.unshoo.pixelmusic.R.drawable.ic_auto_for_you_outline
-        }
-
-        val likedIcon = if (isLikedSelected) {
-            com.unshoo.pixelmusic.R.drawable.ic_auto_favorites_filled
-        } else {
-            com.unshoo.pixelmusic.R.drawable.ic_auto_favorites_outline
-        }
-
         return listOf(
             folder(
                 mediaId = RECENTS_ID,
                 title = "For you",
                 mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_MIXED,
-                artworkUri = autoResourceUri(forYouIcon),
+                artworkUri = autoResourceUri(com.unshoo.pixelmusic.R.drawable.ic_auto_for_you_filled),
                 isCategory = true
             ),
             folder(
                 mediaId = FAVORITES_ID,
                 title = "Liked",
                 mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_MIXED,
-                artworkUri = autoResourceUri(likedIcon),
+                artworkUri = autoResourceUri(com.unshoo.pixelmusic.R.drawable.ic_auto_favorites_filled),
                 isCategory = true
             ),
             folder(
