@@ -27,6 +27,16 @@ import unshoo.ianshulyadav.pixelmusic.innertube.models.SongItem
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
+import com.unshoo.pixelmusic.data.stats.PlaybackStatsRepository
+import com.unshoo.pixelmusic.data.stats.StatsTimeRange
+import com.unshoo.pixelmusic.utils.YouTubeIdUtils
+import unshoo.ianshulyadav.pixelmusic.innertube.models.filterVideo
+import unshoo.ianshulyadav.pixelmusic.innertube.models.WatchEndpoint
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
+import timber.log.Timber
+
 
 @Singleton
 class CarLibraryTree @Inject constructor(
@@ -34,7 +44,8 @@ class CarLibraryTree @Inject constructor(
     private val musicRepository: MusicRepository,
     private val playlistPreferencesRepository: PlaylistPreferencesRepository,
     private val engagementDao: EngagementDao,
-    private val userPreferencesRepository: UserPreferencesRepository
+    private val userPreferencesRepository: UserPreferencesRepository,
+    private val playbackStatsRepository: PlaybackStatsRepository
 ) {
 
     private val songCache = ConcurrentHashMap<String, Song>()
@@ -212,7 +223,7 @@ class CarLibraryTree @Inject constructor(
     fun rootItems(): List<MediaItem> = listOf(
         folder(
             mediaId = RECENTS_ID,
-            title = "Recents",
+            title = "For you",
             mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_MIXED,
             artworkUri = autoResourceUri(com.unshoo.pixelmusic.R.drawable.ic_auto_recents),
             isCategory = true
@@ -263,7 +274,7 @@ class CarLibraryTree @Inject constructor(
 
     fun rootItem(isRecentRoot: Boolean = false): MediaItem = folder(
         mediaId = if (isRecentRoot) RECENTS_ID else ROOT_ID,
-        title = if (isRecentRoot) "Recents" else "PixelMusic",
+        title = if (isRecentRoot) "For you" else "PixelMusic",
         mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_MIXED,
         artworkUri = if (isRecentRoot) autoResourceUri(com.unshoo.pixelmusic.R.drawable.ic_auto_recents) else null,
         isCategory = isRecentRoot
@@ -278,7 +289,7 @@ class CarLibraryTree @Inject constructor(
         return when {
             parentId == ROOT_ID -> rootItems()
             parentId == MORE_ID -> moreItems()
-            parentId == RECENTS_ID -> recentSongs().drop(offset).take(limit)
+            parentId == RECENTS_ID -> forYouSongs().drop(offset).take(limit)
                 .map { song(it, CONTEXT_RECENTS, null, RECENTS_ID) }
             parentId == FAVORITES_ID -> favoriteSongs().drop(offset).take(limit)
                 .map { song(it, CONTEXT_FAVORITES, null, FAVORITES_ID) }
@@ -473,7 +484,7 @@ class CarLibraryTree @Inject constructor(
     // ---- the queue a folder represents --------------------------------------
 
     suspend fun songsOf(contextType: String, contextId: String?): List<Song> = when (contextType) {
-        CONTEXT_RECENTS -> recentSongs()
+        CONTEXT_RECENTS -> forYouSongs()
         CONTEXT_FAVORITES -> favoriteSongs()
         CONTEXT_DOWNLOADS -> downloadedSongs()
         CONTEXT_ALL_SONGS -> musicRepository.getAllSongsOnce().filter { isSongAllowed(it) }.onEach { rememberSong(it) }
@@ -602,6 +613,207 @@ class CarLibraryTree @Inject constructor(
             .setMediaMetadata(metadata.build())
             .build()
     }
+
+    @Volatile private var cachedForYouSongs: List<Song> = emptyList()
+    @Volatile private var lastForYouFetchTimeMs: Long = 0L
+    private val forYouMutex = Mutex()
+    private val FOR_YOU_CACHE_TTL_MS = 10 * 60 * 1000L // 10 minutes cache
+
+    suspend fun forYouSongs(forceRefresh: Boolean = false): List<Song> {
+        if (!forceRefresh && cachedForYouSongs.isNotEmpty() &&
+            System.currentTimeMillis() - lastForYouFetchTimeMs < FOR_YOU_CACHE_TTL_MS
+        ) {
+            return cachedForYouSongs
+        }
+
+        return forYouMutex.withLock {
+            if (!forceRefresh && cachedForYouSongs.isNotEmpty() &&
+                System.currentTimeMillis() - lastForYouFetchTimeMs < FOR_YOU_CACHE_TTL_MS
+            ) {
+                return@withLock cachedForYouSongs
+            }
+
+            val result = withContext(Dispatchers.IO) {
+                buildForYouMix()
+            }
+
+            cachedForYouSongs = result
+            lastForYouFetchTimeMs = System.currentTimeMillis()
+            result.forEach { rememberSong(it) }
+            result
+        }
+    }
+
+    private suspend fun buildForYouMix(): List<Song> {
+        // 1. Most played songs according to the week
+        val weeklySummary = runCatching {
+            playbackStatsRepository.loadSummary(
+                range = StatsTimeRange.WEEK,
+                songs = emptyList()
+            )
+        }.getOrNull()
+
+        val weeklyTopIds = weeklySummary?.songs?.map { it.songId }.orEmpty()
+        val allTimeTopIds = runCatching {
+            engagementDao.getTopPlayedSongs(20).map { it.songId }
+        }.getOrDefault(emptyList())
+
+        val combinedTopIds = (weeklyTopIds + allTimeTopIds).distinct()
+        val topSongs = resolveSongsByIds(combinedTopIds).filter { isSongAllowed(it) }
+
+        // 2. Random liked songs
+        val likedSongs = favoriteSongs().shuffled()
+
+        // 3. Random songs (from library / downloads)
+        val libraryPool = downloadedSongs().ifEmpty {
+            musicRepository.getAllSongsOnce().filter { isSongAllowed(it) }
+        }
+        val randomSongs = libraryPool.shuffled()
+
+        // 4. Similar fresh songs similar to most played songs
+        val seedSong = topSongs.firstOrNull() ?: recentSongs().firstOrNull() ?: likedSongs.firstOrNull()
+        val freshSimilarSongs = if (seedSong != null) {
+            fetchSimilarFreshSongs(seedSong)
+        } else {
+            emptyList()
+        }
+
+        // Interleave & blend smartly:
+        // - User's most played songs of the week
+        // - Fresh similar songs to the most played
+        // - Random liked songs
+        // - Random library songs
+        val result = mutableListOf<Song>()
+        val seenKeys = mutableSetOf<String>()
+
+        fun tryAdd(song: Song?): Boolean {
+            if (song == null) return false
+            val key = YouTubeIdUtils.extractVideoId(song.id).takeIf { it.isNotBlank() }
+                ?: song.id.removePrefix("youtube_")
+            if (seenKeys.add(key.lowercase())) {
+                result.add(song)
+                return true
+            }
+            return false
+        }
+
+        var topIndex = 0
+        var similarIndex = 0
+        var likedIndex = 0
+        var randomIndex = 0
+
+        // Ensure top slot is #1 most played of the week (if available)
+        if (topSongs.isNotEmpty()) {
+            tryAdd(topSongs.getOrNull(topIndex++))
+        }
+
+        while (result.size < 25 &&
+            (topIndex < topSongs.size || similarIndex < freshSimilarSongs.size ||
+             likedIndex < likedSongs.size || randomIndex < randomSongs.size)
+        ) {
+            var addedAnyInRound = false
+
+            // Fresh similar song
+            if (similarIndex < freshSimilarSongs.size) {
+                if (tryAdd(freshSimilarSongs.getOrNull(similarIndex++))) addedAnyInRound = true
+            }
+
+            // Liked song
+            if (likedIndex < likedSongs.size) {
+                if (tryAdd(likedSongs.getOrNull(likedIndex++))) addedAnyInRound = true
+            }
+
+            // Most played song
+            if (topIndex < topSongs.size) {
+                if (tryAdd(topSongs.getOrNull(topIndex++))) addedAnyInRound = true
+            }
+
+            // Random library song
+            if (randomIndex < randomSongs.size) {
+                if (tryAdd(randomSongs.getOrNull(randomIndex++))) addedAnyInRound = true
+            }
+
+            if (!addedAnyInRound) break
+        }
+
+        // Fallback if user has no listening history yet
+        if (result.isEmpty()) {
+            val fallback = recentSongs().ifEmpty { libraryPool }
+            fallback.take(20).forEach { tryAdd(it) }
+        }
+
+        return result
+    }
+
+    private suspend fun fetchSimilarFreshSongs(seedSong: Song): List<Song> {
+        val videoId = seedSong.youtubeId?.takeIf { it.isNotBlank() }
+            ?: YouTubeIdUtils.extractVideoId(seedSong.contentUriString).takeIf { it.isNotBlank() }
+            ?: YouTubeIdUtils.extractVideoId(seedSong.id).takeIf { it.isNotBlank() }
+
+        if (videoId != null && videoId.length == 11 && hasInternet()) {
+            val onlineFresh = withTimeoutOrNull(2500L) {
+                try {
+                    val pureYt = userPreferencesRepository.pureYtMusicOnlyFlow.first()
+                    val radioResult = YouTube.next(
+                        WatchEndpoint(playlistId = "RDAMVM$videoId", videoId = videoId)
+                    ).getOrNull()
+                    radioResult?.items
+                        ?.filterIsInstance<SongItem>()
+                        ?.filterVideo(pureYt)
+                        ?.map { it.toNativeSong() }
+                        ?.filter { isSongAllowed(it) }
+                        .orEmpty()
+                } catch (e: Exception) {
+                    Timber.tag("CarLibraryTree").w(e, "Failed to fetch fresh similar songs for $videoId")
+                    emptyList()
+                }
+            }.orEmpty()
+
+            if (onlineFresh.isNotEmpty()) {
+                return onlineFresh.take(6)
+            }
+        }
+
+        // Offline / fallback: local related songs from Room DB
+        return runCatching {
+            val numericId = seedSong.id.toLongOrNull()
+            if (numericId != null) {
+                musicRepository.getRelatedSongs(numericId, 10).filter { isSongAllowed(it) }
+            } else {
+                emptyList()
+            }
+        }.getOrDefault(emptyList()).take(6)
+    }
+
+    private fun hasInternet(): Boolean {
+        return try {
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+            val caps = cm?.getNetworkCapabilities(cm?.activeNetwork)
+            caps?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private suspend fun resolveSongsByIds(ids: List<String>): List<Song> {
+        if (ids.isEmpty()) return emptyList()
+        val byId = musicRepository.getSongsByIdsOnce(ids).associateBy { it.id }.toMutableMap()
+        val missingIds = ids.filter { !byId.containsKey(it) }
+        if (missingIds.isNotEmpty()) {
+            val ytRepo = runCatching { AppDatabase.getInstance(context).songRepository() }.getOrNull()
+            missingIds.forEach { id ->
+                val cleanId = id.removePrefix("youtube_")
+                val ytSong = ytRepo?.getSong(cleanId)
+                if (ytSong != null) {
+                    val native = ytSong.toNativeSong()
+                    byId[id] = native
+                    byId[native.id] = native
+                }
+            }
+        }
+        return ids.mapNotNull { byId[it] ?: songCache[it] }
+    }
+
 
     private suspend fun recentSongs(): List<Song> {
         val ids = engagementDao.getRecentlyPlayedSongs(MAX_RECENTS).map { it.songId }

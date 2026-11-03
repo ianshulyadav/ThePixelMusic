@@ -421,6 +421,8 @@ object AutoQueueManager {
         var batchAttempts = 0
         var totalAdded = 0
         var consecutiveEmptyFetches = 0
+        val batchedItems = mutableListOf<MediaItem>()
+        var firstBatchAdded = false
 
         while (remaining < TARGET_UPCOMING_COUNT && batchAttempts < MAX_REFILL_BATCH_ATTEMPTS) {
             batchAttempts++
@@ -551,16 +553,18 @@ object AutoQueueManager {
                     if (yt.isNotBlank()) sessionQueuedIds.add(yt)
                     sessionQueuedIds.add(item.mediaId)
                 }
-                withContext(Dispatchers.Main) {
-                    livePlayer()?.addMediaItems(newItems)
-                    onQueueItemsAddedCallback?.invoke()
+                if (!firstBatchAdded && remaining <= 1) {
+                    withContext(Dispatchers.Main) {
+                        livePlayer()?.addMediaItems(newItems)
+                        onQueueItemsAddedCallback?.invoke()
+                    }
+                    firstBatchAdded = true
+                } else {
+                    batchedItems.addAll(newItems)
                 }
                 totalAdded += newItems.size
-                remaining = withContext(Dispatchers.Main) {
-                    val p = livePlayer() ?: return@withContext -1
-                    computeRemainingUpcoming(p)
-                }
-                Timber.tag(TAG).d("Batch %d: added %d items -> remaining is now %d", batchAttempts, newItems.size, remaining)
+                remaining += newItems.size
+                Timber.tag(TAG).d("Batch %d: buffered %d items -> remaining target is now %d", batchAttempts, newItems.size, remaining)
             } else {
                 consecutiveEmptyFetches++
                 Timber.tag(TAG).w("Batch %d yielded no new items (fetched=%d, existing=%d). Consecutive empty=%d",
@@ -586,8 +590,20 @@ object AutoQueueManager {
             }
         }
 
+        if (batchedItems.isNotEmpty()) {
+            withContext(Dispatchers.Main) {
+                livePlayer()?.addMediaItems(batchedItems)
+                onQueueItemsAddedCallback?.invoke()
+            }
+            Timber.tag(TAG).d("Committed %d batched items to livePlayer in a single call", batchedItems.size)
+        }
+
         if (totalAdded > 0) {
-            Timber.tag(TAG).d("doRefillLocked finished: total added %d items, upcoming remaining is now %d", totalAdded, remaining)
+            val finalRemaining = withContext(Dispatchers.Main) {
+                val p = livePlayer() ?: return@withContext -1
+                computeRemainingUpcoming(p)
+            }
+            Timber.tag(TAG).d("doRefillLocked finished: total added %d items, upcoming remaining is now %d", totalAdded, finalRemaining)
         }
     }
 

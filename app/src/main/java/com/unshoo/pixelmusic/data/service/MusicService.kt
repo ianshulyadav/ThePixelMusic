@@ -903,8 +903,13 @@ class MusicService : MediaLibraryService() {
                 browser: MediaSession.ControllerInfo,
                 params: MediaLibraryService.LibraryParams?
             ): ListenableFuture<LibraryResult<MediaItem>> {
-                val wantsRecents = params?.extras?.getBoolean(EXTRA_RECENT) == true ||
-                    params?.extras?.getBoolean(EXTRA_RECENT_COMPAT) == true
+                val wantsRecents = params?.isRecent == true ||
+                    params?.isSuggested == true ||
+                    params?.extras?.getBoolean(EXTRA_RECENT) == true ||
+                    params?.extras?.getBoolean(EXTRA_RECENT_COMPAT) == true ||
+                    params?.extras?.getBoolean("androidx.media.MediaBrowserCompat.EXTRA_SUGGESTED") == true ||
+                    params?.extras?.getBoolean("android.service.media.extra.SUGGESTED") == true ||
+                    browser.packageName == "com.google.android.googlequicksearchbox"
                 val extras = CarLibraryTree.styleExtras(
                     CarLibraryTree.CONTENT_STYLE_GRID_ITEM_HINT_VALUE,
                     CarLibraryTree.CONTENT_STYLE_LIST_ITEM_HINT_VALUE
@@ -1136,6 +1141,7 @@ class MusicService : MediaLibraryService() {
         mediaSession = MediaLibrarySession.Builder(this, sessionPlayer, callback)
             .setSessionActivity(getOpenAppPendingIntent())
             .setBitmapLoader(CoilBitmapLoader(this, serviceScope))
+            .setPeriodicPositionUpdateEnabled(false)
             .build()
 
         mediaSession?.let { session ->
