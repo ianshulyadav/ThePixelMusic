@@ -564,8 +564,20 @@ class CastPlayback(
             metadata.title?.let { putString(MediaMetadata.KEY_TITLE, it.toString()) }
             metadata.artist?.let { putString(MediaMetadata.KEY_ARTIST, it.toString()) }
             metadata.albumTitle?.let { putString(MediaMetadata.KEY_ALBUM_TITLE, it.toString()) }
-            metadata.artworkUri?.takeIf { it.scheme == "http" || it.scheme == "https" }
-                ?.let { addImage(WebImage(it)) }
+            val artUri = metadata.artworkUri
+            val extraArt = item.mediaMetadata.extras?.getString(com.unshoo.pixelmusic.utils.MediaItemBuilder.EXTERNAL_EXTRA_ALBUM_ART)
+            val parsedExtra = extraArt?.let { runCatching { android.net.Uri.parse(it) }.getOrNull() }
+            val effectiveArtUri = artUri ?: parsedExtra
+
+            val remoteArtUrl = when {
+                effectiveArtUri == null -> null
+                effectiveArtUri.scheme == "http" || effectiveArtUri.scheme == "https" -> effectiveArtUri.toString()
+                effectiveArtUri.authority?.endsWith(".artwork") == true -> effectiveArtUri.getQueryParameter("url")
+                effectiveArtUri.scheme == "content" && effectiveArtUri.path?.contains("/remote") == true -> effectiveArtUri.getQueryParameter("url")
+                stream.url.contains("/song/") -> stream.url.replaceFirst("/song/", "/art/")
+                else -> null
+            }
+            remoteArtUrl?.let { addImage(WebImage(android.net.Uri.parse(it))) }
         }
         val info = MediaInfo.Builder(stream.url)
             .setStreamType(MediaInfo.STREAM_TYPE_BUFFERED)

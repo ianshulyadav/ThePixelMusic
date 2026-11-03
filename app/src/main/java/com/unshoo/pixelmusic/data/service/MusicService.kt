@@ -981,6 +981,7 @@ class MusicService : MediaLibraryService() {
                 // without notifying leaves voice search spinning for ever.
                 return serviceScope.future {
                     try {
+                        rememberLastBrowsedParent(browser, "${CarLibraryTree.SEARCH_ID}:$query")
                         val count = carLibraryTree.search(query).size
                         session.notifySearchResultChanged(browser, query, count, params)
                         LibraryResult.ofVoid(params)
@@ -1003,6 +1004,7 @@ class MusicService : MediaLibraryService() {
             ): ListenableFuture<LibraryResult<com.google.common.collect.ImmutableList<MediaItem>>> {
                 return serviceScope.future {
                     try {
+                        rememberLastBrowsedParent(browser, "${CarLibraryTree.SEARCH_ID}:$query")
                         val results = paginate(carLibraryTree.search(query), page, pageSize)
                         grantArtworkUriPermissions(browser.packageName, results)
                         LibraryResult.ofItemList(results, params)
@@ -1082,6 +1084,21 @@ class MusicService : MediaLibraryService() {
                         return@future MediaSession.MediaItemsWithStartPosition(
                             contextQueue.mediaItems,
                             contextQueue.startIndex,
+                            startPositionMs
+                        )
+                    }
+
+                    val requestedSongId = requestedItem?.let { CarLibraryTree.songIdOf(it.mediaId) }
+                    val singleSong = requestedSongId?.let { carLibraryTree.findSong(it) }
+                    if (singleSong != null) {
+                        val externalItem = MediaItemBuilder.buildForExternalController(this@MusicService, singleSong)
+                        grantArtworkUriPermissions(controller.packageName, listOf(externalItem))
+                        serviceScope.launch(Dispatchers.Main) {
+                            AutoQueueManager.resetAndReseedFromCurrentSong()
+                        }
+                        return@future MediaSession.MediaItemsWithStartPosition(
+                            mutableListOf(externalItem),
+                            0,
                             startPositionMs
                         )
                     }
@@ -3794,28 +3811,55 @@ class MusicService : MediaLibraryService() {
         requestedItem: MediaItem,
         controller: MediaSession.ControllerInfo
     ): ContextQueueResolution? {
-        val fromItem = carLibraryTree.contextOfItem(requestedItem)
-        val context = fromItem ?: run {
-            val parentId = requestedItem.mediaMetadata.extras
-                ?.getString(CarLibraryTree.KEY_CONTEXT_PARENT)
-                ?: getLastBrowsedParent(controller)
-            parentId?.let { carLibraryTree.contextOf(it) }
-        } ?: return null
-
-        val songs = carLibraryTree.songsOf(context.first, context.second)
-        if (songs.isEmpty()) return null
-
         val requestedSongId = CarLibraryTree.songIdOf(requestedItem.mediaId)
-        val foundIndex = songs.indexOfFirst {
-            it.id == requestedSongId || CarLibraryTree.songIdOf(it.id) == requestedSongId
+        val cleanSongId = if (requestedSongId.startsWith("youtube_")) requestedSongId.removePrefix("youtube_") else requestedSongId
+
+        val fromItem = carLibraryTree.contextOfItem(requestedItem)
+        val parentId = requestedItem.mediaMetadata.extras
+            ?.getString(CarLibraryTree.KEY_CONTEXT_PARENT)
+            ?: getLastBrowsedParent(controller)
+
+        val isSearchParent = parentId?.startsWith(CarLibraryTree.SEARCH_ID) == true || fromItem?.first == CarLibraryTree.CONTEXT_SEARCH
+        val inSearchSongs = carLibraryTree.lastSearchSongs.any {
+            val bare = CarLibraryTree.songIdOf(it.id)
+            it.id == requestedSongId || it.id == cleanSongId || bare == requestedSongId || bare == cleanSongId
         }
-        val startIndex = if (foundIndex >= 0) foundIndex else 0
+
+        val songs = when {
+            isSearchParent || inSearchSongs -> carLibraryTree.lastSearchSongs
+            fromItem != null -> carLibraryTree.songsOf(fromItem.first, fromItem.second)
+            parentId != null -> carLibraryTree.contextOf(parentId)?.let { carLibraryTree.songsOf(it.first, it.second) } ?: emptyList()
+            else -> emptyList()
+        }
+
+        val foundIndex = songs.indexOfFirst {
+            val bare = CarLibraryTree.songIdOf(it.id)
+            it.id == requestedSongId || it.id == cleanSongId || bare == requestedSongId || bare == cleanSongId
+        }
+
+        if (foundIndex < 0) {
+            if (!isSearchParent && !inSearchSongs) {
+                val searchIdx = carLibraryTree.lastSearchSongs.indexOfFirst {
+                    val bare = CarLibraryTree.songIdOf(it.id)
+                    it.id == requestedSongId || it.id == cleanSongId || bare == requestedSongId || bare == cleanSongId
+                }
+                if (searchIdx >= 0) {
+                    return ContextQueueResolution(
+                        mediaItems = carLibraryTree.lastSearchSongs
+                            .map { MediaItemBuilder.buildForExternalController(this, it) }
+                            .toMutableList(),
+                        startIndex = searchIdx
+                    )
+                }
+            }
+            return null
+        }
 
         return ContextQueueResolution(
             mediaItems = songs
                 .map { MediaItemBuilder.buildForExternalController(this, it) }
                 .toMutableList(),
-            startIndex = startIndex
+            startIndex = foundIndex
         )
     }
 

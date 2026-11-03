@@ -8,6 +8,9 @@ import com.unshoo.pixelmusic.data.service.cast.CastMirror
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlin.math.roundToInt
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -55,19 +58,23 @@ class CastStateHolder @Inject constructor() {
     val isRemotelySeeking: StateFlow<Boolean> = _remotelySeeking.asStateFlow()
 
     private val _routeVolume = MutableStateFlow(100)
-    val routeVolume: StateFlow<Int> = _routeVolume.asStateFlow()
+    val routeVolume: StateFlow<Int> = CastController.volume
+        .map { (it * 100f).roundToInt().coerceIn(0, 100) }
+        .stateIn(kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main.immediate), kotlinx.coroutines.flow.SharingStarted.Eagerly, 100)
 
-    val isRefreshingRoutes: StateFlow<Boolean> = MutableStateFlow(false).asStateFlow()
+    val isRefreshingRoutes: StateFlow<Boolean> = CastController.isRefreshing
 
-    val castRoutes: StateFlow<List<MediaRouter.RouteInfo>> =
-        MutableStateFlow<List<MediaRouter.RouteInfo>>(emptyList()).asStateFlow()
+    val castRoutes: StateFlow<List<MediaRouter.RouteInfo>> = CastController.routes
 
-    val selectedRoute: StateFlow<MediaRouter.RouteInfo?> =
-        MutableStateFlow<MediaRouter.RouteInfo?>(null).asStateFlow()
+    val selectedRoute: StateFlow<MediaRouter.RouteInfo?> = CastController.selectedRoute
 
-    fun startDiscovery() = Unit
+    fun startDiscovery() {
+        CastController.discover(active = true)
+    }
 
-    fun stopDiscovery() = Unit
+    fun stopDiscovery() {
+        CastController.discover(active = false)
+    }
 
     fun setCastPlayer(player: LegacyCastPlayer?) = Unit
 

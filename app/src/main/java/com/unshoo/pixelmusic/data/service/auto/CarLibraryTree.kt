@@ -34,7 +34,10 @@ class CarLibraryTree @Inject constructor(
 
     private val songCache = ConcurrentHashMap<String, Song>()
     @Volatile private var lastSearchQuery: String? = null
-    @Volatile private var lastSearchResults: List<MediaItem> = emptyList()
+    @Volatile var lastSearchResults: List<MediaItem> = emptyList()
+        private set
+    @Volatile var lastSearchSongs: List<Song> = emptyList()
+        private set
 
     companion object {
         const val ROOT_ID = "root"
@@ -44,6 +47,7 @@ class CarLibraryTree @Inject constructor(
 
         const val FAVORITES_ID = "favorites"
         const val PLAYLISTS_ID = "playlists"
+        const val MORE_ID = "more"
         const val DOWNLOADS_ID = "downloads"
         const val ALBUMS_ID = "albums"
         const val ARTISTS_ID = "artists"
@@ -169,6 +173,37 @@ class CarLibraryTree @Inject constructor(
 
     // ---- browse -------------------------------------------------------------
 
+    fun moreItems(): List<MediaItem> = listOf(
+        folder(
+            mediaId = DOWNLOADS_ID,
+            title = "Downloaded songs",
+            mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_MIXED,
+            artworkUri = autoResourceUri(com.unshoo.pixelmusic.R.drawable.ic_auto_downloads),
+            isCategory = true
+        ),
+        folder(
+            mediaId = ALBUMS_ID,
+            title = "Albums",
+            mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_ALBUMS,
+            artworkUri = autoResourceUri(com.unshoo.pixelmusic.R.drawable.ic_auto_albums),
+            isCategory = true
+        ),
+        folder(
+            mediaId = ARTISTS_ID,
+            title = "Artists",
+            mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_ARTISTS,
+            artworkUri = autoResourceUri(com.unshoo.pixelmusic.R.drawable.ic_auto_artists),
+            isCategory = true
+        ),
+        folder(
+            mediaId = SONGS_ID,
+            title = "All Songs",
+            mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_MIXED,
+            artworkUri = autoResourceUri(com.unshoo.pixelmusic.R.drawable.ic_auto_songs),
+            isCategory = true
+        ),
+    )
+
     fun rootItems(): List<MediaItem> = listOf(
         folder(
             mediaId = RECENTS_ID,
@@ -192,8 +227,15 @@ class CarLibraryTree @Inject constructor(
             isCategory = true
         ),
         folder(
+            mediaId = MORE_ID,
+            title = "More",
+            mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_MIXED,
+            artworkUri = autoResourceUri(com.unshoo.pixelmusic.R.drawable.ic_auto_more),
+            isCategory = true
+        ),
+        folder(
             mediaId = DOWNLOADS_ID,
-            title = "Downloads",
+            title = "Downloaded songs",
             mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_MIXED,
             artworkUri = autoResourceUri(com.unshoo.pixelmusic.R.drawable.ic_auto_downloads),
             isCategory = true
@@ -214,7 +256,7 @@ class CarLibraryTree @Inject constructor(
         ),
         folder(
             mediaId = SONGS_ID,
-            title = "Songs",
+            title = "All Songs",
             mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_MIXED,
             artworkUri = autoResourceUri(com.unshoo.pixelmusic.R.drawable.ic_auto_songs),
             isCategory = true
@@ -237,6 +279,7 @@ class CarLibraryTree @Inject constructor(
 
         return when {
             parentId == ROOT_ID -> rootItems()
+            parentId == MORE_ID -> moreItems()
             parentId == RECENTS_ID -> recentSongs().drop(offset).take(limit)
                 .map { song(it, CONTEXT_RECENTS, null, RECENTS_ID) }
             parentId == FAVORITES_ID -> favoriteSongs().drop(offset).take(limit)
@@ -263,9 +306,9 @@ class CarLibraryTree @Inject constructor(
 
     suspend fun item(mediaId: String): MediaItem? = when {
         mediaId == ROOT_ID || mediaId == RECENTS_ID -> rootItem(isRecentRoot = mediaId == RECENTS_ID)
-        mediaId == FAVORITES_ID || mediaId == PLAYLISTS_ID || mediaId == DOWNLOADS_ID ||
+        mediaId == FAVORITES_ID || mediaId == PLAYLISTS_ID || mediaId == MORE_ID || mediaId == DOWNLOADS_ID ||
             mediaId == ALBUMS_ID || mediaId == ARTISTS_ID || mediaId == SONGS_ID ->
-            rootItems().firstOrNull { it.mediaId == mediaId }
+            rootItems().firstOrNull { it.mediaId == mediaId } ?: moreItems().firstOrNull { it.mediaId == mediaId }
         mediaId.startsWith(ALBUM_PREFIX) -> {
             val id = mediaId.removePrefix(ALBUM_PREFIX).toLongOrNull() ?: return null
             musicRepository.getAlbumById(id).first()?.let(::albumFolder)
@@ -290,6 +333,7 @@ class CarLibraryTree @Inject constructor(
         }
 
         val results = LinkedHashMap<String, MediaItem>()
+        val foundSongs = ArrayList<Song>()
 
         // 1. Search local songs
         runCatching {
@@ -297,23 +341,51 @@ class CarLibraryTree @Inject constructor(
                 .take(MAX_SEARCH)
                 .forEach { s ->
                     rememberSong(s)
+                    foundSongs.add(s)
                     results[SONG_PREFIX + s.id] = song(s, CONTEXT_SEARCH, trimmed, "$SEARCH_ID:$trimmed")
                 }
         }
 
-        // 2. Search YouTube Music online
+        // 2. Search YouTube Music online (FILTER_SONG -> searchSummary -> SongDataSource)
         runCatching {
             val ytResult = YouTube.search(trimmed, YouTube.SearchFilter.FILTER_SONG).getOrNull()
-            ytResult?.items?.filterIsInstance<SongItem>()
-                ?.take(MAX_SEARCH)
-                ?.forEach { item ->
+            val ytSongs = ytResult?.items?.filterIsInstance<SongItem>()
+            if (!ytSongs.isNullOrEmpty()) {
+                ytSongs.take(MAX_SEARCH).forEach { item ->
                     val nativeSong = item.toNativeSong()
                     rememberSong(nativeSong)
                     val key = SONG_PREFIX + nativeSong.id
                     if (!results.containsKey(key)) {
+                        foundSongs.add(nativeSong)
                         results[key] = song(nativeSong, CONTEXT_SEARCH, trimmed, "$SEARCH_ID:$trimmed")
                     }
                 }
+            } else {
+                val summaryResult = YouTube.searchSummary(trimmed).getOrNull()
+                val summarySongs = summaryResult?.summaries?.flatMap { it.items }?.filterIsInstance<SongItem>()
+                if (!summarySongs.isNullOrEmpty()) {
+                    summarySongs.take(MAX_SEARCH).forEach { item ->
+                        val nativeSong = item.toNativeSong()
+                        rememberSong(nativeSong)
+                        val key = SONG_PREFIX + nativeSong.id
+                        if (!results.containsKey(key)) {
+                            foundSongs.add(nativeSong)
+                            results[key] = song(nativeSong, CONTEXT_SEARCH, trimmed, "$SEARCH_ID:$trimmed")
+                        }
+                    }
+                } else {
+                    val rawSongs = com.unshoo.pixelmusic.data.remote.youtube.SongDataSource().search(trimmed)
+                    rawSongs.take(MAX_SEARCH).forEach { ytSong ->
+                        val nativeSong = ytSong.toNativeSong()
+                        rememberSong(nativeSong)
+                        val key = SONG_PREFIX + nativeSong.id
+                        if (!results.containsKey(key)) {
+                            foundSongs.add(nativeSong)
+                            results[key] = song(nativeSong, CONTEXT_SEARCH, trimmed, "$SEARCH_ID:$trimmed")
+                        }
+                    }
+                }
+            }
         }
 
         // 3. Search local albums & artists
@@ -331,6 +403,7 @@ class CarLibraryTree @Inject constructor(
         val list = results.values.toList()
         lastSearchQuery = trimmed
         lastSearchResults = list
+        lastSearchSongs = foundSongs
         return list
     }
 
@@ -343,13 +416,13 @@ class CarLibraryTree @Inject constructor(
         CONTEXT_ALL_SONGS -> musicRepository.getAllSongsOnce().onEach { rememberSong(it) }
         CONTEXT_SEARCH -> {
             val trimmed = contextId?.trim().orEmpty()
-            if (trimmed.isNotEmpty()) {
-                val matching = songCache.values.filter {
-                    it.title.contains(trimmed, ignoreCase = true) || it.artist.contains(trimmed, ignoreCase = true)
-                }
-                if (matching.isNotEmpty()) matching else songCache.values.toList()
+            if (trimmed.equals(lastSearchQuery, ignoreCase = true) && lastSearchSongs.isNotEmpty()) {
+                lastSearchSongs
+            } else if (trimmed.isNotEmpty()) {
+                search(trimmed)
+                lastSearchSongs
             } else {
-                songCache.values.toList()
+                lastSearchSongs.ifEmpty { songCache.values.toList() }
             }
         }
         CONTEXT_ALBUM -> contextId?.toLongOrNull()
@@ -503,34 +576,77 @@ class CarLibraryTree @Inject constructor(
                 .map { it.toNativeSong() }
         }.getOrDefault(emptyList())
 
-        val result = ytDownloaded.filter {
+        val offlineYt = ytDownloaded.filter {
             OfflineAudioResolver.hasOfflineAudio(context, it)
         }.ifEmpty { ytDownloaded }
 
-        result.forEach { rememberSong(it) }
-        return result
+        val localDownloaded = runCatching {
+            musicRepository.getAllSongsOnce().filter { song ->
+                song.path.contains("/download", ignoreCase = true)
+            }
+        }.getOrDefault(emptyList())
+
+        val combined = (offlineYt + localDownloaded).distinctBy { it.id }
+        combined.forEach { rememberSong(it) }
+        return combined
     }
 
     private suspend fun songsForPlaylist(playlistId: String): List<Song> {
-        val playlist = playlists().firstOrNull { it.id == playlistId } ?: return emptyList()
+        val cleanId = playlistId.removePrefix("VL")
+        val playlist = playlists().firstOrNull { it.id == playlistId || it.id.removePrefix("VL") == cleanId }
 
-        if (playlist.id == "LM" || playlist.id == "liked" || playlist.name.equals("Liked Music", ignoreCase = true)) {
+        val isLikedMusic = playlistId == "LM" || cleanId == "LM" || playlistId == "liked" ||
+            playlist?.name?.equals("Liked Music", ignoreCase = true) == true
+
+        if (isLikedMusic) {
             val favs = favoriteSongs()
             if (favs.isNotEmpty()) return favs
         }
 
-        var songs = musicRepository.getSongsByIdsOnce(playlist.songIds)
-        if (songs.size < playlist.songIds.size || songs.isEmpty()) {
-            val cleanId = playlistId.removePrefix("VL")
+        var songs = playlist?.let { musicRepository.getSongsByIdsOnce(it.songIds) }.orEmpty()
+        val neededSongCount = playlist?.songIds?.size ?: 0
+
+        if (songs.size < neededSongCount || songs.isEmpty()) {
             val cachedYtPlaylist = runCatching {
                 val repo = AppDatabase.getInstance(context).playlistRepository()
-                repo.getPlaylistById(cleanId) ?: repo.getPlaylistById(playlistId)
+                repo.getPlaylistById(cleanId)
+                    ?: repo.getPlaylistById("VL$cleanId")
+                    ?: repo.getPlaylistById(playlistId)
             }.getOrNull()
 
             if (cachedYtPlaylist != null && cachedYtPlaylist.songs.isNotEmpty()) {
                 val nativeYtSongs = cachedYtPlaylist.songs.map { it.toNativeSong() }
                 runCatching { musicRepository.insertYoutubeSongs(nativeYtSongs) }
                 songs = nativeYtSongs
+            }
+        }
+
+        if (playlist != null && songs.size < playlist.songIds.size) {
+            val missingIds = playlist.songIds.filter { id -> songs.none { it.id == id || it.id == id.removePrefix("youtube_") } }
+            if (missingIds.isNotEmpty()) {
+                val ytSongRepo = runCatching { AppDatabase.getInstance(context).songRepository() }.getOrNull()
+                if (ytSongRepo != null) {
+                    val additional = missingIds.mapNotNull { id ->
+                        val bare = id.removePrefix("youtube_")
+                        ytSongRepo.getSong(bare)?.toNativeSong()
+                    }
+                    if (additional.isNotEmpty()) {
+                        runCatching { musicRepository.insertYoutubeSongs(additional) }
+                        songs = (songs + additional).distinctBy { it.id }
+                    }
+                }
+            }
+        }
+
+        if (songs.isEmpty() && (playlist?.source == "YOUTUBE" || isLikedMusic || cleanId.startsWith("PL") || cleanId.startsWith("RD"))) {
+            runCatching {
+                val ytPlaylistResult = YouTube.playlist(cleanId).getOrNull()
+                    ?: YouTube.playlist(playlistId).getOrNull()
+                val fetched = ytPlaylistResult?.songs?.map { it.toNativeSong() }
+                if (!fetched.isNullOrEmpty()) {
+                    runCatching { musicRepository.insertYoutubeSongs(fetched) }
+                    songs = fetched
+                }
             }
         }
 

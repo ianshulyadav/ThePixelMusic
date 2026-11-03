@@ -658,10 +658,17 @@ object AutoQueueManager {
         return if (uri.startsWith("youtube://")) uri.removePrefix("youtube://") else null
     }
 
-    private fun normalizeId(id: String): String = when {
-        id.startsWith("youtube_") -> id.substringAfter("youtube_")
-        id.startsWith("youtube://") -> id.substringAfter("youtube://")
-        else -> id
+    private fun normalizeId(id: String): String {
+        var clean = id.trim()
+        if (clean.startsWith("song:")) {
+            clean = clean.removePrefix("song:")
+        }
+        return when {
+            clean.startsWith("youtube_") -> clean.substringAfter("youtube_")
+            clean.startsWith("youtube://") -> clean.substringAfter("youtube://")
+            clean.startsWith("monochrome_") -> clean.substringAfter("monochrome_")
+            else -> clean
+        }
     }
 
     private suspend fun isAutoQueueEnabled(): Boolean {

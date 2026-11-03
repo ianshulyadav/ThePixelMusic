@@ -23,12 +23,14 @@ class MediaMapper @Inject constructor(
         val metadata = mediaItem.mediaMetadata
         val extras = metadata.extras
         // extras are lazily populated in some cases, or we rely on localConfiguration
+        val rawMediaId = mediaItem.mediaId
+        val bareMediaId = if (rawMediaId.startsWith("song:")) rawMediaId.removePrefix("song:") else rawMediaId
         val contentUri = extras?.getString(MediaItemBuilder.EXTERNAL_EXTRA_CONTENT_URI)
             ?: mediaItem.localConfiguration?.uri?.toString()
-            ?: if (mediaItem.mediaId.startsWith("-15")) {
-                "youtube://${mediaItem.mediaId}"
-            } else if (mediaItem.mediaId.startsWith("youtube_")) {
-                "youtube://${mediaItem.mediaId.removePrefix("youtube_")}"
+            ?: if (bareMediaId.startsWith("-15")) {
+                "youtube://$bareMediaId"
+            } else if (bareMediaId.startsWith("youtube_")) {
+                "youtube://${bareMediaId.removePrefix("youtube_")}"
             } else {
                 ""
             }
@@ -49,7 +51,7 @@ class MediaMapper @Inject constructor(
                 ?.takeIf { it.scheme.equals("file", ignoreCase = true) }
                 ?.path
                 .orEmpty()
-        val id = mediaItem.mediaId
+        val id = bareMediaId
 
         val resolvedYoutubeId = if (id.startsWith("youtube_")) {
             id.removePrefix("youtube_")

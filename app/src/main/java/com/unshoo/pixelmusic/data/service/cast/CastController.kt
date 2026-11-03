@@ -58,6 +58,15 @@ object CastController {
     private val _volume = MutableStateFlow(1f)
     val volume: StateFlow<Float> = _volume.asStateFlow()
 
+    private val _routes = MutableStateFlow<List<MediaRouter.RouteInfo>>(emptyList())
+    val routes: StateFlow<List<MediaRouter.RouteInfo>> = _routes.asStateFlow()
+
+    private val _selectedRoute = MutableStateFlow<MediaRouter.RouteInfo?>(null)
+    val selectedRoute: StateFlow<MediaRouter.RouteInfo?> = _selectedRoute.asStateFlow()
+
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
+
     private var castContext: CastContext? = null
     private var router: MediaRouter? = null
     private var selector: MediaRouteSelector? = null
@@ -248,21 +257,24 @@ object CastController {
     private fun publishDevices() {
         val router = router
         val selector = selector
-        val devices = if (router == null || selector == null) {
+        val matchingRoutes = if (router == null || selector == null) {
             emptyList()
         } else {
-            router.routes
-                .filter { !it.isDefault && it.isEnabled && it.matchesSelector(selector) }
-                .map {
-                    Device(
-                        id = it.id,
-                        name = it.name,
-                        connecting = it.connectionState == MediaRouter.RouteInfo.CONNECTION_STATE_CONNECTING,
-                        connected = it.isSelected,
-                    )
-                }
-                .sortedBy { it.name.lowercase() }
+            router.routes.filter { !it.isDefault && it.isEnabled && it.matchesSelector(selector) }
         }
+        _routes.value = matchingRoutes
+        _selectedRoute.value = router?.selectedRoute?.takeIf { matchingRoutes.any { m -> m.id == it.id } }
+
+        val devices = matchingRoutes
+            .map {
+                Device(
+                    id = it.id,
+                    name = it.name,
+                    connecting = it.connectionState == MediaRouter.RouteInfo.CONNECTION_STATE_CONNECTING,
+                    connected = it.isSelected,
+                )
+            }
+            .sortedBy { it.name.lowercase() }
         update { it.copy(devices = devices) }
     }
 

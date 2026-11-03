@@ -489,9 +489,8 @@ internal fun UnifiedPlayerCastLayer(
             typography = MaterialTheme.typography,
             shapes = MaterialTheme.shapes
         ) {
-            // The sheet talks to CastController directly: the UI no longer holds a
-            // CastSession of its own (see data/service/cast).
             CastBottomSheet(
+                playerViewModel = playerViewModel,
                 onDismiss = onDismiss,
                 onExpansionChanged = onExpansionChanged
             )
