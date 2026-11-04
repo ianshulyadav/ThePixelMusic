@@ -5,19 +5,12 @@
 
 package com.unshoo.pixelmusic.data.lossless.applemusic
 
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.util.Base64
 
 internal object AppleHls {
 
     const val WidevineKeyFormat = "urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed"
-
-    class WidevineKey(
-        val uri: String,
-        val pssh: ByteArray,
-        val keyId: ByteArray,
-    )
-
-    fun segmentCount(media: String): Int = media.lines().count { it.isNotBlank() && !it.startsWith("#") }
 
     private val WidevineSystemId = byteArrayOf(
         0xed.toByte(), 0xef.toByte(), 0x8b.toByte(), 0xa9.toByte(), 0x79, 0xd6.toByte(), 0x4a, 0xce.toByte(),
@@ -28,7 +21,7 @@ internal object AppleHls {
     fun legacyKey(media: String): Pair<String, ByteArray>? {
         val line = media.lines().firstOrNull { l ->
             l.startsWith("#EXT-X-KEY") &&
-                (attribute(l, "KEYFORMAT") == WidevineKeyFormat || attribute(l, "URI")?.startsWith("data:") == true)
+                (attribute(l, "KEYFORMAT") == WidevineKeyFormat || l.contains(WidevineKeyFormat, ignoreCase = true))
         } ?: return null
         val uri = attribute(line, "URI") ?: return null
         val payload = runCatching { Base64.getDecoder().decode(uri.substringAfter(',')) }.getOrNull() ?: return null
@@ -94,15 +87,7 @@ internal object AppleHls {
     }
 
     private fun resolve(base: String, uri: String): String =
-        if (uri.startsWith("http")) uri else base.substringBeforeLast('/') + "/" + uri
-}
-
-internal fun ByteArray.indexOf(needle: ByteArray): Int {
-    if (needle.isEmpty() || needle.size > size) return -1
-    outer@ for (i in 0..size - needle.size) {
-        for (j in needle.indices) if (this[i + j] != needle[j]) continue@outer
-        return i
-    }
-    return -1
+        if (uri.startsWith("http")) uri
+        else base.toHttpUrlOrNull()?.resolve(uri)?.toString() ?: (base.substringBeforeLast('/') + "/" + uri)
 }
 

@@ -182,8 +182,7 @@ private const val ENABLE_FOLDERS_SOURCE_SWITCHING = true
 private const val MAX_ALBUM_BATCH_SELECTION = 6
 private const val SONG_ID_QUERY_CHUNK_SIZE = 900
 private const val HOME_MIX_PREVIEW_LIMIT = 48
-/** Max time we wait for lossless resolution (4s hedged wave + buffer) before starting with YouTube fallback. */
-private const val OPTIMISTIC_RESOLVE_BUDGET_MS = 5_000L
+private const val OPTIMISTIC_RESOLVE_BUDGET_MS = 1_500L
 
 private fun List<Song>.toPlaybackQueue(): ImmutableList<Song> = when (this) {
     is PersistentList<Song> -> this
@@ -1379,42 +1378,12 @@ class PlayerViewModel @Inject constructor(
             )}
             _isSheetVisible.value = true
 
-            // Pre-resolve stream URL for last recently played song so miniplayer can play immediately.
-            // Per user directive: for cold-started retrieved last recently played song, directly
-            // use YT Music's fastest available stream (bypassing lossless addons) to prevent cold-start delay.
-            val videoId = restoredSong.id.removePrefix("youtube_")
-            val isYoutubeSong = restoredSong.id.startsWith("youtube_") || (videoId.length == 11 && !restoredSong.id.startsWith("external:"))
-            if (isYoutubeSong) {
+            // Pre-resolve stream URL for last recently played song so miniplayer can play immediately
+            val playbackUri = MediaItemBuilder.playbackUri(restoredSong)
+            val scheme = playbackUri.scheme
+            if (scheme == "youtube" || scheme == "telegram" || scheme == "gdrive" || scheme == "monochrome") {
                 viewModelScope.launch(Dispatchers.IO) {
-                    try {
-                        val ytSong = com.unshoo.pixelmusic.data.model.youtube.Song(
-                            youtubeId = videoId,
-                            title = restoredSong.title,
-                            artist = restoredSong.artist,
-                            album = restoredSong.album
-                        )
-                        val fastUrl = com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.getSongPlayerUrl(
-                            context = context,
-                            song = ytSong,
-                            allowLocal = true,
-                            allowLossless = false
-                        )
-                        if (fastUrl.isNotBlank()) {
-                            val ytUri = "youtube://$videoId"
-                            dualPlayerEngine.resolvedUriCache.put(ytUri, Uri.parse(fastUrl))
-                            Timber.tag("PlayerViewModel").i("Cold-start fast stream pre-cached for %s", videoId)
-                        }
-                    } catch (e: Exception) {
-                        Timber.tag("PlayerViewModel").w(e, "Cold-start fast stream resolve failed for %s", videoId)
-                    }
-                }
-            } else {
-                val playbackUri = MediaItemBuilder.playbackUri(restoredSong)
-                val scheme = playbackUri.scheme
-                if (scheme == "telegram" || scheme == "gdrive" || scheme == "monochrome") {
-                    viewModelScope.launch(Dispatchers.IO) {
-                        dualPlayerEngine.resolveCloudUri(playbackUri)
-                    }
+                    dualPlayerEngine.resolveCloudUri(playbackUri)
                 }
             }
 

@@ -116,7 +116,7 @@ class DualPlayerEngine @Inject constructor(
          * UI thread — whereas throwing early pushed ProgressiveMediaSource into exponential
          * retry back-off (1s → 2s → 4s), which was the multi-second audio-start regression.
          */
-        private const val LOAD_THREAD_RESOLVE_AWAIT_MS = 12_000L
+        private const val LOAD_THREAD_RESOLVE_AWAIT_MS = 18_000L
         // Upgraded HTTP timeouts (InnerTune/ViMusic parity): 15s connect / 20s read to prevent
         // premature SocketTimeoutException on weak connections or during concurrent downloads.
         private const val HTTP_CONNECT_TIMEOUT_MS = 15_000
@@ -311,6 +311,7 @@ class DualPlayerEngine @Inject constructor(
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             if (isPlaying) {
+                lastPausedAtMs = 0L
                 lastPlayingAtMs = SystemClock.elapsedRealtime()
                 cancelAudioOffloadFallback()
                 if (!isLikelyLocalMedia(playerA.currentMediaItem)) {
