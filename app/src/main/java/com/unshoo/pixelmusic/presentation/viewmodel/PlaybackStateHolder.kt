@@ -433,9 +433,26 @@ class PlaybackStateHolder @Inject constructor(
                         withContext(Dispatchers.Main.immediate) {
                             val activeCtrl = mediaController ?: controller
                             val player = dualPlayerEngine.masterPlayer
-                            if (player.playbackState == androidx.media3.exoplayer.ExoPlayer.STATE_IDLE ||
-                                player.playbackState == androidx.media3.exoplayer.ExoPlayer.STATE_ENDED) {
-                                activeCtrl.prepare()
+                            when (player.playbackState) {
+                                androidx.media3.exoplayer.ExoPlayer.STATE_IDLE,
+                                androidx.media3.exoplayer.ExoPlayer.STATE_ENDED -> {
+                                    // Player lost its session; re-prepare before playing.
+                                    activeCtrl.prepare()
+                                }
+                                androidx.media3.exoplayer.ExoPlayer.STATE_BUFFERING -> {
+                                    // BUGFIX: Any source can stall in BUFFERING with
+                                    // playWhenReady=false when the underlying connection
+                                    // dies (DRM handshake timeout, expired CDN segments,
+                                    // dropped HTTP keep-alive, etc.). The first play tap
+                                    // just sets playWhenReady=true which does nothing if
+                                    // the source is dead. Force stop()+prepare() to reset
+                                    // the pipeline and restart from the (now-fresh) media item.
+                                    if (!player.playWhenReady) {
+                                        player.stop()
+                                        activeCtrl.prepare()
+                                    }
+                                }
+                                else -> { /* STATE_READY — just play */ }
                             }
                             activeCtrl.play()
                         }

@@ -537,13 +537,27 @@ class DualPlayerEngine @Inject constructor(
         if (player.isPlaying) return
         val currentItem = player.currentMediaItem ?: return
         val uriStr = currentItem.localConfiguration?.uri?.toString() ?: ""
-        val isRemoteStream = uriStr.startsWith("youtube://") ||
+        val isAppleHlsStream = uriStr.startsWith("data:application/vnd.apple.mpegurl") ||
+            uriStr.startsWith("data:application/x-mpegurl")
+        val isRemoteStream = isAppleHlsStream ||
+            uriStr.startsWith("youtube://") ||
             uriStr.contains("googlevideo.com") ||
             uriStr.contains("saavncdn.com") ||
             uriStr.contains("jiosaavn.com") ||
             currentItem.mediaId.startsWith("youtube_")
 
         if (!isRemoteStream) return
+
+        // Apple HLS data: URIs are self-contained (no resolved-uri cache entry);
+        // check freshness directly via LosslessStreamResolver.
+        if (isAppleHlsStream) {
+            if (!LosslessStreamResolver.isFreshUri(uriStr)) {
+                scope.launch(Dispatchers.Main.immediate) {
+                    ensureFreshStreamForResume()
+                }
+            }
+            return
+        }
 
         val cleanId = currentItem.mediaId.removePrefix("youtube_")
         val resolvedUri = activePlaybackResolvedUris[uriStr]
@@ -1792,6 +1806,53 @@ class DualPlayerEngine @Inject constructor(
 
         val currentUriStr = currentUri.toString()
         val originalUriStr = currentItem.mediaMetadata.extras?.getString("com.unshoo.pixelmusic.external.CONTENT_URI") ?: currentUriStr
+
+        // Apple HLS streams use data: URIs that embed the entire playlist as base64.
+        // The CDN segment URLs inside expire after ~30 min, so after a long pause the
+        // player buffers forever. Detect stale Apple HLS and force a full re-resolve.
+        val isAppleHls = currentUriStr.startsWith("data:application/vnd.apple.mpegurl") ||
+            currentUriStr.startsWith("data:application/x-mpegurl")
+        if (isAppleHls) {
+            if (LosslessStreamResolver.isFreshUri(currentUriStr)) {
+                // Still within the freshness window; just make sure the player is prepared.
+                withContext(Dispatchers.Main.immediate) {
+                    if (::playerA.isInitialized) {
+                        if (playerA.playbackState == Player.STATE_IDLE || playerA.playbackState == Player.STATE_ENDED) {
+                            playerA.prepare()
+                        }
+                        playerA.playWhenReady = true
+                    }
+                }
+                return
+            }
+            Timber.tag("DualPlayerEngine").i("Apple HLS stale on resume for %s, re-resolving...", currentItem.mediaId)
+            LosslessStreamResolver.markUriFresh(currentUriStr, 0L)
+            val sourceUri = Uri.parse(originalUriStr.takeIf { it != currentUriStr } ?: "youtube://${currentItem.mediaId.removePrefix("youtube_")}")
+            val freshItem = withContext(Dispatchers.IO) {
+                val sourceScheme = sourceUri.scheme
+                if (sourceScheme != null && sourceScheme in REMOTE_MEDIA_SCHEMES) {
+                    resolveMediaItem(currentItem.buildUpon().setUri(sourceUri).build())
+                } else {
+                    // Reconstruct a youtube:// URI to re-enter the lossless chain
+                    val ytUri = Uri.parse("youtube://${currentItem.mediaId.removePrefix("youtube_")}")
+                    resolveMediaItem(currentItem.buildUpon().setUri(ytUri).build())
+                }
+            }
+            withContext(Dispatchers.Main.immediate) {
+                if (::playerA.isInitialized && playerA.currentMediaItem?.mediaId == currentItem.mediaId) {
+                    val pos = playerA.currentPosition
+                    val idx = playerA.currentMediaItemIndex
+                    val playWhenReady = playerA.playWhenReady
+                    playerA.replaceMediaItem(idx, freshItem)
+                    playerA.seekTo(idx, pos)
+                    playerA.playWhenReady = playWhenReady
+                    if (playerA.playbackState == Player.STATE_IDLE || playerA.playbackState == Player.STATE_ENDED) {
+                        playerA.prepare()
+                    }
+                }
+            }
+            return
+        }
 
         val isHttp = currentUri.scheme == "http" || currentUri.scheme == "https"
         val isRemoteScheme = currentUri.scheme in REMOTE_MEDIA_SCHEMES

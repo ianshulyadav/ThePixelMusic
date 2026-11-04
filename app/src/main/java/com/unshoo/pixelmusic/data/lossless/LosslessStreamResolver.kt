@@ -125,6 +125,13 @@ object LosslessStreamResolver {
     /** How long a resolved URI is considered playable by the player-side freshness checks. */
     private const val URI_FRESHNESS_MS = 60 * 60 * 1000L
 
+    /**
+     * Apple CDN segment URLs inside HLS playlists expire faster than other sources (~30 min).
+     * Use a shorter freshness window so stale Apple streams get re-resolved on resume instead
+     * of buffering forever against expired segment URLs.
+     */
+    private const val APPLE_HLS_FRESHNESS_MS = 25 * 60 * 1000L
+
 
     /**
      * Cap for the per-track resolver maps. They used to grow by one entry per distinct track played
@@ -340,7 +347,7 @@ object LosslessStreamResolver {
             uriFreshness[uri] = System.currentTimeMillis() + URI_FRESHNESS_MS
             return true
         } else if (uri.startsWith("data:application/vnd.apple.mpegurl") || uri.startsWith("data:application/x-mpegurl")) {
-            uriFreshness[uri] = System.currentTimeMillis() + URI_FRESHNESS_MS
+            uriFreshness[uri] = System.currentTimeMillis() + APPLE_HLS_FRESHNESS_MS
             return true
         } else {
             return false
@@ -1331,6 +1338,10 @@ object LosslessStreamResolver {
                     matchedArtist = candidate.matchedArtist,
                     matchedAlbum = candidate.matchedAlbum,
                     matchedDurationMs = candidate.matchedDurationMs,
+                    // Apple's internal TitleMatch already validated this candidate;
+                    // skip the redundant outer TitleMatch.evaluate() in resolveLocked()
+                    // that was rejecting Apple streams due to metadata format differences.
+                    trustedDirectId = true,
                 )
             val match =
                 if (trusted) {
@@ -1423,7 +1434,8 @@ object LosslessStreamResolver {
                 containerMimeType = detectedContainerMime,
             )
         resolvedByMediaId[mediaId] = result
-        uriFreshness[stream.uri] = System.currentTimeMillis() + URI_FRESHNESS_MS
+        val freshnessTtl = if (stream.source == AudioSourceType.APPLE) APPLE_HLS_FRESHNESS_MS else URI_FRESHNESS_MS
+        uriFreshness[stream.uri] = System.currentTimeMillis() + freshnessTtl
         // Oldest-resolved first; uriFreshness expires in the same order, so the two stay consistent.
         resolvedByMediaId.trimTo(MAX_RESOLVED_ENTRIES) { it.resolvedAtMs }
         uriFreshness.trimTo(MAX_RESOLVED_ENTRIES) { it }
