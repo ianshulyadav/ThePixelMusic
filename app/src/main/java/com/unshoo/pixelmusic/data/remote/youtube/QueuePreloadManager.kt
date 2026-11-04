@@ -139,10 +139,11 @@ object QueuePreloadManager {
                 try {
                     // Prefetch at the user's selected quality (HIGH → highest stream first).
                     streamUrl = YoutubeHelper.getSongPlayerUrl(ctx, song, allowLocal = false, isNextInQueue = true)
-                    if (!streamUrl.isNullOrBlank() && streamUrl.startsWith("http")) {
+                    if (!streamUrl.isNullOrBlank() && (streamUrl.startsWith("http") || streamUrl.startsWith("data:") || streamUrl.startsWith("apple-pending:"))) {
                         val ytUri = "youtube://$videoId"
                         engineRef?.resolvedUriCache?.put(ytUri, android.net.Uri.parse(streamUrl))
-                        if (!com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver.isLosslessUri(streamUrl) &&
+                        if (streamUrl.startsWith("http") &&
+                            !com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver.isLosslessUri(streamUrl) &&
                             !streamUrl.contains("monochrome.st/track/") &&
                             !streamUrl.endsWith(".flac", ignoreCase = true)
                         ) {

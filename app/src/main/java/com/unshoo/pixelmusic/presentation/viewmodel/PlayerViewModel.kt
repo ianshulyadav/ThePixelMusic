@@ -182,7 +182,8 @@ private const val ENABLE_FOLDERS_SOURCE_SWITCHING = true
 private const val MAX_ALBUM_BATCH_SELECTION = 6
 private const val SONG_ID_QUERY_CHUNK_SIZE = 900
 private const val HOME_MIX_PREVIEW_LIMIT = 48
-private const val OPTIMISTIC_RESOLVE_BUDGET_MS = 1_500L
+/** Max time we wait for lossless resolution (4s hedged wave + buffer) before starting with YouTube fallback. */
+private const val OPTIMISTIC_RESOLVE_BUDGET_MS = 5_000L
 
 private fun List<Song>.toPlaybackQueue(): ImmutableList<Song> = when (this) {
     is PersistentList<Song> -> this
@@ -4760,6 +4761,26 @@ class PlayerViewModel @Inject constructor(
         allSongsById: Map<String, Song>? = null
     ): Song {
         val songsMap = allSongsById ?: libraryStateHolder.allSongsById.value
+        val resolvedYoutubeId = if (itemSnapshot.mediaId.startsWith("youtube_")) {
+            itemSnapshot.mediaId.removePrefix("youtube_")
+        } else if (itemSnapshot.uri.startsWith("youtube://")) {
+            itemSnapshot.uri.removePrefix("youtube://")
+        } else if (itemSnapshot.mediaId.length == 11 && !itemSnapshot.mediaId.startsWith("external:")) {
+            itemSnapshot.mediaId
+        } else {
+            null
+        }
+        val safeContentUri = if (resolvedYoutubeId != null && (
+                itemSnapshot.uri.contains("googlevideo.com") ||
+                itemSnapshot.uri.contains("youtube.com") ||
+                itemSnapshot.uri.contains("saavncdn.com") ||
+                itemSnapshot.uri.contains("jiosaavn.com") ||
+                itemSnapshot.uri.startsWith("youtube://")
+            )) {
+            "youtube://$resolvedYoutubeId"
+        } else {
+            itemSnapshot.uri
+        }
         return songsMap[itemSnapshot.mediaId] ?: Song(
             id = itemSnapshot.mediaId,
             title = itemSnapshot.title?.takeIf { it.isNotBlank() } ?: context.getString(R.string.unknown_song_title),
@@ -4768,22 +4789,14 @@ class PlayerViewModel @Inject constructor(
             album = itemSnapshot.albumTitle?.takeIf { it.isNotBlank() } ?: context.getString(R.string.unknown_album),
             albumId = -1L,
             path = "",
-            contentUriString = itemSnapshot.uri,
+            contentUriString = safeContentUri,
             albumArtUriString = itemSnapshot.artworkUri,
             duration = itemSnapshot.durationMs ?: 0L,
             dateAdded = System.currentTimeMillis(),
             mimeType = null,
             bitrate = null,
             sampleRate = null,
-            youtubeId = if (itemSnapshot.mediaId.startsWith("youtube_")) {
-                itemSnapshot.mediaId.removePrefix("youtube_")
-            } else if (itemSnapshot.uri.startsWith("youtube://")) {
-                itemSnapshot.uri.removePrefix("youtube://")
-            } else if (itemSnapshot.mediaId.length == 11 && !itemSnapshot.mediaId.startsWith("external:")) {
-                itemSnapshot.mediaId
-            } else {
-                null
-            }
+            youtubeId = resolvedYoutubeId
         )
     }
 

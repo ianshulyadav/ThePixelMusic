@@ -2868,7 +2868,12 @@ class MusicService : MediaLibraryService() {
             snapshotItem.mediaId.startsWith("-15") -> "youtube://${snapshotItem.mediaId}"
             snapshotItem.uri.startsWith("youtube://") -> snapshotItem.uri
             snapshotItem.uri.isNotBlank() && !snapshotItem.uri.startsWith("http") -> snapshotItem.uri
-            snapshotItem.mediaId.isNotBlank() && (snapshotItem.uri.contains("googlevideo.com") || snapshotItem.uri.contains("youtube.com")) -> {
+            snapshotItem.mediaId.isNotBlank() && (
+                snapshotItem.uri.contains("googlevideo.com") ||
+                snapshotItem.uri.contains("youtube.com") ||
+                snapshotItem.uri.contains("saavncdn.com") ||
+                snapshotItem.uri.contains("jiosaavn.com")
+            ) -> {
                 val cleanId = snapshotItem.mediaId.removePrefix("youtube_")
                 "youtube://$cleanId"
             }

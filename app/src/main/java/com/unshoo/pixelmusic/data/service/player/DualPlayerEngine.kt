@@ -237,6 +237,7 @@ class DualPlayerEngine @Inject constructor(
     }
 
     private var lastPlayWhenReadyAtMs: Long = 0L
+    private var lastPausedAtMs: Long = 0L
     private var lastPlayingAtMs: Long = 0L
     // Used to distinguish a STATE_BUFFERING caused by a user seek from a real HAL offload
     // reset (where audio underflows mid-playback). Without this, seeking shortly after
@@ -299,6 +300,7 @@ class DualPlayerEngine @Inject constructor(
                 requestAudioFocus()
                 checkAndRecoverStalePlaybackOnResume()
             } else {
+                lastPausedAtMs = SystemClock.elapsedRealtime()
                 cancelAudioOffloadFallback()
                 // Keep focus across user pauses so a quick resume doesn't have to re-acquire it.
                 // Focus is abandoned explicitly on AUDIOFOCUS_LOSS and on release(); anything in
@@ -547,6 +549,19 @@ class DualPlayerEngine @Inject constructor(
             currentItem.mediaId.startsWith("youtube_")
 
         if (!isRemoteStream) return
+
+        // After a long pause (>20 min) or cold start, remote CDN tokens (JioSaavn, YouTube, etc.)
+        // are almost certainly expired. Force a proactive re-resolve instead of waiting for
+        // the player to buffer-timeout.
+        val pausedForMs = if (lastPausedAtMs > 0L) SystemClock.elapsedRealtime() - lastPausedAtMs else Long.MAX_VALUE
+        val isLongPause = pausedForMs > 20 * 60 * 1000L
+        if (isLongPause) {
+            Timber.tag("DualPlayerEngine").i("Long pause (%ds) detected, forcing re-resolve for %s", pausedForMs / 1000, currentItem.mediaId)
+            scope.launch(Dispatchers.Main.immediate) {
+                ensureFreshStreamForResume()
+            }
+            return
+        }
 
         // Apple HLS data: URIs are self-contained (no resolved-uri cache entry);
         // check freshness directly via LosslessStreamResolver.
@@ -1690,10 +1705,10 @@ class DualPlayerEngine @Inject constructor(
         // Expanding maxMs to 90s–120s lets the player continuously bank up to 2 minutes of audio,
         // while minMs (20s–30s) starts fetching the next chunk long before the buffer is endangered.
         val profile = when {
-            isRecentlyUnstable -> BufferProfile(30_000, 120_000, 1_000, 3_000)
-            bandwidthKbps < 1_000 -> BufferProfile(25_000, 90_000, 800, 2_500)
-            bandwidthKbps < 5_000 -> BufferProfile(20_000, 90_000, 500, 2_000)
-            else -> BufferProfile(15_000, 120_000, 300, 1_500)
+            isRecentlyUnstable -> BufferProfile(45_000, 150_000, 500, 4_000)
+            bandwidthKbps < 1_000 -> BufferProfile(40_000, 150_000, 400, 3_500)
+            bandwidthKbps < 5_000 -> BufferProfile(30_000, 150_000, 400, 2_500)
+            else -> BufferProfile(25_000, 150_000, 300, 2_000)
         }
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(profile.minMs, profile.maxMs, profile.forPlaybackMs, profile.afterRebufferMs)
@@ -2033,7 +2048,24 @@ class DualPlayerEngine @Inject constructor(
             return true
         }
 
-        val isYoutubeResolution = originalUriString.startsWith("youtube://") ||
+        // JioSaavn streams:
+        val isSaavn = resolved.contains("saavncdn.com", ignoreCase = true) ||
+            resolved.contains("jiosaavn.com", ignoreCase = true)
+        if (isSaavn) {
+            if (LosslessStreamResolver.isFreshUri(resolved)) return true
+            val expireParam = resolvedUri.getQueryParameter("expire")
+                ?: resolvedUri.getQueryParameter("expires")
+                ?: resolvedUri.getQueryParameter("exp")
+            if (expireParam != null) {
+                val expireSeconds = expireParam.toLongOrNull() ?: return true
+                val nowSeconds = System.currentTimeMillis() / 1000L
+                return expireSeconds > (nowSeconds + 900L)
+            }
+            val pausedForMs = if (lastPausedAtMs > 0L) SystemClock.elapsedRealtime() - lastPausedAtMs else 0L
+            return pausedForMs <= 20 * 60 * 1000L
+        }
+
+        val isYoutubeResolution = (originalUriString.startsWith("youtube://") && (resolved.contains("googlevideo.com", ignoreCase = true) || resolved.contains("youtube.com", ignoreCase = true))) ||
             resolved.contains("googlevideo.com", ignoreCase = true) ||
             resolved.contains("youtube.com", ignoreCase = true)
         if (!isYoutubeResolution) {

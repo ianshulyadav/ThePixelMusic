@@ -661,6 +661,8 @@ object YoutubeHelper {
         /** When true, pick lowest bitrate first (Data Saver / weak nets). */
         val preferLowFirst: Boolean,
         val preferFastDirect: Boolean = false,
+        /** True when the effective quality was resolved via AUTO mode (network-adaptive). */
+        val isAutoMode: Boolean = false,
     )
 
     private suspend fun resolveStreamQualityPlan(context: Context): StreamQualityPlan {
@@ -719,18 +721,21 @@ object YoutubeHelper {
                             maxBitrateKbps = StreamingAudioQuality.LOW.maxBitrateKbps,
                             preferLowFirst = true,
                             preferFastDirect = true,
+                            isAutoMode = true,
                         )
                         StreamingAudioQuality.MEDIUM -> StreamQualityPlan(
                             quality = StreamingAudioQuality.MEDIUM,
                             maxBitrateKbps = 0,
                             preferLowFirst = false,
                             preferFastDirect = true,
+                            isAutoMode = true,
                         )
                         else -> StreamQualityPlan(
                             quality = StreamingAudioQuality.HIGH,
                             maxBitrateKbps = 0,
                             preferLowFirst = false,
                             preferFastDirect = isMetered,
+                            isAutoMode = true,
                         )
                     }
                 }
@@ -909,17 +914,18 @@ object YoutubeHelper {
             ytIdx >= 0 && saavnIdx >= 0 && ytIdx < saavnIdx
         }
 
-        // Strict Lossless Gating:
-        // - LOW and MEDIUM bypass lossless completely (0ms delay, even if Master Lossless is ON)
-        // - HIGH engages lossless (if Master Lossless is ON)
-        // - Per user requirement: when high quality is selected use default per source timeout for addons
-        val isQualityEligibleForLossless = plan.quality == StreamingAudioQuality.HIGH
+        // Lossless Gating:
+        // - HIGH and AUTO engage lossless sources (if Master Lossless is ON)
+        // - Pure LOW quality bypasses lossless for 0ms data saver
+        // - In AUTO mode: use a fast 4-second hedged fallback timeout with top concurrent sources
+        // - In HIGH mode: use default per-source timeout for full lossless resolution
+        val isQualityEligibleForLossless = plan.quality == StreamingAudioQuality.HIGH || (plan.isAutoMode && (!plan.preferLowFirst || unifiedSongOverride != null))
         val allowLosslessForTrack = allowLossless && (isQualityEligibleForLossless || unifiedSongOverride != null)
 
         if (allowLosslessForTrack && (!LosslessStreamResolver.isFailedForTrack(videoId) || unifiedSongOverride != null)) {
-            // When HIGH quality is selected, use default per-source timeout for addons (fastTimeoutMs = null).
-            // If preferFastDirect is active (e.g. mobile metered with forceHigh), apply a bounded fast timeout (4_000L).
-            val fastTimeout = if (plan.preferFastDirect) 4_000L else null
+            // In AUTO mode or fastDirect, apply a 4-second fallback budget so fastest available source plays.
+            // In HIGH mode, use default per-source timeout (fastTimeoutMs = null).
+            val fastTimeout = if (plan.isAutoMode || plan.preferFastDirect) 4_000L else null
             resolveLosslessStreamUrl(
                 context = context,
                 song = song,
@@ -976,6 +982,7 @@ object YoutubeHelper {
                         val saavnBitrate = saavnResult.bitrateKbps * 1000
                         val mimeType = "audio/mp4"
 
+                        LosslessStreamResolver.markUriFresh(saavnUrl, 2 * 60 * 60 * 1000L)
                         streamUrlLruCache.put(targetCacheKey, saavnUrl)
                         streamMimeTypeLruCache.put(targetCacheKey, mimeType)
                         streamBitrateLruCache.put(targetCacheKey, saavnBitrate)
@@ -1544,6 +1551,7 @@ object YoutubeHelper {
                         val mimeType = "audio/mp4"
 
                         if (isSaavnEnabled) {
+                            LosslessStreamResolver.markUriFresh(saavnUrl, 2 * 60 * 60 * 1000L)
                             streamUrlLruCache.put(cacheKey, saavnUrl)
                             streamMimeTypeLruCache.put(cacheKey, mimeType)
                             streamBitrateLruCache.put(cacheKey, saavnBitrate)
@@ -2311,13 +2319,14 @@ object YoutubeHelper {
                 return@withContext expireTimeSecs > currentTimeSecs + 900
             }
         }
+        if (isSaavnUrl(url)) {
+            return@withContext LosslessStreamResolver.isFreshUri(url)
+        }
         // No expire param (rare): treat as valid and let ExoPlayer / error recovery handle it.
         // Doing a HEAD/range probe here was a major low-connectivity stall source.
         return@withContext url.contains("googlevideo.com", ignoreCase = true) ||
             url.contains("youtube.com", ignoreCase = true) ||
-            url.contains("ggpht.com", ignoreCase = true) ||
-            url.contains("saavncdn.com", ignoreCase = true) ||
-            url.contains("jiosaavn.com", ignoreCase = true)
+            url.contains("ggpht.com", ignoreCase = true)
     }
 
     fun findObjectsWithKey(element: JsonElement, key: String, result: MutableList<JsonObject>) {

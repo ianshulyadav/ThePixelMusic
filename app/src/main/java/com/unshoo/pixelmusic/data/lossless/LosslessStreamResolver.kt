@@ -340,7 +340,8 @@ object LosslessStreamResolver {
         val until = uriFreshness[uri]
         if (until != null) {
             if (until <= System.currentTimeMillis()) {
-                uriFreshness.remove(uri)
+                // Keep the expired entry in the map so subsequent calls don't fall through
+                // to heuristic re-granting (e.g. Apple data: URIs or monochrome links).
                 return false
             }
         } else if (uri.startsWith("monochrome://") || uri.contains("monochrome.st/track/")) {
