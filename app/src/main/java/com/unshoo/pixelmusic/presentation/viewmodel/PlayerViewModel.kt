@@ -1367,11 +1367,8 @@ class PlayerViewModel @Inject constructor(
                 snapshot.items.getOrNull(snapshot.currentIndex)
             } ?: return@launch
 
-            val artworkUri = currentItem.artworkUri?.takeIf { it.isNotBlank() } ?: return@launch
-
             // FIX 1: Restore last recently played song as currentSong on cold start
             // without permanently writing to PlaybackStatsRepository DB.
-            // Resolve stream URL exactly like BitChord/Mochy-Music (resolveCloudUri).
             val allSongsById = libraryStateHolder.allSongsById.value
             val restoredSong = mapSnapshotItemToSong(currentItem, allSongsById)
             playbackStateHolder.updateStablePlayerState { it.copy(
@@ -1380,21 +1377,55 @@ class PlayerViewModel @Inject constructor(
                 playWhenReady = false,
                 totalDuration = restoredSong.duration.coerceAtLeast(0L)
             )}
+            _isSheetVisible.value = true
 
-            // Pre-resolve stream URL for last recently played song so miniplayer can play immediately
-            val playbackUri = MediaItemBuilder.playbackUri(restoredSong)
-            val scheme = playbackUri.scheme
-            if (scheme == "youtube" || scheme == "telegram" || scheme == "gdrive" || scheme == "monochrome") {
+            // Pre-resolve stream URL for last recently played song so miniplayer can play immediately.
+            // Per user directive: for cold-started retrieved last recently played song, directly
+            // use YT Music's fastest available stream (bypassing lossless addons) to prevent cold-start delay.
+            val videoId = restoredSong.id.removePrefix("youtube_")
+            val isYoutubeSong = restoredSong.id.startsWith("youtube_") || (videoId.length == 11 && !restoredSong.id.startsWith("external:"))
+            if (isYoutubeSong) {
                 viewModelScope.launch(Dispatchers.IO) {
-                    dualPlayerEngine.resolveCloudUri(playbackUri)
+                    try {
+                        val ytSong = com.unshoo.pixelmusic.data.model.youtube.Song(
+                            youtubeId = videoId,
+                            title = restoredSong.title,
+                            artist = restoredSong.artist,
+                            album = restoredSong.album
+                        )
+                        val fastUrl = com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.getSongPlayerUrl(
+                            context = context,
+                            song = ytSong,
+                            allowLocal = true,
+                            allowLossless = false
+                        )
+                        if (fastUrl.isNotBlank()) {
+                            val ytUri = "youtube://$videoId"
+                            dualPlayerEngine.resolvedUriCache.put(ytUri, Uri.parse(fastUrl))
+                            Timber.tag("PlayerViewModel").i("Cold-start fast stream pre-cached for %s", videoId)
+                        }
+                    } catch (e: Exception) {
+                        Timber.tag("PlayerViewModel").w(e, "Cold-start fast stream resolve failed for %s", videoId)
+                    }
+                }
+            } else {
+                val playbackUri = MediaItemBuilder.playbackUri(restoredSong)
+                val scheme = playbackUri.scheme
+                if (scheme == "telegram" || scheme == "gdrive" || scheme == "monochrome") {
+                    viewModelScope.launch(Dispatchers.IO) {
+                        dualPlayerEngine.resolveCloudUri(playbackUri)
+                    }
                 }
             }
 
-            themeStateHolder.extractAndGenerateColorScheme(
-                albumArtUriAsUri = artworkUri.toUri(),
-                currentSongUriString = artworkUri,
-                isPreload = false
-            )
+            val artworkUri = restoredSong.albumArtUriString?.takeIf { it.isNotBlank() }
+            if (artworkUri != null) {
+                themeStateHolder.extractAndGenerateColorScheme(
+                    albumArtUriAsUri = artworkUri.toUri(),
+                    currentSongUriString = artworkUri,
+                    isPreload = false
+                )
+            }
         }
 
         viewModelScope.launch {
@@ -1413,7 +1444,11 @@ class PlayerViewModel @Inject constructor(
                     val currentSong = playbackStateHolder.stablePlayerState.value.currentSong
                     if (currentSong != null && currentSong.artistId == -1L && songsMap.containsKey(currentSong.id)) {
                         songsMap[currentSong.id]?.let { richSong ->
-                            playbackStateHolder.updateStablePlayerState { it.copy(currentSong = richSong) }
+                            val effectiveArt = richSong.albumArtUriString?.takeIf { it.isNotBlank() }
+                                ?: currentSong.albumArtUriString
+                            playbackStateHolder.updateStablePlayerState {
+                                it.copy(currentSong = richSong.copy(albumArtUriString = effectiveArt))
+                            }
                         }
                     }
                 }
@@ -4611,7 +4646,6 @@ class PlayerViewModel @Inject constructor(
                     ?.takeIf { it.isNotBlank() }
 
         return when {
-            metadataArtwork == null && song.albumArtUriString != null -> song.copy(albumArtUriString = null)
             metadataArtwork != null && song.albumArtUriString != metadataArtwork ->
                 song.copy(albumArtUriString = metadataArtwork)
             else -> song
@@ -4781,7 +4815,19 @@ class PlayerViewModel @Inject constructor(
         } else {
             itemSnapshot.uri
         }
-        return songsMap[itemSnapshot.mediaId] ?: Song(
+        val cachedSong = songsMap[itemSnapshot.mediaId]
+        val effectiveArt = cachedSong?.albumArtUriString?.takeIf { it.isNotBlank() }
+            ?: itemSnapshot.artworkUri?.takeIf { it.isNotBlank() }
+            ?: if (resolvedYoutubeId != null && resolvedYoutubeId.length == 11) "https://i.ytimg.com/vi/$resolvedYoutubeId/hqdefault.jpg" else null
+
+        if (cachedSong != null) {
+            return cachedSong.copy(
+                albumArtUriString = effectiveArt,
+                contentUriString = cachedSong.contentUriString.ifBlank { safeContentUri },
+                youtubeId = cachedSong.youtubeId ?: resolvedYoutubeId
+            )
+        }
+        return Song(
             id = itemSnapshot.mediaId,
             title = itemSnapshot.title?.takeIf { it.isNotBlank() } ?: context.getString(R.string.unknown_song_title),
             artist = itemSnapshot.artist?.takeIf { it.isNotBlank() } ?: context.getString(R.string.unknown_artist),

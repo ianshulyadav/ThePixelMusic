@@ -2,6 +2,8 @@
 
 package com.unshoo.pixelmusic.presentation.components
 
+import com.unshoo.pixelmusic.R
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -115,6 +117,10 @@ internal fun MiniPlayerContentInternal(
         verticalAlignment = Alignment.CenterVertically
     ) {
         val albumArtModel = song.albumArtUriString?.takeIf { it.isNotBlank() }
+            ?: (if (song.id.isNotBlank() && !song.id.startsWith("external:") && !song.id.startsWith("local:")) {
+                val cleanYtId = song.id.removePrefix("youtube_")
+                if (cleanYtId.length == 11) "https://i.ytimg.com/vi/$cleanYtId/hqdefault.jpg" else null
+            } else null)
         Box(
             modifier = Modifier.size(44.dp),
             contentAlignment = Alignment.Center
@@ -125,6 +131,8 @@ internal fun MiniPlayerContentInternal(
                     contentDescription = "Carátula de ${song.title}",
                     shape = CircleShape,
                     targetSize = Size(150, 150),
+                    placeholderResId = R.drawable.ic_music_placeholder,
+                    errorResId = R.drawable.ic_music_placeholder,
                     modifier = Modifier
                         .fillMaxSize()
                         .clip(CircleShape),

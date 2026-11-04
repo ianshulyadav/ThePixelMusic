@@ -2810,9 +2810,33 @@ class MusicService : MediaLibraryService() {
 
         // Do not block player restoration on resolving the track's streaming URI from network.
         // Instead, restore immediately with the unresolved media item so the UI displays the song instantly.
-        // The URI resolution is launched asynchronously to warm up the cache with fresh URLs.
+        // Per user directive: for the cold-started restored song, directly use YT Music's fastest available
+        // stream without lossless addons to avoid cold-start delays.
         serviceScope.launch(Dispatchers.IO) {
-            runCatching { engine.preResolveForPlayback(latestItem) }
+            runCatching {
+                val videoId = latestItem.mediaId.removePrefix("youtube_")
+                val isYoutube = latestItem.mediaId.startsWith("youtube_") || (videoId.length == 11 && !latestItem.mediaId.startsWith("external:"))
+                if (isYoutube) {
+                    val ytSong = com.unshoo.pixelmusic.data.model.youtube.Song(
+                        youtubeId = videoId,
+                        title = latestItem.mediaMetadata.title?.toString().orEmpty(),
+                        artist = latestItem.mediaMetadata.artist?.toString().orEmpty(),
+                        album = latestItem.mediaMetadata.albumTitle?.toString().orEmpty()
+                    )
+                    val fastUrl = com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.getSongPlayerUrl(
+                        context = this@MusicService,
+                        song = ytSong,
+                        allowLocal = true,
+                        allowLossless = false // Fast YT direct stream on cold start
+                    )
+                    if (fastUrl.isNotBlank()) {
+                        val ytUri = "youtube://$videoId"
+                        engine.resolvedUriCache.put(ytUri, android.net.Uri.parse(fastUrl))
+                    }
+                } else {
+                    engine.preResolveForPlayback(latestItem)
+                }
+            }
         }
 
         withContext(Dispatchers.Main.immediate) {
