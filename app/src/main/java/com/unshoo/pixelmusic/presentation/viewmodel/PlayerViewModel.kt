@@ -4805,7 +4805,7 @@ class PlayerViewModel @Inject constructor(
             albumId = -1L,
             path = "",
             contentUriString = safeContentUri,
-            albumArtUriString = itemSnapshot.artworkUri,
+            albumArtUriString = effectiveArt,
             duration = itemSnapshot.durationMs ?: 0L,
             dateAdded = System.currentTimeMillis(),
             mimeType = null,

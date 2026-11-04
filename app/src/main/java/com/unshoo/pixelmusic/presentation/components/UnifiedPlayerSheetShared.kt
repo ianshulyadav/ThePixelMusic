@@ -3,6 +3,7 @@
 package com.unshoo.pixelmusic.presentation.components
 
 import com.unshoo.pixelmusic.R
+import com.unshoo.pixelmusic.utils.LocalArtworkUri
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -117,10 +118,12 @@ internal fun MiniPlayerContentInternal(
         verticalAlignment = Alignment.CenterVertically
     ) {
         val albumArtModel = song.albumArtUriString?.takeIf { it.isNotBlank() }
+            ?: song.youtubeId?.takeIf { it.length == 11 }?.let { "https://i.ytimg.com/vi/$it/hqdefault.jpg" }
             ?: (if (song.id.isNotBlank() && !song.id.startsWith("external:") && !song.id.startsWith("local:")) {
                 val cleanYtId = song.id.removePrefix("youtube_")
                 if (cleanYtId.length == 11) "https://i.ytimg.com/vi/$cleanYtId/hqdefault.jpg" else null
             } else null)
+            ?: (song.id.toLongOrNull()?.takeIf { it > 0L }?.let { LocalArtworkUri.buildSongUri(it) })
         Box(
             modifier = Modifier.size(44.dp),
             contentAlignment = Alignment.Center

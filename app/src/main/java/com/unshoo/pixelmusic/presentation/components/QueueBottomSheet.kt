@@ -149,6 +149,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import com.unshoo.pixelmusic.R
+import com.unshoo.pixelmusic.utils.LocalArtworkUri
 import com.unshoo.pixelmusic.data.model.Song
 import com.unshoo.pixelmusic.presentation.components.AutoScrollingText
 import com.unshoo.pixelmusic.presentation.components.SmartImage
@@ -2052,8 +2053,16 @@ fun QueuePlaylistSongItem(
                     val albumArtPadding = if (isDragHandleVisible) 6.dp else 12.dp
                     Spacer(Modifier.width(albumArtPadding))
 
+                    val albumArtModel = song.albumArtUriString?.takeIf { it.isNotBlank() }
+                        ?: song.youtubeId?.takeIf { it.length == 11 }?.let { "https://i.ytimg.com/vi/$it/hqdefault.jpg" }
+                        ?: (if (song.id.isNotBlank() && !song.id.startsWith("external:") && !song.id.startsWith("local:")) {
+                            val cleanYtId = song.id.removePrefix("youtube_")
+                            if (cleanYtId.length == 11) "https://i.ytimg.com/vi/$cleanYtId/hqdefault.jpg" else null
+                        } else null)
+                        ?: (song.id.toLongOrNull()?.takeIf { it > 0L }?.let { LocalArtworkUri.buildSongUri(it) })
+
                     SmartImage(
-                        model = song.albumArtUriString,
+                        model = albumArtModel,
                         shape = albumShape,
                         contentDescription = stringResource(R.string.cd_album_art_for_title, song.title),
                         modifier = Modifier

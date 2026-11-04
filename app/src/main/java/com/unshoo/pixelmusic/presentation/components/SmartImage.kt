@@ -42,6 +42,7 @@ import coil.memory.MemoryCache
 import coil.compose.SubcomposeAsyncImage
 import coil.compose.SubcomposeAsyncImageContent
 import com.unshoo.pixelmusic.R
+import com.unshoo.pixelmusic.utils.LocalArtworkUri
 import androidx.compose.runtime.collectAsState
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
@@ -299,16 +300,24 @@ fun SmartImage(
             crossfadeDurationMillis
         }
 
+val isStableLocalArtwork = when (optimizedModel) {
+            is String -> LocalArtworkUri.isLocalArtworkUri(optimizedModel)
+            is android.net.Uri -> LocalArtworkUri.isLocalArtworkUri(optimizedModel)
+            else -> false
+        }
+        val effectiveDiskCachePolicy = if (!useDiskCache || isStableLocalArtwork) CachePolicy.DISABLED else CachePolicy.ENABLED
+
         if (optimizedModel is ImageRequest) {
             optimizedModel.newBuilder(context)
                 .size(requestTargetSize)
                 .crossfade(effectiveCrossfade)
+                .diskCachePolicy(effectiveDiskCachePolicy)
                 .build()
         } else {
             ImageRequest.Builder(context)
                 .data(optimizedModel)
                 .crossfade(effectiveCrossfade)
-                .diskCachePolicy(if (useDiskCache) CachePolicy.ENABLED else CachePolicy.DISABLED)
+                .diskCachePolicy(effectiveDiskCachePolicy)
                 .memoryCachePolicy(if (useMemoryCache) CachePolicy.ENABLED else CachePolicy.DISABLED)
                 .allowHardware(allowHardware)
                 .apply {

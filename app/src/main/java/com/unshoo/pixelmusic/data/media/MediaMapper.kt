@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.media3.common.MediaItem
 import com.unshoo.pixelmusic.R
 import com.unshoo.pixelmusic.data.model.Song
+import com.unshoo.pixelmusic.utils.LocalArtworkUri
 import com.unshoo.pixelmusic.utils.MediaItemBuilder
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -62,8 +63,18 @@ class MediaMapper @Inject constructor(
             null
         }
 
-        // Note: This creates a partial Song object. 
+        // Note: This creates a partial Song object.
         // Some fields like path, genre, year might be missing if not in extras.
+        val effectiveAlbumArtUri = metadata.artworkUri?.toString()?.takeIf { it.isNotBlank() }
+            ?: extras?.getString(MediaItemBuilder.EXTERNAL_EXTRA_ALBUM_ART)?.takeIf { it.isNotBlank() }
+            ?: if (resolvedYoutubeId != null && resolvedYoutubeId.length == 11) {
+                "https://i.ytimg.com/vi/$resolvedYoutubeId/hqdefault.jpg"
+            } else if (bareMediaId.toLongOrNull() != null && bareMediaId.toLong() > 0L) {
+                LocalArtworkUri.buildSongUri(bareMediaId.toLong())
+            } else {
+                null
+            }
+
         return Song(
             id = id,
             title = title,
@@ -73,7 +84,7 @@ class MediaMapper @Inject constructor(
             albumId = albumId,
             path = filePath,
             contentUriString = contentUri,
-            albumArtUriString = metadata.artworkUri?.toString(),
+            albumArtUriString = effectiveAlbumArtUri,
             duration = duration,
             dateAdded = dateAdded,
             mimeType = null, 

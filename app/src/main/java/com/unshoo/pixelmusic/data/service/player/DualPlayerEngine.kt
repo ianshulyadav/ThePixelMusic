@@ -116,7 +116,7 @@ class DualPlayerEngine @Inject constructor(
          * UI thread — whereas throwing early pushed ProgressiveMediaSource into exponential
          * retry back-off (1s → 2s → 4s), which was the multi-second audio-start regression.
          */
-        private const val LOAD_THREAD_RESOLVE_AWAIT_MS = 18_000L
+        private const val LOAD_THREAD_RESOLVE_AWAIT_MS = 12_000L
         // Upgraded HTTP timeouts (InnerTune/ViMusic parity): 15s connect / 20s read to prevent
         // premature SocketTimeoutException on weak connections or during concurrent downloads.
         private const val HTTP_CONNECT_TIMEOUT_MS = 15_000
@@ -1985,11 +1985,10 @@ class DualPlayerEngine @Inject constructor(
                     // resolveYoutubeUriAsync's own timeout (which also branches on metered)
                     // can complete before the outer fires. Previously the outer and inner
                     // used the same value, making the inner's fallback unreachable.
-                    val isLosslessActive = LosslessStreamResolver.isEnabled(context) && !connectivityStateHolder.isMeteredNetwork.value
-                    val timeoutMs = when {
-                        connectivityStateHolder.isMeteredNetwork.value -> STREAM_RESOLVE_TIMEOUT_LOW_CONNECTIVITY_MS + 4_000L
-                        isLosslessActive -> 18_000L
-                        else -> STREAM_RESOLVE_TIMEOUT_MS + 4_000L
+                    val timeoutMs = if (connectivityStateHolder.isMeteredNetwork.value) {
+                        STREAM_RESOLVE_TIMEOUT_LOW_CONNECTIVITY_MS + 4_000L
+                    } else {
+                        STREAM_RESOLVE_TIMEOUT_MS + 4_000L
                     }
                     val resolved: Uri? = withTimeoutOrNull(timeoutMs) {
                         when (uri.scheme) {
@@ -2162,11 +2161,10 @@ class DualPlayerEngine @Inject constructor(
             )
 
             // Never retry the full quality-aware resolver without an outer timeout.
-            val isLosslessActive = isLosslessEnabled && !connectivityStateHolder.isMeteredNetwork.value
-            val timeoutMs = when {
-                connectivityStateHolder.isMeteredNetwork.value -> STREAM_RESOLVE_TIMEOUT_LOW_CONNECTIVITY_MS
-                isLosslessActive -> 14_000L
-                else -> STREAM_RESOLVE_TIMEOUT_MS
+            val timeoutMs = if (connectivityStateHolder.isMeteredNetwork.value) {
+                STREAM_RESOLVE_TIMEOUT_LOW_CONNECTIVITY_MS
+            } else {
+                STREAM_RESOLVE_TIMEOUT_MS
             }
             // Reserve time for one emergency fallback; never launch a second unbounded full resolve.
             val fallbackBudgetMs = 3_000L
