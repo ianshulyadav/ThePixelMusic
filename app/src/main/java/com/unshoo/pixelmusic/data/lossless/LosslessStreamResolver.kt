@@ -1339,10 +1339,6 @@ object LosslessStreamResolver {
                     matchedArtist = candidate.matchedArtist,
                     matchedAlbum = candidate.matchedAlbum,
                     matchedDurationMs = candidate.matchedDurationMs,
-                    // Apple's internal TitleMatch already validated this candidate;
-                    // skip the redundant outer TitleMatch.evaluate() in resolveLocked()
-                    // that was rejecting Apple streams due to metadata format differences.
-                    trustedDirectId = true,
                 )
             val match =
                 if (trusted) {
