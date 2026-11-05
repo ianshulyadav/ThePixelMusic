@@ -43,6 +43,7 @@ import coil.compose.SubcomposeAsyncImage
 import coil.compose.SubcomposeAsyncImageContent
 import com.unshoo.pixelmusic.R
 import com.unshoo.pixelmusic.utils.LocalArtworkUri
+import com.unshoo.pixelmusic.utils.MediaItemBuilder
 import androidx.compose.runtime.collectAsState
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
@@ -251,7 +252,9 @@ fun SmartImage(
         memoryCacheKey,
         isThumbnail
     ) {
-        val optimizedModel = if (model is String && (model.contains("googleusercontent.com") || model.contains("ggpht.com"))) {
+        val rawUnwrapped = if (model is String) MediaItemBuilder.unwrapArtworkUri(model) ?: model else model
+        val optimizedModel = if (rawUnwrapped is String && (rawUnwrapped.contains("googleusercontent.com") || rawUnwrapped.contains("ggpht.com"))) {
+            val unwrappedStr = rawUnwrapped
             val widthPx = (requestTargetSize.width as? coil.size.Dimension.Pixels)?.px ?: (if (isThumbnail) SmartImageBuckets.LIST_ROW_PX else SmartImageBuckets.CARD_PX)
             val heightPx = (requestTargetSize.height as? coil.size.Dimension.Pixels)?.px ?: (if (isThumbnail) SmartImageBuckets.LIST_ROW_PX else SmartImageBuckets.CARD_PX)
             val targetDim = maxOf(widthPx, heightPx)
@@ -261,17 +264,17 @@ fun SmartImage(
             } else {
                 "=w$bucketDim-h$bucketDim-c-rj"
             }
-            if (SmartImageRegex.sizeParamRegex.containsMatchIn(model)) {
-                model.replace(SmartImageRegex.sizeParamRegex, sizeStr)
-            } else if (SmartImageRegex.sizeParamRegex2.containsMatchIn(model)) {
-                model.replace(SmartImageRegex.sizeParamRegex2, sizeStr.replace("=", "/"))
-            } else if (model.contains("=")) {
-                model.substringBeforeLast("=") + sizeStr
+            if (SmartImageRegex.sizeParamRegex.containsMatchIn(unwrappedStr)) {
+                unwrappedStr.replace(SmartImageRegex.sizeParamRegex, sizeStr)
+            } else if (SmartImageRegex.sizeParamRegex2.containsMatchIn(unwrappedStr)) {
+                unwrappedStr.replace(SmartImageRegex.sizeParamRegex2, sizeStr.replace("=", "/"))
+            } else if (unwrappedStr.contains("=")) {
+                unwrappedStr.substringBeforeLast("=") + sizeStr
             } else {
-                "$model$sizeStr"
+                "$unwrappedStr$sizeStr"
             }
-        } else if (model is String && (model.contains("i.ytimg.com") || model.contains("img.youtube.com"))) {
-            val match = SmartImageRegex.youtubeViRegex.find(model)
+        } else if (rawUnwrapped is String && (rawUnwrapped.contains("i.ytimg.com") || rawUnwrapped.contains("img.youtube.com"))) {
+            val match = SmartImageRegex.youtubeViRegex.find(rawUnwrapped)
             if (match != null) {
                 val videoId = match.groupValues[1]
                 if (isThumbnail) {
@@ -280,12 +283,12 @@ fun SmartImage(
                     "https://i.ytimg.com/vi/$videoId/hqdefault.jpg"
                 }
             } else {
-                model
+                rawUnwrapped
             }
-        } else if (model is String && model.startsWith("/")) {
-            java.io.File(model)
+        } else if (rawUnwrapped is String && rawUnwrapped.startsWith("/")) {
+            java.io.File(rawUnwrapped)
         } else {
-            model
+            rawUnwrapped
         }
 
         val isInMemoryCache = if (useMemoryCache && memoryCacheKey != null) {

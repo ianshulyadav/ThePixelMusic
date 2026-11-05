@@ -117,7 +117,8 @@ internal fun MiniPlayerContentInternal(
             .padding(start = 10.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        val albumArtModel = song.albumArtUriString?.takeIf { it.isNotBlank() }
+        val cleanArt = com.unshoo.pixelmusic.utils.MediaItemBuilder.unwrapArtworkUri(song.albumArtUriString)
+        val albumArtModel = cleanArt?.takeIf { it.isNotBlank() }
             ?: song.youtubeId?.takeIf { it.length == 11 }?.let { "https://i.ytimg.com/vi/$it/hqdefault.jpg" }
             ?: (if (song.id.isNotBlank() && !song.id.startsWith("external:") && !song.id.startsWith("local:")) {
                 val cleanYtId = song.id.removePrefix("youtube_")

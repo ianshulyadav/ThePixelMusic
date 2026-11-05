@@ -246,6 +246,19 @@ object MediaItemBuilder {
      * Artwork URIs are surfaced to external controllers (Android Auto, widgets, etc.).
      * Keep only schemes that these surfaces can usually resolve, and normalize raw paths.
      */
+    fun unwrapArtworkUri(rawArtworkUri: String?): String? {
+        if (rawArtworkUri.isNullOrBlank()) return null
+        var current: String = rawArtworkUri
+        var depth = 0
+        while (current.startsWith("content://") && (current.contains("/remote") || current.contains("/" + SharedArtworkContentProvider.PATH_REMOTE)) && depth < 5) {
+            val unwrapped = SharedArtworkContentProvider.unwrapRemoteUrl(current)
+            if (unwrapped.isNullOrBlank() || unwrapped == current) break
+            current = unwrapped
+            depth++
+        }
+        return current
+    }
+
     fun artworkUri(rawArtworkUri: String?): Uri? {
         val pkg = applicationPackageName
         if (pkg != null && rawArtworkUri?.startsWith("${LocalArtworkUri.SCHEME}://") == true) {

@@ -1360,26 +1360,52 @@ class PlayerViewModel @Inject constructor(
                 userPreferencesRepository.getPlaybackQueueSnapshotOnce()
             }.getOrNull() ?: return@launch
 
-            val currentItem = if (snapshot.currentMediaId != null) {
-                snapshot.items.find { it.mediaId == snapshot.currentMediaId }
-            } else {
-                snapshot.items.getOrNull(snapshot.currentIndex)
-            } ?: return@launch
+            if (snapshot.items.isEmpty()) return@launch
 
-            // FIX 1: Restore last recently played song as currentSong on cold start
-            // without permanently writing to PlaybackStatsRepository DB.
             val allSongsById = libraryStateHolder.allSongsById.value
-            val restoredSong = mapSnapshotItemToSong(currentItem, allSongsById)
+            val restoredQueue = snapshot.items.map { item -> mapSnapshotItemToSong(item, allSongsById) }
+
+            val resolvedIndex = when {
+                !snapshot.currentMediaId.isNullOrBlank() -> {
+                    restoredQueue.indexOfFirst { it.id == snapshot.currentMediaId }
+                        .takeIf { it >= 0 } ?: (if (snapshot.currentIndex in restoredQueue.indices) snapshot.currentIndex else 0)
+                }
+                snapshot.currentIndex in restoredQueue.indices -> snapshot.currentIndex
+                else -> 0
+            }
+
+            val leftSongs = if (resolvedIndex in restoredQueue.indices) {
+                restoredQueue.subList(resolvedIndex, restoredQueue.size)
+            } else {
+                restoredQueue
+            }
+
+            val currentSongResolved = leftSongs.firstOrNull() ?: restoredQueue.firstOrNull() ?: return@launch
+
+            // Restore queue in memory immediately on cold start so queue sheet displays instantly
+            _playerUiState.update { currentState ->
+                if (currentState.currentPlaybackQueue.isEmpty() && leftSongs.isNotEmpty()) {
+                    currentState.copy(currentPlaybackQueue = leftSongs.toPlaybackQueue())
+                } else {
+                    currentState
+                }
+            }
+
+            // Restore last recently played song as currentSong on cold start in memory
             playbackStateHolder.updateStablePlayerState { it.copy(
-                currentSong = restoredSong,
+                currentSong = currentSongResolved,
                 isPlaying = false,
                 playWhenReady = false,
-                totalDuration = restoredSong.duration.coerceAtLeast(0L)
+                currentMediaItemIndex = 0,
+                repeatMode = snapshot.repeatMode,
+                isShuffleEnabled = snapshot.shuffleEnabled,
+                totalDuration = currentSongResolved.duration.coerceAtLeast(0L)
             )}
+            playbackStateHolder.setCurrentPosition(snapshot.currentPositionMs.coerceAtLeast(0L))
             _isSheetVisible.value = true
 
             // Pre-resolve stream URL for last recently played song so miniplayer can play immediately
-            val playbackUri = MediaItemBuilder.playbackUri(restoredSong)
+            val playbackUri = MediaItemBuilder.playbackUri(currentSongResolved)
             val scheme = playbackUri.scheme
             if (scheme == "youtube" || scheme == "telegram" || scheme == "gdrive" || scheme == "monochrome") {
                 viewModelScope.launch(Dispatchers.IO) {
@@ -1387,7 +1413,7 @@ class PlayerViewModel @Inject constructor(
                 }
             }
 
-            val artworkUri = restoredSong.albumArtUriString?.takeIf { it.isNotBlank() }
+            val artworkUri = currentSongResolved.albumArtUriString?.takeIf { it.isNotBlank() }
             if (artworkUri != null) {
                 themeStateHolder.extractAndGenerateColorScheme(
                     albumArtUriAsUri = artworkUri.toUri(),
@@ -4608,17 +4634,23 @@ class PlayerViewModel @Inject constructor(
     }
 
     private fun normalizeArtworkForResolvedSong(song: Song, mediaItem: MediaItem): Song {
-        val metadataArtwork =
+        val rawMetadataArtwork =
             mediaItem.mediaMetadata.artworkUri?.toString()?.takeIf { it.isNotBlank() }
                 ?: mediaItem.mediaMetadata.extras
                     ?.getString(MediaItemBuilder.EXTERNAL_EXTRA_ALBUM_ART)
                     ?.takeIf { it.isNotBlank() }
+        val metadataArtwork = MediaItemBuilder.unwrapArtworkUri(rawMetadataArtwork)
 
-        return when {
-            metadataArtwork != null && song.albumArtUriString != metadataArtwork ->
-                song.copy(albumArtUriString = metadataArtwork)
-            else -> song
-        }
+        val resolvedArt = metadataArtwork ?: song.albumArtUriString
+        val cleanSongArt = MediaItemBuilder.unwrapArtworkUri(resolvedArt)?.takeIf { it.isNotBlank() }
+            ?: (if (song.youtubeId != null && song.youtubeId!!.length == 11) "https://i.ytimg.com/vi/${song.youtubeId}/hqdefault.jpg" else null)
+            ?: (if (song.id.isNotBlank() && !song.id.startsWith("external:") && !song.id.startsWith("local:")) {
+                val cleanYtId = song.id.removePrefix("youtube_")
+                if (cleanYtId.length == 11) "https://i.ytimg.com/vi/$cleanYtId/hqdefault.jpg" else null
+            } else null)
+            ?: (song.id.toLongOrNull()?.takeIf { it > 0L }?.let { LocalArtworkUri.buildSongUri(it) })
+
+        return if (song.albumArtUriString != cleanSongArt) song.copy(albumArtUriString = cleanSongArt) else song
     }
 
     private var lastQueueUpdateRequestId = 0L
@@ -4729,13 +4761,21 @@ class PlayerViewModel @Inject constructor(
                 song.youtubeId != null -> "youtube://${song.youtubeId}"
                 else -> song.path
             }
+            val ytId = song.youtubeId
+                ?: song.id.takeIf { it.startsWith("youtube_") }?.removePrefix("youtube_")
+                ?: song.id.takeIf { it.length == 11 && !it.startsWith("external:") }
+            val cleanSongArt = MediaItemBuilder.unwrapArtworkUri(song.albumArtUriString)
+            val effectiveArt = cleanSongArt?.takeIf { it.isNotBlank() }
+                ?: (if (ytId != null && ytId.length == 11) "https://i.ytimg.com/vi/$ytId/hqdefault.jpg" else null)
+                ?: (song.id.toLongOrNull()?.takeIf { it > 0L }?.let { LocalArtworkUri.buildSongUri(it) })
+
             PlaybackQueueItemSnapshot(
                 mediaId = song.id,
                 uri = uri,
                 title = song.title,
                 artist = song.artist,
                 albumTitle = song.album,
-                artworkUri = song.albumArtUriString,
+                artworkUri = effectiveArt,
                 durationMs = song.duration.takeIf { it > 0L }
             )
         }
@@ -4785,9 +4825,11 @@ class PlayerViewModel @Inject constructor(
             itemSnapshot.uri
         }
         val cachedSong = songsMap[itemSnapshot.mediaId]
+        val cleanSnapshotArt = MediaItemBuilder.unwrapArtworkUri(itemSnapshot.artworkUri)
         val effectiveArt = cachedSong?.albumArtUriString?.takeIf { it.isNotBlank() }
-            ?: itemSnapshot.artworkUri?.takeIf { it.isNotBlank() }
+            ?: cleanSnapshotArt?.takeIf { it.isNotBlank() }
             ?: if (resolvedYoutubeId != null && resolvedYoutubeId.length == 11) "https://i.ytimg.com/vi/$resolvedYoutubeId/hqdefault.jpg" else null
+            ?: (itemSnapshot.mediaId.toLongOrNull()?.takeIf { it > 0L }?.let { LocalArtworkUri.buildSongUri(it) })
 
         if (cachedSong != null) {
             return cachedSong.copy(

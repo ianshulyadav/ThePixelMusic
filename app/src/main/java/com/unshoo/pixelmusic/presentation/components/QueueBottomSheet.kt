@@ -1865,8 +1865,17 @@ fun SaveQueueAsPlaylistSheet(
                                             CircleShape
                                         )
                                 ) {
+                                    val cleanArt = com.unshoo.pixelmusic.utils.MediaItemBuilder.unwrapArtworkUri(song.albumArtUriString)
+                                    val dialogArtModel = cleanArt?.takeIf { it.isNotBlank() }
+                                        ?: song.youtubeId?.takeIf { it.length == 11 }?.let { "https://i.ytimg.com/vi/$it/hqdefault.jpg" }
+                                        ?: (if (song.id.isNotBlank() && !song.id.startsWith("external:") && !song.id.startsWith("local:")) {
+                                            val cleanYtId = song.id.removePrefix("youtube_")
+                                            if (cleanYtId.length == 11) "https://i.ytimg.com/vi/$cleanYtId/hqdefault.jpg" else null
+                                        } else null)
+                                        ?: (song.id.toLongOrNull()?.takeIf { it > 0L }?.let { LocalArtworkUri.buildSongUri(it) })
+
                                     SmartImage(
-                                        model = song.albumArtUriString,
+                                        model = dialogArtModel,
                                         contentDescription = song.title,
                                         shape = albumShape,
                                         targetSize = Size(168, 168),
@@ -2053,7 +2062,8 @@ fun QueuePlaylistSongItem(
                     val albumArtPadding = if (isDragHandleVisible) 6.dp else 12.dp
                     Spacer(Modifier.width(albumArtPadding))
 
-                    val albumArtModel = song.albumArtUriString?.takeIf { it.isNotBlank() }
+                    val cleanArt = com.unshoo.pixelmusic.utils.MediaItemBuilder.unwrapArtworkUri(song.albumArtUriString)
+                    val albumArtModel = cleanArt?.takeIf { it.isNotBlank() }
                         ?: song.youtubeId?.takeIf { it.length == 11 }?.let { "https://i.ytimg.com/vi/$it/hqdefault.jpg" }
                         ?: (if (song.id.isNotBlank() && !song.id.startsWith("external:") && !song.id.startsWith("local:")) {
                             val cleanYtId = song.id.removePrefix("youtube_")

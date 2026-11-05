@@ -1,5 +1,7 @@
 package com.unshoo.pixelmusic.data.service
 
+import com.unshoo.pixelmusic.utils.LocalArtworkUri
+
 import android.app.AlarmManager
 import android.app.BackgroundServiceStartNotAllowedException
 import android.app.ForegroundServiceStartNotAllowedException
@@ -2707,6 +2709,17 @@ class MusicService : MediaLibraryService() {
                 ?.getLong(MediaItemBuilder.EXTERNAL_EXTRA_DURATION)
                 ?.takeIf { it > 0L }
 
+            val cleanYtId = when {
+                mediaItem.mediaId.startsWith("youtube_") -> mediaItem.mediaId.removePrefix("youtube_")
+                mediaItem.mediaId.length == 11 && !mediaItem.mediaId.startsWith("external:") -> mediaItem.mediaId
+                finalUri.startsWith("youtube://") -> finalUri.removePrefix("youtube://")
+                else -> null
+            }
+            val rawArt = resolveStoredArtworkUriString(metadata)
+            val cleanArt = MediaItemBuilder.unwrapArtworkUri(rawArt)?.takeIf { it.isNotBlank() }
+                ?: (if (cleanYtId != null && cleanYtId.length == 11) "https://i.ytimg.com/vi/$cleanYtId/hqdefault.jpg" else null)
+                ?: (mediaItem.mediaId.toLongOrNull()?.takeIf { it > 0L }?.let { LocalArtworkUri.buildSongUri(it) })
+
             items.add(
                 PlaybackQueueItemSnapshot(
                     mediaId = mediaItem.mediaId,
@@ -2714,7 +2727,7 @@ class MusicService : MediaLibraryService() {
                     title = metadata.title?.toString(),
                     artist = metadata.artist?.toString(),
                     albumTitle = metadata.albumTitle?.toString(),
-                    artworkUri = resolveStoredArtworkUriString(metadata),
+                    artworkUri = cleanArt,
                     durationMs = durationMs,
                 )
             )
@@ -2881,12 +2894,22 @@ class MusicService : MediaLibraryService() {
             else -> snapshotItem.mediaId
         }
 
+        val resolvedYoutubeId = when {
+            snapshotItem.mediaId.startsWith("youtube_") -> snapshotItem.mediaId.removePrefix("youtube_")
+            snapshotItem.mediaId.length == 11 && !snapshotItem.mediaId.startsWith("external:") -> snapshotItem.mediaId
+            uriStr.startsWith("youtube://") -> uriStr.removePrefix("youtube://")
+            else -> null
+        }
+        val cleanArt = MediaItemBuilder.unwrapArtworkUri(snapshotItem.artworkUri)?.takeIf { it.isNotBlank() }
+            ?: (if (resolvedYoutubeId != null && resolvedYoutubeId.length == 11) "https://i.ytimg.com/vi/$resolvedYoutubeId/hqdefault.jpg" else null)
+            ?: (snapshotItem.mediaId.toLongOrNull()?.takeIf { it > 0L }?.let { LocalArtworkUri.buildSongUri(it) })
+
         val metadataBuilder = MediaMetadata.Builder()
             .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
         snapshotItem.title?.takeIf { it.isNotBlank() }?.let { metadataBuilder.setTitle(it) }
         snapshotItem.artist?.takeIf { it.isNotBlank() }?.let { metadataBuilder.setArtist(it) }
         snapshotItem.albumTitle?.takeIf { it.isNotBlank() }?.let { metadataBuilder.setAlbumTitle(it) }
-        MediaItemBuilder.externalControllerArtworkUri(this, snapshotItem.artworkUri)
+        MediaItemBuilder.artworkUri(cleanArt)
             ?.let { metadataBuilder.setArtworkUri(it) }
 
         val extras = Bundle().apply {
@@ -2898,7 +2921,7 @@ class MusicService : MediaLibraryService() {
             snapshotItem.albumTitle?.takeIf { it.isNotBlank() }?.let {
                 putString(MediaItemBuilder.EXTERNAL_EXTRA_ALBUM, it)
             }
-            snapshotItem.artworkUri?.takeIf { it.isNotBlank() }?.let {
+            cleanArt?.takeIf { it.isNotBlank() }?.let {
                 putString(MediaItemBuilder.EXTERNAL_EXTRA_ALBUM_ART, it)
             }
             snapshotItem.durationMs?.takeIf { it > 0L }?.let {

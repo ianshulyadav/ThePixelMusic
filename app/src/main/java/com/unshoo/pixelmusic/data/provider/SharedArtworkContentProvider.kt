@@ -161,7 +161,7 @@ class SharedArtworkContentProvider : ContentProvider() {
     companion object {
         private const val AUTHORITY_SUFFIX = ".artwork"
         private const val PATH_SONG = "song"
-        private const val PATH_REMOTE = "remote"
+        const val PATH_REMOTE = "remote"
         private const val PATH_FILE = "file"
         private const val DEFAULT_CONTENT_TYPE = "image/jpeg"
 
@@ -218,6 +218,25 @@ class SharedArtworkContentProvider : ContentProvider() {
             file: File
         ): Uri {
             return Uri.parse("content://${authority(packageName)}/$PATH_FILE?path=${Uri.encode(file.absolutePath)}")
+        }
+
+        fun unwrapRemoteUrl(uriString: String?): String? {
+            if (uriString.isNullOrBlank()) return null
+            var current: String = uriString
+            var depth = 0
+            while (current.startsWith("content://") && (current.contains("/$PATH_REMOTE") || current.contains("/remote")) && depth < 5) {
+                val parsed = runCatching { Uri.parse(current) }.getOrNull() ?: break
+                val rawUrl = parsed.getQueryParameter("url")
+                    ?: parsed.path?.let { p ->
+                        if (p.contains("/remote/") || p.contains("/$PATH_REMOTE/")) {
+                            p.substringAfter("/remote/").substringAfter("/$PATH_REMOTE/").takeIf { it.isNotBlank() }?.let { Uri.decode(it) }
+                        } else null
+                    }
+                if (rawUrl.isNullOrBlank() || rawUrl == current) break
+                current = rawUrl
+                depth++
+            }
+            return current
         }
 
         internal fun parseSongId(uri: Uri, packageName: String? = null): Long? {
