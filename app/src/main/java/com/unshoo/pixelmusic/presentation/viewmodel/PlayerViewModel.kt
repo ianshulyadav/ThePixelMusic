@@ -4639,17 +4639,7 @@ class PlayerViewModel @Inject constructor(
                 ?: mediaItem.mediaMetadata.extras
                     ?.getString(MediaItemBuilder.EXTERNAL_EXTRA_ALBUM_ART)
                     ?.takeIf { it.isNotBlank() }
-        val metadataArtwork = MediaItemBuilder.unwrapArtworkUri(rawMetadataArtwork)
-
-        val resolvedArt = metadataArtwork ?: song.albumArtUriString
-        val cleanSongArt = MediaItemBuilder.unwrapArtworkUri(resolvedArt)?.takeIf { it.isNotBlank() }
-            ?: (if (song.youtubeId != null && song.youtubeId!!.length == 11) "https://i.ytimg.com/vi/${song.youtubeId}/hqdefault.jpg" else null)
-            ?: (if (song.id.isNotBlank() && !song.id.startsWith("external:") && !song.id.startsWith("local:")) {
-                val cleanYtId = song.id.removePrefix("youtube_")
-                if (cleanYtId.length == 11) "https://i.ytimg.com/vi/$cleanYtId/hqdefault.jpg" else null
-            } else null)
-            ?: (song.id.toLongOrNull()?.takeIf { it > 0L }?.let { LocalArtworkUri.buildSongUri(it) })
-
+        val cleanSongArt = MediaItemBuilder.resolveArtworkUri(rawMetadataArtwork ?: song.albumArtUriString, song.id, song.youtubeId)
         return if (song.albumArtUriString != cleanSongArt) song.copy(albumArtUriString = cleanSongArt) else song
     }
 
@@ -4761,13 +4751,7 @@ class PlayerViewModel @Inject constructor(
                 song.youtubeId != null -> "youtube://${song.youtubeId}"
                 else -> song.path
             }
-            val ytId = song.youtubeId
-                ?: song.id.takeIf { it.startsWith("youtube_") }?.removePrefix("youtube_")
-                ?: song.id.takeIf { it.length == 11 && !it.startsWith("external:") }
-            val cleanSongArt = MediaItemBuilder.unwrapArtworkUri(song.albumArtUriString)
-            val effectiveArt = cleanSongArt?.takeIf { it.isNotBlank() }
-                ?: (if (ytId != null && ytId.length == 11) "https://i.ytimg.com/vi/$ytId/hqdefault.jpg" else null)
-                ?: (song.id.toLongOrNull()?.takeIf { it > 0L }?.let { LocalArtworkUri.buildSongUri(it) })
+            val effectiveArt = MediaItemBuilder.resolveArtworkUri(song.albumArtUriString, song.id, song.youtubeId)
 
             PlaybackQueueItemSnapshot(
                 mediaId = song.id,
@@ -4825,11 +4809,8 @@ class PlayerViewModel @Inject constructor(
             itemSnapshot.uri
         }
         val cachedSong = songsMap[itemSnapshot.mediaId]
-        val cleanSnapshotArt = MediaItemBuilder.unwrapArtworkUri(itemSnapshot.artworkUri)
         val effectiveArt = cachedSong?.albumArtUriString?.takeIf { it.isNotBlank() }
-            ?: cleanSnapshotArt?.takeIf { it.isNotBlank() }
-            ?: if (resolvedYoutubeId != null && resolvedYoutubeId.length == 11) "https://i.ytimg.com/vi/$resolvedYoutubeId/hqdefault.jpg" else null
-            ?: (itemSnapshot.mediaId.toLongOrNull()?.takeIf { it > 0L }?.let { LocalArtworkUri.buildSongUri(it) })
+            ?: MediaItemBuilder.resolveArtworkUri(itemSnapshot.artworkUri, itemSnapshot.mediaId, resolvedYoutubeId)
 
         if (cachedSong != null) {
             return cachedSong.copy(

@@ -1,6 +1,7 @@
 package com.unshoo.pixelmusic.presentation.components
 
 import android.graphics.Bitmap
+import android.net.Uri
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -252,7 +253,11 @@ fun SmartImage(
         memoryCacheKey,
         isThumbnail
     ) {
-        val rawUnwrapped = if (model is String) MediaItemBuilder.unwrapArtworkUri(model) ?: model else model
+        val rawUnwrapped = when (model) {
+            is String -> MediaItemBuilder.unwrapArtworkUri(model) ?: model
+            is Uri -> MediaItemBuilder.unwrapArtworkUri(model.toString())?.let(Uri::parse) ?: model
+            else -> model
+        }
         val optimizedModel = if (rawUnwrapped is String && (rawUnwrapped.contains("googleusercontent.com") || rawUnwrapped.contains("ggpht.com"))) {
             val unwrappedStr = rawUnwrapped
             val widthPx = (requestTargetSize.width as? coil.size.Dimension.Pixels)?.px ?: (if (isThumbnail) SmartImageBuckets.LIST_ROW_PX else SmartImageBuckets.CARD_PX)

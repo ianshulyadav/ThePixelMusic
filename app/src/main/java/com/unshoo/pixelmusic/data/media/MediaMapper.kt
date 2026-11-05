@@ -67,15 +67,7 @@ class MediaMapper @Inject constructor(
         // Some fields like path, genre, year might be missing if not in extras.
         val rawArt = metadata.artworkUri?.toString()?.takeIf { it.isNotBlank() }
             ?: extras?.getString(MediaItemBuilder.EXTERNAL_EXTRA_ALBUM_ART)?.takeIf { it.isNotBlank() }
-        val unwrappedArt = MediaItemBuilder.unwrapArtworkUri(rawArt)
-        val effectiveAlbumArtUri = unwrappedArt?.takeIf { it.isNotBlank() }
-            ?: if (resolvedYoutubeId != null && resolvedYoutubeId.length == 11) {
-                "https://i.ytimg.com/vi/$resolvedYoutubeId/hqdefault.jpg"
-            } else if (bareMediaId.toLongOrNull() != null && bareMediaId.toLong() > 0L) {
-                LocalArtworkUri.buildSongUri(bareMediaId.toLong())
-            } else {
-                null
-            }
+        val effectiveAlbumArtUri = MediaItemBuilder.resolveArtworkUri(rawArt, bareMediaId, resolvedYoutubeId)
 
         return Song(
             id = id,

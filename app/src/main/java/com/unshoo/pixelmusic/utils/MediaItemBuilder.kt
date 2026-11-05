@@ -246,17 +246,23 @@ object MediaItemBuilder {
      * Artwork URIs are surfaced to external controllers (Android Auto, widgets, etc.).
      * Keep only schemes that these surfaces can usually resolve, and normalize raw paths.
      */
-    fun unwrapArtworkUri(rawArtworkUri: String?): String? {
-        if (rawArtworkUri.isNullOrBlank()) return null
-        var current: String = rawArtworkUri
-        var depth = 0
-        while (current.startsWith("content://") && (current.contains("/remote") || current.contains("/" + SharedArtworkContentProvider.PATH_REMOTE)) && depth < 5) {
-            val unwrapped = SharedArtworkContentProvider.unwrapRemoteUrl(current)
-            if (unwrapped.isNullOrBlank() || unwrapped == current) break
-            current = unwrapped
-            depth++
-        }
-        return current
+    fun unwrapArtworkUri(rawArtworkUri: String?): String? =
+        SharedArtworkContentProvider.unwrapRemoteUrl(rawArtworkUri)
+
+    fun resolveArtworkUri(
+        rawArt: String?,
+        mediaId: String? = null,
+        youtubeId: String? = null
+    ): String? {
+        val cleanArt = unwrapArtworkUri(rawArt)?.takeIf { it.isNotBlank() }
+        if (cleanArt != null) return cleanArt
+        val ytId = youtubeId?.takeIf { it.length == 11 }
+            ?: mediaId?.takeIf { it.startsWith("youtube_") }?.removePrefix("youtube_")
+            ?: mediaId?.takeIf { it.length == 11 && !it.startsWith("external:") && !it.startsWith("local:") }
+        if (ytId != null && ytId.length == 11) return "https://i.ytimg.com/vi/$ytId/hqdefault.jpg"
+        val localId = mediaId?.toLongOrNull()?.takeIf { it > 0L }
+        if (localId != null) return LocalArtworkUri.buildSongUri(localId)
+        return null
     }
 
     fun artworkUri(rawArtworkUri: String?): Uri? {

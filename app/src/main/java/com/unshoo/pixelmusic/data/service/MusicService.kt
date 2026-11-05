@@ -2709,16 +2709,8 @@ class MusicService : MediaLibraryService() {
                 ?.getLong(MediaItemBuilder.EXTERNAL_EXTRA_DURATION)
                 ?.takeIf { it > 0L }
 
-            val cleanYtId = when {
-                mediaItem.mediaId.startsWith("youtube_") -> mediaItem.mediaId.removePrefix("youtube_")
-                mediaItem.mediaId.length == 11 && !mediaItem.mediaId.startsWith("external:") -> mediaItem.mediaId
-                finalUri.startsWith("youtube://") -> finalUri.removePrefix("youtube://")
-                else -> null
-            }
             val rawArt = resolveStoredArtworkUriString(metadata)
-            val cleanArt = MediaItemBuilder.unwrapArtworkUri(rawArt)?.takeIf { it.isNotBlank() }
-                ?: (if (cleanYtId != null && cleanYtId.length == 11) "https://i.ytimg.com/vi/$cleanYtId/hqdefault.jpg" else null)
-                ?: (mediaItem.mediaId.toLongOrNull()?.takeIf { it > 0L }?.let { LocalArtworkUri.buildSongUri(it) })
+            val cleanArt = MediaItemBuilder.resolveArtworkUri(rawArt, mediaItem.mediaId, finalUri.removePrefix("youtube://"))
 
             items.add(
                 PlaybackQueueItemSnapshot(
@@ -2894,15 +2886,7 @@ class MusicService : MediaLibraryService() {
             else -> snapshotItem.mediaId
         }
 
-        val resolvedYoutubeId = when {
-            snapshotItem.mediaId.startsWith("youtube_") -> snapshotItem.mediaId.removePrefix("youtube_")
-            snapshotItem.mediaId.length == 11 && !snapshotItem.mediaId.startsWith("external:") -> snapshotItem.mediaId
-            uriStr.startsWith("youtube://") -> uriStr.removePrefix("youtube://")
-            else -> null
-        }
-        val cleanArt = MediaItemBuilder.unwrapArtworkUri(snapshotItem.artworkUri)?.takeIf { it.isNotBlank() }
-            ?: (if (resolvedYoutubeId != null && resolvedYoutubeId.length == 11) "https://i.ytimg.com/vi/$resolvedYoutubeId/hqdefault.jpg" else null)
-            ?: (snapshotItem.mediaId.toLongOrNull()?.takeIf { it > 0L }?.let { LocalArtworkUri.buildSongUri(it) })
+        val cleanArt = MediaItemBuilder.resolveArtworkUri(snapshotItem.artworkUri, snapshotItem.mediaId, uriStr.removePrefix("youtube://"))
 
         val metadataBuilder = MediaMetadata.Builder()
             .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)

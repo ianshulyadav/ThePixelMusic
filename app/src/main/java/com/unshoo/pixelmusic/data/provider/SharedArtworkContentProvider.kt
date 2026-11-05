@@ -225,13 +225,15 @@ class SharedArtworkContentProvider : ContentProvider() {
             var current: String = uriString
             var depth = 0
             while (current.startsWith("content://") && (current.contains("/$PATH_REMOTE") || current.contains("/remote")) && depth < 5) {
-                val parsed = runCatching { Uri.parse(current) }.getOrNull() ?: break
-                val rawUrl = parsed.getQueryParameter("url")
-                    ?: parsed.path?.let { p ->
-                        if (p.contains("/remote/") || p.contains("/$PATH_REMOTE/")) {
-                            p.substringAfter("/remote/").substringAfter("/$PATH_REMOTE/").takeIf { it.isNotBlank() }?.let { Uri.decode(it) }
-                        } else null
-                    }
+                val rawUrl = if (current.contains("url=")) {
+                    val encoded = current.substringAfter("url=").substringBefore('&')
+                    runCatching { java.net.URLDecoder.decode(encoded, "UTF-8") }.getOrNull()
+                } else {
+                    val pathPart = current.substringAfter("/remote/").substringAfter("/$PATH_REMOTE/").substringBefore('?')
+                    if (pathPart.isNotBlank() && pathPart != current) {
+                        runCatching { java.net.URLDecoder.decode(pathPart, "UTF-8") }.getOrNull()
+                    } else null
+                }
                 if (rawUrl.isNullOrBlank() || rawUrl == current) break
                 current = rawUrl
                 depth++
