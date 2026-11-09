@@ -103,9 +103,10 @@ async def publish():
 
     apks = [
         ("app/build/outputs/apk/release/app-arm64-v8a-release.apk",   "app-mobile-arm64-release.apk",    f"📱 <b>ARM64-v8a — v{version}</b>"),
+        ("app/build/outputs/apk/release/app-vivo-release.apk",        "app-vivo-release.apk",            f"🔥 <b>Vivo / Oppo / iQOO — v{version}</b>"),
+        ("app/build/outputs/apk/release/app-universal-release.apk",   "app-mobile-universal-release.apk",f"📱 <b>Universal — v{version}</b>"),
         ("app/build/outputs/apk/release/app-armeabi-v7a-release.apk", "app-mobile-armeabi-release.apk",  f"📱 <b>ARMeabi-v7a — v{version}</b>"),
         ("app/build/outputs/apk/release/app-x86_64-release.apk",      "app-mobile-x86_64-release.apk",   f"💻 <b>x86_64 — v{version}</b>"),
-        ("app/build/outputs/apk/release/app-universal-release.apk",   "app-mobile-universal-release.apk",f"📱 <b>Universal — v{version}</b>"),
     ]
 
     # Filter to files that actually exist
@@ -173,6 +174,7 @@ async def publish():
                 f"------------------------------------\n"
                 f"💡 <b>Which APK to install?</b>\n"
                 f"<blockquote>• <b>arm64-v8a:</b> Modern phones (recommended)\n"
+                f"• <b>vivo:</b> Vivo / Oppo / iQOO (OriginOS / ColorOS lockscreen card & battery whitelist)\n"
                 f"• <b>universal:</b> Works on all phones (larger size)\n"
                 f"• <b>armeabi-v7a:</b> Older / budget phones\n"
                 f"• <b>x86_64:</b> Emulators & Chromebooks</blockquote>\n"
@@ -268,6 +270,7 @@ async def publish():
                 f"Version: Android >= 11\n\n"
                 f"💡 <b>Which APK to install?</b>\n"
                 f"<blockquote>• <b>arm64-v8a:</b> Modern phones (recommended)\n"
+                f"• <b>vivo:</b> Vivo / Oppo / iQOO (OriginOS / ColorOS lockscreen card & battery whitelist)\n"
                 f"• <b>universal:</b> Works on all phones (larger size)\n"
                 f"• <b>armeabi-v7a:</b> Older / budget phones\n"
                 f"• <b>x86_64:</b> Emulators & Chromebooks</blockquote>"

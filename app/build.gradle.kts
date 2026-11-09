@@ -37,6 +37,9 @@ val onlyArm64 = providers.gradleProperty("pixelmusic.onlyArm64")
     .getOrElse("false")
     .toBoolean()
 
+val targetOem = providers.gradleProperty("pixelmusic.targetOem").orNull
+val isVivoBuild = targetOem?.equals("vivo", ignoreCase = true) == true
+
 @Suppress("DEPRECATION")
 android {
     namespace = "com.unshoo.pixelmusic"
@@ -74,7 +77,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.unshoo.pixelmusic"
+        applicationId = if (isVivoBuild) "com.netease.cloudmusic" else "com.unshoo.pixelmusic"
         minSdk = 30
         targetSdk = 37
         versionCode = (project.findProperty("APP_VERSION_CODE") as? String)?.toInt() ?: 1
