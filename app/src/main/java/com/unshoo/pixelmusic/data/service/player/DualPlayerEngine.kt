@@ -197,6 +197,11 @@ class DualPlayerEngine @Inject constructor(
     private var isFocusLossPause = false
     val isFocusLossPaused: Boolean
         get() = isFocusLossPause
+    private var isDucked = false
+    private var preDuckVolumeA = 1f
+    private var preDuckVolumeB = 1f
+    private var prePauseVolumeA = 1f
+    private var prePauseVolumeB = 1f
 
     private val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? android.net.wifi.WifiManager
     private var wifiLock: android.net.wifi.WifiManager.WifiLock? = null
@@ -259,32 +264,59 @@ class DualPlayerEngine @Inject constructor(
             AudioManager.AUDIOFOCUS_LOSS -> {
                 Timber.tag("TransitionDebug").d("AudioFocus LOSS. Pausing.")
                 isFocusLossPause = false
+                isDucked = false
                 if (::playerA.isInitialized) playerA.playWhenReady = false
                 if (::playerB.isInitialized) playerB.playWhenReady = false
                 releaseWifiLock()
                 abandonAudioFocus()
             }
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
                 Timber.tag("TransitionDebug").d("AudioFocus LOSS_TRANSIENT (%d). Pausing.", focusChange)
                 isFocusLossPause = (::playerA.isInitialized && (playerA.playWhenReady || playerA.isPlaying)) ||
                     (transitionRunning && ::playerB.isInitialized && (playerB.playWhenReady || playerB.isPlaying))
-                if (::playerA.isInitialized) playerA.playWhenReady = false
-                if (::playerB.isInitialized) playerB.playWhenReady = false
+                if (::playerA.isInitialized) {
+                    prePauseVolumeA = playerA.volume
+                    playerA.playWhenReady = false
+                }
+                if (::playerB.isInitialized) {
+                    prePauseVolumeB = playerB.volume
+                    playerB.playWhenReady = false
+                }
+            }
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                Timber.tag("TransitionDebug").d("AudioFocus LOSS_TRANSIENT_CAN_DUCK. Ducking.")
+                isDucked = true
+                if (::playerA.isInitialized) {
+                    preDuckVolumeA = playerA.volume
+                    playerA.volume = (playerA.volume * 0.2f).coerceIn(0.01f, 1f)
+                }
+                if (transitionRunning && ::playerB.isInitialized) {
+                    preDuckVolumeB = playerB.volume
+                    playerB.volume = (playerB.volume * 0.2f).coerceIn(0.01f, 1f)
+                }
             }
             AudioManager.AUDIOFOCUS_GAIN -> {
-                Timber.tag("TransitionDebug").d("AudioFocus GAIN. Resuming if paused by loss.")
+                Timber.tag("TransitionDebug").d("AudioFocus GAIN. Restoring volume and resuming if paused.")
+                if (isDucked) {
+                    isDucked = false
+                    val restoredA = incomingTrackReplayGainVolume ?: preDuckVolumeA
+                    val restoredB = incomingTrackReplayGainVolume ?: preDuckVolumeB
+                    if (::playerA.isInitialized) playerA.volume = restoredA
+                    if (transitionRunning && ::playerB.isInitialized) playerB.volume = restoredB
+                }
                 if (isFocusLossPause) {
                     isFocusLossPause = false
+                    val restoredA = incomingTrackReplayGainVolume ?: prePauseVolumeA
+                    val restoredB = incomingTrackReplayGainVolume ?: prePauseVolumeB
                     if (::playerA.isInitialized) {
-                        playerA.volume = 1f
+                        playerA.volume = restoredA
                         if (playerA.playbackState == Player.STATE_IDLE || playerA.playbackState == Player.STATE_ENDED) {
                             playerA.prepare()
                         }
                         playerA.playWhenReady = true
                     }
                     if (transitionRunning && ::playerB.isInitialized) {
-                        playerB.volume = incomingTrackReplayGainVolume ?: 1f
+                        playerB.volume = restoredB
                         playerB.playWhenReady = true
                     }
                 }
@@ -773,6 +805,13 @@ class DualPlayerEngine @Inject constructor(
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
     }
 
+    private val activePreCacheJobs = java.util.concurrent.ConcurrentHashMap<String, Job>()
+
+    fun cancelPreCacheJobs() {
+        activePreCacheJobs.values.forEach { it.cancel() }
+        activePreCacheJobs.clear()
+    }
+
     /**
      * Pre-cache the first chunk of a stream into SimpleCache for instant playback start.
      * Ported from SpatialFlow AudioPlaybackService.preCacheFirstChunk.
@@ -789,8 +828,11 @@ class DualPlayerEngine @Inject constructor(
         }
         val chunkSize = FIRST_CHUNK_PRECACHE_BYTES
         if (cacheKey != null && runCatching { exoCache.cache.isCached(cacheKey, 0, chunkSize) }.getOrDefault(false)) return
-        scope.launch(Dispatchers.IO) {
+        val jobKey = cacheKey ?: streamUrl
+        activePreCacheJobs[jobKey]?.cancel()
+        val job = scope.launch(Dispatchers.IO) {
             try {
+                currentCoroutineContext().ensureActive()
                 val dataSource = preCacheDataSourceFactory.createDataSource()
                 val dataSpecBuilder = DataSpec.Builder()
                     .setUri(Uri.parse(streamUrl))
@@ -809,6 +851,7 @@ class DualPlayerEngine @Inject constructor(
                     dataSpecBuilder.setHttpRequestHeaders(headers)
                 }
                 val dataSpec = dataSpecBuilder.build()
+                currentCoroutineContext().ensureActive()
                 androidx.media3.datasource.cache.CacheWriter(
                     dataSource,
                     dataSpec,
@@ -821,9 +864,13 @@ class DualPlayerEngine @Inject constructor(
                     cacheKey
                 )
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 Timber.tag("DualPlayerEngine").d("preCacheFirstChunk skipped: %s", e.message)
+            } finally {
+                activePreCacheJobs.remove(jobKey)
             }
         }
+        activePreCacheJobs[jobKey] = job
     }
 
 
@@ -1589,6 +1636,25 @@ class DualPlayerEngine @Inject constructor(
                     )
                 }
 
+                // Inject request headers (User-Agent, Origin, Referer) on pre-resolved HTTPS Google Video streams
+                val isGoogleVideoStream = uriString.contains("googlevideo.com") || uriString.contains("youtube.com")
+                if (isGoogleVideoStream && (scheme == "https" || scheme == "http")) {
+                    val profile = StreamClientUtils.resolveRequestProfile(uriString)
+                    val headers = buildMap {
+                        putAll(dataSpec.httpRequestHeaders)
+                        put("User-Agent", profile.userAgent)
+                        profile.origin?.let { put("Origin", it) }
+                        profile.referer?.let { put("Referer", it) }
+                    }
+                    if (cleanId != null) {
+                        StreamChoice.remember(cleanId, uriString, headers)
+                    }
+                    return dataSpec.buildUpon()
+                        .apply { if (cleanId != null && dataSpec.key == null) setKey(cleanId) }
+                        .setHttpRequestHeaders(headers)
+                        .build()
+                }
+
                 if (cleanId != null && dataSpec.key == null) {
                     return dataSpec.buildUpon().setKey(cleanId).build()
                 }
@@ -1711,10 +1777,29 @@ class DualPlayerEngine @Inject constructor(
             bandwidthKbps < 5_000 -> BufferProfile(30_000, 150_000, 400, 2_500)
             else -> BufferProfile(25_000, 150_000, 300, 2_000)
         }
+
+        // M3 Optimization: Dynamic buffer allocation with setTargetBufferBytes(32 * 1024 * 1024) (32MB)
+        // for Lossless streams and reduce maxBufferMs to 45,000ms (45s), vs 150s default for standard streams.
+        val isLosslessStream = LosslessStreamResolver.isEnabledBlocking(context)
+        val minBufferMs = if (isLosslessStream) {
+            if (isRecentlyUnstable || bandwidthKbps < 3_000) 30_000 else 20_000
+        } else {
+            profile.minMs
+        }
+        val maxBufferMs = if (isLosslessStream) 45_000 else profile.maxMs
+        val targetBufferBytes = if (isLosslessStream) 32 * 1024 * 1024 else C.LENGTH_UNSET
+        val prioritizeTime = !isLosslessStream
+
         val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(profile.minMs, profile.maxMs, profile.forPlaybackMs, profile.afterRebufferMs)
-            .setPrioritizeTimeOverSizeThresholds(true)
-            .setBackBuffer(30_000, /* retainBackBufferFromKeyframe = */ true)
+            .setBufferDurationsMs(
+                minBufferMs,
+                maxBufferMs,
+                if (isLosslessStream) 500 else profile.forPlaybackMs,
+                if (isLosslessStream) 3_000 else profile.afterRebufferMs
+            )
+            .setTargetBufferBytes(targetBufferBytes)
+            .setPrioritizeTimeOverSizeThresholds(prioritizeTime)
+            .setBackBuffer(if (isLosslessStream) 15_000 else 30_000, /* retainBackBufferFromKeyframe = */ true)
             .build()
 
         return ExoPlayer.Builder(context, renderersFactory)
@@ -2311,7 +2396,10 @@ class DualPlayerEngine @Inject constructor(
     }
 
     private fun ensurePlayerB(): ExoPlayer {
-        if (!::playerB.isInitialized) {
+        val needsNew = !::playerB.isInitialized ||
+            (playerB.playbackState == Player.STATE_IDLE && playerB.playerError != null) ||
+            !playerB.applicationLooper.thread.isAlive
+        if (needsNew) {
             playerB = buildPlayer()
             if (pinnedAudioSessionId != C.AUDIO_SESSION_ID_UNSET && pinnedAudioSessionId != 0) {
                 try { playerB.audioSessionId = pinnedAudioSessionId } catch (_: Exception) {}
@@ -2531,6 +2619,9 @@ class DualPlayerEngine @Inject constructor(
             abortTransition(outgoingPlayer, incomingPlayer)
             return
         }
+
+        // Fire onTransitionDisplayPlayerListeners immediately once incoming player clock starts advancing
+        onTransitionDisplayPlayerListeners.forEach { runCatching { it(playerB) } }
 
         val duration = settings.durationMs.toLong().coerceAtLeast(500L)
         val startedAtMs = SystemClock.elapsedRealtime()
@@ -2764,6 +2855,7 @@ class DualPlayerEngine @Inject constructor(
         transitionJob?.cancel()
         preResolutionJob?.cancel()
         cancelAudioOffloadFallback()
+        cancelPreCacheJobs()
         scope.coroutineContext[Job]?.cancel()
         releaseWifiLock()
         abandonAudioFocus()

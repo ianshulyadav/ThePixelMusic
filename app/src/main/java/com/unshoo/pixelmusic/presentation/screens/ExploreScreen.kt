@@ -193,7 +193,6 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import com.unshoo.pixelmusic.presentation.viewmodel.ExploreViewModel
 import com.unshoo.pixelmusic.presentation.viewmodel.FeedUiState
-import com.unshoo.pixelmusic.presentation.viewmodel.FeedViewModel
 import com.unshoo.pixelmusic.presentation.viewmodel.PlayerSheetState
 import com.unshoo.pixelmusic.presentation.viewmodel.PlayerViewModel
 import com.unshoo.pixelmusic.presentation.viewmodel.PlaylistViewModel
@@ -222,7 +221,6 @@ fun ExploreScreen(
     navController: NavController,
     playerViewModel: PlayerViewModel,
     paddingValuesParent: PaddingValues,
-    feedViewModel: FeedViewModel = hiltViewModel(),
     quickPicksViewModel: QuickPicksViewModel = hiltViewModel(),
     exploreViewModel: ExploreViewModel = hiltViewModel(),
 ) {
@@ -237,27 +235,13 @@ fun ExploreScreen(
     val isOnline by playerViewModel.isOnline.collectAsStateWithLifecycle()
     val isLocalMode by playerViewModel.localModeEnabled.collectAsStateWithLifecycle()
     val isEffectivelyOnline = isOnline && !isLocalMode
-    val state by feedViewModel.uiState.collectAsStateWithLifecycle()
+    val feedData by exploreViewModel.feedData.collectAsStateWithLifecycle()
     val exploreUiState by exploreViewModel.uiState.collectAsStateWithLifecycle()
     val sectionsState by exploreViewModel.sectionsState.collectAsStateWithLifecycle()
     val quickPicksRaw by quickPicksViewModel.quickPicks.collectAsStateWithLifecycle()
     val ytHomeQuickPicks = exploreUiState.preparedYtHomeQuickPicks
-    val isYtConnected = state.feedData.isYtConnected
-    val effectiveQuickPicks = remember(
-        quickPicksRaw,
-        ytHomeQuickPicks,
-        state.feedData.quickPicks
-    ) {
-        if (quickPicksRaw.isNotEmpty()) {
-            quickPicksRaw
-        } else if (ytHomeQuickPicks.isNotEmpty()) {
-            ytHomeQuickPicks
-        } else if (state.feedData.quickPicks.isNotEmpty()) {
-            state.feedData.quickPicks.map { it.toSong() }
-        } else {
-            emptyList()
-        }
-    }
+    val isYtConnected = feedData.isYtConnected
+    val effectiveQuickPicks = if (ytHomeQuickPicks.isNotEmpty()) ytHomeQuickPicks else quickPicksRaw
     val quickPicks by produceState(
         initialValue = if (!isEffectivelyOnline && ytHomeQuickPicks.isNotEmpty()) ytHomeQuickPicks else effectiveQuickPicks,
         effectiveQuickPicks,
@@ -321,7 +305,7 @@ fun ExploreScreen(
     val pullRefreshState = rememberPullToRefreshState()
     val scope = rememberCoroutineScope()
     var isManualRefreshing by remember { mutableStateOf(false) }
-    val isRefreshing = state.isRefreshing || exploreUiState.isRefreshing || isManualRefreshing
+    val isRefreshing = exploreUiState.isRefreshing || isManualRefreshing
 
     val listState = rememberLazyListState()
 
@@ -365,55 +349,37 @@ fun ExploreScreen(
     val isAdvancedExplore = exploreUiState.isAdvancedExploreEnabled
 
     // Artists for you: Pre-computed online artists -> Local topArtists / library artists strictly when offline
-    val artistsForYou = remember(
-        state.feedData.topArtists,
-        exploreUiState.preparedArtistsForYou,
-        exploreUiState.localTopArtists,
-        localArtists,
-        isEffectivelyOnline
-    ) {
-        if (isEffectivelyOnline) {
-            if (state.feedData.topArtists.isNotEmpty()) {
-                state.feedData.topArtists
-            } else {
-                exploreUiState.preparedArtistsForYou
+    val artistsForYou = if (isEffectivelyOnline) {
+        exploreUiState.preparedArtistsForYou.ifEmpty { feedData.topArtists }
+    } else {
+        if (exploreUiState.localTopArtists.isNotEmpty()) {
+            exploreUiState.localTopArtists
+        } else if (localArtists.isNotEmpty()) {
+            localArtists.sortedByDescending { it.songCount }.take(10).map { artist ->
+                FeedArtist(
+                    name = artist.name,
+                    browseId = null,
+                    artworkUrl = artist.customImageUri ?: artist.imageUrl
+                )
             }
         } else {
-            if (exploreUiState.localTopArtists.isNotEmpty()) {
-                exploreUiState.localTopArtists
-            } else if (localArtists.isNotEmpty()) {
-                localArtists.sortedByDescending { it.songCount }.take(10).map { artist ->
-                    FeedArtist(
-                        name = artist.name,
-                        browseId = null,
-                        artworkUrl = artist.customImageUri ?: artist.imageUrl
-                    )
-                }
-            } else {
-                emptyList()
-            }
+            emptyList()
         }
     }
 
-    val blockedReleaseIds by feedViewModel.blockedReleaseIds.collectAsStateWithLifecycle(initialValue = emptySet())
-    val pureYtMusicOnly by feedViewModel.pureYtMusicOnly.collectAsStateWithLifecycle(initialValue = false)
-    val filterKeywords by feedViewModel.filterKeywords.collectAsStateWithLifecycle(initialValue = emptyList())
+    val blockedReleaseIds by exploreViewModel.blockedReleaseIds.collectAsStateWithLifecycle(initialValue = emptySet())
+    val pureYtMusicOnly by exploreViewModel.pureYtMusicOnly.collectAsStateWithLifecycle(initialValue = false)
+    val filterKeywords by exploreViewModel.filterKeywords.collectAsStateWithLifecycle(initialValue = emptyList())
     var releaseToBlock by remember { mutableStateOf<YouTubePlaylistSummary?>(null) }
 
-    val freshFindsToDisplay = remember(state.feedData.freshFinds, pureYtMusicOnly, filterKeywords) {
-        state.feedData.freshFinds.filter { track ->
+    val freshFindsToDisplay = remember(feedData.freshFinds, pureYtMusicOnly, filterKeywords) {
+        feedData.freshFinds.filter { track ->
             (!pureYtMusicOnly || (!track.isVideo && !ContentFilterUtils.isVideoTitle(track.title))) &&
             !ContentFilterUtils.matchesFilterKeywords(track, filterKeywords)
         }
     }
 
-    val chartTracks = remember(state.feedData.charts, exploreUiState.preparedChartTracks) {
-        if (state.feedData.charts.isNotEmpty()) {
-            state.feedData.charts
-        } else {
-            exploreUiState.preparedChartTracks
-        }
-    }
+    val chartTracks = exploreUiState.preparedChartTracks.ifEmpty { feedData.charts }
 
     val chartPlaylistsAndAlbums = exploreUiState.preparedChartPlaylistsAndAlbums
 
@@ -435,26 +401,23 @@ fun ExploreScreen(
     }
 
     // Jump back in: Remote jumpBackIn when online -> Local rotatory history strictly when offline
-    val jumpBackInTracks = remember(state.feedData.jumpBackIn, exploreUiState.localHighlyRotatoryTracks, recentlyAddedToDisplay, pureYtMusicOnly, chartVideoIds, isEffectivelyOnline) {
-        val tracks = if (isEffectivelyOnline) {
-            if (state.feedData.jumpBackIn.isNotEmpty()) {
-                state.feedData.jumpBackIn.filter { it.url !in chartVideoIds && it.name !in chartVideoIds }
-            } else emptyList()
-        } else {
-            if (exploreUiState.localHighlyRotatoryTracks.isNotEmpty()) {
-                exploreUiState.localHighlyRotatoryTracks.filter { it.url !in chartVideoIds && it.name !in chartVideoIds }
-            } else if (recentlyAddedToDisplay.isNotEmpty()) {
-                recentlyAddedToDisplay.take(15).map { song ->
-                    RecentTrack(
-                        name = song.title,
-                        artist = RecentTrackArtistRef(name = song.displayArtist),
-                        album = RecentTrackArtistRef(name = song.album),
-                        image = song.albumArtUriString?.let { listOf(com.unshoo.pixelmusic.data.feed.ImageDto(it, "extralarge")) }.orEmpty(),
-                        url = song.id
-                    )
-                }
-            } else emptyList()
-        }
+    val jumpBackInTracks = if (isEffectivelyOnline) {
+        feedData.jumpBackIn.filter { it.url !in chartVideoIds && it.name !in chartVideoIds }
+    } else {
+        if (exploreUiState.localHighlyRotatoryTracks.isNotEmpty()) {
+            exploreUiState.localHighlyRotatoryTracks.filter { it.url !in chartVideoIds && it.name !in chartVideoIds }
+        } else if (recentlyAddedToDisplay.isNotEmpty()) {
+            recentlyAddedToDisplay.take(15).map { song ->
+                RecentTrack(
+                    name = song.title,
+                    artist = RecentTrackArtistRef(name = song.displayArtist),
+                    album = RecentTrackArtistRef(name = song.album),
+                    image = song.albumArtUriString?.let { listOf(com.unshoo.pixelmusic.data.feed.ImageDto(it, "extralarge")) }.orEmpty(),
+                    url = song.id
+                )
+            }
+        } else emptyList()
+    }.let { tracks ->
         if (pureYtMusicOnly) {
             tracks.filterNot { ContentFilterUtils.isVideoTitle(it.name) }
         } else {
@@ -462,25 +425,18 @@ fun ExploreScreen(
         }
     }
 
-    val spotlight = remember(state.feedData.spotlight, exploreUiState.preparedSpotlight, artistsForYou, quickPicks) {
-        state.feedData.spotlight ?: exploreUiState.preparedSpotlight ?: artistsForYou.firstOrNull()?.let { artist ->
-            val trackTitle = quickPicks.firstOrNull { it.artist.contains(artist.name, ignoreCase = true) }?.title
-            FeedSpotlight(
-                artistName = artist.name,
-                artworkUrl = artist.artworkUrl,
-                browseId = artist.browseId,
-                description = "Spotlight Artist",
-                topTrackTitle = trackTitle
-            )
-        }
+    val spotlight = exploreUiState.preparedSpotlight ?: feedData.spotlight ?: artistsForYou.firstOrNull()?.let { artist ->
+        val trackTitle = quickPicks.firstOrNull { it.artist.contains(artist.name, ignoreCase = true) }?.title
+        FeedSpotlight(
+            artistName = artist.name,
+            artworkUrl = artist.artworkUrl,
+            browseId = artist.browseId,
+            description = "Spotlight Artist",
+            topTrackTitle = trackTitle
+        )
     }
 
-    val newReleases = remember(exploreUiState.preparedNewReleases, state.feedData.newReleases, blockedReleaseIds) {
-        val rawList = if (exploreUiState.preparedNewReleases.isNotEmpty()) {
-            exploreUiState.preparedNewReleases
-        } else if (state.feedData.newReleases.isNotEmpty()) {
-            state.feedData.newReleases
-        } else emptyList()
+    val newReleases = (exploreUiState.preparedNewReleases.ifEmpty { feedData.newReleases }).let { rawList ->
         if (blockedReleaseIds.isEmpty()) rawList else rawList.filter { it.id !in blockedReleaseIds }
     }
 
@@ -499,29 +455,22 @@ fun ExploreScreen(
         }
     }
 
-    val mixesToDisplay = remember(state.feedData.mixes, quickPicks) {
-        val list = if (state.feedData.mixes.isNotEmpty()) {
-            state.feedData.mixes
-        } else {
-            quickPicks.take(6).map { song ->
-                FeedMix(
-                    title = "${song.artist} Mix",
-                    seed = com.unshoo.pixelmusic.data.feed.YouTubeMusicTrack(
-                        videoId = song.youtubeId ?: if (song.id.startsWith("youtube_")) song.id.removePrefix("youtube_") else song.id,
-                        title = song.title,
-                        artist = song.artist,
-                        artworkUrl = song.albumArtUriString
-                    )
+    val mixesToDisplay = feedData.mixes.ifEmpty {
+        quickPicks.take(6).map { song ->
+            FeedMix(
+                title = "${song.artist} Mix",
+                seed = com.unshoo.pixelmusic.data.feed.YouTubeMusicTrack(
+                    videoId = song.youtubeId ?: if (song.id.startsWith("youtube_")) song.id.removePrefix("youtube_") else song.id,
+                    title = song.title,
+                    artist = song.artist,
+                    artworkUrl = song.albumArtUriString
                 )
-            }.filter { it.seed.videoId.isNotBlank() }
-        }
-        list.distinctBy { it.seed.videoId }
-    }
+            )
+        }.filter { it.seed.videoId.isNotBlank() }
+    }.distinctBy { it.seed.videoId }
 
-    val heavyToDisplay = remember(state.feedData.heavyRotation, quickPicks) {
-        if (state.feedData.heavyRotation.isNotEmpty()) {
-            state.feedData.heavyRotation
-        } else if (quickPicks.size > 8) {
+    val heavyToDisplay = feedData.heavyRotation.ifEmpty {
+        if (quickPicks.size > 8) {
             quickPicks.drop(8).take(10).map { song ->
                 com.unshoo.pixelmusic.data.feed.GeneratedTrack(
                     name = song.title,
@@ -566,8 +515,7 @@ fun ExploreScreen(
                     unshoo.ianshulyadav.pixelmusic.innertube.YouTube.invalidateHomeCache()
                     val exploreJob = launch { exploreViewModel.refreshOnEntry(force = true) }
                     val quickPicksJob = launch { quickPicksViewModel.refresh(force = true) }
-                    val feedJob = launch { feedViewModel.refresh() }
-                    joinAll(exploreJob, quickPicksJob, feedJob)
+                    joinAll(exploreJob, quickPicksJob)
                     isManualRefreshing = false
                 }
             },
@@ -902,7 +850,7 @@ fun ExploreScreen(
                                         section = section,
                                         navController = navController,
                                         playerViewModel = playerViewModel,
-                                        feedViewModel = feedViewModel,
+                                        exploreViewModel = exploreViewModel,
                                         currentSongId = currentSongId,
                                         isPlaying = isPlaying
                                     )
@@ -918,7 +866,7 @@ fun ExploreScreen(
                                         section = section,
                                         navController = navController,
                                         playerViewModel = playerViewModel,
-                                        feedViewModel = feedViewModel,
+                                        exploreViewModel = exploreViewModel,
                                         currentSongId = currentSongId,
                                         isPlaying = isPlaying,
                                         pureYtMusicOnly = pureYtMusicOnly,
@@ -969,7 +917,7 @@ fun ExploreScreen(
                                 SpotlightHeroCard(
                                     spotlight = spot,
                                     onPlayRadio = {
-                                        feedViewModel.playArtistRadio(
+                                        exploreViewModel.playArtistRadio(
                                             FeedArtist(spot.artistName, spot.browseId, spot.artworkUrl),
                                             playerViewModel
                                         )
@@ -986,7 +934,7 @@ fun ExploreScreen(
                             item(key = "feed_top_artists", contentType = "section") {
                                 FeedSectionHeader(
                                     title = stringResource(R.string.explore_section_artists_for_you),
-                                    subtitle = if (state.feedData.topArtists.isNotEmpty()) stringResource(R.string.explore_subtitle_most_replayed_musicians) else stringResource(R.string.explore_subtitle_most_played_artists)
+                                    subtitle = if (feedData.topArtists.isNotEmpty()) stringResource(R.string.explore_subtitle_most_replayed_musicians) else stringResource(R.string.explore_subtitle_most_played_artists)
                                 )
                                 LazyRow(
                                     contentPadding = PaddingValues(horizontal = 16.dp),
@@ -1010,10 +958,10 @@ fun ExploreScreen(
 
                         // 4. Feed Content (Taste Tags, Because You Listen To, Fresh Finds)
                         if (isAdvancedExplore) {
-                            if (state.feedData.tasteTags.isNotEmpty()) {
+                            if (feedData.tasteTags.isNotEmpty()) {
                                 item(key = "feed_taste_strip", contentType = "taste_strip") {
                                     TasteStrip(
-                                        tags = state.feedData.tasteTags,
+                                        tags = feedData.tasteTags,
                                         onTagClick = { _ ->
                                             navController.navigateSafely(Screen.Search.route)
                                         }
@@ -1021,7 +969,7 @@ fun ExploreScreen(
                                 }
                             }
 
-                            state.feedData.becauseYouListenTo?.takeIf { it.items.isNotEmpty() }?.let { section ->
+                            feedData.becauseYouListenTo?.takeIf { it.items.isNotEmpty() }?.let { section ->
                                 item(key = "because_you_listen_to", contentType = "section") {
                                     FeedSectionHeader(
                                         title = section.title,
@@ -1029,10 +977,10 @@ fun ExploreScreen(
                                         actionText = stringResource(R.string.action_play_all),
                                         actionIcon = Icons.Filled.PlayArrow,
                                         onActionClick = {
-                                            feedViewModel.playTracksQueue(section.items, 0, playerViewModel, section.title)
+                                            exploreViewModel.playTracksQueue(section.items, 0, playerViewModel, section.title)
                                         },
                                         onShuffleClick = {
-                                            feedViewModel.shuffleTracksQueue(section.items, playerViewModel, section.title)
+                                            exploreViewModel.shuffleTracksQueue(section.items, playerViewModel, section.title)
                                         }
                                     )
                                     FeedMediaRow {
@@ -1043,10 +991,10 @@ fun ExploreScreen(
                                                 artworkUrl = track.artworkUrl,
                                                 isCurrentPlaying = isPlaying && currentSongId == "youtube_${track.videoId}",
                                                 onClick = {
-                                                    feedViewModel.playTracksQueue(section.items, index, playerViewModel, section.title)
+                                                    exploreViewModel.playTracksQueue(section.items, index, playerViewModel, section.title)
                                                 },
                                                 onPlayClick = {
-                                                    feedViewModel.playTracksQueue(section.items, index, playerViewModel, section.title)
+                                                    exploreViewModel.playTracksQueue(section.items, index, playerViewModel, section.title)
                                                 },
                                                 onMoreClick = {
                                                     playerViewModel.selectSongForInfo(track.toSong())
@@ -1066,10 +1014,10 @@ fun ExploreScreen(
                                         actionText = stringResource(R.string.action_play_all),
                                         actionIcon = Icons.Filled.PlayArrow,
                                         onActionClick = {
-                                            feedViewModel.playTracksQueue(freshFindsToDisplay, 0, playerViewModel, "Fresh Finds")
+                                            exploreViewModel.playTracksQueue(freshFindsToDisplay, 0, playerViewModel, "Fresh Finds")
                                         },
                                         onShuffleClick = {
-                                            feedViewModel.shuffleTracksQueue(freshFindsToDisplay, playerViewModel, "Fresh Finds")
+                                            exploreViewModel.shuffleTracksQueue(freshFindsToDisplay, playerViewModel, "Fresh Finds")
                                         }
                                     )
                                     FeedMediaRow {
@@ -1081,10 +1029,10 @@ fun ExploreScreen(
                                                 badgeText = stringResource(R.string.badge_new),
                                                 isCurrentPlaying = isPlaying && currentSongId == "youtube_${track.videoId}",
                                                 onClick = {
-                                                    feedViewModel.playTracksQueue(freshFindsToDisplay, index, playerViewModel, "Fresh Finds")
+                                                    exploreViewModel.playTracksQueue(freshFindsToDisplay, index, playerViewModel, "Fresh Finds")
                                                 },
                                                 onPlayClick = {
-                                                    feedViewModel.playTracksQueue(freshFindsToDisplay, index, playerViewModel, "Fresh Finds")
+                                                    exploreViewModel.playTracksQueue(freshFindsToDisplay, index, playerViewModel, "Fresh Finds")
                                                 },
                                                 onMoreClick = {
                                                     playerViewModel.selectSongForInfo(track.toSong())
@@ -1144,7 +1092,7 @@ fun ExploreScreen(
                                         actionText = stringResource(R.string.action_shuffle),
                                         actionIcon = Icons.Filled.Shuffle,
                                         onActionClick = {
-                                            mixesToDisplay.randomOrNull()?.let { feedViewModel.playMix(it, playerViewModel) }
+                                            mixesToDisplay.randomOrNull()?.let { exploreViewModel.playMix(it, playerViewModel) }
                                         }
                                     )
                                     FeedMediaRow {
@@ -1154,8 +1102,8 @@ fun ExploreScreen(
                                                 subtitle = stringResource(R.string.explore_subtitle_artist_radio_station),
                                                 artworkUrl = mix.seed.artworkUrl,
                                                 badgeText = "MIX",
-                                                onClick = { feedViewModel.playMix(mix, playerViewModel) },
-                                                onPlayClick = { feedViewModel.playMix(mix, playerViewModel) }
+                                                onClick = { exploreViewModel.playMix(mix, playerViewModel) },
+                                                onPlayClick = { exploreViewModel.playMix(mix, playerViewModel) }
                                             )
                                         }
                                     }
@@ -1167,7 +1115,7 @@ fun ExploreScreen(
                                 item(key = "feed_jump_back_in", contentType = "section") {
                                     FeedSectionHeader(
                                         title = stringResource(R.string.explore_section_jump_back_in),
-                                        subtitle = if (isYtConnected && state.feedData.jumpBackIn.isNotEmpty()) {
+                                        subtitle = if (isYtConnected && feedData.jumpBackIn.isNotEmpty()) {
                                             stringResource(R.string.explore_subtitle_recent_history)
                                         } else {
                                             stringResource(R.string.explore_subtitle_rotatory_history)
@@ -1181,7 +1129,7 @@ fun ExploreScreen(
                                             if (allLocal.isNotEmpty()) {
                                                 playerViewModel.playSongs(allLocal, allLocal.first(), queueName = "Jump Back In")
                                             } else {
-                                                feedViewModel.playRecentQueue(jumpBackInTracks, 0, playerViewModel)
+                                                exploreViewModel.playRecentQueue(jumpBackInTracks, 0, playerViewModel)
                                             }
                                         },
                                         onShuffleClick = {
@@ -1191,7 +1139,7 @@ fun ExploreScreen(
                                             if (allLocal.isNotEmpty()) {
                                                 playerViewModel.playSongsShuffled(allLocal, queueName = "Jump Back In")
                                             } else {
-                                                feedViewModel.playRecentQueue(jumpBackInTracks.shuffled(), 0, playerViewModel)
+                                                exploreViewModel.playRecentQueue(jumpBackInTracks.shuffled(), 0, playerViewModel)
                                             }
                                         }
                                     )
@@ -1208,7 +1156,7 @@ fun ExploreScreen(
                                                         }
                                                         playerViewModel.playSongs(allLocal, localSong, queueName = "Jump Back In")
                                                     } else {
-                                                        feedViewModel.playRecentQueue(jumpBackInTracks, index, playerViewModel)
+                                                        exploreViewModel.playRecentQueue(jumpBackInTracks, index, playerViewModel)
                                                     }
                                                 },
                                                 onMoreClick = {
@@ -1233,7 +1181,7 @@ fun ExploreScreen(
                                         actionText = stringResource(R.string.action_play_all),
                                         actionIcon = Icons.Filled.PlayArrow,
                                         onActionClick = {
-                                            feedViewModel.playGeneratedQueue(heavyToDisplay, 0, playerViewModel, "Heavy Rotation")
+                                            exploreViewModel.playGeneratedQueue(heavyToDisplay, 0, playerViewModel, "Heavy Rotation")
                                         }
                                     )
                                     FeedMediaRow {
@@ -1244,10 +1192,10 @@ fun ExploreScreen(
                                                 artworkUrl = track.artworkUrl,
                                                 isCurrentPlaying = isPlaying && currentSongId == "youtube_${track.toSong().youtubeId}",
                                                 onClick = {
-                                                    feedViewModel.playGeneratedQueue(heavyToDisplay, index, playerViewModel, "Heavy Rotation")
+                                                    exploreViewModel.playGeneratedQueue(heavyToDisplay, index, playerViewModel, "Heavy Rotation")
                                                 },
                                                 onPlayClick = {
-                                                    feedViewModel.playGeneratedQueue(heavyToDisplay, index, playerViewModel, "Heavy Rotation")
+                                                    exploreViewModel.playGeneratedQueue(heavyToDisplay, index, playerViewModel, "Heavy Rotation")
                                                 },
                                                 onMoreClick = {
                                                     playerViewModel.selectSongForInfo(track.toSong())
@@ -1332,14 +1280,14 @@ fun ExploreScreen(
                                     actionIcon = Icons.Filled.PlayArrow,
                                     onActionClick = {
                                         if (chartTracks.isNotEmpty()) {
-                                            feedViewModel.playTracksQueue(chartTracks, 0, playerViewModel, "Top Charts")
+                                            exploreViewModel.playTracksQueue(chartTracks, 0, playerViewModel, "Top Charts")
                                         } else {
                                             navController.navigateSafely(Screen.FeedPlaylistDetail.createRoute("charts"))
                                         }
                                     },
                                     onShuffleClick = {
                                         if (chartTracks.isNotEmpty()) {
-                                            feedViewModel.shuffleTracksQueue(chartTracks, playerViewModel, "Top Charts")
+                                            exploreViewModel.shuffleTracksQueue(chartTracks, playerViewModel, "Top Charts")
                                         }
                                     }
                                 )
@@ -1355,7 +1303,7 @@ fun ExploreScreen(
                                                 track = track,
                                                 isCurrentPlaying = isPlaying && currentSongId == "youtube_${track.videoId}",
                                                 onClick = {
-                                                    feedViewModel.playTracksQueue(chartTracks, index, playerViewModel, "Top Charts")
+                                                    exploreViewModel.playTracksQueue(chartTracks, index, playerViewModel, "Top Charts")
                                                 },
                                                 onMoreClick = {
                                                     playerViewModel.selectSongForInfo(track.toSong())
@@ -1466,7 +1414,7 @@ fun ExploreScreen(
                                             section = section,
                                             navController = navController,
                                             playerViewModel = playerViewModel,
-                                            feedViewModel = feedViewModel,
+                                            exploreViewModel = exploreViewModel,
                                             currentSongId = currentSongId,
                                             isPlaying = isPlaying
                                         )
@@ -1482,7 +1430,7 @@ fun ExploreScreen(
                                             section = section,
                                             navController = navController,
                                             playerViewModel = playerViewModel,
-                                            feedViewModel = feedViewModel,
+                                            exploreViewModel = exploreViewModel,
                                             currentSongId = currentSongId,
                                             isPlaying = isPlaying,
                                             pureYtMusicOnly = pureYtMusicOnly,
@@ -1634,7 +1582,7 @@ fun ExploreScreen(
                 Button(
                     onClick = {
                         val title = rel.title
-                        feedViewModel.blockRelease(rel.id)
+                        exploreViewModel.blockRelease(rel.id)
                         releaseToBlock = null
                         android.widget.Toast.makeText(context, "\"$title\" blocked from new releases", android.widget.Toast.LENGTH_SHORT).show()
                     },
@@ -3318,7 +3266,7 @@ private fun LibrarySwipeableCarousel(
     section: HomePage.Section,
     navController: NavController,
     playerViewModel: PlayerViewModel,
-    feedViewModel: FeedViewModel,
+    exploreViewModel: ExploreViewModel,
     currentSongId: String? = null,
     isPlaying: Boolean = false
 ) {
@@ -3352,7 +3300,7 @@ private fun LibrarySwipeableCarousel(
                     )
                     val idx = songTracks.indexOfFirst { it.videoId == item.id }
                     if (idx >= 0) {
-                        feedViewModel.playTracksQueue(songTracks, idx, playerViewModel, section.title)
+                        exploreViewModel.playTracksQueue(songTracks, idx, playerViewModel, section.title)
                     } else {
                         playerViewModel.showAndPlaySong(track.toSong(), listOf(track.toSong()), section.title)
                     }
@@ -3374,7 +3322,7 @@ private fun LibrarySwipeableCarousel(
             actionText = if (songTracks.isNotEmpty()) "Play all" else null,
             actionIcon = if (songTracks.isNotEmpty()) Icons.Filled.PlayArrow else null,
             onActionClick = if (songTracks.isNotEmpty()) {
-                { feedViewModel.playTracksQueue(songTracks, 0, playerViewModel, section.title) }
+                { exploreViewModel.playTracksQueue(songTracks, 0, playerViewModel, section.title) }
             } else null
         )
 
@@ -3655,7 +3603,7 @@ private fun RegionalExploreSection(
     section: HomePage.Section,
     navController: NavController,
     playerViewModel: PlayerViewModel,
-    feedViewModel: FeedViewModel,
+    exploreViewModel: ExploreViewModel,
     currentSongId: String?,
     isPlaying: Boolean,
     pureYtMusicOnly: Boolean,
@@ -3732,12 +3680,12 @@ private fun RegionalExploreSection(
         actionText = if (hasSongs) "Play all" else null,
         actionIcon = if (hasSongs) Icons.Filled.PlayArrow else null,
         onActionClick = if (hasSongs) {
-            { feedViewModel.playTracksQueue(songTracks, 0, playerViewModel, section.title) }
+            { exploreViewModel.playTracksQueue(songTracks, 0, playerViewModel, section.title) }
         } else {
             navigationAction
         },
         onShuffleClick = if (hasSongs && songTracks.size > 1) {
-            { feedViewModel.shuffleTracksQueue(songTracks, playerViewModel, section.title) }
+            { exploreViewModel.shuffleTracksQueue(songTracks, playerViewModel, section.title) }
         } else null,
         onAvatarClick = navigationAction
     )
@@ -3785,14 +3733,14 @@ private fun RegionalExploreSection(
                         isCurrentPlaying = isPlaying && currentSongId == "youtube_${track.videoId}",
                         onClick = {
                             if (songIdx >= 0) {
-                                feedViewModel.playTracksQueue(songTracks, songIdx, playerViewModel, section.title)
+                                exploreViewModel.playTracksQueue(songTracks, songIdx, playerViewModel, section.title)
                             } else {
                                 playerViewModel.showAndPlaySong(track.toSong(), listOf(track.toSong()), section.title)
                             }
                         },
                         onPlayClick = {
                             if (songIdx >= 0) {
-                                feedViewModel.playTracksQueue(songTracks, songIdx, playerViewModel, section.title)
+                                exploreViewModel.playTracksQueue(songTracks, songIdx, playerViewModel, section.title)
                             } else {
                                 playerViewModel.showAndPlaySong(track.toSong(), listOf(track.toSong()), section.title)
                             }
@@ -3849,7 +3797,7 @@ private fun RegionalExploreSection(
                             navController.navigateSafely(Screen.ArtistDetail.createRoute(item.id))
                         },
                         onRadioClick = {
-                            feedViewModel.playArtistRadio(FeedArtist(item.title, item.id, item.thumbnail), playerViewModel)
+                            exploreViewModel.playArtistRadio(FeedArtist(item.title, item.id, item.thumbnail), playerViewModel)
                         }
                     )
                 }

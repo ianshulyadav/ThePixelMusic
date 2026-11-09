@@ -66,10 +66,12 @@ class QuickPicksViewModel @Inject constructor(
     private val prefs by lazy { context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }
 
     init {
-        // Immediately populate from cache so the UI shows something on relaunch.
-        loadFromCache()
-        viewModelScope.launch {
+        // Immediately populate from cache on Dispatchers.IO so UI thread is never blocked
+        viewModelScope.launch(Dispatchers.IO) {
+            loadFromCache()
             loadQuickPicks(_selectedCategory.value, forceRefresh = isCacheExpired())
+        }
+        viewModelScope.launch {
             userPreferencesRepository.discoverFlow.collect { _ ->
                 if (_selectedCategory.value == "All") {
                     loadQuickPicks("All", forceRefresh = isCacheExpired())
@@ -116,13 +118,13 @@ class QuickPicksViewModel @Inject constructor(
         _quickPicks.value = persistentListOf()
     }
 
-    private fun loadFromCache() {
+    private suspend fun loadFromCache() = withContext(Dispatchers.IO) {
         try {
             if (isCacheExpired()) {
                 clearCache()
-                return
+                return@withContext
             }
-            val songsJson = prefs.getString(KEY_SONGS, null) ?: return
+            val songsJson = prefs.getString(KEY_SONGS, null) ?: return@withContext
             val categoriesJson = prefs.getString(KEY_CATEGORIES, null)
 
             val songsArray = JSONArray(songsJson)
@@ -143,7 +145,7 @@ class QuickPicksViewModel @Inject constructor(
         }
     }
 
-    private fun saveToCache(songs: List<Song>, categories: List<String>) {
+    private suspend fun saveToCache(songs: List<Song>, categories: List<String>) = withContext(Dispatchers.IO) {
         try {
             val songsArray = JSONArray()
             songs.forEach { songsArray.put(songToJson(it)) }

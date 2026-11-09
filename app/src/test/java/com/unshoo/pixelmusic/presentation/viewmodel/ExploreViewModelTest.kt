@@ -7,6 +7,14 @@ import com.unshoo.pixelmusic.data.model.Song
 import com.unshoo.pixelmusic.data.preferences.PlaylistPreferencesRepository
 import com.unshoo.pixelmusic.data.preferences.UserPreferencesRepository
 import com.unshoo.pixelmusic.data.remote.youtube.DatastoreRepository
+import com.unshoo.pixelmusic.data.feed.FeedArtist
+import com.unshoo.pixelmusic.data.feed.FeedData
+import com.unshoo.pixelmusic.data.feed.FeedInnerTubeApi
+import com.unshoo.pixelmusic.data.feed.FeedMix
+import com.unshoo.pixelmusic.data.feed.GeneratedTrack
+import com.unshoo.pixelmusic.data.feed.RecentTrack
+import com.unshoo.pixelmusic.data.feed.YouTubeMusicTrack
+import com.unshoo.pixelmusic.data.feed.YouTubePlaylistSummary
 import com.unshoo.pixelmusic.data.stats.PlaybackStatsRepository
 import com.unshoo.pixelmusic.presentation.model.ExploreScreenUiState
 import io.mockk.coEvery
@@ -68,6 +76,7 @@ class ExploreViewModelTest {
     private val listeningStatsTracker: ListeningStatsTracker = mockk(relaxed = true)
     private val datastoreRepository: DatastoreRepository = mockk(relaxed = true)
     private val connectivityStateHolder: ConnectivityStateHolder = mockk(relaxed = true)
+    private val feedInnerTube: FeedInnerTubeApi = mockk(relaxed = true)
     private val context: Context = mockk(relaxed = true)
 
     private lateinit var tempCacheDir: File
@@ -89,6 +98,9 @@ class ExploreViewModelTest {
         every { userPreferencesRepository.youtubePersonalizedExploreFlow } returns flowOf(true)
         every { userPreferencesRepository.youtubePersonalizedQueueFlow } returns flowOf(true)
         every { userPreferencesRepository.pureYtMusicOnlyFlow } returns flowOf(false)
+        every { userPreferencesRepository.blockedReleaseIdsFlow } returns flowOf(emptySet())
+        every { userPreferencesRepository.filterKeywordsFlow } returns flowOf(emptyList())
+        coEvery { userPreferencesRepository.blockRelease(any(), any()) } returns Unit
 
         every { playlistPreferencesRepository.userPlaylistsFlow } returns flowOf(emptyList())
         every { musicDao.getHomeMixPreviewSongs(any(), any(), any()) } returns flowOf(emptyList())
@@ -115,6 +127,7 @@ class ExploreViewModelTest {
             listeningStatsTracker = listeningStatsTracker,
             datastoreRepository = datastoreRepository,
             connectivityStateHolder = connectivityStateHolder,
+            feedInnerTube = feedInnerTube,
             context = context,
             ioDispatcher = testDispatcher,
             defaultDispatcher = testDispatcher
@@ -649,6 +662,127 @@ class ExploreViewModelTest {
 
         // 3. Legacy error state must also be populated
         assertNotNull(viewModel.exploreUiState.value.error, "Legacy error state must be populated")
+    }
+
+    @Test
+    @DisplayName("22: M2 Single-request flow populates both ExploreScreenUiState and FeedData atomically")
+    fun singleRequest_populatesBothUiStateAndFeedData_atomically() = runTest(testDispatcher) {
+        val mockHome = createMockHomePage("Trending Quick Picks", 4)
+        coEvery { YouTube.home(any(), any(), any()) } returns Result.success(mockHome)
+        coEvery { YouTube.newReleaseAlbums() } returns Result.success(emptyList())
+
+        val viewModel = createViewModel()
+        advanceUntilIdle()
+
+        // 1. Verify single network request was executed
+        coVerify(exactly = 1) { YouTube.home(any(), any(), any()) }
+
+        // 2. Verify ExploreScreenUiState is populated
+        val screenState = viewModel.uiState.value
+        assertTrue(screenState is ExploreScreenUiState.Content)
+        val content = screenState as ExploreScreenUiState.Content
+        assertEquals(1, content.dynamicShelves.size)
+        assertEquals(4, content.quickPicks.size)
+
+        // 3. Verify FeedData is populated atomically from the same request
+        val feed = viewModel.feedData.value
+        assertNotNull(feed)
+        assertEquals(4, feed.quickPicks.size)
+        assertEquals("song_1", feed.quickPicks.first().videoId)
+    }
+
+    @Test
+    @DisplayName("23: M2 blockRelease updates preferences and removes release from state atomically")
+    fun blockRelease_updatesPreferencesAndRemovesFromFeedDataAndUiState() = runTest(testDispatcher) {
+        val mockHome = createMockHomePage("Online Picks", 3)
+        val sampleAlbum = AlbumItem(
+            browseId = "album_block_1",
+            playlistId = "pl_1",
+            title = "Blocked Album",
+            artists = listOf(Artist("Blocked Artist", "art_1")),
+            year = 2026,
+            thumbnail = "https://example.com/blocked.jpg",
+            explicit = false
+        )
+        coEvery { YouTube.home(any(), any(), any()) } returns Result.success(mockHome)
+        coEvery { YouTube.newReleaseAlbums() } returns Result.success(listOf(sampleAlbum))
+
+        val viewModel = createViewModel()
+        advanceUntilIdle()
+
+        val initialContent = viewModel.uiState.value as ExploreScreenUiState.Content
+        assertEquals(1, initialContent.newReleases.size)
+        assertEquals(1, viewModel.feedData.value.newReleases.size)
+
+        // When: User blocks the release
+        viewModel.blockRelease("album_block_1")
+        advanceUntilIdle()
+
+        // Then:
+        // 1. Preferences repository is called to block release
+        coVerify(exactly = 1) { userPreferencesRepository.blockRelease("album_block_1", true) }
+
+        // 2. FeedData removes the blocked release
+        assertTrue(viewModel.feedData.value.newReleases.none { it.id == "album_block_1" })
+
+        // 3. ExploreScreenUiState removes the blocked release
+        val updatedContent = viewModel.uiState.value as ExploreScreenUiState.Content
+        assertTrue(updatedContent.newReleases.none { it.id == "album_block_1" || it.browseId == "album_block_1" })
+    }
+
+    @Test
+    @DisplayName("24: M2 Playback methods correctly forward queue dispatching to PlayerViewModel")
+    fun playbackMethods_forwardProperlyToPlayerViewModel() = runTest(testDispatcher) {
+        val mockPlayerViewModel = mockk<PlayerViewModel>(relaxed = true)
+        val viewModel = createViewModel()
+
+        val track = YouTubeMusicTrack(
+            videoId = "track_123",
+            title = "Test Track",
+            artist = "Artist Name",
+            album = "Album Name",
+            artworkUrl = "https://example.com/art.jpg"
+        )
+
+        // 1. playTrack
+        viewModel.playTrack(track, mockPlayerViewModel, "Test Queue")
+        coVerify(exactly = 1) {
+            mockPlayerViewModel.showAndPlaySong(
+                match { it.id == "youtube_track_123" || it.title == "Test Track" },
+                any(),
+                queueName = "Test Queue"
+            )
+        }
+
+        // 2. playTracksQueue
+        val tracks = listOf(track)
+        viewModel.playTracksQueue(tracks, 0, mockPlayerViewModel, "Custom Queue")
+        coVerify(exactly = 1) {
+            mockPlayerViewModel.playSongs(
+                match { it.size == 1 && it.first().title == "Test Track" },
+                match { it.title == "Test Track" },
+                queueName = "Custom Queue"
+            )
+        }
+
+        // 3. shuffleTracksQueue
+        viewModel.shuffleTracksQueue(tracks, mockPlayerViewModel, "Custom Queue")
+        coVerify(exactly = 1) {
+            mockPlayerViewModel.playSongsShuffled(
+                match { it.size == 1 && it.first().title == "Test Track" },
+                queueName = "Custom Queue Shuffle"
+            )
+        }
+
+        // 4. playMix
+        val mix = FeedMix(
+            title = "Chill Mix",
+            seed = track
+        )
+        viewModel.playMix(mix, mockPlayerViewModel)
+        coVerify(atLeast = 1) {
+            mockPlayerViewModel.showAndPlaySong(any(), any(), queueName = "Chill Mix")
+        }
     }
 
     private class TestYTItemTypeAdapter : com.google.gson.JsonSerializer<YTItem>, com.google.gson.JsonDeserializer<YTItem> {

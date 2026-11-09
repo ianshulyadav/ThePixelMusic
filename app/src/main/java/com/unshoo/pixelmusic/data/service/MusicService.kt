@@ -1509,14 +1509,18 @@ class MusicService : MediaLibraryService() {
         val startCommandResult = super.onStartCommand(intent, flags, startId)
         if (needsTemporaryForeground) {
             val player = mediaSession?.player
+            val hasValidMediaItem = player?.currentMediaItem != null || (player?.mediaItemCount ?: 0) > 0
             val isActivelyPlaying = player?.let {
                 it.playWhenReady &&
                     it.playbackState != Player.STATE_IDLE &&
                     it.playbackState != Player.STATE_ENDED
             } == true
-            if (!isActivelyPlaying) {
+            if (!isActivelyPlaying && !hasValidMediaItem) {
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelfResult(startId)
+            } else if (!isActivelyPlaying && hasValidMediaItem) {
+                // Prevent service termination and preserve media notification when paused widget actions are handled
+                mediaSession?.let { refreshMediaSessionUi(it, force = false) }
             }
         }
         return startCommandResult
@@ -2804,20 +2808,16 @@ class MusicService : MediaLibraryService() {
             else -> 0
         }
 
-        // Device-friendly queue restore: only restore the left songs in the queue after the last played song
-        val leftItems = if (resolvedIndex in restoredItems.indices) {
-            restoredItems.subList(resolvedIndex, restoredItems.size)
-        } else {
-            restoredItems
-        }
-        val preparedItems = leftItems.toMutableList()
-        val latestItem = preparedItems.firstOrNull() ?: return
+        // Preserve entire queue history across cold restore
+        val preparedItems = restoredItems.toMutableList()
+        val targetIndex = if (resolvedIndex in preparedItems.indices) resolvedIndex else 0
+        val currentItem = preparedItems.getOrNull(targetIndex) ?: return
 
         // Do not block player restoration on resolving the track's streaming URI from network.
         // Instead, restore immediately with the unresolved media item so the UI displays the song instantly.
         // The URI resolution is launched asynchronously to warm up the cache with fresh URLs.
         serviceScope.launch(Dispatchers.IO) {
-            runCatching { engine.preResolveForPlayback(latestItem) }
+            runCatching { engine.preResolveForPlayback(currentItem) }
         }
 
         withContext(Dispatchers.Main.immediate) {
@@ -2835,10 +2835,10 @@ class MusicService : MediaLibraryService() {
 
             isRestoringPlaybackSnapshot = true
             try {
-                // Restore only remaining upcoming tracks with the last-played song placed cleanly at index 0
+                // Restore entire queue preserving preceding history, starting at targetIndex
                 player.setMediaItems(
                     preparedItems,
-                    0,
+                    targetIndex,
                     snapshot.currentPositionMs.coerceAtLeast(0L)
                 )
                 player.repeatMode = safeRepeatMode
@@ -2855,8 +2855,9 @@ class MusicService : MediaLibraryService() {
         }
 
         Timber.tag(TAG).i(
-            "Restored playback queue snapshot: leftItems=%d position=%d",
+            "Restored playback queue snapshot: totalItems=%d targetIndex=%d position=%d",
             preparedItems.size,
+            targetIndex,
             snapshot.currentPositionMs
         )
         schedulePlaybackSnapshotPersist(immediate = true)

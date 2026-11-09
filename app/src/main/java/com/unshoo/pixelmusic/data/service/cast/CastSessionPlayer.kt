@@ -78,7 +78,8 @@ class CastSessionPlayer(
     override fun release() {
         runCatching { wrappedPlayer.removeListener(queueWatcher) }
         listeners.clear()
-        super.release()
+        // CRITICAL: Do NOT call super.release() or wrappedPlayer.release()!
+        // CastSessionPlayer is a session wrapper and does NOT own the lifecycle of the underlying ExoPlayer engine.
     }
 
     // ---- what the session sees ----------------------------------------------

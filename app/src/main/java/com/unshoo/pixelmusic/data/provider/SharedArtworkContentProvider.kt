@@ -9,8 +9,11 @@ import android.net.Uri
 import android.os.ParcelFileDescriptor
 import coil.imageLoader
 import com.unshoo.pixelmusic.utils.AlbumArtUtils
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 import java.io.File
 import java.io.FileNotFoundException
 import java.util.concurrent.TimeUnit
@@ -124,38 +127,45 @@ class SharedArtworkContentProvider : ContentProvider() {
             }
         } catch (_: Throwable) {}
 
-        // Download and cache synchronously for external controller
-        return downloadAndCacheUrl(rawUrl, targetFile)
+        // Prevent synchronous network calls on IPC Binder thread: enqueue async background download and return null immediately
+        enqueueAsyncArtworkDownload(rawUrl, targetFile)
+        return null
     }
 
-    private fun downloadAndCacheUrl(rawUrl: String, targetFile: File): File? {
-        val tempFile = File(targetFile.parentFile, "${targetFile.name}.tmp_${System.currentTimeMillis()}")
-        return try {
-            val request = Request.Builder()
-                .url(rawUrl)
-                .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36")
-                .build()
-            artworkHttpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return null
-                val body = response.body ?: return null
-                tempFile.outputStream().use { out ->
-                    body.byteStream().copyTo(out)
+    private fun enqueueAsyncArtworkDownload(rawUrl: String, targetFile: File) {
+        val request = Request.Builder()
+            .url(rawUrl)
+            .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36")
+            .build()
+        artworkHttpClient.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: java.io.IOException) {
+                // Background download failed, ignore
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                val tempFile = File(targetFile.parentFile, "${targetFile.name}.tmp_${System.currentTimeMillis()}")
+                try {
+                    response.use { resp ->
+                        if (!resp.isSuccessful) return
+                        val body = resp.body ?: return
+                        tempFile.outputStream().use { out ->
+                            body.byteStream().copyTo(out)
+                        }
+                    }
+                    if (tempFile.exists() && tempFile.length() > 0L) {
+                        if (tempFile.renameTo(targetFile) || (targetFile.delete() && tempFile.renameTo(targetFile))) {
+                            // Target file ready
+                        } else {
+                            tempFile.delete()
+                        }
+                    } else {
+                        tempFile.delete()
+                    }
+                } catch (_: Exception) {
+                    tempFile.delete()
                 }
             }
-            if (tempFile.exists() && tempFile.length() > 0L) {
-                if (tempFile.renameTo(targetFile) || (targetFile.delete() && tempFile.renameTo(targetFile))) {
-                    targetFile
-                } else {
-                    tempFile
-                }
-            } else {
-                tempFile.delete()
-                null
-            }
-        } catch (e: Exception) {
-            tempFile.delete()
-            null
-        }
+        })
     }
 
     companion object {

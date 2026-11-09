@@ -53,13 +53,20 @@ import unshoo.ianshulyadav.pixelmusic.innertube.pages.HomePage
 import com.unshoo.pixelmusic.data.database.toSong
 import com.unshoo.pixelmusic.data.feed.FeedAlbum
 import com.unshoo.pixelmusic.data.feed.FeedArtist
+import com.unshoo.pixelmusic.data.feed.FeedData
+import com.unshoo.pixelmusic.data.feed.FeedInnerTubeApi
+import com.unshoo.pixelmusic.data.feed.FeedMix
 import com.unshoo.pixelmusic.data.feed.FeedSpotlight
+import com.unshoo.pixelmusic.data.feed.GeneratedTrack
 import com.unshoo.pixelmusic.data.feed.ImageDto
 import com.unshoo.pixelmusic.data.feed.RecentTrack
 import com.unshoo.pixelmusic.data.feed.RecentTrackArtistRef
 import com.unshoo.pixelmusic.data.feed.YouTubeMusicTrack
 import com.unshoo.pixelmusic.data.feed.YouTubePlaylistSummary
-import com.unshoo.pixelmusic.data.remote.youtube.toNativeSong
+import com.unshoo.pixelmusic.data.feed.toSong
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import javax.inject.Inject
 
 data class ExploreUiState(
@@ -105,6 +112,7 @@ class ExploreViewModel @Inject constructor(
     private val listeningStatsTracker: ListeningStatsTracker,
     private val datastoreRepository: DatastoreRepository,
     private val connectivityStateHolder: ConnectivityStateHolder,
+    private val feedInnerTube: FeedInnerTubeApi,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -130,6 +138,37 @@ class ExploreViewModel @Inject constructor(
         listeningStatsTracker,
         datastoreRepository,
         connectivityStateHolder,
+        FeedInnerTubeApi(
+            okhttp3.OkHttpClient(),
+            com.unshoo.pixelmusic.data.feed.FeedYtAuthBridge(datastoreRepository)
+        ),
+        context
+    ) {
+        this.ioDispatcher = ioDispatcher
+        this.defaultDispatcher = defaultDispatcher
+    }
+
+    constructor(
+        playbackStatsRepository: PlaybackStatsRepository,
+        playlistPreferencesRepository: PlaylistPreferencesRepository,
+        userPreferencesRepository: UserPreferencesRepository,
+        musicDao: MusicDao,
+        listeningStatsTracker: ListeningStatsTracker,
+        datastoreRepository: DatastoreRepository,
+        connectivityStateHolder: ConnectivityStateHolder,
+        feedInnerTube: FeedInnerTubeApi,
+        context: Context,
+        ioDispatcher: CoroutineDispatcher,
+        defaultDispatcher: CoroutineDispatcher = ioDispatcher
+    ) : this(
+        playbackStatsRepository,
+        playlistPreferencesRepository,
+        userPreferencesRepository,
+        musicDao,
+        listeningStatsTracker,
+        datastoreRepository,
+        connectivityStateHolder,
+        feedInnerTube,
         context
     ) {
         this.ioDispatcher = ioDispatcher
@@ -166,6 +205,122 @@ class ExploreViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(ExploreUiState())
     val exploreUiState: StateFlow<ExploreUiState> = _uiState.asStateFlow()
     val legacyUiState: StateFlow<ExploreUiState> = _uiState.asStateFlow()
+
+    // --- Unified FeedData StateFlow ---
+    private val _feedDataState = MutableStateFlow(FeedData())
+    val feedData: StateFlow<FeedData> = _feedDataState.asStateFlow()
+
+    // --- Absorbed Preferences Flows from FeedViewModel ---
+    val blockedReleaseIds = userPreferencesRepository.blockedReleaseIdsFlow
+    val pureYtMusicOnly = userPreferencesRepository.pureYtMusicOnlyFlow
+    val filterKeywords = userPreferencesRepository.filterKeywordsFlow
+
+    // --- Radio Launching State ---
+    private val _launchingRadio = MutableStateFlow<String?>(null)
+    val launchingRadio: StateFlow<String?> = _launchingRadio.asStateFlow()
+
+    // --- FeedUiState for backward compatibility with FeedViewModel ---
+    val feedUiState: StateFlow<FeedUiState> = combine(
+        isLoadingState,
+        isRefreshingState,
+        _launchingRadio,
+        errorState,
+        feedData
+    ) { loading, refreshing, launching, err, data ->
+        FeedUiState(
+            isLoading = loading,
+            isRefreshing = refreshing,
+            launchingRadio = launching,
+            error = err,
+            feedData = data
+        )
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, FeedUiState())
+
+    fun blockRelease(id: String) {
+        viewModelScope.launch {
+            userPreferencesRepository.blockRelease(id, true)
+            _feedDataState.update { current ->
+                current.copy(
+                    newReleases = current.newReleases.filter { it.id != id }
+                )
+            }
+            _uiState.update { current ->
+                current.copy(
+                    preparedNewReleases = current.preparedNewReleases.filter { it.id != id },
+                    newReleaseAlbums = current.newReleaseAlbums.filter { it.browseId != id }
+                )
+            }
+            val content = _screenUiState.value as? ExploreScreenUiState.Content
+            if (content != null) {
+                _screenUiState.value = content.copy(
+                    newReleases = content.newReleases.filter { it.id != id && it.browseId != id }
+                )
+            }
+        }
+    }
+
+    fun playTrack(track: YouTubeMusicTrack, playerViewModel: PlayerViewModel, sourceLabel: String = "Feed") {
+        val song = track.toSong()
+        playerViewModel.showAndPlaySong(song, listOf(song), queueName = sourceLabel)
+    }
+
+    fun shuffleTracksQueue(tracks: List<YouTubeMusicTrack>, playerViewModel: PlayerViewModel, sourceLabel: String = "Feed") {
+        if (tracks.isEmpty()) return
+        val songs = tracks.map { it.toSong() }
+        playerViewModel.playSongsShuffled(songs, queueName = "$sourceLabel Shuffle")
+    }
+
+    fun playTracksQueue(tracks: List<YouTubeMusicTrack>, startIndex: Int = 0, playerViewModel: PlayerViewModel, sourceLabel: String = "Feed") {
+        if (tracks.isEmpty()) return
+        val songs = tracks.map { it.toSong() }
+        val startSong = songs.getOrElse(startIndex) { songs.first() }
+        playerViewModel.playSongs(songs, startSong, queueName = sourceLabel)
+    }
+
+    fun playRecentQueue(tracks: List<RecentTrack>, startIndex: Int = 0, playerViewModel: PlayerViewModel) {
+        if (tracks.isEmpty()) return
+        val songs = tracks.map { it.toSong() }
+        val startSong = songs.getOrElse(startIndex) { songs.first() }
+        playerViewModel.playSongs(songs, startSong, queueName = "Jump Back In")
+    }
+
+    fun playGeneratedQueue(tracks: List<GeneratedTrack>, startIndex: Int = 0, playerViewModel: PlayerViewModel, sourceLabel: String = "Heavy Rotation") {
+        if (tracks.isEmpty()) return
+        val songs = tracks.map { it.toSong() }
+        val startSong = songs.getOrElse(startIndex) { songs.first() }
+        playerViewModel.playSongs(songs, startSong, queueName = sourceLabel)
+    }
+
+    fun playMix(mix: FeedMix, playerViewModel: PlayerViewModel) {
+        playTrack(mix.seed, playerViewModel, mix.title)
+    }
+
+    fun playInfiniteRadio(playerViewModel: PlayerViewModel) {
+        val feed = _feedDataState.value
+        val candidate = (feed.quickPicks + feed.ytLikedSongs + feed.freshFinds).randomOrNull()
+        if (candidate != null) {
+            playTrack(candidate, playerViewModel, "Infinite Radio")
+        }
+    }
+
+    fun playArtistRadio(artist: FeedArtist, playerViewModel: PlayerViewModel) {
+        viewModelScope.launch {
+            _launchingRadio.value = artist.name
+            try {
+                val seeds = feedInnerTube.searchSongs("${artist.name} songs", limit = 5)
+                val seed = seeds.firstOrNull { it.videoId.isNotBlank() }
+                if (seed != null) {
+                    playTrack(seed, playerViewModel, "${artist.name} Radio")
+                } else {
+                    playerViewModel.playArtistSongsShuffledWithRelated(artist.name, initialArtistSongs = emptyList())
+                }
+            } catch (_: Exception) {
+                playerViewModel.playArtistSongsShuffledWithRelated(artist.name, initialArtistSongs = emptyList())
+            } finally {
+                _launchingRadio.value = null
+            }
+        }
+    }
 
     fun refresh(force: Boolean = true): Job? = refreshOnEntry(force = force)
     fun retry(): Job? = refresh(force = true)
@@ -514,6 +669,26 @@ class ExploreViewModel @Inject constructor(
                         hasMoreContent = cache.continuation != null,
                         legacyState = _uiState.value
                     )
+                    val cachedFeedPicks = cachedYtQuickPicks.map {
+                        YouTubeMusicTrack(
+                            videoId = it.youtubeId ?: if (it.id.startsWith("youtube_")) it.id.removePrefix("youtube_") else it.id,
+                            title = it.title,
+                            artist = it.artist,
+                            album = it.album,
+                            artworkUrl = it.albumArtUriString
+                        )
+                    }
+                    _feedDataState.value = FeedData(
+                        isYtConnected = !isLocalModeCached,
+                        hasYtRecommendations = cachedYtQuickPicks.isNotEmpty(),
+                        hasPersonalContent = cachedYtQuickPicks.isNotEmpty(),
+                        quickPicks = cachedFeedPicks,
+                        newReleases = cachedNewReleases,
+                        recentAlbums = cachedAlbums,
+                        topArtists = cachedArtists,
+                        charts = cachedChartTracks,
+                        lastUpdatedMillis = cache.timestamp
+                    )
                     true
                 } else {
                     _isLoadingState.value = true
@@ -560,7 +735,8 @@ class ExploreViewModel @Inject constructor(
         val uiNewReleases: List<ExploreAlbumItemUiModel> = emptyList(),
         val uiAlbumsForYou: List<ExploreAlbumItemUiModel> = emptyList(),
         val uiCharts: ExploreChartsUiModel? = null,
-        val uiArtistsForYou: List<ExploreArtistItemUiModel> = emptyList()
+        val uiArtistsForYou: List<ExploreArtistItemUiModel> = emptyList(),
+        val compiledFeedData: FeedData = FeedData()
     )
 
     private fun persistToCacheAtomic(
@@ -939,6 +1115,58 @@ class ExploreViewModel @Inject constructor(
                         )
                     }
 
+                    val quickPicksTracks = ytHomeQuickPicks.map { song ->
+                        YouTubeMusicTrack(
+                            videoId = song.youtubeId ?: if (song.id.startsWith("youtube_")) song.id.removePrefix("youtube_") else song.id,
+                            title = song.title,
+                            artist = song.artist,
+                            album = song.album,
+                            artworkUrl = song.albumArtUriString
+                        )
+                    }
+
+                    val homeMixes = rawSections.flatMap { it.items }
+                        .filterIsInstance<PlaylistItem>()
+                        .filter { it.id.startsWith("RD") || it.id.startsWith("PL") || it.title.contains("mix", ignoreCase = true) }
+                        .map { item ->
+                            FeedMix(
+                                title = item.title,
+                                seed = YouTubeMusicTrack(
+                                    videoId = item.id,
+                                    title = item.title,
+                                    artist = item.author?.name ?: "Mix",
+                                    album = null,
+                                    artworkUrl = item.thumbnail
+                                )
+                            )
+                        }
+
+                    val compiledFeedData = FeedData(
+                        isYtConnected = isYtConnected,
+                        hasYtRecommendations = ytHomeQuickPicks.isNotEmpty(),
+                        hasPersonalContent = isYtConnected || ytHomeQuickPicks.isNotEmpty(),
+                        tasteTags = uiChips.map { it.title }.filter { !it.equals("All", ignoreCase = true) && !it.equals("Local", ignoreCase = true) },
+                        spotlight = spotlight,
+                        quickPicks = quickPicksTracks,
+                        newReleases = newReleasesSummaries,
+                        charts = emptyList(),
+                        mixes = homeMixes,
+                        jumpBackIn = _uiState.value.localHighlyRotatoryTracks,
+                        recentAlbums = preparedAlbums,
+                        topArtists = artistsForYou,
+                        heavyRotation = emptyList(),
+                        freshFinds = discoverSongs.map {
+                            YouTubeMusicTrack(
+                                videoId = it.youtubeId ?: if (it.id.startsWith("youtube_")) it.id.removePrefix("youtube_") else it.id,
+                                title = it.title,
+                                artist = it.artist,
+                                album = it.album,
+                                artworkUrl = it.albumArtUriString
+                            )
+                        },
+                        lastUpdatedMillis = System.currentTimeMillis()
+                    )
+
                     PreparedExploreData(
                         rawSections = rawSections,
                         resolvedNewReleases = resolvedNewReleases,
@@ -959,7 +1187,8 @@ class ExploreViewModel @Inject constructor(
                         uiNewReleases = uiNewReleases,
                         uiAlbumsForYou = uiAlbumsForYou,
                         uiCharts = null,
-                        uiArtistsForYou = uiArtistsForYou
+                        uiArtistsForYou = uiArtistsForYou,
+                        compiledFeedData = compiledFeedData
                     )
                 }
 
@@ -970,6 +1199,7 @@ class ExploreViewModel @Inject constructor(
                 val isCategoryActive = !currentCategory.equals("All", ignoreCase = true)
 
                 // 3. Commit exactly once atomically to observable state
+                _feedDataState.value = prepared.compiledFeedData
                 if (!isCategoryActive) {
                     _sectionsState.value = prepared.uiSections
                 }
@@ -1700,6 +1930,20 @@ class ExploreViewModel @Inject constructor(
                 dynamicShelves = uiSections,
                 hasMoreContent = false,
                 legacyState = _uiState.value
+            )
+            val offlineFeedPicks = allOfflineSongs.take(15).map { song ->
+                YouTubeMusicTrack(
+                    videoId = song.youtubeId ?: if (song.id.startsWith("youtube_")) song.id.removePrefix("youtube_") else song.id,
+                    title = song.title,
+                    artist = song.artist,
+                    album = song.album,
+                    artworkUrl = song.albumArtUriString
+                )
+            }
+            _feedDataState.value = FeedData(
+                isYtConnected = false,
+                quickPicks = offlineFeedPicks,
+                lastUpdatedMillis = System.currentTimeMillis()
             )
         } catch (e: Exception) {
             Timber.e(e, "Error loading offline explore data")

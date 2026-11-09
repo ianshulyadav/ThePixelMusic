@@ -92,6 +92,7 @@ class PlaybackStateHolder @Inject constructor(
 
     // Internal State
     private var isSeeking = false
+    private var localSeekUnlockJob: Job? = null
     private var remoteSeekUnlockJob: Job? = null
     private var activePositionOccurrenceMediaId: String? = null
     private var activePositionOccurrenceToken: Long = 0L
@@ -468,10 +469,34 @@ class PlaybackStateHolder @Inject constructor(
         }
     }
 
+    fun onSeekStarted() {
+        isSeeking = true
+    }
+
+    fun onSeekFinished(position: Long) {
+        seekTo(position)
+    }
+
+    fun setIsSeeking(seeking: Boolean) {
+        isSeeking = seeking
+        if (!seeking) {
+            localSeekUnlockJob?.cancel()
+        }
+    }
+
     fun seekTo(position: Long) {
+        val targetPosition = position.coerceAtLeast(0L)
+        _currentPosition.value = targetPosition
+        isSeeking = true
+        localSeekUnlockJob?.cancel()
+        localSeekUnlockJob = scope.launch(Dispatchers.Main) {
+            // Retain seeking lock briefly so UI progress ticks do not snap back
+            delay(1000)
+            isSeeking = false
+        }
+
         val castSession = castStateHolder.castSession.value
         if (castSession != null && castSession.remoteMediaClient != null) {
-            val targetPosition = position.coerceAtLeast(0L)
             castStateHolder.setRemotelySeeking(true)
             castStateHolder.setRemotePosition(targetPosition)
             setCurrentPosition(targetPosition)
@@ -487,7 +512,6 @@ class PlaybackStateHolder @Inject constructor(
         } else {
             remoteSeekUnlockJob?.cancel()
             castStateHolder.setRemotelySeeking(false)
-            val targetPosition = position.coerceAtLeast(0L)
             val currentMediaId = try {
                 mediaController?.currentMediaItem?.mediaId
             } catch (_: IllegalStateException) {
@@ -534,12 +558,20 @@ class PlaybackStateHolder @Inject constructor(
             val targetMediaId = playHistoryStack.lastOrNull()
             if (targetMediaId != null) {
                 // Find matching media item directly in controller timeline to avoid index desync
-                val targetIndex = (0 until controller.mediaItemCount)
-                    .firstOrNull { controller.getMediaItemAt(it).mediaId == targetMediaId }
-                    ?: (if (currentQueueMediaIds != null) {
-                        val idx = currentQueueMediaIds.indexOf(targetMediaId)
-                        if (idx >= 0 && idx < controller.mediaItemCount) idx else null
-                    } else null)
+                val timeline = controller.currentTimeline
+                val targetIndex = if (!timeline.isEmpty) {
+                    val window = androidx.media3.common.Timeline.Window()
+                    (0 until timeline.windowCount).firstOrNull { i ->
+                        timeline.getWindow(i, window).mediaItem.mediaId == targetMediaId
+                    }
+                } else {
+                    (0 until controller.mediaItemCount).firstOrNull {
+                        controller.getMediaItemAt(it).mediaId == targetMediaId
+                    }
+                } ?: (if (currentQueueMediaIds != null) {
+                    val idx = currentQueueMediaIds.indexOf(targetMediaId)
+                    if (idx >= 0 && idx < controller.mediaItemCount) idx else null
+                } else null)
                 if (targetIndex != null) {
                     controller.seekTo(targetIndex, 0L)
                     return
