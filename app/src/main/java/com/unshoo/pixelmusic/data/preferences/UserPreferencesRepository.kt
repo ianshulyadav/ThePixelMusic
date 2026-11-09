@@ -497,7 +497,7 @@ constructor(
 
     val useBlurEffectsFlow: Flow<Boolean> =
         dataStore.data.map { preferences ->
-            preferences[PreferencesKeys.USE_BLUR_EFFECTS] ?: true
+            preferences[PreferencesKeys.USE_BLUR_EFFECTS] ?: false
         }.distinctUntilChanged()
 
     suspend fun setUseBlurEffects(enabled: Boolean) {
@@ -508,7 +508,7 @@ constructor(
 
     val nowPlayingBlurEnabledFlow: Flow<Boolean> =
         dataStore.data.map { preferences ->
-            preferences[PreferencesKeys.NOW_PLAYING_BLUR_ENABLED] ?: true
+            preferences[PreferencesKeys.NOW_PLAYING_BLUR_ENABLED] ?: false
         }.distinctUntilChanged()
 
     suspend fun setNowPlayingBlurEnabled(enabled: Boolean) {

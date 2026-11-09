@@ -34,11 +34,11 @@ fun DirectStream.pcmBitrateOrNull(channels: Int = 2): Int? {
 }
 
 object TitleMatch {
-    const val ACCEPT_THRESHOLD = 0.78
+    const val ACCEPT_THRESHOLD = 0.85
     private const val TITLE_ONLY_THRESHOLD = 0.95
-    private const val MIN_TITLE_WITH_METADATA = 0.84
-    private const val MIN_ARTIST = 0.72
-    private const val DURATION_HARD_GATE_MS = 15_000L
+    private const val MIN_TITLE_WITH_METADATA = 0.88
+    private const val MIN_ARTIST = 0.80
+    private const val DURATION_HARD_GATE_MS = 6_000L
 
     data class Result(
         val accepted: Boolean,
@@ -120,7 +120,7 @@ object TitleMatch {
             return Result(false, 0.0, titleScore, artistScore, durationScore, "artist mismatch")
         }
         if (durationScore == 0.0) {
-            return Result(false, 0.0, titleScore, artistScore, durationScore, "duration differs by more than 15s")
+            return Result(false, 0.0, titleScore, artistScore, durationScore, "duration differs by more than 6s")
         }
 
         if (artistScore == null) {
@@ -128,7 +128,7 @@ object TitleMatch {
             val score = titleScore * 0.8 + (durationScore ?: 0.5) * 0.2
             return Result(accepted, score, titleScore, null, durationScore, if (accepted) "strict title fallback" else "artist metadata unavailable")
         }
-        if (titleScore < MIN_TITLE_WITH_METADATA && !containsTokenRun(candidateTitle, wantedTitle)) {
+        if (titleScore < MIN_TITLE_WITH_METADATA) {
             return Result(false, 0.0, titleScore, artistScore, durationScore, "title mismatch")
         }
 
@@ -146,9 +146,9 @@ object TitleMatch {
         val difference = abs(wantedMs - candidateMs)
         return when {
             difference > DURATION_HARD_GATE_MS -> 0.0
-            difference <= 3_000L -> 1.0
-            difference <= 10_000L -> 0.8
-            else -> 0.6
+            difference <= 2_500L -> 1.0
+            difference <= 4_500L -> 0.8
+            else -> 0.5
         }
     }
 
@@ -163,10 +163,11 @@ object TitleMatch {
         if (wantedParts.isEmpty() || candidateParts.isEmpty()) return 0.0
         return wantedParts.maxOf { target ->
             candidateParts.maxOf { option ->
-                if (target == option || (target.length >= 4 && option.length >= 4 && (target in option || option in target))) {
+                if (target == option) {
                     1.0
                 } else {
-                    jaroWinkler(target, option)
+                    val jw = jaroWinkler(target, option)
+                    if (jw >= 0.80) jw else 0.0
                 }
             }
         }
@@ -195,6 +196,7 @@ object TitleMatch {
         listOf(
             "live", "concert", "remix", "rework", "acoustic", "instrumental", "karaoke",
             "cover", "demo", "sped up", "nightcore", "slowed", "extended", "radio edit",
+            "clean", "explicit", "film version", "dialogue", "mashup",
         )
 
     private fun hasVersionMismatch(wanted: String, candidate: String): Boolean {

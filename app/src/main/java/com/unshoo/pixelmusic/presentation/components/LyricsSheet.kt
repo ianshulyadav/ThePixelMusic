@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.ui.layout.ContentScale
 import com.unshoo.pixelmusic.presentation.components.SmartImage
 import com.unshoo.pixelmusic.presentation.components.AutoScrollingText
-import com.unshoo.pixelmusic.presentation.components.player.FullPlayerAtmosphereBackground
 import racra.compose.smooth_corner_rect_library.AbsoluteSmoothCornerShape
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.animateFloat
@@ -359,18 +358,6 @@ fun LyricsSheet(
     }
     val animatedLyricsBlurStrength by animatedLyricsBlurStrengthFlow.collectAsStateWithLifecycle(initialValue = 2.5f)
 
-    val useBlurEffectsFlow = remember(context) {
-        context.dataStore.data.map { it[booleanPreferencesKey("use_blur_effects")] ?: true }
-    }
-    val useBlurEffects by useBlurEffectsFlow.collectAsStateWithLifecycle(initialValue = true)
-
-    val lyricsScreenBlurEnabledFlow = remember(context) {
-        context.dataStore.data.map { it[booleanPreferencesKey("lyrics_screen_blur_enabled")] ?: true }
-    }
-    val lyricsScreenBlurEnabled by lyricsScreenBlurEnabledFlow.collectAsStateWithLifecycle(initialValue = true)
-
-    val isLyricsBlurActive = useBlurEffects && lyricsScreenBlurEnabled
-
     // Read keep-screen-on preference from DataStore
     val keepScreenOnFlow = remember(context) {
         context.dataStore.data.map { it[booleanPreferencesKey("keep_screen_on_lyrics")] ?: false }
@@ -635,6 +622,7 @@ fun LyricsSheet(
                 scaleY = scale
                 translationY = lerp(0f, size.height * 0.08f, p)
             }
+            .clip(RoundedCornerShape(32.dp))
             .pointerInput(Unit) {
                 detectDragGestures(
                     onDragStart = {
@@ -682,24 +670,15 @@ fun LyricsSheet(
                     }
                 )
             },
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        containerColor = if (isLyricsBlurActive) Color.Transparent else containerColor,
+        containerColor = containerColor,
         contentColor = contentColor,
         // Removed TopBar and FAB
-    ) { _ ->
+    ) { paddingValues ->
         Box(modifier = Modifier.fillMaxSize()) {
-            if (isLyricsBlurActive) {
-                FullPlayerAtmosphereBackground(
-                    currentSong = currentSong,
-                    albumColorScheme = colorScheme,
-                    modifier = Modifier.fillMaxSize(),
-                    showTopVignette = false
-                )
-            }
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .statusBarsPadding()
+                    .padding(top = paddingValues.calculateTopPadding())
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null
@@ -873,34 +852,30 @@ fun LyricsSheet(
                 }
                 
                 // Top Gradient for fade
-                if (!isLyricsBlurActive) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(130.dp)
-                            .align(Alignment.TopCenter)
-                            .background(
-                                brush = Brush.verticalGradient(
-                                    colors = listOf(containerColor, Color.Transparent)
-                                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(130.dp)
+                        .align(Alignment.TopCenter)
+                        .background(
+                            brush = Brush.verticalGradient(
+                                colors = listOf(containerColor, Color.Transparent)
                             )
-                    )
-                }
+                        )
+                )
 
                 // Bottom Gradient for fade
-                if (!isLyricsBlurActive) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(80.dp)
-                            .align(Alignment.BottomCenter)
-                            .background(
-                                brush = Brush.verticalGradient(
-                                    colors = listOf(Color.Transparent, containerColor)
-                                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(80.dp)
+                        .align(Alignment.BottomCenter)
+                        .background(
+                            brush = Brush.verticalGradient(
+                                colors = listOf(Color.Transparent, containerColor)
                             )
-                    )
-                }
+                        )
+                )
             }
 
             // Controls Section (Auto-hide in immersive mode)
@@ -912,9 +887,8 @@ fun LyricsSheet(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(if (isLyricsBlurActive) Color.Transparent else containerColor)
-                        .navigationBarsPadding()
-                        .padding(bottom = 12.dp, end = 16.dp, start = 16.dp)
+                        .background(containerColor)
+                        .padding(bottom = paddingValues.calculateBottomPadding() + 10.dp, end = 16.dp, start = 16.dp)
                         .pointerInput(Unit) {
                             awaitPointerEventScope {
                                 while (true) {
@@ -1123,7 +1097,6 @@ fun LyricsSheet(
             exit = fadeOut() + slideOutVertically { it / 2 },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
                 .padding(bottom = 32.dp)
         ) {
             FilledIconButton(

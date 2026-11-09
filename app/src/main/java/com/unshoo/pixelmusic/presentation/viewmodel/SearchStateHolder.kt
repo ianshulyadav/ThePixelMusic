@@ -298,9 +298,6 @@ class SearchStateHolder @Inject constructor(
                 val summaryResult = YouTube.searchSummary(query).getOrNull()
                 if (summaryResult != null && summaryResult.summaries.isNotEmpty()) {
                     val filteredSummary = if (shouldFilterVideos) summaryResult.filterVideo(true) else summaryResult
-                    val rawItems = filteredSummary.summaries.flatMap { it.items }
-                    val mappedItems = rawItems.mapNotNull { it.toSearchResultItem(shouldFilterVideos) }
-
                     fun itemKey(item: SearchResultItem): String = when (item) {
                         is SearchResultItem.SongItem -> "song_${item.song.id}"
                         is SearchResultItem.ArtistItem -> "artist_${item.artist.id}"
@@ -309,19 +306,13 @@ class SearchStateHolder @Inject constructor(
                     }
 
                     val seenKeys = mutableSetOf<String>()
-
-                    // 1-- Priority: Keep up to 10 top songs according to user's YouTube Music search ranking
-                    val topSongs = mappedItems.filterIsInstance<SearchResultItem.SongItem>().take(10)
-                    topSongs.forEach { songItem ->
-                        if (seenKeys.add(itemKey(songItem))) {
-                            items.add(songItem)
-                        }
-                    }
-
-                    // 2-- After that: Keep the natural list of artists, albums, playlists, and further items
-                    mappedItems.forEach { item ->
-                        if (seenKeys.add(itemKey(item))) {
-                            items.add(item)
+                    filteredSummary.summaries.forEach { summary ->
+                        summary.items.forEach { ytItem ->
+                            ytItem.toSearchResultItem(shouldFilterVideos)?.let { mappedItem ->
+                                if (seenKeys.add(itemKey(mappedItem))) {
+                                    items.add(mappedItem)
+                                }
+                            }
                         }
                     }
                 } else {
@@ -363,9 +354,18 @@ class SearchStateHolder @Inject constructor(
                 }
             }
             SearchFilterType.PLAYLISTS -> {
-                val result = YouTube.search(query, YouTube.SearchFilter.FILTER_FEATURED_PLAYLIST).getOrNull()
-                lastContinuationToken = result?.continuation
-                result?.items?.filterIsInstance<PlaylistItem>()?.forEach { p ->
+                val featuredResult = YouTube.search(query, YouTube.SearchFilter.FILTER_FEATURED_PLAYLIST).getOrNull()
+                val communityResult = YouTube.search(query, YouTube.SearchFilter.FILTER_COMMUNITY_PLAYLIST).getOrNull()
+                lastContinuationToken = featuredResult?.continuation ?: communityResult?.continuation
+                val seenPlaylistIds = mutableSetOf<String>()
+                val combinedPlaylists = mutableListOf<PlaylistItem>()
+                featuredResult?.items?.filterIsInstance<PlaylistItem>()?.forEach {
+                    if (seenPlaylistIds.add(it.id)) combinedPlaylists.add(it)
+                }
+                communityResult?.items?.filterIsInstance<PlaylistItem>()?.forEach {
+                    if (seenPlaylistIds.add(it.id)) combinedPlaylists.add(it)
+                }
+                combinedPlaylists.forEach { p ->
                     items.add(SearchResultItem.PlaylistItem(Playlist(id = p.id, name = p.title, songIds = emptyList(), coverImageUri = p.thumbnail, source = "YOUTUBE")))
                 }
             }

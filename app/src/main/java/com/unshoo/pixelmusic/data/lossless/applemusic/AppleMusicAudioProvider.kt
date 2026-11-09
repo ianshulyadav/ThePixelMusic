@@ -378,15 +378,15 @@ object AppleMusicAudioProvider {
                 } else {
                     "${artists.firstOrNull().orEmpty()} $title".trim()
                 }
-                val songIds = searchSongIds(query, storefront, devToken, mediaToken)
-                if (songIds.isEmpty()) return@runCatching emptyList()
+                val candidates = searchCatalogRows(query, 5, mediaToken, devToken)
+                if (candidates.isEmpty()) return@runCatching emptyList()
 
                 // Resolve up to the first few candidates; stop early once we have three
                 // playable ones (webPlayback is the expensive call).
                 val out = mutableListOf<AppleMusicStream>()
-                for (id in songIds.take(5)) {
+                for (cand in candidates.take(5)) {
                     if (out.size >= 3) break
-                    webPlayback(id, devToken, mediaToken, storefront, quality)?.let { out += it }
+                    webPlayback(cand.songId, devToken, mediaToken, storefront, quality, cand)?.let { out += it }
                 }
                 out
             }.getOrElse { error ->
@@ -398,44 +398,6 @@ object AppleMusicAudioProvider {
             }
         }
 
-    /** Top catalog song ids for [query], in Apple's search-rank order. */
-    private fun searchSongIds(
-        query: String,
-        storefront: String,
-        devToken: String,
-        mediaToken: String,
-    ): List<String> {
-        val url =
-            "$AMP_BASE/v1/catalog/$storefront/search".toHttpUrl()
-                .newBuilder()
-                .addQueryParameter("term", query)
-                .addQueryParameter("types", "songs")
-                .addQueryParameter("limit", "5")
-                .build()
-        val request =
-            Request.Builder()
-                .url(url)
-                .header("Authorization", "Bearer $devToken")
-                .header("Media-User-Token", mediaToken)
-                .header("Origin", "https://music.apple.com")
-                .header("Referer", "https://music.apple.com/")
-                .header("User-Agent", UA)
-                .get()
-                .build()
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                if (response.code == 401 || response.code == 403) throw AuthException()
-                Log.w(TAG, "search failed: %d".format(response.code))
-                return emptyList()
-            }
-            val root = json.parseToJsonElement(response.body?.string().orEmpty()).jsonObject
-            val songs =
-                root["results"]?.jsonObject?.get("songs")?.jsonObject?.get("data")?.jsonArray
-                    ?: return emptyList()
-            return songs.mapNotNull { it.jsonObject["id"]?.jsonPrimitive?.contentOrNull }
-        }
-    }
-
     /** Resolve one catalog id through the web-playback endpoint to a playable playlist. */
     private fun webPlayback(
         songId: String,
@@ -443,6 +405,7 @@ object AppleMusicAudioProvider {
         mediaToken: String,
         storefront: String,
         quality: AppleMusicQuality,
+        candidateMeta: AppleMusicCandidate? = null,
     ): AppleMusicStream? {
         val body = """{"salableAdamId":"$songId","language":"en-US"}""".toRequestBody(JSON_MEDIA)
         val request =
@@ -506,16 +469,20 @@ object AppleMusicAudioProvider {
                 android.util.Base64.encodeToString(rewritten.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)
 
             val metadata = song["metadata"] as? JsonObject
+            val resolvedTitle = metadata?.title()?.takeIf { it.isNotBlank() } ?: candidateMeta?.title ?: songId
+            val resolvedArtist = metadata?.artist()?.takeIf { it.isNotBlank() } ?: candidateMeta?.artist
+            val resolvedAlbum = metadata?.album()?.takeIf { it.isNotBlank() }
+            val resolvedDuration = metadata?.durationMs() ?: candidateMeta?.durationMs
             return AppleMusicStream(
                 songId = songId,
                 hlsDataUri = hlsDataUri,
                 playlistUrl = playlistUrl,
                 drmUri = keyUri,
                 flavor = asset.flavor,
-                matchedTitle = metadata?.title() ?: songId,
-                matchedArtist = metadata?.artist(),
-                matchedAlbum = metadata?.album(),
-                matchedDurationMs = metadata?.durationMs(),
+                matchedTitle = resolvedTitle,
+                matchedArtist = resolvedArtist,
+                matchedAlbum = resolvedAlbum,
+                matchedDurationMs = resolvedDuration,
                 mediaUserToken = mediaToken,
                 developerToken = devToken,
             )

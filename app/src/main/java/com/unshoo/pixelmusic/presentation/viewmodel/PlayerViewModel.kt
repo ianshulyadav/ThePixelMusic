@@ -665,14 +665,14 @@ class PlayerViewModel @Inject constructor(
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
-            initialValue = true
+            initialValue = false
         )
 
     val nowPlayingBlurEnabled: StateFlow<Boolean> = userPreferencesRepository.nowPlayingBlurEnabledFlow
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
-            initialValue = true
+            initialValue = false
         )
 
     val navBarBlurEnabled: StateFlow<Boolean> = userPreferencesRepository.navBarBlurEnabledFlow
@@ -1988,8 +1988,8 @@ class PlayerViewModel @Inject constructor(
         val useSmoothCorners: Boolean = true,
         val playerThemePreference: String = ThemePreference.ALBUM_ART,
         val playerBackgroundStyle: String = PlayerBackgroundStyle.GRADIENT,
-        val useBlurEffects: Boolean = true,
-        val nowPlayingBlurEnabled: Boolean = true
+        val useBlurEffects: Boolean = false,
+        val nowPlayingBlurEnabled: Boolean = false
     )
 
     private val playerConfigSlicePart1 = combine(

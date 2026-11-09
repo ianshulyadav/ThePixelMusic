@@ -105,7 +105,7 @@ object AddonTrackMatcher {
                 wantedDurationMs = wantedDurationMs,
                 stream = probeStream,
             )
-            if (eval.accepted || (trustedOverride && eval.title >= 0.65)) {
+            if (eval.accepted) {
                 val qualityTieBreak = when {
                     cand.isHiRes -> 0.015
                     cand.formatHint?.equals("flac", true) == true ||
