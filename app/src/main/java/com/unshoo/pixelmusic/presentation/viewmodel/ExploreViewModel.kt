@@ -51,6 +51,7 @@ import unshoo.ianshulyadav.pixelmusic.innertube.models.filterVideo
 import unshoo.ianshulyadav.pixelmusic.innertube.pages.ChartsPage
 import unshoo.ianshulyadav.pixelmusic.innertube.pages.HomePage
 import com.unshoo.pixelmusic.data.database.toSong
+import com.unshoo.pixelmusic.data.feed.FeedRepository
 import com.unshoo.pixelmusic.data.feed.FeedAlbum
 import com.unshoo.pixelmusic.data.feed.FeedArtist
 import com.unshoo.pixelmusic.data.feed.FeedData
@@ -113,6 +114,7 @@ class ExploreViewModel @Inject constructor(
     private val datastoreRepository: DatastoreRepository,
     private val connectivityStateHolder: ConnectivityStateHolder,
     private val feedInnerTube: FeedInnerTubeApi,
+    private val feedRepository: FeedRepository,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -142,6 +144,17 @@ class ExploreViewModel @Inject constructor(
             okhttp3.OkHttpClient(),
             com.unshoo.pixelmusic.data.feed.FeedYtAuthBridge(datastoreRepository)
         ),
+        FeedRepository(
+            FeedInnerTubeApi(okhttp3.OkHttpClient(), com.unshoo.pixelmusic.data.feed.FeedYtAuthBridge(datastoreRepository)),
+            com.unshoo.pixelmusic.data.feed.FeedTasteProfileProvider(
+                userPreferencesRepository,
+                FeedInnerTubeApi(okhttp3.OkHttpClient(), com.unshoo.pixelmusic.data.feed.FeedYtAuthBridge(datastoreRepository)),
+                datastoreRepository,
+                playbackStatsRepository
+            ),
+            datastoreRepository,
+            userPreferencesRepository
+        ),
         context
     ) {
         this.ioDispatcher = ioDispatcher
@@ -169,6 +182,17 @@ class ExploreViewModel @Inject constructor(
         datastoreRepository,
         connectivityStateHolder,
         feedInnerTube,
+        FeedRepository(
+            feedInnerTube,
+            com.unshoo.pixelmusic.data.feed.FeedTasteProfileProvider(
+                userPreferencesRepository,
+                feedInnerTube,
+                datastoreRepository,
+                playbackStatsRepository
+            ),
+            datastoreRepository,
+            userPreferencesRepository
+        ),
         context
     ) {
         this.ioDispatcher = ioDispatcher
@@ -864,6 +888,13 @@ class ExploreViewModel @Inject constructor(
         refreshOnEntry(force = forceRefresh)
     }
 
+    private data class OnlinePayload(
+        val initialHome: HomePage?,
+        val ytNewReleases: List<AlbumItem>,
+        val authAccountAlbums: List<AlbumItem>,
+        val feedDataResult: FeedData?
+    )
+
     private suspend fun executeOnlineRefresh(generation: Long, isSilent: Boolean = false) {
         val currentContent = _screenUiState.value as? ExploreScreenUiState.Content
         val hasContent = currentContent != null || _uiState.value.homePageSections.isNotEmpty()
@@ -900,7 +931,7 @@ class ExploreViewModel @Inject constructor(
             } == true
 
             // Stage 1: Fetch source payloads on IO dispatcher
-            val (initialHome, ytNewReleases, authAccountAlbums) = withContext(ioDispatcher) {
+            val onlinePayload = withContext(ioDispatcher) {
                 val homeDeferred = async { runCatching { YouTube.home().getOrNull() }.getOrNull() }
                 val newReleasesDeferred = async { runCatching { YouTube.newReleaseAlbums().getOrNull().orEmpty() }.getOrDefault(emptyList()) }
                 val authAlbumsDeferred = async {
@@ -912,8 +943,25 @@ class ExploreViewModel @Inject constructor(
                         }.getOrDefault(emptyList())
                     } else emptyList()
                 }
-                Triple(homeDeferred.await(), newReleasesDeferred.await(), authAlbumsDeferred.await())
+                val feedDeferred = async {
+                    runCatching {
+                        val exploreLastFm = userPreferencesRepository.exploreLastfmEnabledFlow.first()
+                        val username = if (exploreLastFm) userPreferencesRepository.lastfmUsernameFlow.first().takeIf(String::isNotBlank) else null
+                        feedRepository.loadFeed(username = username, forceRefresh = !isSilent)
+                    }.getOrNull()
+                }
+                OnlinePayload(
+                    initialHome = homeDeferred.await(),
+                    ytNewReleases = newReleasesDeferred.await(),
+                    authAccountAlbums = authAlbumsDeferred.await(),
+                    feedDataResult = feedDeferred.await()
+                )
             }
+
+            val initialHome = onlinePayload.initialHome
+            val ytNewReleases = onlinePayload.ytNewReleases
+            val authAccountAlbums = onlinePayload.authAccountAlbums
+            val feedDataResult = onlinePayload.feedDataResult
 
             if (generation != currentRefreshGeneration) return
 
@@ -1016,19 +1064,23 @@ class ExploreViewModel @Inject constructor(
                         .map { it.toNativeSong() }
                         .take(20)
 
-                    // Artists for you extracted from Home
-                    val artistsForYou = rawSections.flatMap { it.items }
-                        .flatMap { item ->
-                            when (item) {
-                                is ArtistItem -> listOf(FeedArtist(item.title, item.id, item.thumbnail))
-                                is SongItem -> item.artists.map { FeedArtist(it.name, it.id, item.thumbnail) }
-                                is AlbumItem -> item.artists.orEmpty().map { FeedArtist(it.name, it.id, item.thumbnail) }
-                                else -> emptyList()
+                    // Artists for you: prioritize authentic top artists from feedRepository
+                    val artistsForYou = if (feedDataResult?.topArtists?.isNotEmpty() == true) {
+                        feedDataResult.topArtists
+                    } else {
+                        rawSections.flatMap { it.items }
+                            .flatMap { item ->
+                                when (item) {
+                                    is ArtistItem -> listOf(FeedArtist(item.title, item.id, item.thumbnail))
+                                    is SongItem -> item.artists.map { FeedArtist(it.name, it.id, item.thumbnail) }
+                                    is AlbumItem -> item.artists.orEmpty().map { FeedArtist(it.name, it.id, item.thumbnail) }
+                                    else -> emptyList()
+                                }
                             }
-                        }
-                        .filter { it.name.isNotBlank() && !it.name.equals("Unknown artist", ignoreCase = true) }
-                        .distinctBy { it.name.trim().lowercase() }
-                        .take(10)
+                            .filter { it.name.isNotBlank() && !it.name.equals("Unknown artist", ignoreCase = true) }
+                            .distinctBy { it.name.trim().lowercase() }
+                            .take(10)
+                    }
 
                     // New Releases mapped to YouTubePlaylistSummary
                     val newReleasesSummaries = resolvedNewReleases.map { album ->
@@ -1052,7 +1104,7 @@ class ExploreViewModel @Inject constructor(
 
                     // Spotlight artist derived from top artist and top quick pick
                     val topArtist = artistsForYou.firstOrNull()
-                    val spotlight = topArtist?.let { artist ->
+                    val spotlight = feedDataResult?.spotlight ?: topArtist?.let { artist ->
                         val trackTitle = ytHomeQuickPicks.firstOrNull { it.artist.contains(artist.name, ignoreCase = true) }?.title
                         FeedSpotlight(
                             artistName = artist.name,
@@ -1125,23 +1177,50 @@ class ExploreViewModel @Inject constructor(
                         )
                     }
 
-                    val homeMixes = rawSections.flatMap { it.items }
-                        .filterIsInstance<PlaylistItem>()
-                        .filter { it.id.startsWith("RD") || it.id.startsWith("PL") || it.title.contains("mix", ignoreCase = true) }
-                        .map { item ->
-                            FeedMix(
-                                title = item.title,
-                                seed = YouTubeMusicTrack(
-                                    videoId = item.id,
-                                    title = item.title,
-                                    artist = item.author?.name ?: "Mix",
-                                    album = null,
-                                    artworkUrl = item.thumbnail
+                    val homeMixes = if (feedDataResult?.mixes?.isNotEmpty() == true) {
+                        feedDataResult.mixes
+                    } else {
+                        val mixesFromQuickPicks = ytHomeQuickPicks
+                            .filter { it.youtubeId?.isNotBlank() == true || it.id.isNotBlank() }
+                            .distinctBy { it.displayArtist.trim().lowercase() }
+                            .take(8)
+                            .map { song ->
+                                FeedMix(
+                                    title = "${song.displayArtist} Mix",
+                                    seed = YouTubeMusicTrack(
+                                        videoId = song.youtubeId ?: if (song.id.startsWith("youtube_")) song.id.removePrefix("youtube_") else song.id,
+                                        title = song.title,
+                                        artist = song.artist,
+                                        album = song.album,
+                                        artworkUrl = song.albumArtUriString
+                                    )
                                 )
-                            )
+                            }
+                        mixesFromQuickPicks.ifEmpty {
+                            rawSections.flatMap { it.items }
+                                .filterIsInstance<PlaylistItem>()
+                                .filter { it.id.startsWith("RD") || it.id.startsWith("PL") || it.title.contains("mix", ignoreCase = true) }
+                                .map { item ->
+                                    FeedMix(
+                                        title = item.title,
+                                        seed = YouTubeMusicTrack(
+                                            videoId = item.id,
+                                            title = item.title,
+                                            artist = item.author?.name ?: "Mix",
+                                            album = null,
+                                            artworkUrl = item.thumbnail
+                                        )
+                                    )
+                                }
                         }
+                    }
 
-                    val compiledFeedData = FeedData(
+                    val compiledFeedData = feedDataResult?.copy(
+                        quickPicks = if (feedDataResult.quickPicks.isNotEmpty()) feedDataResult.quickPicks else quickPicksTracks,
+                        mixes = homeMixes,
+                        topArtists = artistsForYou,
+                        spotlight = spotlight
+                    ) ?: FeedData(
                         isYtConnected = isYtConnected,
                         hasYtRecommendations = ytHomeQuickPicks.isNotEmpty(),
                         hasPersonalContent = isYtConnected || ytHomeQuickPicks.isNotEmpty(),

@@ -263,7 +263,7 @@ fun ExploreScreen(
             categories
         }
     }
-    val selectedCategory by quickPicksViewModel.selectedCategory.collectAsStateWithLifecycle()
+    val selectedCategory = exploreUiState.selectedFilter
     val isLocalSelected = isLocalMode || selectedCategory.equals("Local", ignoreCase = true)
     val quickPicksDisplayMode by playerViewModel.quickPicksDisplayMode.collectAsStateWithLifecycle()
     val localAlbums by playerViewModel.albumsFlow.collectAsStateWithLifecycle()
@@ -1400,7 +1400,7 @@ fun ExploreScreen(
                         }
 
                         // 15. All real YouTube Home Shelves
-                        if (isAdvancedExplore && otherHomeSections.isNotEmpty()) {
+                        if (otherHomeSections.isNotEmpty()) {
                             items(otherHomeSections, key = { s -> "yt_section_${s.title}" }, contentType = { "yt_section" }) { section ->
                                 val isSimilar = section.title.startsWith("Similar to", ignoreCase = true) ||
                                     section.title.contains("Fans also like", ignoreCase = true) ||

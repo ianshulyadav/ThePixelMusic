@@ -45,8 +45,11 @@ data class HomePage(
     ) {
         companion object {
             fun fromChipCloudChipRenderer(renderer: SectionListRenderer.Header.ChipCloudRenderer.Chip): Chip? {
+                val title = renderer.chipCloudChipRenderer.text?.runs?.joinToString("") { it.text }?.takeIf { it.isNotBlank() }
+                    ?: renderer.chipCloudChipRenderer.text?.runs?.firstOrNull()?.text
+                    ?: return null
                 return Chip(
-                    title = renderer.chipCloudChipRenderer.text?.runs?.firstOrNull()?.text ?: return null,
+                    title = title,
                     endpoint = renderer.chipCloudChipRenderer.navigationEndpoint.browseEndpoint,
                     deselectEndPoint = renderer.chipCloudChipRenderer.onDeselectedCommand?.browseEndpoint,
                 )
