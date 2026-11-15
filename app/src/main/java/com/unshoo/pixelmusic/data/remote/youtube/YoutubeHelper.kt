@@ -18,6 +18,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
@@ -894,14 +895,55 @@ object YoutubeHelper {
 
         // When quality is AUTO, avoid slow external scrapers so YouTube playback starts instantly
         if (allowLossless && !fastPlaybackForAuto && (!LosslessStreamResolver.isFailedForTrack(videoId) || unifiedSongOverride != null)) {
-            resolveLosslessStreamUrl(
-                context = context,
-                song = song,
-                savedSong = savedSong,
-                cacheKeys = listOf(targetCacheKey, "${videoId}_high"),
-                lowDataMode = unifiedSongOverride == null &&
-                    (plan.quality == StreamingAudioQuality.LOW || plan.quality == StreamingAudioQuality.MEDIUM),
-            )?.let { return it }
+            // BUGFIX (lossless fallback): the lossless chain used to run inline with its own 10s
+            // budget, while DualPlayerEngine aborts the WHOLE resolve after ~5s, so a slow or
+            // unavailable addon never reached the YouTube step and the engine played the
+            // *lowest* quality emergency stream instead.
+            // Now it is a hedged race with no leftover background work: lossless gets a short head
+            // start; if it has not answered by then, the normal (Saavn/YouTube) resolve starts in
+            // parallel. Lossless wins if it answers within the budget, otherwise the already-running
+            // YouTube result is used at once and the lossless lookup is cancelled.
+            val lowDataMode = unifiedSongOverride == null &&
+                (plan.quality == StreamingAudioQuality.LOW || plan.quality == StreamingAudioQuality.MEDIUM)
+            val budgetMs = if (isNextInQueue || unifiedSongOverride != null) {
+                LOSSLESS_PRELOAD_BUDGET_MS
+            } else {
+                LOSSLESS_INLINE_BUDGET_MS
+            }
+            val hedged: String? = kotlinx.coroutines.coroutineScope {
+                val lossless = async {
+                    resolveLosslessStreamUrl(
+                        context = context,
+                        song = song,
+                        savedSong = savedSong,
+                        cacheKeys = listOf(targetCacheKey, "${videoId}_high"),
+                        lowDataMode = lowDataMode,
+                    )
+                }
+                val headStart = withTimeoutOrNull(LOSSLESS_HEDGE_HEAD_START_MS) { lossless.await() }
+                when {
+                    !headStart.isNullOrBlank() -> headStart
+                    lossless.isCompleted -> null // lossless answered "not available": continue inline
+                    else -> {
+                        val fallback = async {
+                            runCatching {
+                                getSongPlayerUrl(context, song, allowLocal, allowLossless = false, isNextInQueue = isNextInQueue)
+                            }
+                        }
+                        val late = withTimeoutOrNull((budgetMs - LOSSLESS_HEDGE_HEAD_START_MS).coerceAtLeast(0L)) {
+                            lossless.await()
+                        }
+                        if (!late.isNullOrBlank()) {
+                            fallback.cancel()
+                            late
+                        } else {
+                            lossless.cancel()
+                            fallback.await().getOrNull()?.takeIf { it.isNotBlank() }
+                        }
+                    }
+                }
+            }
+            if (!hedged.isNullOrBlank()) return hedged
         }
 
         // JioSaavn gate: only try if explicitly forced or not in AUTO mode
@@ -1304,6 +1346,27 @@ object YoutubeHelper {
             PixelMusicHelper.printe("$videoId : Lossless resolve exception: ${e.message}, falling back")
             null
         }
+    }
+
+    /** Inline budget for the lossless chain on a user tap (YouTube result is used after this). */
+    const val LOSSLESS_INLINE_BUDGET_MS = 3_000L
+    /** Lossless head start before the parallel YouTube resolve begins (fast answers pay nothing). */
+    private const val LOSSLESS_HEDGE_HEAD_START_MS = 1_200L
+    /** Budget for preloads / explicit per-song overrides, where nobody is waiting on audio yet. */
+    private const val LOSSLESS_PRELOAD_BUDGET_MS = 9_000L
+
+    /**
+     * Drops every cached stream decision. Called when the lossless master switch or the enabled
+     * addon set changes: the URL caches below are consulted BEFORE the lossless gate, so without
+     * this a toggle had no effect on already-played songs until their URLs expired (~6h), and a
+     * cached lossless URL kept playing after lossless was switched off.
+     */
+    fun invalidateAllStreamCaches() {
+        streamUrlLruCache.evictAll()
+        streamMimeTypeLruCache.evictAll()
+        streamBitrateLruCache.evictAll()
+        resolvedCandidateUrlCache.clear()
+        com.unshoo.pixelmusic.data.service.player.StreamChoice.clear()
     }
 
     /** Register a downloaded local file path so future plays are instant (offline gate). */

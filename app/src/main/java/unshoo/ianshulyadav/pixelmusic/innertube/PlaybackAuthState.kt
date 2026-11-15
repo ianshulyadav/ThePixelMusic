@@ -26,7 +26,8 @@ data class PlaybackAuthState(
     val hasLoginCookie: Boolean
         get() {
             val currentCookie = cookie ?: return false
-            return "SAPISID" in parseCookieString(currentCookie)
+            val map = parseCookieString(currentCookie)
+            return "SAPISID" in map || "__Secure-3PAPISID" in map || "__Secure-1PAPISID" in map
         }
 
     val hasPlaybackLoginContext: Boolean

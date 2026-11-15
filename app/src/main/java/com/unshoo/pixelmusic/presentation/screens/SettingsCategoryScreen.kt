@@ -1184,6 +1184,18 @@ fun SettingsCategoryScreen(
                                     },
                                     leadingIcon = { Icon(painterResource(R.drawable.rounded_all_inclusive_24), null, tint = MaterialTheme.colorScheme.secondary) }
                                 )
+                                if (com.unshoo.pixelmusic.utils.OemBackgroundSettings.isAggressiveRecentsKiller) {
+                                    SettingsItem(
+                                        title = stringResource(R.string.setcat_oem_background_title),
+                                        subtitle = stringResource(R.string.setcat_oem_background_subtitle),
+                                        onClick = {
+                                            if (!com.unshoo.pixelmusic.utils.OemBackgroundSettings.open(context)) {
+                                                Toast.makeText(context, context.getString(R.string.toast_oem_background_unavailable), Toast.LENGTH_LONG).show()
+                                            }
+                                        },
+                                        leadingIcon = { Icon(Icons.Outlined.BatteryChargingFull, null, tint = MaterialTheme.colorScheme.secondary) }
+                                    )
+                                }
                             }
 
                             SettingsSubsection(title = stringResource(R.string.setcat_replaygain_section)) {

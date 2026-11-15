@@ -236,7 +236,8 @@ fun BlurSettingsScreen(
                     subtitle = stringResource(R.string.blur_settings_lyrics_screen_desc),
                     icon = Icons.Outlined.MusicNote,
                     checked = uiState.lyricsScreenBlurEnabled,
-                    enabled = uiState.useBlurEffects,
+                    // Independent of the global switch: the lyrics backdrop is a cheap precomputed blur.
+                    enabled = true,
                     onCheckedChange = { settingsViewModel.setLyricsScreenBlurEnabled(it) }
                 )
             }

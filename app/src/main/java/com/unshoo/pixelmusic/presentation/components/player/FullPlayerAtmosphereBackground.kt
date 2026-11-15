@@ -1,6 +1,5 @@
 package com.unshoo.pixelmusic.presentation.components.player
 
-import android.os.Build
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
@@ -16,18 +15,16 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp as lerpFloat
-import coil.compose.AsyncImage
-import coil.request.ImageRequest
 import com.unshoo.pixelmusic.data.model.Song
+import com.unshoo.pixelmusic.presentation.components.blur.ArtworkGaussianBlur
+import com.unshoo.pixelmusic.presentation.components.blur.BlurredArtworkImage
+import com.unshoo.pixelmusic.presentation.components.blur.rememberBlurredArtwork
 import com.unshoo.pixelmusic.ui.theme.LocalPixelMusicDarkTheme
 
 // Smooth 850ms easing for fluid, liquid-like atmospheric color glide on song transition
@@ -71,6 +68,11 @@ fun FullPlayerAtmosphereBackground(
 
     LaunchedEffect(albumArtUri) {
         if (albumArtUri != displayedArtUri) {
+            // Make sure the incoming blur is ready BEFORE the crossfade starts; otherwise the
+            // fade ran from the old artwork to an empty layer and the base colour flashed through.
+            if (!albumArtUri.isNullOrBlank()) {
+                runCatching { ArtworkGaussianBlur.load(context.applicationContext, albumArtUri) }
+            }
             previousArtUri = displayedArtUri
             displayedArtUri = albumArtUri
             crossfadeProgress.snapTo(0f)
@@ -86,67 +88,47 @@ fun FullPlayerAtmosphereBackground(
     val animSpec = remember { tween<Color>(durationMillis = 850, easing = AtmosphereEasing) }
     val animatedBaseColor by animateColorAsState(albumColorScheme.primaryContainer, animSpec, label = "atmo_base_color")
 
+    val displayedBlur by rememberBlurredArtwork(displayedArtUri)
+    val previousBlur by rememberBlurredArtwork(previousArtUri)
+
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(animatedBaseColor)
     ) {
 
-        // 2. REAL VIBRANT GAUSSIAN BLURRED ALBUM ARTWORK LAYER WITH LIQUID CROSSFADE
-        // Perf (high refresh rate): the artwork below is blurred by 52-60dp,
-        // which destroys all fine detail, so it is decoded at 256px instead of
-        // 512px. That is ~4x fewer pixels for the GPU to scale/blur on every
-        // frame of the sheet expansion animation — invisible visually, but
-        // the difference between hitting and missing the 8.3ms frame budget
-        // at 120Hz. The sharp (unblurred) artwork elsewhere is unaffected.
+        // 2. GAUSSIAN BLURRED ALBUM ARTWORK LAYER WITH LIQUID CROSSFADE
+        // Perf: the artwork is Gaussian-blurred ONCE at 64px on a background thread
+        // (ArtworkGaussianBlur) and drawn upscaled with bilinear filtering. The previous
+        // Modifier.blur(52-60dp) re-ran a full-screen RenderEffect blur on every frame of the
+        // sheet drag (the alpha below changes per frame), which was the main source of dropped
+        // frames at 120Hz, and it rendered no blur at all below Android 12. Alpha is applied in
+        // the layer/draw phase, so expansion never recomposes this tree.
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
                     val expansionFraction = expansionFractionProvider?.invoke() ?: 1f
-                    scaleX = 1.20f
-                    scaleY = 1.20f
                     alpha = if (isDarkTheme) {
                         lerpFloat(0.45f, 0.65f, expansionFraction)
                     } else {
                         lerpFloat(0.18f, 0.45f, expansionFraction)
                     }
                 }
-                .then(
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        Modifier.blur(if (isDarkTheme) 52.dp else 60.dp)
-                    } else {
-                        Modifier
-                    }
-                )
         ) {
             // Previous artwork held at 1.0f alpha underneath: eliminates Porter-Duff crossfade alpha dip
-            if (!previousArtUri.isNullOrBlank()) {
-                AsyncImage(
-                    model = ImageRequest.Builder(context)
-                        .data(previousArtUri)
-                        .size(96, 96)
-                        .build(),
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
+            val outgoing = previousBlur
+            if (!previousArtUri.isNullOrBlank() && outgoing != null) {
+                BlurredArtworkImage(image = outgoing, modifier = Modifier.fillMaxSize())
             }
 
             // Incoming artwork dissolving in on top from 0f -> 1f
-            if (!displayedArtUri.isNullOrBlank()) {
-                AsyncImage(
-                    model = ImageRequest.Builder(context)
-                        .data(displayedArtUri)
-                        .size(96, 96)
-                        .build(),
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer {
-                            alpha = if (previousArtUri != null) crossfadeProgress.value else 1f
-                        }
+            val incoming = displayedBlur
+            if (!displayedArtUri.isNullOrBlank() && incoming != null) {
+                BlurredArtworkImage(
+                    image = incoming,
+                    modifier = Modifier.fillMaxSize(),
+                    alphaProvider = { if (previousArtUri != null) crossfadeProgress.value else 1f }
                 )
             }
         }

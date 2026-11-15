@@ -32,7 +32,15 @@ object MonochromeInstancePool {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
             "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
 
+    /**
+     * BUGFIX (Monochrome stopped working after v1.8.11): `tracks.monochrome.st` — the only server
+     * v1.8.11 used, and the one that works — was moved to the END of this list while resolve() only
+     * tried the first 4 entries, sequentially, on a client with 15s connect / 30s read timeouts.
+     * Dead mirrors ate the whole lossless budget so Monochrome never answered. It is first again,
+     * mirrors are probed in parallel, and probes use short timeouts.
+     */
     val DEFAULT_INSTANCES: List<String> = listOf(
+        "https://tracks.monochrome.st",
         "https://api.monochrome.tf",
         "https://eu-central.monochrome.tf",
         "https://us-west.monochrome.tf",
@@ -43,8 +51,23 @@ object MonochromeInstancePool {
         "https://vogel.qqdl.site",
         "https://hund.qqdl.site",
         "https://katze.qqdl.site",
-        "https://tracks.monochrome.st",
     )
+
+    /** Parallel probes per wave; the first matching stream wins and the rest are cancelled. */
+    private const val PARALLEL_PROBES = 3
+    private const val MAX_WAVES = 2
+
+    private val probeExecutor = java.util.concurrent.Executors.newCachedThreadPool { r ->
+        Thread(r, "monochrome-probe").apply { isDaemon = true }
+    }
+
+    /** Search/track-metadata probes must fail fast; dead mirrors must not burn the lossless budget. */
+    private fun probeClient(base: OkHttpClient): OkHttpClient = base.newBuilder()
+        .connectTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+        .callTimeout(7, java.util.concurrent.TimeUnit.SECONDS)
+        .retryOnConnectionFailure(false)
+        .build()
 
     fun activeInstances(customRaw: String? = null): List<String> {
         val custom = customRaw
@@ -76,31 +99,62 @@ object MonochromeInstancePool {
         if (query.isBlank()) return null
         val encoded = URLEncoder.encode(query, "UTF-8")
 
-        val instances = activeInstances(customInstancesRaw).take(4)
-        for (base in instances) {
-            val healthKey = "mono:$base"
-            val startedAt = System.currentTimeMillis()
-            val resolved = runCatching {
-                if (base.contains("monochrome.st", ignoreCase = true)) {
-                    tryStreamerProtocol(httpClient, base, encoded, title, artists, album, durationMs, isrc, trustedOverride)
-                } else {
-                    tryHifiApiProtocol(httpClient, base, encoded, title, artists, album, durationMs, isrc, trustedOverride)
-                        ?: tryRelayProtocol(httpClient, base, encoded, title, artists, album, durationMs, isrc, trustedOverride)
-                        ?: tryStreamerProtocol(httpClient, base, encoded, title, artists, album, durationMs, isrc, trustedOverride)
+        val client = probeClient(httpClient)
+        val instances = activeInstances(customInstancesRaw).take(PARALLEL_PROBES * MAX_WAVES)
+        for (wave in instances.chunked(PARALLEL_PROBES)) {
+            val completion = java.util.concurrent.ExecutorCompletionService<DirectStream?>(probeExecutor)
+            val futures = wave.map { base ->
+                completion.submit {
+                    probeInstance(client, base, encoded, title, artists, album, durationMs, isrc, trustedOverride)
                 }
-            }.onFailure { err ->
-                if (err is IOException) {
-                    AddonHealthTracker.recordFailure(healthKey, err.message ?: "Unreachable")
+            }
+            try {
+                repeat(futures.size) {
+                    val result = runCatching { completion.take().get() }.getOrNull()
+                    if (result != null) return result
                 }
-                Timber.tag(TAG).d(err, "Monochrome instance %s failed for '%s'", base, title)
-            }.getOrNull()
-
-            if (resolved != null) {
-                AddonHealthTracker.recordSuccess(healthKey, System.currentTimeMillis() - startedAt)
-                return resolved
+            } finally {
+                futures.forEach { it.cancel(true) }
             }
         }
         return null
+    }
+
+    private fun probeInstance(
+        client: OkHttpClient,
+        base: String,
+        encoded: String,
+        title: String,
+        artists: List<String>,
+        album: String?,
+        durationMs: Long?,
+        isrc: String?,
+        trustedOverride: Boolean,
+    ): DirectStream? {
+        val healthKey = "mono:$base"
+        val startedAt = System.currentTimeMillis()
+        val resolved = runCatching {
+            // One protocol per server family: probing all three shapes on every mirror tripled
+            // the latency of every dead or non-matching host.
+            when {
+                base.contains("monochrome.st", ignoreCase = true) ->
+                    tryStreamerProtocol(client, base, encoded, title, artists, album, durationMs, isrc, trustedOverride)
+                else ->
+                    tryHifiApiProtocol(client, base, encoded, title, artists, album, durationMs, isrc, trustedOverride)
+                        ?: if (base.contains("relay", ignoreCase = true)) {
+                            tryRelayProtocol(client, base, encoded, title, artists, album, durationMs, isrc, trustedOverride)
+                        } else null
+            }
+        }.onFailure { err ->
+            if (err is IOException) {
+                AddonHealthTracker.recordFailure(healthKey, err.message ?: "Unreachable")
+            }
+            Timber.tag(TAG).d(err, "Monochrome instance %s failed for '%s'", base, title)
+        }.getOrNull()
+        if (resolved != null) {
+            AddonHealthTracker.recordSuccess(healthKey, System.currentTimeMillis() - startedAt)
+        }
+        return resolved
     }
 
     private fun tryHifiApiProtocol(

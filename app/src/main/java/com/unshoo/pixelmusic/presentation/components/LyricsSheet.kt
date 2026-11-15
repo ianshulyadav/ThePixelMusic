@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.ui.layout.ContentScale
 import com.unshoo.pixelmusic.presentation.components.SmartImage
 import com.unshoo.pixelmusic.presentation.components.AutoScrollingText
+import com.unshoo.pixelmusic.presentation.components.player.FullPlayerAtmosphereBackground
+import com.unshoo.pixelmusic.presentation.components.blur.LyricsLineBlur
 import racra.compose.smooth_corner_rect_library.AbsoluteSmoothCornerShape
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.animateFloat
@@ -65,7 +67,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
+
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -357,6 +359,15 @@ fun LyricsSheet(
         context.dataStore.data.map { it[androidx.datastore.preferences.core.floatPreferencesKey("animated_lyrics_blur_strength")] ?: 2.5f }
     }
     val animatedLyricsBlurStrength by animatedLyricsBlurStrengthFlow.collectAsStateWithLifecycle(initialValue = 2.5f)
+
+    // Lyrics-screen Gaussian artwork backdrop: on by default, controlled only by its own
+    // "Lyrics screen blur" toggle (independent of the global blur switch, which stays off by
+    // default for the rest of the app). It is the cheap precomputed blur, not a RenderEffect.
+    val isLyricsBlurActiveFlow = remember(context) {
+        context.dataStore.data.map { it[booleanPreferencesKey("lyrics_screen_blur_enabled")] ?: true }
+    }
+    val isLyricsBlurActiveRaw by isLyricsBlurActiveFlow.collectAsStateWithLifecycle(initialValue = true)
+    val isLyricsBlurActive = isLyricsBlurActiveRaw && !performanceModeEnabled
 
     // Read keep-screen-on preference from DataStore
     val keepScreenOnFlow = remember(context) {
@@ -675,6 +686,16 @@ fun LyricsSheet(
         // Removed TopBar and FAB
     ) { paddingValues ->
         Box(modifier = Modifier.fillMaxSize()) {
+            if (isLyricsBlurActive && currentSong != null) {
+                // Precomputed Gaussian backdrop (see ArtworkGaussianBlur): one bitmap draw per frame,
+                // no full-screen RenderEffect while the lyrics auto-scroll.
+                FullPlayerAtmosphereBackground(
+                    currentSong = currentSong,
+                    albumColorScheme = colorScheme,
+                    modifier = Modifier.fillMaxSize(),
+                    showTopVignette = false
+                )
+            }
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -859,7 +880,10 @@ fun LyricsSheet(
                         .align(Alignment.TopCenter)
                         .background(
                             brush = Brush.verticalGradient(
-                                colors = listOf(containerColor, Color.Transparent)
+                                colors = listOf(
+                                    if (isLyricsBlurActive) containerColor.copy(alpha = 0.55f) else containerColor,
+                                    Color.Transparent
+                                )
                             )
                         )
                 )
@@ -872,7 +896,10 @@ fun LyricsSheet(
                         .align(Alignment.BottomCenter)
                         .background(
                             brush = Brush.verticalGradient(
-                                colors = listOf(Color.Transparent, containerColor)
+                                colors = listOf(
+                                    Color.Transparent,
+                                    if (isLyricsBlurActive) containerColor.copy(alpha = 0.55f) else containerColor
+                                )
                             )
                         )
                 )
@@ -887,7 +914,7 @@ fun LyricsSheet(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(containerColor)
+                        .background(if (isLyricsBlurActive) containerColor.copy(alpha = 0.55f) else containerColor)
                         .padding(bottom = paddingValues.calculateBottomPadding() + 10.dp, end = 16.dp, start = 16.dp)
                         .pointerInput(Unit) {
                             awaitPointerEventScope {
@@ -1506,8 +1533,12 @@ fun LyricLineRow(
                     },
                     pivotFractionY = 0.5f
                 )
+                // Perf: blurRadius is read here, in the layer phase, so its 400ms animation no
+                // longer recomposes every visible line each frame (Modifier.blur(blurRadius) read it
+                // during composition and rebuilt a RenderEffect per line per frame). Effects are
+                // quantised and cached, and Decal tiling lets the glow bleed instead of hard-clipping.
+                renderEffect = LyricsLineBlur.effectFor(blurRadius.toPx())
             }
-            .then(if (blurRadius > 0.dp) Modifier.blur(blurRadius) else Modifier)
     } else baseModifier
 
     // Roman or Translate Logic
