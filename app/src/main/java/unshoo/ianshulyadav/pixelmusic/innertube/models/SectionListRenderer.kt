@@ -21,8 +21,10 @@ data class SectionListRenderer(
     val contents: List<Content>?,
     val continuations: List<Continuation>?,
 ) {
+    @OptIn(ExperimentalSerializationApi::class)
     @Serializable
     data class Header(
+        @JsonNames("feedFilterChipBarRenderer", "musicHeaderRenderer")
         val chipCloudRenderer: ChipCloudRenderer?,
     ) {
         @Serializable

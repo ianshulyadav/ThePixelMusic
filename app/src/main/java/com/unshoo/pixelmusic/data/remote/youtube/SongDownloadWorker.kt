@@ -349,7 +349,13 @@ class SongDownloadWorker(
             trackNumber = 0,
             year = 0,
             dateAdded = System.currentTimeMillis(),
-            mimeType = "audio/webm",
+            mimeType = when (song.audioFilePath?.substringAfterLast('.', "")?.lowercase()) {
+                "m4a", "mp4" -> "audio/mp4"
+                "flac" -> "audio/flac"
+                "mp3" -> "audio/mpeg"
+                "ogg", "opus" -> "audio/ogg"
+                else -> "audio/webm"
+            },
             bitrate = null,
             sampleRate = null,
             telegramChatId = null,

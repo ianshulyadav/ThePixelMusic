@@ -254,14 +254,25 @@ fun ExploreScreen(
         }
     }
     val categories by quickPicksViewModel.categories.collectAsStateWithLifecycle()
+    val defaultYouTubeCategories = remember {
+        listOf(
+            "All",
+            "Relax",
+            "Workout",
+            "Focus",
+            "Energize",
+            "Commute",
+            "Party",
+            "Romance",
+            "Feel good",
+            "Podcasts",
+            "Sleep",
+            "Local"
+        )
+    }
     val effectiveCategories = remember(categories, exploreUiState.moodChips, isLocalMode, isEffectivelyOnline) {
-        if (isLocalMode || !isEffectivelyOnline) {
-            listOf("Local")
-        } else if (exploreUiState.moodChips.isNotEmpty()) {
-            (listOf("All", "Local") + exploreUiState.moodChips.map { it.title }).distinct()
-        } else {
-            categories
-        }
+        val fetchedTitles = exploreUiState.moodChips.map { it.title }
+        (listOf("All") + fetchedTitles + defaultYouTubeCategories + categories).distinct()
     }
     val selectedCategory = exploreUiState.selectedFilter
     val isLocalSelected = isLocalMode || selectedCategory.equals("Local", ignoreCase = true)

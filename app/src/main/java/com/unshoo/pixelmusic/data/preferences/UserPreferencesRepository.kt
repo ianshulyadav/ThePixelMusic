@@ -563,7 +563,7 @@ constructor(
 
     val lyricsScreenBlurEnabledFlow: Flow<Boolean> =
         dataStore.data.map { preferences ->
-            preferences[PreferencesKeys.LYRICS_SCREEN_BLUR_ENABLED] ?: false
+            preferences[PreferencesKeys.LYRICS_SCREEN_BLUR_ENABLED] ?: true
         }.distinctUntilChanged()
 
     suspend fun setLyricsScreenBlurEnabled(enabled: Boolean) {
@@ -2555,6 +2555,14 @@ constructor(
             preferences[PreferencesKeys.CONTENT_LANGUAGE] = language
         }
     }
+
+    /** The Content country the user explicitly chose, or null when they never picked one. */
+    val contentCountryExplicitFlow: Flow<String?> =
+        dataStore.data.map { preferences ->
+            preferences[PreferencesKeys.CONTENT_COUNTRY]
+                ?.uppercase()
+                ?.takeIf { it.length == 2 && it in SupportedYouTubeCountryCodes }
+        }.distinctUntilChanged()
 
     val contentCountryFlow: Flow<String> =
         dataStore.data.map { preferences ->

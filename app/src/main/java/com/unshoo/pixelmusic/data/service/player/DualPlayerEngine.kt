@@ -103,6 +103,10 @@ class DualPlayerEngine @Inject constructor(
 ) {
     private companion object {
         private const val LOSSLESS_STALL_FALLBACK_TIMEOUT_MS = 4_000L
+        private const val DUCK_FACTOR = 0.2f
+        private const val DEAD_URL_TTL_MS = 6 * 60 * 60 * 1000L
+        private const val FORCED_REFRESH_MIN_INTERVAL_MS = 15_000L
+        private val REFUSED_STREAM_CODES = setOf(401, 403, 404, 410)
         private const val AUDIO_OFFLOAD_BUFFERING_FALLBACK_MS = 4_000L
         private const val MAX_AUXILIARY_TIMELINE_ITEMS = 200
         private const val STREAM_RESOLVE_TIMEOUT_MS = 8_000L
@@ -116,13 +120,51 @@ class DualPlayerEngine @Inject constructor(
          * UI thread — whereas throwing early pushed ProgressiveMediaSource into exponential
          * retry back-off (1s → 2s → 4s), which was the multi-second audio-start regression.
          */
-        private const val LOAD_THREAD_RESOLVE_AWAIT_MS = 12_000L
+        private const val LOAD_THREAD_RESOLVE_AWAIT_MS = 14_000L
+        /** Extra resolve time granted when the lossless chain runs before the YouTube step. */
+        private const val LOSSLESS_RESOLVE_EXTRA_MS = 3_500L
+        /**
+         * Byte ceiling for the forward buffer. With prioritizeTimeOverSizeThresholds=true the player
+         * always fills minBufferMs, then keeps loading up to maxBufferMs only while under this cap.
+         * AAC/Opus (~4.8MB per 150s) never reach it, so they keep the long time-based buffer; FLAC
+         * (16/44 ~15MB per 120s, 24/96 ~24MB per 64s) is bounded by bytes. This makes one profile
+         * safe for every source, independent of the lossless toggle.
+         */
+        private const val TARGET_BUFFER_BYTES = 24 * 1024 * 1024
         // Upgraded HTTP timeouts (InnerTune/ViMusic parity): 15s connect / 20s read to prevent
         // premature SocketTimeoutException on weak connections or during concurrent downloads.
         private const val HTTP_CONNECT_TIMEOUT_MS = 15_000
         private const val HTTP_READ_TIMEOUT_MS = 20_000
         private const val FIRST_CHUNK_PRECACHE_BYTES = 1024L * 1024L // 1MB — standard audio (~50s audio cushion)
         private val LOCAL_MEDIA_SCHEMES = setOf("content", "file", "android.resource")
+        private val YOUTUBE_ID_REGEX = Regex("^[A-Za-z0-9_-]{11}$")
+
+        /** Shared streaming client: no call timeout (a track streams for minutes), pooled connections. */
+        private val playbackHttpClient: okhttp3.OkHttpClient by lazy {
+            okhttp3.OkHttpClient.Builder()
+                .connectTimeout(HTTP_CONNECT_TIMEOUT_MS.toLong(), java.util.concurrent.TimeUnit.MILLISECONDS)
+                .readTimeout(HTTP_READ_TIMEOUT_MS.toLong(), java.util.concurrent.TimeUnit.MILLISECONDS)
+                .connectionPool(okhttp3.ConnectionPool(8, 5, java.util.concurrent.TimeUnit.MINUTES))
+                .followRedirects(true)
+                .followSslRedirects(true)
+                .retryOnConnectionFailure(true)
+                // Same routing as before: the default ProxySelector honours the system properties
+                // AppProxyManager sets; HTTP proxy credentials (HttpURLConnection used the JVM
+                // Authenticator) are supplied here. SOCKS auth still goes through the JVM Authenticator.
+                .proxyAuthenticator { _, response ->
+                    val cfg = com.unshoo.pixelmusic.data.network.AppProxyManager.currentConfig
+                    if (!cfg.isValid || cfg.username.isBlank() ||
+                        response.request.header("Proxy-Authorization") != null
+                    ) {
+                        null
+                    } else {
+                        response.request.newBuilder()
+                            .header("Proxy-Authorization", okhttp3.Credentials.basic(cfg.username, cfg.password))
+                            .build()
+                    }
+                }
+                .build()
+        }
         private val REMOTE_MEDIA_SCHEMES = setOf("http", "https", "telegram", "gdrive", "youtube", "monochrome")
     }
 
@@ -152,6 +194,24 @@ class DualPlayerEngine @Inject constructor(
 
     private lateinit var playerA: ExoPlayer
     private lateinit var playerB: ExoPlayer
+    /**
+     * BUGFIX: a released ExoPlayer keeps STATE_IDLE with a null playerError and its application
+     * looper (main) stays alive, so ensurePlayerB() could not tell a released standby player from
+     * a healthy one. After any rebuild (Hi-Fi toggle, offload fallback, service re-create) the
+     * crossfade standby was a dead instance: prepare() no-oped, awaitPlayerReady() timed out and
+     * every crossfade silently aborted. Track the release explicitly instead.
+     */
+    private var playerBReleased = true
+
+    private fun releaseStandbyPlayer() {
+        if (::playerB.isInitialized && !playerBReleased) {
+            try {
+                playerB.removeListener(standbyPlayerListener)
+                playerB.release()
+            } catch (_: Exception) { /* Ignore */ }
+        }
+        playerBReleased = true
+    }
 
     private val onPlayerSwappedListeners = mutableListOf<(Player) -> Unit>()
     private val onNextPlayerPreparedListeners = mutableListOf<(Player) -> Unit>()
@@ -272,42 +332,52 @@ class DualPlayerEngine @Inject constructor(
             }
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
                 Timber.tag("TransitionDebug").d("AudioFocus LOSS_TRANSIENT (%d). Pausing.", focusChange)
-                isFocusLossPause = (::playerA.isInitialized && (playerA.playWhenReady || playerA.isPlaying)) ||
+                // Only latch "resume on GAIN" from the first transient loss; a second
+                // LOSS_TRANSIENT while already paused must not clear the flag.
+                isFocusLossPause = isFocusLossPause ||
+                    (::playerA.isInitialized && (playerA.playWhenReady || playerA.isPlaying)) ||
                     (transitionRunning && ::playerB.isInitialized && (playerB.playWhenReady || playerB.isPlaying))
                 if (::playerA.isInitialized) {
-                    prePauseVolumeA = playerA.volume
+                    // BUGFIX: when already ducked, playerA.volume is the 20% ducked level. Capturing it
+                    // made GAIN restore the ducked level permanently (quiet playback after a
+                    // notification followed by a call). Capture the pre-duck level instead.
+                    prePauseVolumeA = if (isDucked) preDuckVolumeA else playerA.volume
                     playerA.playWhenReady = false
                 }
                 if (::playerB.isInitialized) {
-                    prePauseVolumeB = playerB.volume
+                    prePauseVolumeB = if (isDucked) preDuckVolumeB else playerB.volume
                     playerB.playWhenReady = false
                 }
             }
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
                 Timber.tag("TransitionDebug").d("AudioFocus LOSS_TRANSIENT_CAN_DUCK. Ducking.")
-                isDucked = true
-                if (::playerA.isInitialized) {
-                    preDuckVolumeA = playerA.volume
-                    playerA.volume = (playerA.volume * 0.2f).coerceIn(0.01f, 1f)
-                }
-                if (transitionRunning && ::playerB.isInitialized) {
-                    preDuckVolumeB = playerB.volume
-                    playerB.volume = (playerB.volume * 0.2f).coerceIn(0.01f, 1f)
+                // BUGFIX: repeated CAN_DUCK callbacks compounded the attenuation (20% -> 4% -> ...)
+                // and overwrote the saved pre-duck level with an already-ducked value.
+                if (!isDucked) {
+                    isDucked = true
+                    if (::playerA.isInitialized) {
+                        preDuckVolumeA = playerA.volume
+                        playerA.volume = (playerA.volume * DUCK_FACTOR).coerceIn(0.01f, 1f)
+                    }
+                    if (transitionRunning && ::playerB.isInitialized) {
+                        preDuckVolumeB = playerB.volume
+                        playerB.volume = (playerB.volume * DUCK_FACTOR).coerceIn(0.01f, 1f)
+                    }
                 }
             }
             AudioManager.AUDIOFOCUS_GAIN -> {
                 Timber.tag("TransitionDebug").d("AudioFocus GAIN. Restoring volume and resuming if paused.")
+                // BUGFIX: incomingTrackReplayGainVolume belongs to the crossfade's INCOMING track;
+                // applying it to playerA after a duck/pause applied the wrong track's gain.
                 if (isDucked) {
                     isDucked = false
-                    val restoredA = incomingTrackReplayGainVolume ?: preDuckVolumeA
-                    val restoredB = incomingTrackReplayGainVolume ?: preDuckVolumeB
-                    if (::playerA.isInitialized) playerA.volume = restoredA
-                    if (transitionRunning && ::playerB.isInitialized) playerB.volume = restoredB
+                    if (::playerA.isInitialized) playerA.volume = preDuckVolumeA
+                    if (transitionRunning && ::playerB.isInitialized) playerB.volume = preDuckVolumeB
                 }
                 if (isFocusLossPause) {
                     isFocusLossPause = false
-                    val restoredA = incomingTrackReplayGainVolume ?: prePauseVolumeA
-                    val restoredB = incomingTrackReplayGainVolume ?: prePauseVolumeB
+                    val restoredA = prePauseVolumeA
+                    val restoredB = prePauseVolumeB
                     if (::playerA.isInitialized) {
                         playerA.volume = restoredA
                         if (playerA.playbackState == Player.STATE_IDLE || playerA.playbackState == Player.STATE_ENDED) {
@@ -406,6 +476,7 @@ class DualPlayerEngine @Inject constructor(
                 cancelNext()
             }
 
+            currentMasterMediaId = mediaItem?.mediaId
             val uri = mediaItem?.localConfiguration?.uri
             if (uri?.scheme == "telegram") {
                 scope.launch {
@@ -612,7 +683,9 @@ class DualPlayerEngine @Inject constructor(
             ?: resolvedUriCache.get(uriStr)
             ?: StreamChoice.of(cleanId)?.let { Uri.parse(it.url) }
 
-        if (resolvedUri == null || !isResolvedUriFresh(uriStr, resolvedUri)) {
+        // Unknown (null) is not stale: the data source resolves on demand. Treating "no cached
+        // entry" as stale rebuilt the item and dropped the buffer on every resume.
+        if (resolvedUri != null && (!isResolvedUriFresh(uriStr, resolvedUri) || isDeadStreamUrl(resolvedUri.toString()))) {
             scope.launch(Dispatchers.Main.immediate) {
                 ensureFreshStreamForResume()
             }
@@ -689,6 +762,108 @@ class DualPlayerEngine @Inject constructor(
         }
     }
 
+    // ── Stream expiry / dead-link handling ────────────────────────────────────────────────
+
+    /**
+     * Links the CDN refused (401/403/404/410) even though their `expire=` time has not passed:
+     * revoked tokens, IP changes, throttled sessions. Treated as stale so no cache layer hands
+     * them out again.
+     */
+    private val deadStreamUrls = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val lastForcedRefreshAtMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    private fun markStreamUrlDead(url: String) {
+        if (url.isBlank()) return
+        val now = SystemClock.elapsedRealtime()
+        deadStreamUrls[url] = now + DEAD_URL_TTL_MS
+        if (deadStreamUrls.size > 64) deadStreamUrls.entries.removeIf { it.value <= now }
+    }
+
+    private fun isDeadStreamUrl(url: String): Boolean {
+        val until = deadStreamUrls[url] ?: return false
+        if (until <= SystemClock.elapsedRealtime()) {
+            deadStreamUrls.remove(url)
+            return false
+        }
+        return true
+    }
+
+    /**
+     * Cache key for a stream's bytes: video id plus format (itag), or the source for non-YouTube
+     * CDNs. Keying by video id alone let a refreshed URL in a different format (Opus vs AAC, or a
+     * JioSaavn file) stitch onto the old format's cached spans: corrupt audio, parser errors and a
+     * reload loop. Same-format refreshes keep reusing the cached bytes.
+     */
+    internal fun streamCacheKey(videoId: String, url: String?): String =
+        StreamCacheKeys.forStream(videoId, url)
+
+    private fun headersForStream(url: String): Map<String, String> {
+        val addonHeaders = com.unshoo.pixelmusic.data.addons.AddonStreamRegistry.headersFor(url)
+        if (addonHeaders.isNotEmpty()) return addonHeaders
+        if (url.contains("googlevideo.com") || url.contains("youtube.com")) {
+            val profile = StreamClientUtils.resolveRequestProfile(url)
+            return buildMap {
+                put("User-Agent", profile.userAgent)
+                profile.origin?.let { put("Origin", it) }
+                profile.referer?.let { put("Referer", it) }
+            }
+        }
+        return mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
+    }
+
+    /**
+     * Purges every cached decision for [videoId] and resolves a fresh stream, waiting on the
+     * loader thread (never the UI thread). At most one forced refresh per track per
+     * [FORCED_REFRESH_MIN_INTERVAL_MS], so a source that keeps returning bad links cannot spin the
+     * loader; the error then reaches MusicService's bounded recovery (retry, skip or pause).
+     */
+    private fun refreshStreamOnLoadThread(videoId: String): Uri? {
+        val now = SystemClock.elapsedRealtime()
+        val last = lastForcedRefreshAtMs[videoId]
+        if (last != null && now - last < FORCED_REFRESH_MIN_INTERVAL_MS) return null
+        lastForcedRefreshAtMs[videoId] = now
+        Timber.tag("DualPlayerEngine").i("Stream link for %s expired or refused; re-resolving", videoId)
+        invalidateResolvedUri("youtube://$videoId")
+        val source = Uri.parse("youtube://$videoId")
+        val fresh = runCatching {
+            kotlinx.coroutines.runBlocking {
+                kotlinx.coroutines.withTimeoutOrNull(LOAD_THREAD_RESOLVE_AWAIT_MS) { resolveCloudUri(source) }
+            }
+        }.getOrNull() ?: return null
+        if (fresh == source || isDeadStreamUrl(fresh.toString())) return null
+        return fresh
+    }
+
+    /**
+     * On a refused link: mark it dead and purge the track's cached decisions so the very next retry
+     * re-resolves; allow two quick retries, then hand the error to the player (and MusicService's
+     * bounded recovery) instead of backing off for ~15s on a URL that cannot work.
+     */
+    private val streamRecoveryLoadErrorPolicy = object : androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy() {
+        override fun getRetryDelayMsFor(
+            loadErrorInfo: androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy.LoadErrorInfo
+        ): Long {
+            var cause: Throwable? = loadErrorInfo.exception
+            var http: androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException? = null
+            while (cause != null && http == null) {
+                http = cause as? androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException
+                cause = cause.cause
+            }
+            if (http != null && http.responseCode in REFUSED_STREAM_CODES) {
+                markStreamUrlDead(http.dataSpec.uri.toString())
+                val originalSpec = loadErrorInfo.loadEventInfo.dataSpec
+                val videoId = originalSpec.key?.substringBefore('#')
+                    ?: originalSpec.uri.toString().takeIf { it.startsWith("youtube://") }?.removePrefix("youtube://")
+                if (videoId != null) invalidateResolvedUri("youtube://$videoId")
+                return if (loadErrorInfo.errorCount <= 2) 250L else C.TIME_UNSET
+            }
+            return super.getRetryDelayMsFor(loadErrorInfo)
+        }
+    }
+
+    /** mediaId of the master player's current item, readable from IO threads. */
+    @Volatile private var currentMasterMediaId: String? = null
+
     private var isReleased = false
     internal val resolvedUriCache = LruCache<String, Uri>(100)
     private val activePlaybackResolvedUris = java.util.concurrent.ConcurrentHashMap<String, Uri>()
@@ -698,7 +873,11 @@ class DualPlayerEngine @Inject constructor(
     /** Fire-and-forget stream resolve used by the non-blocking ResolvingDataSource path. */
     fun kickBackgroundResolve(uri: Uri) {
         val uriString = uri.toString()
-        if (resolvedUriCache.get(uriString) != null) return
+        // A cached entry only short-circuits while still usable; an expired or refused one must
+        // trigger a fresh resolve instead of silently blocking it.
+        resolvedUriCache.get(uriString)?.let { cached ->
+            if (isResolvedUriFresh(uriString, cached) && !isDeadStreamUrl(cached.toString())) return
+        }
         // Always funnel through resolveCloudUri so in-flight requests are deduped.
         scope.launch(Dispatchers.IO) {
             runCatching { resolveCloudUri(uri) }
@@ -743,10 +922,22 @@ class DualPlayerEngine @Inject constructor(
             if (isResolvedUriFresh(originalUriString, uri)) {
                 return mediaItem
             }
-            // If the URL has expired or is nearing expiration (<15m left), re-resolve from source URI
-            val sourceUri = Uri.parse(originalUriString)
-            if (sourceUri.scheme in REMOTE_MEDIA_SCHEMES) {
-                return resolveMediaItem(mediaItem.buildUpon().setUri(sourceUri).build())
+            // If the URL has expired or is nearing expiration (<15m left), re-resolve from source URI.
+            // BUGFIX: nothing sets the CONTENT_URI extra for streamed items, so originalUriString was
+            // the stale https URL itself and the item was returned unchanged (expired googlevideo /
+            // saavn links handed straight to ExoPlayer -> 403 -> error-recovery loop). Fall back to
+            // the item's YouTube id, the same way ensureFreshStreamForResume() does.
+            val sourceUri = Uri.parse(originalUriString).takeIf { it.scheme in REMOTE_MEDIA_SCHEMES }
+                ?: youtubeIdOf(mediaItem)?.let { Uri.parse("youtube://$it") }
+            if (sourceUri != null) {
+                invalidateResolvedUri(uriString)
+                return resolveMediaItem(
+                    mediaItem.buildUpon()
+                        .setUri(sourceUri)
+                        .setCustomCacheKey(null)
+                        .setMimeType(null)
+                        .build()
+                )
             }
             return mediaItem
         }
@@ -754,6 +945,77 @@ class DualPlayerEngine @Inject constructor(
             return mediaItem
         }
         return resolveMediaItem(mediaItem)
+    }
+
+    /** YouTube video id for [item], or null for local / non-YouTube sources. */
+    private fun youtubeIdOf(item: MediaItem): String? {
+        val uri = item.localConfiguration?.uri?.toString().orEmpty()
+        if (uri.startsWith("youtube://")) return uri.removePrefix("youtube://").takeIf { it.isNotBlank() }
+        val id = item.mediaId.removePrefix("youtube_")
+        return id.takeIf { YOUTUBE_ID_REGEX.matches(it) && !it.all(Char::isDigit) }
+    }
+
+    /**
+     * Called when the effective lossless switch changes (master toggle or enabled-addon set).
+     * Every cached decision was made under the previous policy, so purge them and point queued
+     * items that were already pre-resolved back at their youtube:// source; they re-resolve under
+     * the new policy when they play. When lossless is switched OFF while a lossless stream is
+     * playing, hand the current track over to YouTube in place so the toggle takes effect now.
+     */
+    private fun onLosslessPolicyChanged(enabled: Boolean) {
+        Timber.tag("DualPlayerEngine").i("Lossless policy changed -> enabled=%b; purging stream decisions", enabled)
+        com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.invalidateAllStreamCaches()
+        if (enabled) LosslessStreamResolver.clearAll()
+        resolvedUriCache.evictAll()
+        activeResolutions.values.forEach { it.cancel() }
+        activeResolutions.clear()
+        cancelPreCacheJobs()
+        if (!::playerA.isInitialized || playerA.mediaItemCount == 0) {
+            activePlaybackResolvedUris.clear()
+            return
+        }
+        if (!transitionRunning) cancelNext()
+
+        val currentIndex = playerA.currentMediaItemIndex
+        val currentItem = playerA.currentMediaItem
+        val currentUri = currentItem?.localConfiguration?.uri?.toString()
+        activePlaybackResolvedUris.keys.retainAll { key ->
+            currentItem != null && (key == currentUri || key == "youtube://${youtubeIdOf(currentItem)}")
+        }
+
+        fun resetIfPreResolved(item: MediaItem): MediaItem? {
+            val uri = item.localConfiguration?.uri ?: return null
+            val isPreResolved = uri.scheme == "http" || uri.scheme == "https" ||
+                uri.scheme == "data" || uri.scheme == "apple-pending" ||
+                LosslessSchemeRoutingDataSource.isCustomLosslessScheme(uri)
+            if (!isPreResolved) return null
+            val id = youtubeIdOf(item) ?: return null
+            return item.buildUpon()
+                .setUri(Uri.parse("youtube://$id"))
+                .setCustomCacheKey(null)
+                .setMimeType(null)
+                .setDrmConfiguration(null)
+                .build()
+        }
+
+        val count = playerA.mediaItemCount
+        fun resetRange(from: Int, to: Int) {
+            if (from >= to) return
+            var changed = false
+            val items = (from until to).map { idx ->
+                val original = playerA.getMediaItemAt(idx)
+                resetIfPreResolved(original)?.also { changed = true } ?: original
+            }
+            if (changed) playerA.replaceMediaItems(from, to, items)
+        }
+        if (currentIndex != C.INDEX_UNSET) {
+            resetRange(currentIndex + 1, count)
+            resetRange(0, currentIndex)
+        }
+
+        // The current song is intentionally left untouched: swapping its source mid-song means a
+        // gap plus a re-buffer. The new policy applies seamlessly from the next track (whose queue
+        // entry was reset above and whose crossfade standby was cancelled).
     }
 
     suspend fun preResolveForPlayback(mediaItems: List<MediaItem>, startIndex: Int): List<MediaItem> {
@@ -827,8 +1089,11 @@ class DualPlayerEngine @Inject constructor(
             return
         }
         val chunkSize = FIRST_CHUNK_PRECACHE_BYTES
-        if (cacheKey != null && runCatching { exoCache.cache.isCached(cacheKey, 0, chunkSize) }.getOrDefault(false)) return
-        val jobKey = cacheKey ?: streamUrl
+        // Must match the key the player reads with (format-aware); otherwise the warmed bytes are
+        // never found, or a different format's bytes are found under the bare video id.
+        val formatKey = cacheKey?.let { streamCacheKey(it.substringBefore('#'), streamUrl) }
+        if (formatKey != null && runCatching { exoCache.cache.isCached(formatKey, 0, chunkSize) }.getOrDefault(false)) return
+        val jobKey = formatKey ?: streamUrl
         activePreCacheJobs[jobKey]?.cancel()
         val job = scope.launch(Dispatchers.IO) {
             try {
@@ -838,8 +1103,8 @@ class DualPlayerEngine @Inject constructor(
                     .setUri(Uri.parse(streamUrl))
                     .setPosition(0)
                     .setLength(chunkSize)
-                if (cacheKey != null) {
-                    dataSpecBuilder.setKey(cacheKey)
+                if (formatKey != null) {
+                    dataSpecBuilder.setKey(formatKey)
                 }
                 val profile = StreamClientUtils.resolveRequestProfile(streamUrl)
                 val headers = buildMap {
@@ -861,7 +1126,7 @@ class DualPlayerEngine @Inject constructor(
                 Timber.tag("DualPlayerEngine").d(
                     "Pre-cached first %dKB of stream for key=%s",
                     chunkSize / 1024,
-                    cacheKey
+                    formatKey
                 )
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
@@ -965,6 +1230,35 @@ class DualPlayerEngine @Inject constructor(
             ?.let { method -> runCatching { method.invoke(player, schedulingEnabled) } }
     }
 
+    /**
+     * BUGFIX: these collectors used to live only in `init`. release() cancels the scope and
+     * initialize() recreates it, so after the first MusicService destroy/create cycle the offload
+     * preference was never observed again. They are now (re)started with every fresh scope.
+     */
+    private fun startPreferenceCollectors() {
+        scope.launch {
+            userPreferencesRepository.audioOffloadEnabledFlow.collect { enabled ->
+                if (audioOffloadEnabled != enabled) {
+                    audioOffloadEnabled = enabled
+                    // ArchiveTune-style: apply offload preferences in-place. Rebuilding players
+                    // on every toggle causes audible gaps and UI churn on low-end devices.
+                    if (::playerA.isInitialized) applyAudioOffloadToActivePlayers()
+                }
+            }
+        }
+        scope.launch {
+            var previous: Boolean? = null
+            LosslessStreamResolver.enabledFlow(context).collect { enabled ->
+                val before = previous
+                previous = enabled
+                if (before != null && before != enabled) {
+                    runCatching { onLosslessPolicyChanged(enabled) }
+                        .onFailure { Timber.tag("DualPlayerEngine").w(it, "Lossless policy refresh failed") }
+                }
+            }
+        }
+    }
+
     init {
         // BUGFIX (was: initialize() called eagerly in init on the calling
         // thread, which is the main thread for the service path):
@@ -979,16 +1273,7 @@ class DualPlayerEngine @Inject constructor(
         // `initialize()` call from MusicService.onCreate, which itself
         // has been moved to run as the last step. The audioOffload
         // preferences collector stays since it doesn't allocate.
-        scope.launch {
-            userPreferencesRepository.audioOffloadEnabledFlow.collect { enabled ->
-                if (audioOffloadEnabled != enabled) {
-                    audioOffloadEnabled = enabled
-                    // ArchiveTune-style: apply offload preferences in-place. Rebuilding players
-                    // on every toggle causes audible gaps and UI churn on low-end devices.
-                    if (::playerA.isInitialized) applyAudioOffloadToActivePlayers()
-                }
-            }
-        }
+        startPreferenceCollectors()
         // Purge any stale monochrome chunk-cache entries from prior sessions so playback is clean
         scope.launch(Dispatchers.IO) {
             runCatching {
@@ -1008,15 +1293,14 @@ class DualPlayerEngine @Inject constructor(
         // MusicService destroy/create cycles.
         if (!scope.isActive) {
             scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+            startPreferenceCollectors()
         }
 
         if (::playerA.isInitialized) {
             onPlayerAboutToBeReleasedListener?.invoke(playerA)
             try { playerA.release() } catch (e: Exception) { /* Ignore */ }
         }
-        if (::playerB.isInitialized) {
-            try { playerB.release() } catch (e: Exception) { /* Ignore */ }
-        }
+        releaseStandbyPlayer()
 
         if (pinnedAudioSessionId == C.AUDIO_SESSION_ID_UNSET || pinnedAudioSessionId == 0) {
             val generated = audioManager.generateAudioSessionId()
@@ -1121,23 +1405,29 @@ class DualPlayerEngine @Inject constructor(
     private fun scheduleLosslessStallFallbackIfNeeded(player: ExoPlayer) {
         cancelLosslessStallFallback()
         if (transitionRunning || !player.playWhenReady) return
+        // A seek into an unbuffered region of a lossless file is a normal re-buffer, not a dead
+        // source. Swapping to YouTube there only adds a resolve + a second buffer-up (slower,
+        // not faster), so seeks never trigger the source swap. Real failures still surface
+        // through onPlayerError, which steps down the source chain.
+        if (lastSeekAtMs > 0L && SystemClock.elapsedRealtime() - lastSeekAtMs < 2_000L) return
         val currentItem = player.currentMediaItem ?: return
         val currentUri = currentItem.localConfiguration?.uri?.toString() ?: return
         if (!LosslessStreamResolver.isLosslessUri(currentUri)) return
 
         val watchedMediaId = currentItem.mediaId
+        val timeoutMs = LOSSLESS_STALL_FALLBACK_TIMEOUT_MS
         losslessStallFallbackJob = scope.launch {
-            delay(LOSSLESS_STALL_FALLBACK_TIMEOUT_MS) // 4 seconds of stall on lossless triggers graceful YouTube fallback
+            delay(timeoutMs)
             if (transitionRunning || player !== playerA) return@launch
             if (player.currentMediaItem?.mediaId != watchedMediaId) return@launch
             if (player.playbackState != Player.STATE_BUFFERING || !player.playWhenReady || player.isPlaying) return@launch
 
             Timber.tag("DualPlayerEngine").w(
-                "Lossless stream stalled for >%ds on %s; triggering source failover to YouTube",
-                LOSSLESS_STALL_FALLBACK_TIMEOUT_MS / 1000,
+                "Lossless stream stalled for >%ds on %s; triggering source failover",
+                timeoutMs / 1000,
                 watchedMediaId
             )
-            failoverLosslessToYoutube(currentItem, player, "Playback stall >${LOSSLESS_STALL_FALLBACK_TIMEOUT_MS / 1000}s")
+            failoverLosslessToYoutube(currentItem, player, "Playback stall >${timeoutMs / 1000}s")
         }
     }
 
@@ -1209,7 +1499,7 @@ class DualPlayerEngine @Inject constructor(
                 val replacement = mediaItem.buildUpon()
                     .setUri(fallbackUri)
                     .apply {
-                        if (!isStillLossless) setCustomCacheKey(videoId)
+                        if (!isStillLossless) setCustomCacheKey(streamCacheKey(videoId, ytUrl))
                         if (containerMime != null) setMimeType(containerMime)
                     }
                     .build()
@@ -1335,9 +1625,7 @@ class DualPlayerEngine @Inject constructor(
         playerA.removeAudioOffloadListener(masterAudioOffloadListener)
         onPlayerAboutToBeReleasedListener?.invoke(playerA)
         playerA.release()
-        if (::playerB.isInitialized) {
-            try { playerB.release() } catch (_: Exception) {}
-        }
+        releaseStandbyPlayer()
 
         playerA = buildPlayer()
 
@@ -1450,7 +1738,10 @@ class DualPlayerEngine @Inject constructor(
                 val scheme = uri.scheme
                 val uriString = uri.toString()
 
-                val cleanId = dataSpec.key ?: when {
+                // dataSpec.key is the format-aware cache key ("<videoId>#<itag|saavn>", see
+                // streamCacheKey); everything else here works on the bare video id.
+                val rawKey = dataSpec.key
+                val cleanId = rawKey?.substringBefore('#') ?: when {
                     scheme == "youtube" -> uri.host?.takeIf { it.isNotBlank() } ?: uriString.removePrefix("youtube://")
                     uriString.startsWith("youtube://") -> uriString.removePrefix("youtube://")
                     else -> null
@@ -1461,10 +1752,10 @@ class DualPlayerEngine @Inject constructor(
                 if (cleanId != null) {
                     StreamChoice.of(cleanId)?.let { pinned ->
                         val pinnedUri = Uri.parse(pinned.url)
-                        if (isResolvedUriFresh(uriString, pinnedUri)) {
+                        if (isResolvedUriFresh(uriString, pinnedUri) && !isDeadStreamUrl(pinned.url)) {
                             return dataSpec.buildUpon()
                                 .setUri(pinnedUri)
-                                .setKey(cleanId)
+                                .setKey(streamCacheKey(cleanId, pinned.url))
                                 .apply {
                                     if (pinned.headers.isNotEmpty()) {
                                         setHttpRequestHeaders(pinned.headers)
@@ -1497,14 +1788,14 @@ class DualPlayerEngine @Inject constructor(
                 if (cleanId != null) {
                     val isFullyCached = runCatching {
                         val totalLen = androidx.media3.datasource.cache.ContentMetadata.getContentLength(
-                            exoCache.cache.getContentMetadata(cleanId)
+                            exoCache.cache.getContentMetadata(rawKey ?: cleanId)
                         )
                         val remainingLen = when {
                             dataSpec.length > 0 -> dataSpec.length
                             totalLen > dataSpec.position -> totalLen - dataSpec.position
                             else -> -1L
                         }
-                        remainingLen > 0L && exoCache.cache.isCached(cleanId, dataSpec.position, remainingLen)
+                        remainingLen > 0L && exoCache.cache.isCached(rawKey ?: cleanId, dataSpec.position, remainingLen)
                     }.getOrDefault(false)
 
                     val isCloudScheme = scheme == "youtube" || uriString.startsWith("youtube://") ||
@@ -1512,7 +1803,7 @@ class DualPlayerEngine @Inject constructor(
                         scheme == "gdrive" || uriString.startsWith("gdrive:")
 
                     if (isFullyCached && !isCloudScheme) {
-                        return dataSpec.buildUpon().setKey(cleanId).build()
+                        return dataSpec.buildUpon().setKey(rawKey ?: cleanId).build()
                     }
                 }
 
@@ -1578,10 +1869,10 @@ class DualPlayerEngine @Inject constructor(
                     }
 
                     activePlaybackResolvedUris[originalUri]?.let { locked ->
-                        if (isResolvedUriFresh(originalUri, locked)) {
+                        if (isResolvedUriFresh(originalUri, locked) && !isDeadStreamUrl(locked.toString())) {
                             return dataSpec.buildUpon()
                                 .setUri(locked)
-                                .apply { if (cleanId != null) setKey(cleanId) }
+                                .apply { if (cleanId != null) setKey(streamCacheKey(cleanId, locked.toString())) }
                                 .applyStreamHeaders(locked)
                                 .build()
                         } else {
@@ -1593,11 +1884,11 @@ class DualPlayerEngine @Inject constructor(
 
                     val resolved = resolvedUriCache.get(originalUri)
                     if (resolved != null) {
-                        if (isResolvedUriFresh(originalUri, resolved)) {
+                        if (isResolvedUriFresh(originalUri, resolved) && !isDeadStreamUrl(resolved.toString())) {
                             activePlaybackResolvedUris[originalUri] = resolved
                             return dataSpec.buildUpon()
                                 .setUri(resolved)
-                                .apply { if (cleanId != null) setKey(cleanId) }
+                                .apply { if (cleanId != null) setKey(streamCacheKey(cleanId, resolved.toString())) }
                                 .applyStreamHeaders(resolved)
                                 .build()
                         } else {
@@ -1622,7 +1913,7 @@ class DualPlayerEngine @Inject constructor(
                             activePlaybackResolvedUris[originalUri] = ready
                             return dataSpec.buildUpon()
                                 .setUri(ready)
-                                .apply { if (cleanId != null) setKey(cleanId) }
+                                .apply { if (cleanId != null) setKey(streamCacheKey(cleanId, ready.toString())) }
                                 .applyStreamHeaders(ready)
                                 .build()
                         }
@@ -1636,8 +1927,27 @@ class DualPlayerEngine @Inject constructor(
                     )
                 }
 
-                // Inject request headers (User-Agent, Origin, Referer) on pre-resolved HTTPS Google Video streams
+                // BUGFIX (looped loading on expiry): queue items pre-resolved to an https URL were
+                // handed to the network as-is forever. Once that link expired (or YouTube revoked it,
+                // e.g. after an IP change) every ExoPlayer retry re-sent the same dead URL and the
+                // player spun until error recovery eventually replaced the item. Re-resolve such
+                // links right here, once, so the retry already uses a fresh URL.
+                val isSaavnStream = uriString.contains("saavncdn.com") || uriString.contains("jiosaavn.com")
                 val isGoogleVideoStream = uriString.contains("googlevideo.com") || uriString.contains("youtube.com")
+                if ((isGoogleVideoStream || isSaavnStream) && (scheme == "https" || scheme == "http") &&
+                    cleanId != null && YOUTUBE_ID_REGEX.matches(cleanId) &&
+                    (isDeadStreamUrl(uriString) || !isResolvedUriFresh(uriString, uri))
+                ) {
+                    refreshStreamOnLoadThread(cleanId)?.let { fresh ->
+                        return dataSpec.buildUpon()
+                            .setUri(fresh)
+                            .setKey(streamCacheKey(cleanId, fresh.toString()))
+                            .setHttpRequestHeaders(headersForStream(fresh.toString()))
+                            .build()
+                    }
+                }
+
+                // Inject request headers (User-Agent, Origin, Referer) on pre-resolved HTTPS Google Video streams
                 if (isGoogleVideoStream && (scheme == "https" || scheme == "http")) {
                     val profile = StreamClientUtils.resolveRequestProfile(uriString)
                     val headers = buildMap {
@@ -1650,13 +1960,13 @@ class DualPlayerEngine @Inject constructor(
                         StreamChoice.remember(cleanId, uriString, headers)
                     }
                     return dataSpec.buildUpon()
-                        .apply { if (cleanId != null && dataSpec.key == null) setKey(cleanId) }
+                        .apply { if (cleanId != null) setKey(streamCacheKey(cleanId, uriString)) }
                         .setHttpRequestHeaders(headers)
                         .build()
                 }
 
                 if (cleanId != null && dataSpec.key == null) {
-                    return dataSpec.buildUpon().setKey(cleanId).build()
+                    return dataSpec.buildUpon().setKey(streamCacheKey(cleanId, uriString)).build()
                 }
 
                 return dataSpec
@@ -1664,14 +1974,16 @@ class DualPlayerEngine @Inject constructor(
         }
 
         // Explicit HTTP timeouts for low-connectivity resilience.
-        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+        // Perf: OkHttp with one connection pool shared by both players (and across rebuilds),
+        // HTTP/2 multiplexing and TLS session reuse. YouTube range chunks and the several range
+        // probes a FLAC seek makes now reuse a warm connection instead of paying a new
+        // TCP+TLS handshake each time — the main cost of seeking in a lossless stream and of
+        // mid-song chunk fetches.
+        val httpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(playbackHttpClient)
             .setUserAgent(
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
                     "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
             )
-            .setConnectTimeoutMs(HTTP_CONNECT_TIMEOUT_MS)
-            .setReadTimeoutMs(HTTP_READ_TIMEOUT_MS)
-            .setAllowCrossProtocolRedirects(true)
 
         val chunkedHttpDataSourceFactory = ChunkedDataSource.Factory(
             upstream = httpDataSourceFactory,
@@ -1778,33 +2090,28 @@ class DualPlayerEngine @Inject constructor(
             else -> BufferProfile(25_000, 150_000, 300, 2_000)
         }
 
-        // M3 Optimization: Dynamic buffer allocation with setTargetBufferBytes(32 * 1024 * 1024) (32MB)
-        // for Lossless streams and reduce maxBufferMs to 45,000ms (45s), vs 150s default for standard streams.
-        val isLosslessStream = LosslessStreamResolver.isEnabledBlocking(context)
-        val minBufferMs = if (isLosslessStream) {
-            if (isRecentlyUnstable || bandwidthKbps < 3_000) 30_000 else 20_000
-        } else {
-            profile.minMs
-        }
-        val maxBufferMs = if (isLosslessStream) 45_000 else profile.maxMs
-        val targetBufferBytes = if (isLosslessStream) 32 * 1024 * 1024 else C.LENGTH_UNSET
-        val prioritizeTime = !isLosslessStream
-
+        // BUGFIX: the buffer profile used to be chosen from the lossless *toggle* at player-build
+        // time. Players are only rebuilt on Hi-Fi/offload changes, so after flipping the toggle the
+        // old profile stuck: YouTube AAC was capped at 45s (more rebuffering) with lossless on, and
+        // FLAC ran on the uncapped 150s time-based profile with lossless off (heap spikes on
+        // 24-bit streams). It also ran a blocking DataStore read on the calling thread.
+        // A byte-capped, time-prioritised profile adapts to the actual bitrate of whatever plays.
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                minBufferMs,
-                maxBufferMs,
-                if (isLosslessStream) 500 else profile.forPlaybackMs,
-                if (isLosslessStream) 3_000 else profile.afterRebufferMs
+                profile.minMs,
+                profile.maxMs,
+                profile.forPlaybackMs,
+                profile.afterRebufferMs
             )
-            .setTargetBufferBytes(targetBufferBytes)
-            .setPrioritizeTimeOverSizeThresholds(prioritizeTime)
-            .setBackBuffer(if (isLosslessStream) 15_000 else 30_000, /* retainBackBufferFromKeyframe = */ true)
+            .setTargetBufferBytes(TARGET_BUFFER_BYTES)
+            .setPrioritizeTimeOverSizeThresholds(true)
+            .setBackBuffer(20_000, /* retainBackBufferFromKeyframe = */ true)
             .build()
 
         return ExoPlayer.Builder(context, renderersFactory)
             .setMediaSourceFactory(
                 DefaultMediaSourceFactory(resolvingFactory, extractorsFactory)
+                    .setLoadErrorHandlingPolicy(streamRecoveryLoadErrorPolicy)
                     // Apple Music (lossless sources) streams are Widevine-L3 protected fMP4; the
                     // provider answers DRM_UNSUPPORTED for everything else (see AppleMusicDrm).
                     .setDrmSessionManagerProvider(AppleMusicDrm.drmSessionManagerProvider)
@@ -1959,6 +2266,23 @@ class DualPlayerEngine @Inject constructor(
         val isRemoteScheme = currentUri.scheme in REMOTE_MEDIA_SCHEMES
 
         if (!isHttp && isRemoteScheme) {
+            // BUGFIX (repeated loading on every resume): items queued as youtube:// are resolved by
+            // the data source on demand. This branch used to re-resolve and replaceMediaItem() on
+            // EVERY play press, which threw away the whole forward buffer even on a fast network,
+            // so each resume showed the loader again. Only rebuild the item when the player has no
+            // live source (idle/ended) or the URL it is streaming from is actually stale.
+            val locked = activePlaybackResolvedUris[originalUriStr] ?: resolvedUriCache.get(originalUriStr)
+            val playerHasSource = withContext(Dispatchers.Main.immediate) {
+                ::playerA.isInitialized &&
+                    playerA.playbackState != Player.STATE_IDLE &&
+                    playerA.playbackState != Player.STATE_ENDED
+            }
+            val pausedForMs = if (lastPausedAtMs > 0L) SystemClock.elapsedRealtime() - lastPausedAtMs else 0L
+            val lockIsFresh = locked == null ||
+                (isResolvedUriFresh(originalUriStr, locked) && !isDeadStreamUrl(locked.toString()))
+            if (playerHasSource && lockIsFresh && pausedForMs < 20 * 60 * 1000L) {
+                return
+            }
             Timber.tag("DualPlayerEngine").i("Stream URL needs initial resolution on resume for %s", originalUriStr)
             val sourceUri = Uri.parse(originalUriStr)
             val freshItem = withContext(Dispatchers.IO) {
@@ -2070,7 +2394,7 @@ class DualPlayerEngine @Inject constructor(
                     // resolveYoutubeUriAsync's own timeout (which also branches on metered)
                     // can complete before the outer fires. Previously the outer and inner
                     // used the same value, making the inner's fallback unreachable.
-                    val timeoutMs = if (connectivityStateHolder.isMeteredNetwork.value) {
+                    val timeoutMs = LOSSLESS_RESOLVE_EXTRA_MS + if (connectivityStateHolder.isMeteredNetwork.value) {
                         STREAM_RESOLVE_TIMEOUT_LOW_CONNECTIVITY_MS + 4_000L
                     } else {
                         STREAM_RESOLVE_TIMEOUT_MS + 4_000L
@@ -2246,7 +2570,11 @@ class DualPlayerEngine @Inject constructor(
             )
 
             // Never retry the full quality-aware resolver without an outer timeout.
-            val timeoutMs = if (connectivityStateHolder.isMeteredNetwork.value) {
+            // When lossless is on, YoutubeHelper spends up to LOSSLESS_INLINE_BUDGET_MS on the
+            // lossless chain before the YouTube step; grant that time so the YouTube step is not
+            // starved into the lowest-quality emergency path.
+            val losslessExtraMs = if (isLosslessEnabled) LOSSLESS_RESOLVE_EXTRA_MS else 0L
+            val timeoutMs = losslessExtraMs + if (connectivityStateHolder.isMeteredNetwork.value) {
                 STREAM_RESOLVE_TIMEOUT_LOW_CONNECTIVITY_MS
             } else {
                 STREAM_RESOLVE_TIMEOUT_MS
@@ -2287,8 +2615,12 @@ class DualPlayerEngine @Inject constructor(
                     Uri.fromFile(java.io.File(resolvedPath))
                 }
                 else -> {
-                    // Cache warming is background work; never wait for it before returning the URL.
-                    preCacheFirstChunk(resolvedPath, youtubeId)
+                    // Cache warming is for NEIGHBOUR tracks only. For the track the player is about
+                    // to open, a parallel 1MB pre-cache competes with the player's own request for
+                    // the same bytes (double bandwidth, locked cache spans) and slows the start.
+                    if (youtubeId != currentMasterMediaId?.removePrefix("youtube_")) {
+                        preCacheFirstChunk(resolvedPath, youtubeId)
+                    }
                     Uri.parse(resolvedPath)
                 }
             }
@@ -2354,7 +2686,7 @@ class DualPlayerEngine @Inject constructor(
 
         // ONLY attach custom cache key to YouTube streams; NEVER attach to Lossless streams
         if (!isLossless && cleanId != null) {
-            builder.setCustomCacheKey(cleanId)
+            builder.setCustomCacheKey(streamCacheKey(cleanId, resolvedUri.toString()))
         }
 
         val resolvedStr = resolvedUri.toString()
@@ -2397,10 +2729,17 @@ class DualPlayerEngine @Inject constructor(
 
     private fun ensurePlayerB(): ExoPlayer {
         val needsNew = !::playerB.isInitialized ||
+            playerBReleased ||
             (playerB.playbackState == Player.STATE_IDLE && playerB.playerError != null) ||
             !playerB.applicationLooper.thread.isAlive
         if (needsNew) {
+            if (::playerB.isInitialized && !playerBReleased) {
+                // Errored standby: release it before replacing so its codecs/buffers are freed.
+                releaseStandbyPlayer()
+            }
             playerB = buildPlayer()
+            playerBReleased = false
+            playerB.setWakeMode(currentWakeMode)
             if (pinnedAudioSessionId != C.AUDIO_SESSION_ID_UNSET && pinnedAudioSessionId != 0) {
                 try { playerB.audioSessionId = pinnedAudioSessionId } catch (_: Exception) {}
             }
@@ -2489,7 +2828,7 @@ class DualPlayerEngine @Inject constructor(
             } catch (e: Exception) { /* Ignore */ }
         }
         if (::playerA.isInitialized) {
-            playerA.volume = 1f
+            restoreMasterRestVolume(playerA)
         }
         incomingTrackReplayGainVolume = null
         setPauseAtEndOfMediaItems(false)
@@ -2505,9 +2844,9 @@ class DualPlayerEngine @Inject constructor(
                 if (e !is kotlinx.coroutines.CancellationException) {
                     Timber.tag("TransitionDebug").e(e, "Error performing transition")
                 }
-                if (::playerA.isInitialized) playerA.volume = 1f
+                if (::playerA.isInitialized) restoreMasterRestVolume(playerA)
                 setPauseAtEndOfMediaItems(false)
-                if (::playerB.isInitialized) {
+                if (::playerB.isInitialized && !playerBReleased) {
                     try {
                         playerB.stop()
                         playerB.clearMediaItems()
@@ -2523,8 +2862,8 @@ class DualPlayerEngine @Inject constructor(
     }
 
     private suspend fun performOverlapTransition(settings: TransitionSettings) {
-        if (!::playerB.isInitialized || playerB.mediaItemCount == 0) {
-            if (::playerA.isInitialized) playerA.volume = 1f
+        if (!::playerB.isInitialized || playerBReleased || playerB.mediaItemCount == 0) {
+            if (::playerA.isInitialized) restoreMasterRestVolume(playerA)
             setPauseAtEndOfMediaItems(false)
             return
         }
@@ -2589,6 +2928,7 @@ class DualPlayerEngine @Inject constructor(
         }
 
         val outgoingStartVolume = outgoingPlayer.volume.coerceIn(0.1f, 1f)
+        transitionOutgoingRestVolume = if (isDucked) preDuckVolumeA else outgoingStartVolume
         val incomingTargetVolume = incomingTrackReplayGainVolume ?: 1f
         val incomingBeforeStart = incomingPlayer.currentPosition
 
@@ -2652,8 +2992,11 @@ class DualPlayerEngine @Inject constructor(
             val volOut = kotlin.math.cos(angle)
             val volIn = kotlin.math.sin(angle)
 
+            // Keep honouring an active duck while the curve runs; the 16ms loop used to overwrite
+            // the ducked level so notifications played over a full-volume incoming track.
+            val duck = if (isDucked) DUCK_FACTOR else 1f
             outgoingPlayer.volume = (volOut * outgoingStartVolume).coerceIn(0f, 1f)
-            incomingPlayer.volume = (volIn * incomingTargetVolume).coerceIn(0f, 1f)
+            incomingPlayer.volume = (volIn * incomingTargetVolume * duck).coerceIn(0f, 1f)
 
             if (t >= 1f) break
             if (outgoingPlayer.playbackState == Player.STATE_ENDED) break
@@ -2669,8 +3012,14 @@ class DualPlayerEngine @Inject constructor(
 
         // Complete Swap & Live Timeline Queue Splicing:
         outgoingPlayer.volume = 0f
-        incomingPlayer.volume = incomingTargetVolume
+        if (isDucked) {
+            preDuckVolumeA = incomingTargetVolume
+            incomingPlayer.volume = (incomingTargetVolume * DUCK_FACTOR).coerceIn(0.01f, 1f)
+        } else {
+            incomingPlayer.volume = incomingTargetVolume
+        }
         incomingTrackReplayGainVolume = null
+        transitionOutgoingRestVolume = null
 
         val targetIdx = pendingTransitionTarget?.absoluteIndex ?: outgoingPlayer.nextMediaItemIndex
         if (targetIdx in 0 until outgoingPlayer.mediaItemCount) {
@@ -2706,7 +3055,7 @@ class DualPlayerEngine @Inject constructor(
         playerA.addAudioOffloadListener(masterAudioOffloadListener)
 
         if (playerA.volume <= 0.01f) {
-            playerA.volume = incomingTargetVolume
+            playerA.volume = if (isDucked) (incomingTargetVolume * DUCK_FACTOR).coerceIn(0.01f, 1f) else incomingTargetVolume
         }
         if (playerA.playWhenReady) requestAudioFocus()
 
@@ -2730,8 +3079,29 @@ class DualPlayerEngine @Inject constructor(
             incoming.clearMediaItems()
             incoming.volume = 0f
         }
-        outgoing.volume = 1f
+        // BUGFIX: was a hard `outgoing.volume = 1f`, which discarded the track's ReplayGain level
+        // and any active duck. Restore the level the outgoing track had before the fade began.
+        restoreMasterRestVolume(outgoing)
         setPauseAtEndOfMediaItems(false)
+    }
+
+    /** Volume the master player had before a crossfade started; null when no fade touched it. */
+    private var transitionOutgoingRestVolume: Float? = null
+
+    private fun restoreMasterRestVolume(player: ExoPlayer) {
+        val rest = transitionOutgoingRestVolume
+        transitionOutgoingRestVolume = null
+        val base = when {
+            rest != null -> rest
+            player.volume <= 0.01f -> 1f
+            else -> return // Never touched by a fade; keep ReplayGain/duck level as-is.
+        }
+        if (isDucked) {
+            preDuckVolumeA = base
+            player.volume = (base * DUCK_FACTOR).coerceIn(0.01f, 1f)
+        } else {
+            player.volume = base
+        }
     }
 
     private fun ensureQueueSnapshot(): List<MediaItem> {
@@ -2866,7 +3236,7 @@ class DualPlayerEngine @Inject constructor(
             onPlayerAboutToBeReleasedListener?.invoke(playerA)
             playerA.release()
         }
-        if (::playerB.isInitialized) playerB.release()
+        releaseStandbyPlayer()
         resolvedUriCache.evictAll()
         activePlaybackResolvedUris.clear()
         localFilePathCache.evictAll()

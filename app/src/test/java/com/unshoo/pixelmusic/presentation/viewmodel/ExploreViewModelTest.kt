@@ -183,7 +183,8 @@ class ExploreViewModelTest {
         val cache = ExploreCacheModel(
             sections = sections,
             moodChips = chips,
-            timestamp = timestamp
+            timestamp = timestamp,
+            authKey = "anon" // the tests run signed out (empty cookie)
         )
         val file = File(tempCacheDir, "explore_cache.json")
         file.writeText(testGson.toJson(cache))

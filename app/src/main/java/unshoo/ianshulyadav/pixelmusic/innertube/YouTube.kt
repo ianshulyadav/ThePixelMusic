@@ -114,6 +114,7 @@ object YouTube {
     var locale: YouTubeLocale
         get() = innerTube.locale
         set(value) {
+            if (value.gl != REGION_FALLBACK_GL) regionFallbackActive = false
             val oldLocale = innerTube.locale
             if (oldLocale.gl != value.gl || oldLocale.hl != value.hl) {
                 visitorData = null
@@ -246,7 +247,56 @@ object YouTube {
         )
     }
 
-    suspend fun searchSummary(query: String): Result<SearchSummaryPage> = runCatching {
+    // ── Region fallback ──────────────────────────────────────────────────────────────────────
+    // In countries where YouTube Music is not offered, InnerTube answers with EMPTY home/search
+    // payloads for that `gl` (no error), so users saw zero results. When a request comes back
+    // empty for a non-US region we retry once on the US catalogue (keeping the user's `hl`
+    // language) and stay on it for the rest of the session, so later requests don't pay twice.
+    // The user's own Content country choice is restored whenever they change it in settings.
+    private const val REGION_FALLBACK_GL = "US"
+    @Volatile var regionFallbackActive: Boolean = false
+        private set
+
+    private fun activateRegionFallback(reason: String) {
+        if (!canTryRegionFallback()) return
+        android.util.Log.w("YouTube", "Empty $reason for gl=${innerTube.locale.gl} (searchOmitsGl=${innerTube.searchOmitsGl}); switching to $REGION_FALLBACK_GL catalogue")
+        regionFallbackActive = true
+        innerTube.searchOmitsGl = false
+        locale = innerTube.locale.copy(gl = REGION_FALLBACK_GL)
+    }
+
+    private fun canTryRegionFallback(): Boolean =
+        !regionFallbackActive && (innerTube.locale.gl != REGION_FALLBACK_GL || innerTube.searchOmitsGl)
+
+    /** Applied by the app whenever the Content language / country settings change. */
+    fun applyLocaleSettings(newLocale: YouTubeLocale, omitGlForSearch: Boolean, acceptLanguage: String) {
+        regionFallbackActive = false
+        innerTube.searchOmitsGl = omitGlForSearch
+        innerTube.acceptLanguage = acceptLanguage
+        locale = newLocale
+    }
+
+    suspend fun searchSummary(query: String): Result<SearchSummaryPage> {
+        val first = searchSummaryInternal(query)
+        val empty = first.getOrNull()?.summaries?.all { it.items.isEmpty() } ?: false
+        if (empty && query.isNotBlank() && canTryRegionFallback()) {
+            activateRegionFallback("search")
+            return searchSummaryInternal(query)
+        }
+        return first
+    }
+
+    suspend fun search(query: String, filter: SearchFilter): Result<SearchResult> {
+        val first = searchInternal(query, filter)
+        val empty = first.getOrNull()?.items?.isEmpty() ?: false
+        if (empty && query.isNotBlank() && canTryRegionFallback()) {
+            activateRegionFallback("search")
+            return searchInternal(query, filter)
+        }
+        return first
+    }
+
+    private suspend fun searchSummaryInternal(query: String): Result<SearchSummaryPage> = runCatching {
         var response = innerTube.search(WEB_REMIX, query).body<SearchResponse>()
         var contents =
             response.contents
@@ -335,7 +385,7 @@ object YouTube {
         )
     }
 
-    suspend fun search(query: String, filter: SearchFilter): Result<SearchResult> = runCatching {
+    private suspend fun searchInternal(query: String, filter: SearchFilter): Result<SearchResult> = runCatching {
         var response = innerTube.search(WEB_REMIX, query, filter.value).body<SearchResponse>()
         var contents =
             response.contents
@@ -891,37 +941,11 @@ object YouTube {
         }.orEmpty()).toMutableList()
         val chips = sectionListRender?.header?.chipCloudRenderer?.chips?.mapNotNull { HomePage.Chip.fromChipCloudChipRenderer(it) }
 
-        if (sections.isEmpty() && params == null && innerTube.locale.gl != "US") {
-            android.util.Log.w("YouTube", "Empty home sections for gl=${innerTube.locale.gl}. Retrying with US fallback.")
-            val originalLocale = innerTube.locale
-            innerTube.locale = originalLocale.copy(gl = "US")
-            try {
-                val fbResponse = innerTube.browse(
-                    WEB_REMIX,
-                    browseId = "FEmusic_home",
-                    params = null,
-                    setLogin = setLogin,
-                    forceAnonymous = forceAnon
-                ).body<BrowseResponse>()
-                val fbSectionList = fbResponse.contents?.singleColumnBrowseResultsRenderer?.tabs?.firstOrNull()
-                    ?.tabRenderer?.content?.sectionListRenderer
-                    ?: fbResponse.contents?.sectionListRenderer
-                val fbContinuation = fbSectionList?.continuations?.getContinuation()
-                    ?: fbResponse.continuationContents?.sectionListContinuation?.continuations?.getContinuation()
-                val fbSections = (fbSectionList?.contents?.mapNotNull {
-                    HomePage.Section.fromSectionListContent(it)
-                } ?: fbResponse.continuationContents?.sectionListContinuation?.contents?.mapNotNull {
-                    HomePage.Section.fromSectionListContent(it)
-                }.orEmpty()).toMutableList()
-                val fbChips = fbSectionList?.header?.chipCloudRenderer?.chips?.mapNotNull { HomePage.Chip.fromChipCloudChipRenderer(it) }
-                if (fbSections.isNotEmpty()) {
-                    return@runCatching HomePage(fbChips, fbSections, fbContinuation)
-                }
-            } catch (e: Exception) {
-                android.util.Log.w("YouTube", "US fallback failed for home: ${e.message}")
-            } finally {
-                innerTube.locale = originalLocale
-            }
+        if (sections.isEmpty() && params == null && canTryRegionFallback()) {
+            // Sticky session-wide fallback (see activateRegionFallback). The old code swapped the
+            // GLOBAL locale for one request and back, racing every concurrent request.
+            activateRegionFallback("home")
+            return@runCatching fetchHomeInternal(params).getOrThrow()
         }
 
         HomePage(chips, sections, continuation)

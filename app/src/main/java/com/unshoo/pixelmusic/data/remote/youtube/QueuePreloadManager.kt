@@ -198,7 +198,9 @@ object QueuePreloadManager {
 
     private suspend fun prefetchAudioBytes(ctx: Context, videoId: String, streamUrl: String) {
         val cache = exoCache?.cache ?: return
-        if (cache.isCached(videoId, 0, 128 * 1024L)) return
+        // Same format-aware key the player reads with; a bare video id would never be found.
+        val cacheKey = com.unshoo.pixelmusic.data.service.player.StreamCacheKeys.forStream(videoId, streamUrl)
+        if (cache.isCached(cacheKey, 0, 128 * 1024L)) return
         try {
             val uri = Uri.parse(streamUrl)
             val baseDataSourceFactory = DefaultDataSource.Factory(ctx)
@@ -210,7 +212,7 @@ object QueuePreloadManager {
             val dataSource = cacheDataSourceFactory.createDataSource()
             val dataSpec = DataSpec.Builder()
                 .setUri(uri)
-                .setKey(videoId)
+                .setKey(cacheKey)
                 .setPosition(0)
                 .setLength(128 * 1024L)
                 .build()
