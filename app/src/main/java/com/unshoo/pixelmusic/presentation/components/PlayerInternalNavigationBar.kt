@@ -29,6 +29,10 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.border
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -69,10 +73,14 @@ import kotlinx.collections.immutable.ImmutableList
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+/** Rounded-square search button (reference design). */
+private val SearchButtonShape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp)
+
 internal val NavBarContentHeight = 90.dp
 internal val NavBarCompactContentHeight = 64.dp
 internal val NavBarContentHeightFullWidth = NavBarContentHeight
 private val FloatingPillContentHeight = 76.dp
+private val FloatingPillCompactContentHeight = 62.dp
 private val MainScreenBottomGradientExtraHeight = MiniPlayerHeight + MiniPlayerBottomSpacer + 8.dp
 internal val MaxNavigationBarBottomInset = 96.dp
 
@@ -102,7 +110,8 @@ internal fun resolveNavBarContentHeight(compactMode: Boolean, heightOffset: Dp =
 
 internal fun resolveNavBarContentHeight(navBarStyle: String, compactMode: Boolean, heightOffset: Dp = 0.dp): Dp =
     when (navBarStyle) {
-        NavBarStyle.FLOATING_PILL -> FloatingPillContentHeight + heightOffset
+        NavBarStyle.FLOATING_PILL ->
+            (if (compactMode) FloatingPillCompactContentHeight else FloatingPillContentHeight) + heightOffset
         else -> resolveNavBarContentHeight(compactMode, heightOffset)
     }
 
@@ -150,10 +159,19 @@ private fun ExpressiveFloatingPillNavigationBar(
     navItems: ImmutableList<BottomNavItem>,
     currentRoute: String?,
     modifier: Modifier = Modifier,
+    frostedBlur: Boolean = false,
+    searchColorScheme: androidx.compose.material3.ColorScheme? = null,
+    compactMode: Boolean = false,
     onSearchIconDoubleTap: () -> Unit = {}
 ) {
+    // Compact mode shrinks the pill, its items and the search button.
+    val pillItemHeight = if (compactMode) 40.dp else 50.dp
+    val searchButtonSize = if (compactMode) 50.dp else 60.dp
+    val pillIconSize = if (compactMode) 21.dp else 23.dp
     val latestCurrentRoute by rememberUpdatedState(currentRoute)
     val latestNavigationEnabled by rememberUpdatedState(currentRoute != null)
+    val backdropSource = LocalBackdropSource.current
+    val glassTint = frostedGlassTint()
     var lastSearchTapTimestamp by remember { mutableStateOf(0L) }
 
     val haptic = LocalHapticFeedback.current
@@ -166,7 +184,9 @@ private fun ExpressiveFloatingPillNavigationBar(
 
     val isLargeFont = fontScale > 1.25f
     val isCompactScreen = screenWidth < 400
-    val shouldHideLabel = isLargeFont || (isCompactScreen && mainItems.size > 3)
+    // Icon-only pill (reference design): labels are never shown in the floating pill.
+    @Suppress("UNUSED_VARIABLE") val labelsWouldHide = isLargeFont || (isCompactScreen && mainItems.size > 3)
+    val shouldHideLabel = true
 
     val selectedIndex = mainItems.indexOfFirst { it.screen.route == latestCurrentRoute }
 
@@ -186,8 +206,8 @@ private fun ExpressiveFloatingPillNavigationBar(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         // Tomato-style Material You Expressive Floating Pill Navigation Bar
@@ -195,9 +215,18 @@ private fun ExpressiveFloatingPillNavigationBar(
             expanded = true,
             modifier = Modifier
                 .weight(1f)
-                .shadow(elevation = 6.dp, shape = CircleShape),
+                .height(pillItemHeight + 10.dp)
+                .then(
+                    if (frostedBlur) {
+                        Modifier
+                            .clip(CircleShape)
+                            .frostedBackdrop(source = backdropSource, tint = glassTint)
+                    } else {
+                        Modifier.shadow(elevation = 6.dp, shape = CircleShape)
+                    }
+                ),
             colors = FloatingToolbarDefaults.standardFloatingToolbarColors(
-                toolbarContainerColor = solidTintedColor
+                toolbarContainerColor = if (frostedBlur) Color.Transparent else solidTintedColor
             ),
             contentPadding = PaddingValues(start = 10.dp, end = 10.dp, top = 5.dp, bottom = 5.dp)
         ) {
@@ -225,13 +254,22 @@ private fun ExpressiveFloatingPillNavigationBar(
                 )
 
                 val animColor by animateColorAsState(
-                    targetValue = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                    targetValue = when {
+                    isSelected && frostedBlur -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+                    isSelected -> MaterialTheme.colorScheme.primary
+                    else -> Color.Transparent
+                },
                     animationSpec = motionScheme.defaultEffectsSpec(),
                     label = "pill_bg_$index"
                 )
 
                 val animContentColor by animateColorAsState(
-                    targetValue = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
+                    targetValue = when {
+                        isSelected && frostedBlur -> MaterialTheme.colorScheme.onSurface
+                        isSelected -> MaterialTheme.colorScheme.onPrimary
+                        frostedBlur -> MaterialTheme.colorScheme.onSurface
+                        else -> MaterialTheme.colorScheme.primary
+                    },
                     animationSpec = motionScheme.defaultEffectsSpec(),
                     label = "pill_content_$index"
                 )
@@ -251,7 +289,7 @@ private fun ExpressiveFloatingPillNavigationBar(
                     },
                     modifier = Modifier
                         .weight(itemWeight)
-                        .height(44.dp)
+                        .height(pillItemHeight)
                         .graphicsLayer {
                             scaleX = itemTactileScale
                             scaleY = itemTactileScale
@@ -278,7 +316,7 @@ private fun ExpressiveFloatingPillNavigationBar(
                             painter = painterResource(id = iconRes),
                             contentDescription = item.label,
                             modifier = Modifier
-                                .size(23.dp)
+                                .size(pillIconSize)
                                 .graphicsLayer {
                                     scaleX = iconBounceScale
                                     scaleY = iconBounceScale
@@ -315,6 +353,8 @@ private fun ExpressiveFloatingPillNavigationBar(
         }
 
         // Disconnected Search FAB — M3 Expressive floating action button
+        // The search button alone is tinted with the playing song's colours (frosted mode).
+        MaterialTheme(colorScheme = searchColorScheme ?: MaterialTheme.colorScheme) {
         if (searchItem != null) {
             val isSearchSelected = latestCurrentRoute == searchItem.screen.route
             val searchInteractionSource = remember { MutableInteractionSource() }
@@ -345,10 +385,11 @@ private fun ExpressiveFloatingPillNavigationBar(
             }
 
             val searchColor by animateColorAsState(
-                targetValue = if (isSearchSelected) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    solidTintedColor
+                targetValue = when {
+                    // Frosted: no solid accent fill, just a soft light layer over the glass.
+                    frostedBlur -> if (isSearchSelected) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f) else Color.Transparent
+                    isSearchSelected -> MaterialTheme.colorScheme.primary
+                    else -> solidTintedColor
                 },
                 animationSpec = motionScheme.defaultEffectsSpec(),
                 label = "search_fab_bg"
@@ -382,16 +423,23 @@ private fun ExpressiveFloatingPillNavigationBar(
                     }
                 },
                 modifier = Modifier
-                    .size(56.dp)
+                    .size(searchButtonSize)
                     .graphicsLayer {
                         scaleX = fabScale
                         scaleY = fabScale
-                    },
-                shape = CircleShape,
+                    }
+                    .then(
+                        if (frostedBlur) {
+                            Modifier
+                                .clip(SearchButtonShape)
+                                .frostedBackdrop(source = backdropSource, tint = frostedGlassTint(songTintStrength = 0.42f))
+                        } else Modifier
+                    ),
+                shape = SearchButtonShape,
                 color = searchColor,
-                contentColor = searchContentColor,
-                tonalElevation = if (isSearchHovered) 4.dp else 2.dp,
-                shadowElevation = if (isSearchHovered) 8.dp else 6.dp,
+                contentColor = if (frostedBlur) MaterialTheme.colorScheme.onSurface else searchContentColor,
+                tonalElevation = if (frostedBlur) 0.dp else if (isSearchHovered) 4.dp else 2.dp,
+                shadowElevation = if (frostedBlur) 0.dp else if (isSearchHovered) 8.dp else 6.dp,
                 interactionSource = searchInteractionSource
             ) {
                 Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
@@ -407,6 +455,7 @@ private fun ExpressiveFloatingPillNavigationBar(
                     )
                 }
             }
+        }
         }
     }
 }
@@ -573,6 +622,8 @@ fun PlayerInternalNavigationBar(
     navBarStyle: String,
     compactMode: Boolean,
     bottomBarPadding: Dp = 0.dp,
+    frostedBlur: Boolean = false,
+    searchColorScheme: androidx.compose.material3.ColorScheme? = null,
     onSearchIconDoubleTap: () -> Unit = {}
 ) {
     if (navBarStyle == NavBarStyle.FLOATING_PILL) {
@@ -581,6 +632,9 @@ fun PlayerInternalNavigationBar(
             navItems = navItems,
             currentRoute = currentRoute,
             modifier = modifier,
+            frostedBlur = frostedBlur,
+            searchColorScheme = searchColorScheme,
+            compactMode = compactMode,
             onSearchIconDoubleTap = onSearchIconDoubleTap
         )
     } else {
@@ -596,3 +650,18 @@ fun PlayerInternalNavigationBar(
         )
     }
 }
+
+/** Dynamic-colour tint for frosted glass chrome (M3 Expressive): surface tinted toward primary. */
+@Composable
+internal fun frostedGlassTint(songTintStrength: Float = 0.14f): Color {
+    val scheme = MaterialTheme.colorScheme
+    return remember(scheme.surfaceContainerHigh, scheme.primaryContainer, songTintStrength) {
+        // Frosted (milky) rather than clear glass: denser tint over a heavy blur.
+        lerp(scheme.surfaceContainerHigh, scheme.primaryContainer, songTintStrength).copy(alpha = 0.80f)
+    }
+}
+
+/** Thin light rim that sells the glass edge. */
+@Composable
+internal fun frostedGlassRim(): Color =
+    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)

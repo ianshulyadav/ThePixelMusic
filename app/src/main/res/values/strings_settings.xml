@@ -484,4 +484,12 @@
     <string name="smart_storage_stream_max_size_title">Stream cache size limit</string>
     <string name="smart_storage_auto_prune_search_title">Auto-prune search history</string>
     <string name="smart_storage_auto_clean_invalid_title">Auto-clean invalid tracks</string>
+    <string name="setcat_frosted_navbar_title">Frosted navigation bar</string>
+    <string name="setcat_frosted_navbar_subtitle">Frosted navigation bar that softly blurs the content behind it, tinted with your dynamic colours</string>
+    <string name="setcat_fullscreen_player_title">Full screen player</string>
+    <string name="setcat_fullscreen_player_subtitle">Hide the status bar while the full player is open. Swipe down from the top to show it.</string>
+    <string name="home_most_played_title">Most played</string>
+    <string name="home_most_played_songs">Songs</string>
+    <string name="home_most_played_albums">Albums</string>
+    <string name="home_most_played_artists">Artists</string>
 </resources>

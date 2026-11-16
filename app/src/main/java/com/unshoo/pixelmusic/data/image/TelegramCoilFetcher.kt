@@ -66,6 +66,27 @@ class TelegramCoilFetcher(
         if (chatId == null || messageId == null) return null
 
         val key = "${chatId}_${messageId}"
+
+        // 0. YOUTUBE MUSIC ART (preferred): proper full-resolution album art matched by
+        // title + artist. Resolved once, cached on disk, and returned before any low-res
+        // Telegram thumbnail so the cover never starts blurry and never swaps (flickers).
+        val ytmFile = File(cacheDir, "telegram_ytm_art_${key}.jpg")
+        if (ytmFile.exists() && ytmFile.length() > 0) {
+            return SourceResult(
+                source = coil.decode.ImageSource(ytmFile.absolutePath.toPath(), okio.FileSystem.SYSTEM),
+                mimeType = "image/jpeg",
+                dataSource = DataSource.DISK
+            )
+        }
+        val ytmResolved = withTimeoutOrNull(4000L) { fetchYtMusicCover(chatId, messageId, key, ytmFile) }
+        if (ytmResolved == true) {
+            return SourceResult(
+                source = coil.decode.ImageSource(ytmFile.absolutePath.toPath(), okio.FileSystem.SYSTEM),
+                mimeType = "image/jpeg",
+                dataSource = DataSource.NETWORK
+            )
+        }
+
         val cachedDeezerFile = File(cacheDir, "telegram_deezer_art_${key}.jpg")
         val cachedArtFile = File(cacheDir, "telegram_embedded_art_${key}.jpg")
         val persistentArtFile = telegramCacheManager?.getPersistentArtFile(chatId, messageId)
@@ -200,6 +221,59 @@ class TelegramCoilFetcher(
         }
 
         return null
+    }
+
+    /**
+     * Looks the song up on YouTube Music (title + performer from the Telegram message) and
+     * downloads the matching song's album art in high resolution. Returns true when [outFile]
+     * now holds the cover. A "_none" marker avoids repeating failed lookups.
+     */
+    private suspend fun fetchYtMusicCover(chatId: Long, messageId: Long, key: String, outFile: File): Boolean {
+        val noneMarker = File(cacheDir, "telegram_ytm_art_${key}_none")
+        if (noneMarker.exists()) return false
+        val lock = extractionMapMutex.withLock { extractionLocks.getOrPut("ytm_$key") { Mutex() } }
+        return lock.withLock {
+            if (outFile.exists() && outFile.length() > 0) return@withLock true
+            try {
+                val message = telegramRepository.getMessage(chatId, messageId) ?: return@withLock false
+                val rawTitle = when (val content = message.content) {
+                    is TdApi.MessageAudio -> content.audio.title?.takeIf { it.isNotBlank() } ?: content.audio.fileName ?: ""
+                    is TdApi.MessageDocument -> content.document.fileName ?: ""
+                    else -> ""
+                }
+                val artist = (message.content as? TdApi.MessageAudio)?.audio?.performer
+                    ?.takeIf { it.isNotBlank() && !it.equals("Unknown Artist", ignoreCase = true) }
+                val title = cleanTitle(rawTitle)
+                if (title.isBlank()) {
+                    noneMarker.createNewFile()
+                    return@withLock false
+                }
+                val query = listOfNotNull(title, artist).joinToString(" ")
+                val result = unshoo.ianshulyadav.pixelmusic.innertube.YouTube.search(
+                    query,
+                    unshoo.ianshulyadav.pixelmusic.innertube.YouTube.SearchFilter.FILTER_SONG
+                ).getOrNull()
+                val song = result?.items
+                    ?.filterIsInstance<unshoo.ianshulyadav.pixelmusic.innertube.models.SongItem>()
+                    ?.firstOrNull { it.thumbnail.isNotBlank() }
+                val coverUrl = com.unshoo.pixelmusic.data.remote.youtube.upgradeThumbnailUrlToHighQuality(song?.thumbnail)
+                if (coverUrl.isNullOrBlank()) {
+                    noneMarker.createNewFile()
+                    return@withLock false
+                }
+                val tmp = File(cacheDir, "telegram_ytm_art_${key}.tmp")
+                if (downloadDeezerCover(coverUrl, tmp) && tmp.length() > 0) {
+                    tmp.renameTo(outFile)
+                    outFile.exists()
+                } else {
+                    tmp.delete()
+                    false
+                }
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                false
+            }
+        }
     }
 
     private fun extractMinithumbnail(content: TdApi.MessageContent): ByteArray? {

@@ -654,6 +654,26 @@ class TelegramRepository @Inject constructor(
         }
     }
 
+    /**
+     * Warms artwork for the given messages in the background (repository scope), skipping
+     * covers that are already cached. Used after a channel sync so the UI never blocks on a
+     * per-song "Fetching artwork x/N" loop.
+     */
+    fun warmUpArtworkInBackground(chatId: Long, messageIds: List<Long>) {
+        if (messageIds.isEmpty()) return
+        repositoryScope.launch {
+            messageIds.distinct().forEach { messageId ->
+                try {
+                    warmUpArtwork(chatId, messageId)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Timber.v(e, "Background artwork warm-up failed for $chatId/$messageId")
+                }
+            }
+        }
+    }
+
     suspend fun warmUpArtwork(chatId: Long, messageId: Long) {
         val uri = "telegram_art://$chatId/$messageId"
         val persistentFile = telegramCacheManager.getPersistentArtFile(chatId, messageId)

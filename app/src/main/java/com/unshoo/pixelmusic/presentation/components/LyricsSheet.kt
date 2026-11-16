@@ -10,6 +10,7 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.ui.zIndex
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import com.unshoo.pixelmusic.presentation.components.SmartImage
 import com.unshoo.pixelmusic.presentation.components.AutoScrollingText
 import racra.compose.smooth_corner_rect_library.AbsoluteSmoothCornerShape
@@ -672,13 +673,28 @@ fun LyricsSheet(
             },
         containerColor = containerColor,
         contentColor = contentColor,
+        // Edge-to-edge: the sheet background fills behind the (transparent) status bar.
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         // Removed TopBar and FAB
-    ) { paddingValues ->
+    ) { _ ->
+        val topSafeInset = WindowInsets.statusBars.union(WindowInsets.displayCutout)
+            .asPaddingValues().calculateTopPadding()
+        val bottomSafeInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+        val localDensity = LocalDensity.current
+        var controlsHeightPx by remember { mutableIntStateOf(0) }
+        val controlsHeight = with(localDensity) { controlsHeightPx.toDp() }
+        // Lines fade + blur as they scroll under the header pill (top) and the controls (bottom).
+        val edgeBlurSpec = LyricsEdgeBlurSpec(
+            topSolidPx = with(localDensity) { (topSafeInset + 44.dp).toPx() },
+            topFadePx = with(localDensity) { 110.dp.toPx() },
+            bottomSolidPx = with(localDensity) { (controlsHeight - 12.dp).coerceAtLeast(0.dp).toPx() },
+            bottomFadePx = with(localDensity) { 120.dp.toPx() },
+            maxBlurPx = if (performanceModeEnabled) 0f else with(localDensity) { 14.dp.toPx() }
+        )
         Box(modifier = Modifier.fillMaxSize()) {
-            Column(
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(top = paddingValues.calculateTopPadding())
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null
@@ -700,9 +716,7 @@ fun LyricsSheet(
             // Lyrics Content (Weight 1)
             Box(
                 modifier = Modifier
-                    .align(Alignment.Start)
-                    .weight(1f)
-                    .fillMaxWidth()
+                    .fillMaxSize()
             ) {
                 // Track Info Header (Fixed at top)
                 AnimatedContent(
@@ -723,7 +737,7 @@ fun LyricsSheet(
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .padding(
-                                top = 4.dp, bottom = 24.dp, start = 18.dp, end = 18.dp
+                                top = topSafeInset + 4.dp, bottom = 24.dp, start = 18.dp, end = 18.dp
                             )
                             .background(
                                 color = backgroundColor,
@@ -774,7 +788,11 @@ fun LyricsSheet(
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .padding(horizontal = 24.dp),
-                                contentPadding = PaddingValues(top = 130.dp, bottom = 100.dp),
+                                contentPadding = PaddingValues(
+                                    top = topSafeInset + 130.dp,
+                                    bottom = controlsHeight + 100.dp
+                                ),
+                                edgeBlurSpec = edgeBlurSpec,
                                 lines = synced,
                                 listState = syncedListState,
                                 playbackPositionFlow = playbackPositionFlow,
@@ -828,21 +846,23 @@ fun LyricsSheet(
                                 contentPadding = PaddingValues(
                                     start = 24.dp,
                                     end = 24.dp,
-                                    top = 130.dp,
-                                    bottom = 24.dp
+                                    top = topSafeInset + 130.dp,
+                                    bottom = controlsHeight + 24.dp
                                 )
                             ) {
                                 itemsIndexed(
                                     items = plain,
                                     key = { index, line -> "$index-$line" }
-                                ) { _, line ->
+                                ) { index, line ->
                                     PlainLyricsLine(
                                         line = line,
                                         style = lyricsTextStyle,
                                         lyricsAlignment = lyricsAlignment,
                                         showTranslation = if (hasTranslatedLyrics) showLyricsTranslation else true,
                                         showRomanization = if (hasRomanizedLyrics) showLyricsRomanization else true,
-                                        modifier = Modifier.fillMaxWidth()
+                                        modifier = Modifier
+                                            .lyricsEdgeBlur(staticListState, index, edgeBlurSpec)
+                                            .fillMaxWidth()
                                     )
                                     Spacer(modifier = Modifier.height(16.dp))
                                 }
@@ -851,44 +871,24 @@ fun LyricsSheet(
                     }
                 }
                 
-                // Top Gradient for fade
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(130.dp)
-                        .align(Alignment.TopCenter)
-                        .background(
-                            brush = Brush.verticalGradient(
-                                colors = listOf(containerColor, Color.Transparent)
-                            )
-                        )
-                )
-
-                // Bottom Gradient for fade
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(80.dp)
-                        .align(Alignment.BottomCenter)
-                        .background(
-                            brush = Brush.verticalGradient(
-                                colors = listOf(Color.Transparent, containerColor)
-                            )
-                        )
-                )
+                // Edge fades are drawn per line (alpha + progressive blur, see lyricsEdgeBlur)
+                // so they match any sheet background, including the album atmosphere.
             }
 
-            // Controls Section (Auto-hide in immersive mode)
+            // Controls Section (Auto-hide in immersive mode). Overlays the lyrics so lines
+            // dissolve (blur + fade) behind it instead of being cut at a hard edge.
             AnimatedVisibility(
                 visible = !immersiveMode,
                 enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
-                exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut()
+                exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .onSizeChanged { controlsHeightPx = it.height }
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(containerColor)
-                        .padding(bottom = paddingValues.calculateBottomPadding() + 10.dp, end = 16.dp, start = 16.dp)
+                        .padding(bottom = bottomSafeInset + 10.dp, end = 16.dp, start = 16.dp)
                         .pointerInput(Unit) {
                             awaitPointerEventScope {
                                 while (true) {
@@ -1212,6 +1212,7 @@ fun SyncedLyricsList(
     showRomanization: Boolean = true,
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(0.dp),
+    edgeBlurSpec: LyricsEdgeBlurSpec? = null,
     footer: LazyListScope.() -> Unit = {}
 ) {
     val density = LocalDensity.current
@@ -1340,6 +1341,9 @@ fun SyncedLyricsList(
                             translationY = distanceRatio * distanceRatio * distanceRatio * maxTranslation 
                         }
                     } else Modifier
+                    val edgeModifier = if (edgeBlurSpec != null) {
+                        Modifier.lyricsEdgeBlur(listState, index, edgeBlurSpec)
+                    } else Modifier
 
                     if (line.line.isNotBlank()) {
                         LyricLineRow(
@@ -1356,7 +1360,8 @@ fun SyncedLyricsList(
                             showRomanization = showRomanization,
                             accentColor = accentColor,
                             style = textStyle,
-                            modifier = parallaxModifier
+                            modifier = edgeModifier
+                                .then(parallaxModifier)
                                 .fillMaxWidth()
                                 .testTag("synced_line_${line.time}"),
                             onClick = { onLineClick(line) }
@@ -1367,7 +1372,8 @@ fun SyncedLyricsList(
                             time = line.time,
                             color = LocalContentColor.current.copy(alpha = 0.6f),
                             nextTime = nextTime,
-                            modifier = parallaxModifier
+                            modifier = edgeModifier
+                                .then(parallaxModifier)
                                 .fillMaxWidth()
                                 .padding(vertical = 8.dp)
                         )
@@ -2082,5 +2088,82 @@ private fun LyricsTrackInfo(
             color = contentColor,
             isPlaying = isPlaying
         )
+    }
+}
+
+/**
+ * Describes the top / bottom "dissolve" zones of the lyrics viewport. Inside [topSolidPx] /
+ * [bottomSolidPx] (measured from the viewport edge) a line is fully hidden; over the following
+ * fade distance it progressively sharpens and fades back in.
+ */
+@androidx.compose.runtime.Immutable
+data class LyricsEdgeBlurSpec(
+    val topSolidPx: Float,
+    val topFadePx: Float,
+    val bottomSolidPx: Float,
+    val bottomFadePx: Float,
+    val maxBlurPx: Float
+)
+
+private class EdgeBlurCache {
+    var radius = -1f
+    var effect: androidx.compose.ui.graphics.RenderEffect? = null
+    fun effectFor(radiusPx: Float): androidx.compose.ui.graphics.RenderEffect? {
+        // 1.5 px steps: smooth to the eye while reusing the RenderEffect between frames.
+        val q = (radiusPx / 1.5f).roundToInt() * 1.5f
+        if (q < 0.75f) {
+            radius = -1f; effect = null; return null
+        }
+        if (q != radius || effect == null) {
+            radius = q
+            effect = androidx.compose.ui.graphics.BlurEffect(q, q, androidx.compose.ui.graphics.TileMode.Decal)
+        }
+        return effect
+    }
+}
+
+/**
+ * Progressive edge blur for a lazy list item: as the item approaches the header pill or the
+ * playback controls it fades out and blurs smoothly (draw phase only, no recomposition).
+ */
+@Composable
+internal fun Modifier.lyricsEdgeBlur(
+    listState: LazyListState,
+    index: Int,
+    spec: LyricsEdgeBlurSpec
+): Modifier {
+    val cache = remember { EdgeBlurCache() }
+    val blurSupported = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S
+    return this.graphicsLayer {
+        val info = listState.layoutInfo
+        val item = info.visibleItemsInfo.firstOrNull { it.index == index }
+        if (item == null) {
+            alpha = 1f
+            renderEffect = null
+            return@graphicsLayer
+        }
+        // Physical y of the item's centre inside the viewport.
+        val viewportHeight = (info.viewportEndOffset - info.viewportStartOffset).toFloat()
+        val centerY = (item.offset - info.viewportStartOffset) + item.size / 2f
+        val fromBottom = viewportHeight - centerY
+
+        fun edgeFactor(distance: Float, solid: Float, fade: Float): Float {
+            if (fade <= 0f) return 0f
+            val t = ((distance - solid) / fade).coerceIn(0f, 1f)
+            // Smoothstep -> 1 at the edge, 0 once fully clear of the zone.
+            val s = t * t * (3f - 2f * t)
+            return 1f - s
+        }
+
+        val f = maxOf(
+            edgeFactor(centerY, spec.topSolidPx, spec.topFadePx),
+            edgeFactor(fromBottom, spec.bottomSolidPx, spec.bottomFadePx)
+        )
+        alpha = 1f - f * f
+        renderEffect = if (blurSupported && spec.maxBlurPx > 0f && f > 0f) {
+            cache.effectFor(spec.maxBlurPx * f)
+        } else {
+            null
+        }
     }
 }

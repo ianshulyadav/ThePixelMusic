@@ -24,7 +24,8 @@ import timber.log.Timber
 @HiltViewModel
 class StatsViewModel @Inject constructor(
     private val playbackStatsRepository: PlaybackStatsRepository,
-    private val musicRepository: MusicRepository
+    private val musicRepository: MusicRepository,
+    private val artistImageRepository: com.unshoo.pixelmusic.data.repository.ArtistImageRepository
 ) : ViewModel() {
 
     data class StatsUiState(
@@ -43,6 +44,25 @@ class StatsViewModel @Inject constructor(
 
     private val _homeOverview = MutableStateFlow<PlaybackStatsSummary?>(null)
     val homeOverview: StateFlow<PlaybackStatsSummary?> = _homeOverview.asStateFlow()
+
+    /** Artist name (lowercased) -> photo URL for the home "Most played" artists tab. */
+    private val _artistImages = MutableStateFlow<Map<String, String>>(emptyMap())
+    val artistImages: StateFlow<Map<String, String>> = _artistImages.asStateFlow()
+
+    private fun loadArtistImages(summary: PlaybackStatsSummary?) {
+        val names = summary?.topArtists?.map { it.artist }.orEmpty()
+        if (names.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            names.forEach { name ->
+                val key = name.trim().lowercase()
+                if (_artistImages.value.containsKey(key)) return@forEach
+                val url = runCatching { artistImageRepository.getArtistImageUrl(name, -1L) }.getOrNull()
+                if (!url.isNullOrBlank()) {
+                    _artistImages.update { it + (key to url) }
+                }
+            }
+        }
+    }
 
     @Volatile
     private var cachedSongs: List<Song>? = null
@@ -97,6 +117,7 @@ class StatsViewModel @Inject constructor(
                 }
             }.onSuccess { summary ->
                 _homeOverview.value = summary
+                loadArtistImages(summary)
             }.onFailure { throwable ->
                 Timber.e(throwable, "Failed to load home stats overview")
                 _homeOverview.value = null

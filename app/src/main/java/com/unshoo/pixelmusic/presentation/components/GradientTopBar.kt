@@ -44,6 +44,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.unshoo.pixelmusic.R
 import com.unshoo.pixelmusic.ui.theme.GoogleSansRounded
 import com.unshoo.pixelmusic.ui.theme.PixelMusicStatusBarStyle
@@ -139,26 +140,26 @@ fun HomeGradientTopBar(
         ) {
             Surface(
                 shape = CircleShape,
-                color = solidTintedColor,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 contentColor = MaterialTheme.colorScheme.onSurface,
                 shadowElevation = pillElevation
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.padding(start = 18.dp, end = 22.dp, top = 11.dp, bottom = 11.dp)
                 ) {
                     Icon(
                         painter = painterResource(R.drawable.pixelmusic_base_monochrome),
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(28.dp)
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(25.dp)
                     )
                     Text(
                         text = stringResource(R.string.home_header_pill_title),
                         fontFamily = GoogleSansRounded,
                         fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.titleMedium
+                        style = MaterialTheme.typography.titleMedium.copy(fontSize = 19.sp)
                     )
                 }
             }
@@ -174,17 +175,17 @@ fun HomeGradientTopBar(
                 ) {
                     FilledIconButton(
                         colors = IconButtonDefaults.filledIconButtonColors(
-                            containerColor = solidTintedColor,
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                             contentColor = MaterialTheme.colorScheme.onSurface
                         ),
                         onClick = onTelegramClick,
-                        modifier = Modifier.size(44.dp),
+                        modifier = Modifier.size(48.dp),
                         shape = CircleShape
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.Cloud,
                             contentDescription = stringResource(R.string.presentation_batch_g_topbar_cd_telegram),
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(21.dp)
                         )
                     }
                 }
@@ -196,17 +197,17 @@ fun HomeGradientTopBar(
                 ) {
                     FilledIconButton(
                         colors = IconButtonDefaults.filledIconButtonColors(
-                            containerColor = solidTintedColor,
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                             contentColor = MaterialTheme.colorScheme.onSurface
                         ),
                         onClick = onNavigationIconClick,
-                        modifier = Modifier.size(44.dp),
+                        modifier = Modifier.size(48.dp),
                         shape = CircleShape
                     ) {
                         Icon(
                             painter = painterResource(R.drawable.rounded_settings_24),
                             contentDescription = stringResource(R.string.settings_top_bar_title),
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(21.dp)
                         )
                     }
                 }

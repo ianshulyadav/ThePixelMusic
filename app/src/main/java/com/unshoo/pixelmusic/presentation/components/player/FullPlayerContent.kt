@@ -98,6 +98,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.input.pointer.pointerInput
@@ -136,6 +137,8 @@ import android.widget.Toast
 import androidx.compose.foundation.LocalOverscrollFactory
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.runtime.mutableIntStateOf
 import com.unshoo.pixelmusic.presentation.components.SmartImage
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -295,6 +298,27 @@ fun FullPlayerContent(
             playerViewModel.updateFullPlayerModalOpen(false)
         }
     }
+
+    // Full screen mode: hide status + navigation bars while the full player is open.
+    val fullscreenPlayerEnabled by com.unshoo.pixelmusic.presentation.components.rememberBooleanPreference(
+        context = LocalContext.current,
+        key = com.unshoo.pixelmusic.presentation.components.UiEffectPreferenceKeys.FULL_PLAYER_FULLSCREEN,
+        default = true
+    )
+    // Toggling system bars changes window insets and re-lays out the whole app, so only hide
+    // them once the expand animation has fully settled (never mid-animation, which stutters).
+    var fullscreenActive by remember { mutableStateOf(false) }
+    LaunchedEffect(fullscreenPlayerEnabled, currentSheetState) {
+        if (fullscreenPlayerEnabled && currentSheetState == PlayerSheetState.EXPANDED) {
+            kotlinx.coroutines.delay(320)
+            fullscreenActive = true
+        } else {
+            fullscreenActive = false
+        }
+    }
+    com.unshoo.pixelmusic.presentation.components.FullscreenSystemBarsEffect(
+        enabled = fullscreenActive
+    )
 
     androidx.activity.compose.BackHandler(enabled = showLyricsSheet) {
         showLyricsSheet = false
@@ -675,7 +699,9 @@ fun FullPlayerContent(
             onShuffleToggle = onShuffleToggle,
             onRepeatToggle = onRepeatToggle,
             onFavoriteToggle = onFavoriteToggle,
-            isGradientTheme = isGradientTheme
+            isGradientTheme = isGradientTheme,
+            onLyricsClick = onLyricsClick,
+            onAddToPlaylistClick = { showSongInfoBottomSheet = true }
         )
     }
 
@@ -699,7 +725,9 @@ fun FullPlayerContent(
             chipContentColor = playerAccentColor,
             onQueueClick = onSongMetadataQueueClick,
             onArtistClick = onSongMetadataArtistClick,
-            isGradientTheme = isGradientTheme
+            isGradientTheme = isGradientTheme,
+            isFavoriteProvider = isFavoriteProvider,
+            onFavoriteToggle = onFavoriteToggle
         )
     }
 
@@ -723,9 +751,16 @@ fun FullPlayerContent(
             chipContentColor = playerAccentColor,
             onQueueClick = onSongMetadataQueueClick,
             onArtistClick = onSongMetadataArtistClick,
-            isGradientTheme = isGradientTheme
+            isGradientTheme = isGradientTheme,
+            isFavoriteProvider = isFavoriteProvider,
+            onFavoriteToggle = onFavoriteToggle
         )
     }
+
+    // Top bar buttons sit over the cover art: dark translucent tint + light dynamic icon,
+    // using the fixed colour roles so they read well in light and dark schemes.
+    val topButtonContainer = LocalMaterialTheme.current.onPrimaryFixed
+    val topButtonContent = LocalMaterialTheme.current.primaryFixed
 
     Scaffold(
         containerColor = Color.Transparent,
@@ -815,14 +850,8 @@ fun FullPlayerContent(
                         if (!isCastConnecting) {
                             AnimatedVisibility(visible = (!isRemotePlaybackActive)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        modifier = Modifier.padding(start = 18.dp),
-                                        text = stringResource(R.string.setcat_now_playing),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        style = MaterialTheme.typography.labelLargeEmphasized,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
+                                    // No "Now Playing" title: the cover art is the header (reference design).
+                                    Spacer(Modifier.width(8.dp))
 
                                     if (currentSong != null && (currentSong.telegramChatId != null || currentSong.contentUriString.startsWith("telegram:"))) {
                                         Icon(
@@ -840,21 +869,21 @@ fun FullPlayerContent(
                         Box(
                             modifier = Modifier
                                 // Ancho total = 14dp de padding + 42dp del botón
-                                .width(56.dp)
-                                .height(42.dp),
+                                .width(62.dp)
+                                .height(50.dp),
                             // 2. Alinea el contenido (el botón) al final (derecha) y centrado verticalmente
                             contentAlignment = Alignment.CenterEnd
                         ) {
                             // 3. Tu botón circular original, sin cambios
                             Box(
                                 modifier = Modifier
-                                    .size(42.dp)
+                                    .size(50.dp)
                                     .clip(CircleShape)
                                     .then(
                                         if (isGradientTheme) {
-                                            Modifier.background(brush = actionButtonGradientBrush)
+                                            Modifier.background(topButtonContainer)
                                         } else {
-                                            Modifier.background(playerOnAccentColor.copy(alpha = 0.92f))
+                                            Modifier.background(topButtonContainer)
                                         }
                                     )
                                     .clickable(onClick = onCollapse),
@@ -863,7 +892,8 @@ fun FullPlayerContent(
                                 Icon(
                                     painter = painterResource(R.drawable.rounded_keyboard_arrow_down_24),
                                     contentDescription = stringResource(R.string.presentation_batch_g_player_cd_collapse),
-                                    tint = playerAccentColor
+                                    tint = topButtonContent,
+                                    modifier = Modifier.size(28.dp)
                                 )
                             }
                         }
@@ -872,7 +902,7 @@ fun FullPlayerContent(
                         Row(
                             modifier = Modifier
                                 .padding(end = 14.dp),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             val showCastLabel = isCastConnecting || (isRemotePlaybackActive && selectedRouteName != null)
@@ -883,8 +913,8 @@ fun FullPlayerContent(
                                 isBluetoothActive -> painterResource(R.drawable.rounded_bluetooth_24)
                                 else -> painterResource(R.drawable.rounded_mobile_speaker_24)
                             }
-                            val castCornersExpanded = 50.dp
-                            val castCornersCompact = 6.dp
+                            val castCornersExpanded = 22.dp
+                            val castCornersCompact = 22.dp
                             val castTopStart = castCornersExpanded
                             val castTopEnd by animateDpAsState(
                                 targetValue = if (showCastLabel) castCornersExpanded else castCornersCompact,
@@ -895,7 +925,7 @@ fun FullPlayerContent(
                                 targetValue = if (showCastLabel) castCornersExpanded else castCornersCompact,
                                 animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow)
                             )
-                            val castContainerColor = playerOnAccentColor.copy(alpha = 0.92f)
+                            val castContainerColor = topButtonContainer
                             val castShape = RoundedCornerShape(
                                 topStart = castTopStart.coerceAtLeast(0.dp),
                                 topEnd = castTopEnd.coerceAtLeast(0.dp),
@@ -904,7 +934,7 @@ fun FullPlayerContent(
                             )
                             Box(
                                 modifier = Modifier
-                                    .height(42.dp)
+                                    .height(50.dp)
                                     .align(Alignment.CenterVertically)
                                     .animateContentSize(
                                         animationSpec = spring(
@@ -913,13 +943,13 @@ fun FullPlayerContent(
                                         )
                                     )
                                     .widthIn(
-                                        min = 50.dp,
-                                        max = if (showCastLabel) 190.dp else 58.dp
+                                        min = 62.dp,
+                                        max = if (showCastLabel) 190.dp else 62.dp
                                     )
                                     .clip(castShape)
                                     .then(
                                         if (isGradientTheme) {
-                                            Modifier.background(brush = actionButtonGradientBrush)
+                                            Modifier.background(topButtonContainer)
                                         } else {
                                             Modifier.background(castContainerColor)
                                         }
@@ -929,7 +959,7 @@ fun FullPlayerContent(
                             ) {
                                 Row(
                                     modifier = Modifier
-                                        .padding(start = 14.dp),
+                                        .padding(start = 19.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.Start
                                 ) {
@@ -940,7 +970,7 @@ fun FullPlayerContent(
                                             isBluetoothActive -> stringResource(R.string.presentation_batch_g_player_cd_bluetooth)
                                             else -> stringResource(R.string.presentation_batch_g_player_cd_local_playback)
                                         },
-                                        tint = playerAccentColor
+                                        tint = topButtonContent
                                     )
                                     AnimatedVisibility(visible = showCastLabel) {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -964,7 +994,7 @@ fun FullPlayerContent(
                                                     Text(
                                                         text = label,
                                                         style = MaterialTheme.typography.labelMedium,
-                                                        color = playerAccentColor,
+                                                        color = topButtonContent,
                                                         maxLines = 1,
                                                         overflow = TextOverflow.Ellipsis,
                                                         modifier = Modifier.weight(1f, fill = false)
@@ -974,7 +1004,7 @@ fun FullPlayerContent(
                                                             modifier = Modifier
                                                                 .size(14.dp),
                                                             strokeWidth = 2.dp,
-                                                            color = playerAccentColor
+                                                            color = topButtonContent
                                                         )
                                                     }
                                                     if (isRemotePlaybackActive && !isCastConnecting) {
@@ -994,20 +1024,20 @@ fun FullPlayerContent(
 
                             // Queue Button
                             val topQueueShape = RoundedCornerShape(
-                                topStart = 6.dp,
-                                topEnd = 50.dp,
-                                bottomStart = 6.dp,
-                                bottomEnd = 50.dp
+                                topStart = 22.dp,
+                                topEnd = 22.dp,
+                                bottomStart = 22.dp,
+                                bottomEnd = 22.dp
                             )
                             Box(
                                 modifier = Modifier
-                                    .size(height = 42.dp, width = 50.dp)
+                                    .size(height = 50.dp, width = 62.dp)
                                     .clip(topQueueShape)
                                     .then(
                                         if (isGradientTheme) {
-                                            Modifier.background(brush = actionButtonGradientBrush)
+                                            Modifier.background(topButtonContainer)
                                         } else {
-                                            Modifier.background(playerOnAccentColor.copy(alpha = 0.92f))
+                                            Modifier.background(topButtonContainer)
                                         }
                                     )
                                     .clickable {
@@ -1018,7 +1048,7 @@ fun FullPlayerContent(
                                 Icon(
                                     painter = painterResource(R.drawable.rounded_queue_music_24),
                                     contentDescription = stringResource(R.string.presentation_batch_g_player_cd_queue),
-                                    tint = playerAccentColor
+                                    tint = topButtonContent
                                 )
                             }
                         }
@@ -1051,6 +1081,10 @@ fun FullPlayerContent(
             } else {
                 FullPlayerPortraitContent(
                     paddingValues = paddingValues,
+                    artworkModel = song.albumArtUriString,
+                    albumArtQuality = albumArtQuality,
+                    onSwipeNext = onNextWithOptimisticCarousel,
+                    onSwipePrevious = onPreviousWithOptimisticCarousel,
                     albumCoverSection = albumCoverSection,
                     songMetadataSection = portraitSongMetadataSection,
                     playerProgressSection = playerProgressSection,
@@ -1863,7 +1897,9 @@ private fun FullPlayerControlsSection(
     onShuffleToggle: () -> Unit,
     onRepeatToggle: () -> Unit,
     onFavoriteToggle: () -> Unit,
-    isGradientTheme: Boolean = false
+    isGradientTheme: Boolean = false,
+    onLyricsClick: () -> Unit = {},
+    onAddToPlaylistClick: () -> Unit = {}
 ) {
     val stableControlAnimationSpec = remember {
         tween<Float>(durationMillis = 240, easing = FastOutSlowInEasing)
@@ -1876,7 +1912,8 @@ private fun FullPlayerControlsSection(
         applyPlaceholderDelayOnClose = loadingTweaks.applyPlaceholdersOnClose,
         switchOnDragRelease = loadingTweaks.switchOnDragRelease,
         isSheetDragGestureActive = isSheetDragGestureActive,
-        sharedBoundsModifier = Modifier.fillMaxWidth().height(182.dp),
+        // Height follows the controls (they auto-size to the display), never squashed.
+        sharedBoundsModifier = Modifier.fillMaxWidth().heightIn(min = 182.dp),
         expansionFractionProvider = expansionFractionProvider,
         isExpandedOverride = currentSheetState == PlayerSheetState.EXPANDED,
         normalStartThreshold = 0.42f,
@@ -1890,48 +1927,26 @@ private fun FullPlayerControlsSection(
             }
         }
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            AnimatedPlaybackControls(
-                modifier = Modifier
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                isPlayingProvider = isPlayingProvider,
-                isBufferingProvider = isBufferingProvider,
-                onPrevious = onPrevious,
-                onPlayPause = onPlayPause,
-                onNext = onNext,
-                height = 80.dp,
-                pressAnimationSpec = stableControlAnimationSpec,
-                releaseDelay = 220L,
-                colorOtherButtons = transportSkipColors.container,
-                colorPlayPause = transportPlayPauseColors.container,
-                tintPlayPauseIcon = transportPlayPauseColors.content,
-                tintOtherIcons = transportSkipColors.content,
-                colorPreviousButton = transportSkipColors.container,
-                colorNextButton = transportSkipColors.container,
-                tintPreviousIcon = transportSkipColors.content,
-                tintNextIcon = transportSkipColors.content
-            )
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            BottomToggleRow(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 66.dp, max = 86.dp)
-                    .padding(horizontal = 26.dp, vertical = 0.dp)
-                    .padding(bottom = 6.dp),
-                isShuffleEnabled = isShuffleEnabledProvider(),
-                isShuffleTransitionInProgress = shuffleTransitionInProgress,
-                repeatMode = repeatModeProvider(),
-                isFavoriteProvider = isFavoriteProvider,
-                onShuffleToggle = onShuffleToggle,
-                onRepeatToggle = onRepeatToggle,
-                onFavoriteToggle = onFavoriteToggle,
-                isGradientTheme = isGradientTheme
-            )
-        }
+        ExpressivePlayerControls(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp),
+            isPlayingProvider = isPlayingProvider,
+            isBufferingProvider = isBufferingProvider,
+            onPlayPause = onPlayPause,
+            onPrevious = onPrevious,
+            onNext = onNext,
+            isShuffleEnabled = isShuffleEnabledProvider(),
+            repeatMode = repeatModeProvider(),
+            onShuffleToggle = onShuffleToggle,
+            onRepeatToggle = onRepeatToggle,
+            onLyricsClick = onLyricsClick,
+            onAddToPlaylistClick = onAddToPlaylistClick,
+            playPauseContainer = transportPlayPauseColors.container,
+            playPauseContent = transportPlayPauseColors.content,
+            skipContainer = transportSkipColors.container,
+            skipContent = transportSkipColors.content
+        )
     }
 }
 
@@ -2069,7 +2084,9 @@ private fun FullPlayerSongMetadataSection(
     chipContentColor: Color,
     onQueueClick: () -> Unit,
     onArtistClick: () -> Unit,
-    isGradientTheme: Boolean = false
+    isGradientTheme: Boolean = false,
+    isFavoriteProvider: () -> Boolean = { false },
+    onFavoriteToggle: () -> Unit = {}
 ) {
     val shouldDelay = loadingTweaks.delayAll || loadingTweaks.delaySongMetadata
 
@@ -2115,7 +2132,9 @@ private fun FullPlayerSongMetadataSection(
             showQueueButton = isLandscape,
             onClickQueue = onQueueClick,
             onClickArtist = onArtistClick,
-            isGradientTheme = isGradientTheme
+            isGradientTheme = isGradientTheme,
+            isFavoriteProvider = isFavoriteProvider,
+            onFavoriteToggle = onFavoriteToggle
         )
     }
 }
@@ -2123,35 +2142,103 @@ private fun FullPlayerSongMetadataSection(
 @Composable
 private fun FullPlayerPortraitContent(
     paddingValues: PaddingValues,
+    artworkModel: String?,
+    albumArtQuality: AlbumArtQuality,
+    onSwipeNext: () -> Unit,
+    onSwipePrevious: () -> Unit,
     albumCoverSection: @Composable (Modifier) -> Unit,
     songMetadataSection: @Composable () -> Unit,
     playerProgressSection: @Composable () -> Unit,
     controlsSection: @Composable () -> Unit
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(paddingValues)
-            .padding(
-                horizontal = 24.dp,
-                vertical = 0.dp
-            ),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.SpaceAround
-    ) {
-        albumCoverSection(Modifier)
+    val latestNext by rememberUpdatedState(onSwipeNext)
+    val latestPrev by rememberUpdatedState(onSwipePrevious)
+    val density = LocalDensity.current
+    // Measured heights of the info block (title + progress) and the controls block.
+    var infoHeightPx by remember { mutableIntStateOf(0) }
+    var controlsHeightPx by remember { mutableIntStateOf(0) }
+
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        // Auto layout for any display: the cover is the full square poster at the top; the
+        // title overlaps its faded bottom edge; any extra height goes above the controls.
+        // On short screens the cover is trimmed so everything still fits.
+        val padTop = paddingValues.calculateTopPadding()
+        val padBottom = paddingValues.calculateBottomPadding()
+        val overlap = 64.dp
+        val infoH = with(density) { infoHeightPx.toDp() }
+        val controlsH = with(density) { controlsHeightPx.toDp() }
+        val squareTopSpace = (maxWidth - overlap - padTop).coerceAtLeast(0.dp)
+        val availableTopSpace = (maxHeight - padTop - padBottom - infoH - controlsH - 40.dp).coerceAtLeast(0.dp)
+        val topSpace = when {
+            infoHeightPx == 0 || controlsHeightPx == 0 -> squareTopSpace
+            // Tall screens: the cover takes all spare height, so there is no gap between the
+            // audio details and the controls.
+            availableTopSpace > squareTopSpace -> availableTopSpace
+            // Short screens: trim the cover so everything fits.
+            else -> availableTopSpace
+        }
+        val coverHeight = padTop + topSpace + overlap
+
+        ImmersiveCoverBackdrop(
+            artworkModel = artworkModel,
+            albumArtQuality = albumArtQuality,
+            visibleProvider = { true },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(coverHeight)
+        )
 
         Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .padding(horizontal = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Box(Modifier.align(Alignment.Start)) {
-                songMetadataSection()
-            }
-            playerProgressSection()
-        }
+            // Area over the cover: swipe it to change tracks.
+            Spacer(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(topSpace)
+                    .pointerInput(Unit) {
+                        var total = 0f
+                        detectHorizontalDragGestures(
+                            onDragStart = { total = 0f },
+                            onDragEnd = {
+                                val threshold = 72.dp.toPx()
+                                if (total < -threshold) latestNext() else if (total > threshold) latestPrev()
+                                total = 0f
+                            },
+                            onDragCancel = { total = 0f }
+                        ) { change, dragAmount ->
+                            change.consume()
+                            total += dragAmount
+                        }
+                    }
+            )
 
-        controlsSection()
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onGloballyPositioned { if (it.size.height != infoHeightPx) infoHeightPx = it.size.height },
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Box(Modifier.align(Alignment.Start)) {
+                    songMetadataSection()
+                }
+                playerProgressSection()
+            }
+
+            Spacer(Modifier.weight(1f).heightIn(min = 18.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onGloballyPositioned { if (it.size.height != controlsHeightPx) controlsHeightPx = it.size.height }
+            ) {
+                controlsSection()
+            }
+            Spacer(Modifier.height(22.dp))
+        }
     }
 }
 
@@ -2216,7 +2303,9 @@ private fun SongMetadataDisplaySection(
     onClickQueue: () -> Unit,
     onClickArtist: () -> Unit,
     modifier: Modifier = Modifier,
-    isGradientTheme: Boolean = false
+    isGradientTheme: Boolean = false,
+    isFavoriteProvider: () -> Boolean = { false },
+    onFavoriteToggle: () -> Unit = {}
 ) {
     val actionButtonGradientBrush = remember(chipColor) {
         Brush.verticalGradient(
@@ -2256,8 +2345,9 @@ private fun SongMetadataDisplaySection(
         val isBuffering = stablePlayerState.isBuffering
 
 
+        // Portrait shows its loader inside the play button; only landscape keeps this chip.
         AnimatedVisibility(
-            visible = isBuffering,
+            visible = isBuffering && showQueueButton,
             enter = scaleIn(
                 initialScale = 0.85f,
                 animationSpec = tween(
@@ -2393,57 +2483,32 @@ private fun SongMetadataDisplaySection(
                 }
             }
         } else {
-            // Portrait Mode: [Lyrics] [⋮]
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
+            // Portrait Mode: like button (lyrics live in the bottom toolbar, more options in its menu)
+            val isFav = isFavoriteProvider()
+            val heartScale by animateFloatAsState(
+                targetValue = if (isFav) 1.12f else 1f,
+                animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+                label = "heartScale"
+            )
+            Box(
+                modifier = Modifier
+                    .size(58.dp)
+                    .clip(CircleShape)
+                    .background(textColor.copy(alpha = 0.12f))
+                    .clickable(onClick = onFavoriteToggle),
+                contentAlignment = Alignment.Center
             ) {
-                // Lyrics button (left pill)
-                FilledIconButton(
+                Icon(
+                    imageVector = if (isFav) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                    contentDescription = "Like",
+                    tint = if (isFav) LocalMaterialTheme.current.primary else textColor,
                     modifier = Modifier
-                        .size(width = 44.dp, height = 48.dp)
-                        .then(
-                            if (isGradientTheme) {
-                                Modifier.background(brush = actionButtonGradientBrush, shape = lyricsShape)
-                            } else {
-                                Modifier
-                            }
-                        ),
-                    colors = IconButtonDefaults.filledIconButtonColors(
-                        containerColor = if (isGradientTheme) Color.Transparent else chipColor,
-                        contentColor = chipContentColor
-                    ),
-                    shape = lyricsShape,
-                    onClick = onClickLyrics,
-                ) {
-                    Icon(
-                        painter = painterResource(R.drawable.rounded_lyrics_24),
-                        contentDescription = stringResource(R.string.presentation_batch_g_player_cd_lyrics)
-                    )
-                }
-                // More options button (right pill)
-                FilledIconButton(
-                    modifier = Modifier
-                        .size(width = 44.dp, height = 48.dp)
-                        .then(
-                            if (isGradientTheme) {
-                                Modifier.background(brush = actionButtonGradientBrush, shape = queueShape)
-                            } else {
-                                Modifier
-                            }
-                        ),
-                    colors = IconButtonDefaults.filledIconButtonColors(
-                        containerColor = if (isGradientTheme) Color.Transparent else chipColor,
-                        contentColor = chipContentColor
-                    ),
-                    shape = queueShape,
-                    onClick = onClickShare,
-                ) {
-                    Icon(
-                        painter = painterResource(R.drawable.rounded_more_vert_24),
-                        contentDescription = stringResource(R.string.cd_player_more_options)
-                    )
-                }
+                        .size(30.dp)
+                        .graphicsLayer {
+                            scaleX = heartScale
+                            scaleY = heartScale
+                        }
+                )
             }
         }
     }

@@ -346,6 +346,7 @@ fun HomeScreen(
     val scope = rememberCoroutineScope()
 
     val homeStatsOverview by statsViewModel.homeOverview.collectAsStateWithLifecycle()
+    val mostPlayedArtistImages by statsViewModel.artistImages.collectAsStateWithLifecycle()
     val quickPicksRaw by quickPicksViewModel.quickPicks.collectAsStateWithLifecycle()
     val quickPicks by produceState(
         initialValue = if (isEffectivelyOnline) quickPicksRaw else emptyList(),
@@ -438,7 +439,8 @@ fun HomeScreen(
                         // onOpenSidebar() // Disabled
                     },
                     isScrolled = isScrolledPastThreshold.value,
-                    floatingHeaderEnabled = settingsUiState.floatingHeaderBarEnabled
+                    // Home always uses the floating pill header (logo pill + separate circle buttons).
+                    floatingHeaderEnabled = true
                 )
             }
         ) { innerPadding ->
@@ -710,6 +712,22 @@ fun HomeScreen(
                                             }
                                         }
                                     )
+                                }
+                            }
+
+                            homeStatsOverview?.let { overview ->
+                                if (overview.topSongs.isNotEmpty() || overview.topArtists.isNotEmpty() || overview.topAlbums.isNotEmpty()) {
+                                    item(
+                                        key = "most_played_section",
+                                        contentType = "most_played_section"
+                                    ) {
+                                        com.unshoo.pixelmusic.presentation.components.MostPlayedSection(
+                                            summary = overview,
+                                            onSeeAllClick = { navController.navigateSafely(Screen.Stats.route) },
+                                            artistImages = mostPlayedArtistImages,
+                                            modifier = Modifier.padding(vertical = 8.dp)
+                                        )
+                                    }
                                 }
                             }
 
