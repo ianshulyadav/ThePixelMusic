@@ -275,17 +275,14 @@ private fun ExpressiveFloatingPillNavigationBar(
                     label = "pill_container_scale_$index"
                 )
 
-                // Tinted frosted solid container styling with Material theme container color
-                val containerColor = when {
-                    frostedBlur -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.85f)
-                    else -> MaterialTheme.colorScheme.secondaryContainer
-                }
+                // Container styling matching default/full navbar (vibrant solid container)
+                val containerColor = MaterialTheme.colorScheme.secondaryContainer
 
                 val animContentColor by animateColorAsState(
-                    targetValue = when {
-                        isSelected -> MaterialTheme.colorScheme.onSecondaryContainer
-                        frostedBlur -> MaterialTheme.colorScheme.onSurface
-                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    targetValue = if (isSelected) {
+                        MaterialTheme.colorScheme.onSecondaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
                     },
                     animationSpec = motionScheme.defaultEffectsSpec(),
                     label = "pill_content_$index"
@@ -395,9 +392,8 @@ private fun ExpressiveFloatingPillNavigationBar(
 
             val searchColor by animateColorAsState(
                 targetValue = when {
-                    // Frosted: soft tinted solid container fill over the glass.
-                    frostedBlur -> if (isSearchSelected) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.85f) else Color.Transparent
                     isSearchSelected -> MaterialTheme.colorScheme.secondaryContainer
+                    frostedBlur -> Color.Transparent
                     else -> solidTintedColor
                 },
                 animationSpec = motionScheme.defaultEffectsSpec(),
