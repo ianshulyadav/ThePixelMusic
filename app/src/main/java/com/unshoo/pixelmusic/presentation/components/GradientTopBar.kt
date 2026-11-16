@@ -146,20 +146,20 @@ fun HomeGradientTopBar(
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.padding(start = 18.dp, end = 22.dp, top = 11.dp, bottom = 11.dp)
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.padding(start = 16.dp, end = 20.dp, top = 9.dp, bottom = 9.dp)
                 ) {
                     Icon(
                         painter = painterResource(R.drawable.pixelmusic_base_monochrome),
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.size(25.dp)
+                        modifier = Modifier.size(23.dp)
                     )
                     Text(
                         text = stringResource(R.string.home_header_pill_title),
                         fontFamily = GoogleSansRounded,
                         fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.titleMedium.copy(fontSize = 19.sp)
+                        style = MaterialTheme.typography.titleMedium.copy(fontSize = 17.sp)
                     )
                 }
             }
@@ -179,13 +179,13 @@ fun HomeGradientTopBar(
                             contentColor = MaterialTheme.colorScheme.onSurface
                         ),
                         onClick = onTelegramClick,
-                        modifier = Modifier.size(48.dp),
+                        modifier = Modifier.size(44.dp),
                         shape = CircleShape
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.Cloud,
                             contentDescription = stringResource(R.string.presentation_batch_g_topbar_cd_telegram),
-                            modifier = Modifier.size(21.dp)
+                            modifier = Modifier.size(20.dp)
                         )
                     }
                 }
@@ -201,13 +201,13 @@ fun HomeGradientTopBar(
                             contentColor = MaterialTheme.colorScheme.onSurface
                         ),
                         onClick = onNavigationIconClick,
-                        modifier = Modifier.size(48.dp),
+                        modifier = Modifier.size(44.dp),
                         shape = CircleShape
                     ) {
                         Icon(
                             painter = painterResource(R.drawable.rounded_settings_24),
                             contentDescription = stringResource(R.string.settings_top_bar_title),
-                            modifier = Modifier.size(21.dp)
+                            modifier = Modifier.size(20.dp)
                         )
                     }
                 }

@@ -703,9 +703,6 @@ fun LyricsSheet(
             maxBlurPx = if (performanceModeEnabled) 0f else with(localDensity) { 14.dp.toPx() }
         )
         Box(modifier = Modifier.fillMaxSize()) {
-<<<<<<< HEAD
-            Box(
-=======
             if (isLyricsBlurActive && currentSong != null) {
                 // Precomputed Gaussian backdrop (see ArtworkGaussianBlur): one bitmap draw per frame,
                 // no full-screen RenderEffect while the lyrics auto-scroll.
@@ -716,8 +713,7 @@ fun LyricsSheet(
                     showTopVignette = false
                 )
             }
-            Column(
->>>>>>> origin/main
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
                 .clickable(
@@ -896,42 +892,8 @@ fun LyricsSheet(
                     }
                 }
                 
-<<<<<<< HEAD
                 // Edge fades are drawn per line (alpha + progressive blur, see lyricsEdgeBlur)
                 // so they match any sheet background, including the album atmosphere.
-=======
-                // Top Gradient for fade
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(130.dp)
-                        .align(Alignment.TopCenter)
-                        .background(
-                            brush = Brush.verticalGradient(
-                                colors = listOf(
-                                    if (isLyricsBlurActive) containerColor.copy(alpha = 0.55f) else containerColor,
-                                    Color.Transparent
-                                )
-                            )
-                        )
-                )
-
-                // Bottom Gradient for fade
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(80.dp)
-                        .align(Alignment.BottomCenter)
-                        .background(
-                            brush = Brush.verticalGradient(
-                                colors = listOf(
-                                    Color.Transparent,
-                                    if (isLyricsBlurActive) containerColor.copy(alpha = 0.55f) else containerColor
-                                )
-                            )
-                        )
-                )
->>>>>>> origin/main
             }
 
             // Controls Section (Auto-hide in immersive mode). Overlays the lyrics so lines
@@ -947,12 +909,7 @@ fun LyricsSheet(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-<<<<<<< HEAD
                         .padding(bottom = bottomSafeInset + 10.dp, end = 16.dp, start = 16.dp)
-=======
-                        .background(if (isLyricsBlurActive) containerColor.copy(alpha = 0.55f) else containerColor)
-                        .padding(bottom = paddingValues.calculateBottomPadding() + 10.dp, end = 16.dp, start = 16.dp)
->>>>>>> origin/main
                         .pointerInput(Unit) {
                             awaitPointerEventScope {
                                 while (true) {
