@@ -49,6 +49,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.Player
 import com.unshoo.pixelmusic.R
+import com.unshoo.pixelmusic.presentation.components.LocalMaterialTheme
+import com.unshoo.pixelmusic.ui.theme.LocalPixelMusicDarkTheme
 
 /**
  * Material 3 Expressive transport controls:
@@ -73,19 +75,34 @@ fun ExpressivePlayerControls(
     playPauseContent: Color,
     skipContainer: Color,
     skipContent: Color,
+    isBlurActive: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val haptics = LocalHapticFeedback.current
     val isPlaying = isPlayingProvider()
     val isBuffering = isBufferingProvider()
+    val isDark = LocalPixelMusicDarkTheme.current
+    val currentTheme = LocalMaterialTheme.current
 
-    // Toolbar colours: a dark tint of the player background with light segments,
-    // so the active toggle pops the way the reference does.
-    val toolbarContainer = Color.Black.copy(alpha = 0.30f)
-    val segmentInactive = Color.White.copy(alpha = 0.07f)
+    // Toolbar colours: in dark theme, dark frosted tint of the player background with light segments;
+    // in light theme, solid white (blur off) or subtly frosted white (blur on) with grey segments.
+    val toolbarContainer = if (isDark) {
+        if (isBlurActive) Color.Black.copy(alpha = 0.30f) else currentTheme.surfaceContainer.copy(alpha = 0.90f)
+    } else {
+        Color.White.copy(alpha = if (isBlurActive) 0.70f else 0.92f)
+    }
+    val segmentInactive = if (isDark) {
+        Color.White.copy(alpha = 0.07f)
+    } else {
+        currentTheme.onSurface.copy(alpha = 0.08f)
+    }
     val segmentActive = skipContainer
     val segmentActiveContent = skipContent
-    val segmentInactiveContent = skipContainer
+    val segmentInactiveContent = if (isDark) {
+        skipContainer
+    } else {
+        currentTheme.onSurface.copy(alpha = 0.85f)
+    }
 
     androidx.compose.foundation.layout.BoxWithConstraints(modifier = modifier) {
     // Auto-size to the display width: bigger buttons on wide phones, compact on small ones.

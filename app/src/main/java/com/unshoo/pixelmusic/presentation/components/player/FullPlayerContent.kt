@@ -381,6 +381,7 @@ fun FullPlayerContent(
 
     val playerConfig by playerViewModel.playerConfigSlice.collectAsStateWithLifecycle()
     val isGradientTheme = playerConfig.playerBackgroundStyle == com.unshoo.pixelmusic.data.preferences.PlayerBackgroundStyle.GRADIENT
+    val isBlurActive = (playerConfig.useBlurEffects && playerConfig.nowPlayingBlurEnabled) && isGradientTheme
 
     var showFetchLyricsDialog by remember { mutableStateOf(false) }
     var totalDrag by remember { mutableStateOf(0f) }
@@ -700,6 +701,7 @@ fun FullPlayerContent(
             onRepeatToggle = onRepeatToggle,
             onFavoriteToggle = onFavoriteToggle,
             isGradientTheme = isGradientTheme,
+            isBlurActive = isBlurActive,
             onLyricsClick = onLyricsClick,
             onAddToPlaylistClick = { showSongInfoBottomSheet = true }
         )
@@ -902,7 +904,7 @@ fun FullPlayerContent(
                         Row(
                             modifier = Modifier
                                 .padding(end = 14.dp),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             val showCastLabel = isCastConnecting || (isRemotePlaybackActive && selectedRouteName != null)
@@ -913,8 +915,8 @@ fun FullPlayerContent(
                                 isBluetoothActive -> painterResource(R.drawable.rounded_bluetooth_24)
                                 else -> painterResource(R.drawable.rounded_mobile_speaker_24)
                             }
-                            val castCornersExpanded = 22.dp
-                            val castCornersCompact = 22.dp
+                            val castCornersExpanded = 50.dp
+                            val castCornersCompact = 6.dp
                             val castTopStart = castCornersExpanded
                             val castTopEnd by animateDpAsState(
                                 targetValue = if (showCastLabel) castCornersExpanded else castCornersCompact,
@@ -943,8 +945,8 @@ fun FullPlayerContent(
                                         )
                                     )
                                     .widthIn(
-                                        min = 62.dp,
-                                        max = if (showCastLabel) 190.dp else 62.dp
+                                        min = 58.dp,
+                                        max = if (showCastLabel) 190.dp else 58.dp
                                     )
                                     .clip(castShape)
                                     .then(
@@ -959,9 +961,12 @@ fun FullPlayerContent(
                             ) {
                                 Row(
                                     modifier = Modifier
-                                        .padding(start = 19.dp),
+                                        .then(
+                                            if (showCastLabel) Modifier.padding(start = 16.dp)
+                                            else Modifier.fillMaxWidth()
+                                        ),
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.Start
+                                    horizontalArrangement = if (showCastLabel) Arrangement.Start else Arrangement.Center
                                 ) {
                                     Icon(
                                         painter = castIconPainter,
@@ -1024,14 +1029,14 @@ fun FullPlayerContent(
 
                             // Queue Button
                             val topQueueShape = RoundedCornerShape(
-                                topStart = 22.dp,
-                                topEnd = 22.dp,
-                                bottomStart = 22.dp,
-                                bottomEnd = 22.dp
+                                topStart = 6.dp,
+                                topEnd = 50.dp,
+                                bottomStart = 6.dp,
+                                bottomEnd = 50.dp
                             )
                             Box(
                                 modifier = Modifier
-                                    .size(height = 50.dp, width = 62.dp)
+                                    .size(height = 50.dp, width = 58.dp)
                                     .clip(topQueueShape)
                                     .then(
                                         if (isGradientTheme) {
@@ -1898,6 +1903,7 @@ private fun FullPlayerControlsSection(
     onRepeatToggle: () -> Unit,
     onFavoriteToggle: () -> Unit,
     isGradientTheme: Boolean = false,
+    isBlurActive: Boolean = false,
     onLyricsClick: () -> Unit = {},
     onAddToPlaylistClick: () -> Unit = {}
 ) {
@@ -1945,7 +1951,8 @@ private fun FullPlayerControlsSection(
             playPauseContainer = transportPlayPauseColors.container,
             playPauseContent = transportPlayPauseColors.content,
             skipContainer = transportSkipColors.container,
-            skipContent = transportSkipColors.content
+            skipContent = transportSkipColors.content,
+            isBlurActive = isBlurActive
         )
     }
 }
