@@ -82,17 +82,12 @@ class TelegramDashboardViewModel @Inject constructor(
         val songs = telegramRepository.getAudioMessages(channel.chatId)
         musicRepository.replaceTelegramSongsForChannel(channel.chatId, songs)
 
-        // Warm up artwork with progress
-        if (songs.isNotEmpty()) {
-            val total = songs.size
-            songs.forEachIndexed { index, song ->
-                _statusMessage.value = "Fetching artwork for ${channel.title}: ${index + 1}/$total"
-                val msgId = song.id.substringAfterLast("_").toLongOrNull()
-                if (msgId != null) {
-                    telegramRepository.warmUpArtwork(channel.chatId, msgId)
-                }
-            }
-        }
+        // Artwork warms in the background; already-cached covers are skipped. No per-song
+        // "Fetching artwork x/N" progress (re-syncing a known channel used to walk every song).
+        telegramRepository.warmUpArtworkInBackground(
+            channel.chatId,
+            songs.mapNotNull { it.id.substringAfterLast("_").toLongOrNull() }
+        )
 
         val updatedChannel = channel.copy(
             songCount = songs.size,
@@ -101,7 +96,7 @@ class TelegramDashboardViewModel @Inject constructor(
         musicRepository.saveTelegramChannel(updatedChannel)
 
         _statusMessage.value = if (songs.isNotEmpty())
-            "Synced ${songs.size} songs and artworks from ${channel.title}"
+            "Synced ${songs.size} songs from ${channel.title}"
         else
             "No songs found in ${channel.title}"
     }
@@ -134,17 +129,11 @@ class TelegramDashboardViewModel @Inject constructor(
                 songs = topicSongs
             )
 
-            // Warm up artwork for the topic
-            if (topicSongs.isNotEmpty()) {
-                val total = topicSongs.size
-                topicSongs.forEachIndexed { index, song ->
-                    _statusMessage.value = "Fetching artwork for ${topic.name}: ${index + 1}/$total"
-                    val msgId = song.id.substringAfterLast("_").toLongOrNull()
-                    if (msgId != null) {
-                        telegramRepository.warmUpArtwork(channel.chatId, msgId)
-                    }
-                }
-            }
+            // Artwork warms in the background (cached covers skipped), no per-song progress.
+            telegramRepository.warmUpArtworkInBackground(
+                channel.chatId,
+                topicSongs.mapNotNull { it.id.substringAfterLast("_").toLongOrNull() }
+            )
 
             // Track updated topic with real song count
             val updatedTopic = topic.copy(
@@ -161,7 +150,7 @@ class TelegramDashboardViewModel @Inject constructor(
         )
         musicRepository.saveTelegramChannel(updatedChannel)
 
-        _statusMessage.value = "Synced $totalSongs songs and artworks across ${topics.size} topics in ${channel.title}"
+        _statusMessage.value = "Synced $totalSongs songs across ${topics.size} topics in ${channel.title}"
     }
 
     fun removeChannel(chatId: Long) {

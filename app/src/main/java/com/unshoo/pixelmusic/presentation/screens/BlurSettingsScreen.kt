@@ -63,6 +63,8 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.unshoo.pixelmusic.R
+import com.unshoo.pixelmusic.presentation.components.setBooleanPreference
+import kotlinx.coroutines.launch
 import com.unshoo.pixelmusic.presentation.components.MiniPlayerHeight
 import com.unshoo.pixelmusic.presentation.viewmodel.PlayerViewModel
 import com.unshoo.pixelmusic.presentation.viewmodel.SettingsViewModel
@@ -238,6 +240,30 @@ fun BlurSettingsScreen(
                     checked = uiState.lyricsScreenBlurEnabled,
                     enabled = uiState.useBlurEffects,
                     onCheckedChange = { settingsViewModel.setLyricsScreenBlurEnabled(it) }
+                )
+
+                // Frosted, dynamic-colour tinted blur behind the bottom navigation bar.
+                val frostedCtx = androidx.compose.ui.platform.LocalContext.current
+                val frostedScope = androidx.compose.runtime.rememberCoroutineScope()
+                val frostedNav by com.unshoo.pixelmusic.presentation.components.rememberBooleanPreference(
+                    frostedCtx,
+                    com.unshoo.pixelmusic.presentation.components.UiEffectPreferenceKeys.NAV_BAR_FROSTED_BLUR,
+                    false
+                )
+                BlurToggleItem(
+                    title = stringResource(R.string.setcat_frosted_navbar_title),
+                    subtitle = stringResource(R.string.setcat_frosted_navbar_subtitle),
+                    icon = Icons.Outlined.WaterDrop,
+                    checked = frostedNav,
+                    enabled = true,
+                    onCheckedChange = { enabled ->
+                        frostedScope.launch {
+                            frostedCtx.applicationContext.setBooleanPreference(
+                                com.unshoo.pixelmusic.presentation.components.UiEffectPreferenceKeys.NAV_BAR_FROSTED_BLUR,
+                                enabled
+                            )
+                        }
+                    }
                 )
             }
 

@@ -183,6 +183,9 @@ import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import androidx.compose.material.icons.rounded.BlurOn
+import androidx.compose.material.icons.rounded.Fullscreen
+import com.unshoo.pixelmusic.presentation.components.setBooleanPreference
 import com.unshoo.pixelmusic.R
 import com.unshoo.pixelmusic.data.backup.model.BackupHistoryEntry
 import com.unshoo.pixelmusic.data.backup.model.BackupOperationType
@@ -956,6 +959,27 @@ fun SettingsCategoryScreen(
                                     onCheckedChange = { settingsViewModel.setShowPlayerFileInfo(it) },
                                     leadingIcon = { Icon(painterResource(R.drawable.rounded_attach_file_24), null, tint = MaterialTheme.colorScheme.secondary) }
                                 )
+                                run {
+                                    val ctx = LocalContext.current
+                                    val prefScope = rememberCoroutineScope()
+                                    val fullscreen by com.unshoo.pixelmusic.presentation.components.rememberBooleanPreference(
+                                        ctx, com.unshoo.pixelmusic.presentation.components.UiEffectPreferenceKeys.FULL_PLAYER_FULLSCREEN, true
+                                    )
+                                    SwitchSettingItem(
+                                        title = stringResource(R.string.setcat_fullscreen_player_title),
+                                        subtitle = stringResource(R.string.setcat_fullscreen_player_subtitle),
+                                        checked = fullscreen,
+                                        onCheckedChange = { enabled ->
+                                            prefScope.launch {
+                                                ctx.applicationContext.setBooleanPreference(
+                                                    com.unshoo.pixelmusic.presentation.components.UiEffectPreferenceKeys.FULL_PLAYER_FULLSCREEN,
+                                                    enabled
+                                                )
+                                            }
+                                        },
+                                        leadingIcon = { Icon(Icons.Rounded.Fullscreen, null, tint = MaterialTheme.colorScheme.secondary) }
+                                    )
+                                }
                                 SettingsItem(
                                     title = stringResource(R.string.setcat_album_art_palette_title),
                                     subtitle = stringResource(R.string.setcat_album_art_palette_subtitle, uiState.albumArtPaletteStyle.label),

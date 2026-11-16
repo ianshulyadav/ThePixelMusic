@@ -955,9 +955,17 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        val navBarFrostedBlur by com.unshoo.pixelmusic.presentation.components.rememberBooleanPreference(
+            context = context,
+            key = com.unshoo.pixelmusic.presentation.components.UiEffectPreferenceKeys.NAV_BAR_FROSTED_BLUR,
+            default = false
+        )
+        val mainBackdropSource = com.unshoo.pixelmusic.presentation.components.rememberBackdropSource()
+
         CompositionLocalProvider(
             LocalAppHapticsConfig provides appHapticsConfig,
-            LocalHapticFeedback provides scopedHapticFeedback
+            LocalHapticFeedback provides scopedHapticFeedback,
+            com.unshoo.pixelmusic.presentation.components.LocalBackdropSource provides mainBackdropSource
         ) {
             AppSidebarDrawer(
                 drawerState = drawerState,
@@ -1119,6 +1127,12 @@ class MainActivity : ComponentActivity() {
                                 .height(navBarHeight)
                                 .padding(horizontal = horizontalPadding)
 
+                            // Only the search button takes the playing song's colours (all tabs).
+                            val songSchemePair by playerViewModel.currentAlbumArtColorSchemePair.collectAsStateWithLifecycle()
+                            val isDarkForNav = com.unshoo.pixelmusic.ui.theme.LocalPixelMusicDarkTheme.current
+                            val searchColorScheme = if (navBarFrostedBlur) {
+                                songSchemePair?.let { if (isDarkForNav) it.dark else it.light }
+                            } else null
                             val navBarContent: @Composable () -> Unit = {
                                 PlayerInternalNavigationBar(
                                     navController = navController,
@@ -1127,6 +1141,8 @@ class MainActivity : ComponentActivity() {
                                     navBarStyle = navBarStyle,
                                     compactMode = navBarCompactMode,
                                     bottomBarPadding = bottomBarPadding,
+                                    frostedBlur = navBarFrostedBlur,
+                                    searchColorScheme = searchColorScheme,
                                     onSearchIconDoubleTap = onSearchIconDoubleTap,
                                     modifier = Modifier.fillMaxSize()
                                 )
@@ -1140,10 +1156,18 @@ class MainActivity : ComponentActivity() {
                             } else {
                                 Surface(
                                     modifier = navBarContainerModifier,
-                                    color = NavigationBarDefaults.containerColor,
+                                    color = if (navBarFrostedBlur) androidx.compose.ui.graphics.Color.Transparent else NavigationBarDefaults.containerColor,
                                     shape = actualShape,
-                                    shadowElevation = navBarElevation
+                                    shadowElevation = if (navBarFrostedBlur) 0.dp else navBarElevation
                                 ) {
+                                    if (navBarFrostedBlur) {
+                                        // Frosted glass: blurred backdrop + dynamic tint behind the items.
+                                        Box(
+                                            modifier = with(com.unshoo.pixelmusic.presentation.components.PixelGlass) {
+                                                Modifier.fillMaxSize().navGlass(mainBackdropSource)
+                                            }
+                                        )
+                                    }
                                     navBarContent()
                                 }
                             }
@@ -1231,6 +1255,12 @@ class MainActivity : ComponentActivity() {
                                         null
                                     }
                                 }
+                                // Feed the frosted nav bar with the screen content behind it.
+                                .then(
+                                    with(com.unshoo.pixelmusic.presentation.components.PixelGlass) {
+                                        Modifier.navGlassSource(mainBackdropSource, navBarFrostedBlur)
+                                    }
+                                )
                         ) {
                             AppNavigation(
                                 playerViewModel = playerViewModel,

@@ -55,7 +55,6 @@ import unshoo.ianshulyadav.pixelmusic.innertube.pages.ArtistItemsPage
 import unshoo.ianshulyadav.pixelmusic.innertube.pages.ArtistPage
 import unshoo.ianshulyadav.pixelmusic.innertube.pages.ChartsPage
 import unshoo.ianshulyadav.pixelmusic.innertube.pages.BrowseResult
-import unshoo.ianshulyadav.pixelmusic.innertube.pages.ExplorePage
 import unshoo.ianshulyadav.pixelmusic.innertube.pages.HistoryPage
 import unshoo.ianshulyadav.pixelmusic.innertube.pages.HomePage
 import unshoo.ianshulyadav.pixelmusic.innertube.pages.LibraryContinuationPage
@@ -261,10 +260,9 @@ object YouTube {
 
         if (contents.isEmpty() && innerTube.locale.gl != "US") {
             android.util.Log.w("YouTube", "Empty searchSummary for gl=${innerTube.locale.gl}. Retrying with US fallback.")
-            val originalLocale = innerTube.locale
-            innerTube.locale = originalLocale.copy(gl = "US")
+            val fallbackLocale = innerTube.locale.copy(gl = "US")
             try {
-                response = innerTube.search(WEB_REMIX, query).body<SearchResponse>()
+                response = innerTube.search(WEB_REMIX, query, localeOverride = fallbackLocale).body<SearchResponse>()
                 contents =
                     response.contents
                         ?.tabbedSearchResultsRenderer
@@ -277,8 +275,6 @@ object YouTube {
                         .orEmpty()
             } catch (e: Exception) {
                 android.util.Log.w("YouTube", "US fallback failed for searchSummary: ${e.message}")
-            } finally {
-                innerTube.locale = originalLocale
             }
         }
         val topItems = mutableListOf<YTItem>()
@@ -350,10 +346,9 @@ object YouTube {
 
         if (contents.isEmpty() && innerTube.locale.gl != "US") {
             android.util.Log.w("YouTube", "Empty search for gl=${innerTube.locale.gl}. Retrying with US fallback.")
-            val originalLocale = innerTube.locale
-            innerTube.locale = originalLocale.copy(gl = "US")
+            val fallbackLocale = innerTube.locale.copy(gl = "US")
             try {
-                response = innerTube.search(WEB_REMIX, query, filter.value).body<SearchResponse>()
+                response = innerTube.search(WEB_REMIX, query, filter.value, localeOverride = fallbackLocale).body<SearchResponse>()
                 contents =
                     response.contents
                         ?.tabbedSearchResultsRenderer
@@ -366,8 +361,6 @@ object YouTube {
                         .orEmpty()
             } catch (e: Exception) {
                 android.util.Log.w("YouTube", "US fallback failed for search: ${e.message}")
-            } finally {
-                innerTube.locale = originalLocale
             }
         }
         val shelves =
@@ -824,166 +817,139 @@ object YouTube {
         playlistContinuationPageFromResponse(response)
     }
 
+    // -----------------------------------------------------------------------------------------
+    // Home feed (FEmusic_home)
+    //
+    // One raw-response fetch shared by every Home consumer (the Explore feed, Quick Picks, the
+    // new-releases detail). Concurrent callers for the same identity/locale/params coalesce on
+    // [homeFetchMutex]; the short-lived cache is keyed so that an account, locale, personalisation
+    // or chip change can never be served another partition's response. The region fallback uses a
+    // per-request locale override instead of mutating the shared InnerTube locale, so it cannot
+    // leak into requests running concurrently on other screens.
+    // -----------------------------------------------------------------------------------------
+
+    /** Result of a Home browse request, including the locale that actually produced it. */
+    data class HomeBrowseResult(
+        val response: BrowseResponse,
+        val locale: YouTubeLocale,
+        val usedRegionFallback: Boolean,
+    )
+
+    private class CachedHomeResponse(val key: String, val result: HomeBrowseResult, val atMillis: Long)
+
     @Volatile
-    private var inMemoryCachedHome: HomePage? = null
-    @Volatile
-    private var inMemoryCachedHomeTimestamp: Long = 0L
+    private var cachedHomeResponse: CachedHomeResponse? = null
     private val homeFetchMutex = Mutex()
+    private const val HOME_RESPONSE_TTL_MS = 60_000L
 
     fun invalidateHomeCache() {
-        inMemoryCachedHome = null
-        inMemoryCachedHomeTimestamp = 0L
+        cachedHomeResponse = null
     }
 
-    suspend fun home(continuation: String? = null, params: String? = null, forceRefresh: Boolean = false): Result<HomePage> = runCatching {
+    /**
+     * Opaque partition key for personalised browse responses: anonymous, visitor or a hash of the
+     * signed-in account. The raw cookie / sync id never leaves this function and is never logged.
+     */
+    fun homeIdentityKey(): String {
+        val hasAuth = hasLoginCookie()
+        val forceAnon = !hasAuth && !personalizedExploreEnabled
+        return when {
+            forceAnon -> "anon"
+            hasAuth -> {
+                val material = dataSyncId?.takeIf { it.isNotBlank() } ?: cookie.orEmpty()
+                "acct:" + material.hashCode().toUInt().toString(16)
+            }
+            else -> "visitor"
+        }
+    }
+
+    private fun BrowseResponse.homeSectionList() =
+        contents?.singleColumnBrowseResultsRenderer?.tabs?.firstOrNull()?.tabRenderer?.content?.sectionListRenderer
+            ?: contents?.sectionListRenderer
+
+    private fun BrowseResponse.hasHomeContent(): Boolean =
+        !homeSectionList()?.contents.isNullOrEmpty() ||
+            !continuationContents?.sectionListContinuation?.contents.isNullOrEmpty()
+
+    /**
+     * Fetches the raw `FEmusic_home` browse response (or one of its continuations / chip variants)
+     * exactly as YouTube Music returns it. Parsing is left to the caller.
+     */
+    suspend fun homeBrowse(
+        params: String? = null,
+        continuation: String? = null,
+        forceRefresh: Boolean = false,
+    ): Result<HomeBrowseResult> = runCatching {
+        val hasAuth = hasLoginCookie()
+        val forceAnon = !hasAuth && !personalizedExploreEnabled
+        val setLogin = hasAuth || !forceAnon
+        // Snapshot the locale once so every request of this call uses the same one.
+        val requestLocale = innerTube.locale
+
         if (continuation != null) {
-            return@runCatching homeContinuation(continuation).getOrThrow()
-        }
-
-        // Cache and deduplicate default home feed (continuation == null && params == null)
-        if (params == null) {
-            if (!forceRefresh) {
-                val cached = inMemoryCachedHome
-                val ts = inMemoryCachedHomeTimestamp
-                if (cached != null && (System.currentTimeMillis() - ts) < 60_000L) {
-                    return@runCatching cached
-                }
-            }
-
-            homeFetchMutex.withLock {
-                if (!forceRefresh) {
-                    val cached = inMemoryCachedHome
-                    val ts = inMemoryCachedHomeTimestamp
-                    if (cached != null && (System.currentTimeMillis() - ts) < 60_000L) {
-                        return@runCatching cached
-                    }
-                }
-                val fresh = fetchHomeInternal(null).getOrThrow()
-                inMemoryCachedHome = fresh
-                inMemoryCachedHomeTimestamp = System.currentTimeMillis()
-                fresh
-            }
-        } else {
-            fetchHomeInternal(params).getOrThrow()
-        }
-    }
-
-    private suspend fun fetchHomeInternal(params: String?): Result<HomePage> = runCatching {
-        val hasAuth = hasLoginCookie()
-        val forceAnon = !hasAuth && !personalizedExploreEnabled
-        val setLogin = hasAuth || !forceAnon
-        val response = innerTube.browse(
-            WEB_REMIX,
-            browseId = "FEmusic_home",
-            params = params,
-            setLogin = setLogin,
-            forceAnonymous = forceAnon
-        ).body<BrowseResponse>()
-        val sectionListRender = response.contents?.singleColumnBrowseResultsRenderer?.tabs?.firstOrNull()
-            ?.tabRenderer?.content?.sectionListRenderer
-            ?: response.contents?.sectionListRenderer
-        val continuation = sectionListRender?.continuations?.getContinuation()
-            ?: response.continuationContents?.sectionListContinuation?.continuations?.getContinuation()
-        val sections = (sectionListRender?.contents?.mapNotNull {
-            HomePage.Section.fromSectionListContent(it)
-        } ?: response.continuationContents?.sectionListContinuation?.contents?.mapNotNull {
-            HomePage.Section.fromSectionListContent(it)
-        }.orEmpty()).toMutableList()
-        val chips = sectionListRender?.header?.chipCloudRenderer?.chips?.mapNotNull { HomePage.Chip.fromChipCloudChipRenderer(it) }
-
-        if (sections.isEmpty() && params == null && innerTube.locale.gl != "US") {
-            android.util.Log.w("YouTube", "Empty home sections for gl=${innerTube.locale.gl}. Retrying with US fallback.")
-            val originalLocale = innerTube.locale
-            innerTube.locale = originalLocale.copy(gl = "US")
-            try {
-                val fbResponse = innerTube.browse(
-                    WEB_REMIX,
-                    browseId = "FEmusic_home",
-                    params = null,
-                    setLogin = setLogin,
-                    forceAnonymous = forceAnon
-                ).body<BrowseResponse>()
-                val fbSectionList = fbResponse.contents?.singleColumnBrowseResultsRenderer?.tabs?.firstOrNull()
-                    ?.tabRenderer?.content?.sectionListRenderer
-                    ?: fbResponse.contents?.sectionListRenderer
-                val fbContinuation = fbSectionList?.continuations?.getContinuation()
-                    ?: fbResponse.continuationContents?.sectionListContinuation?.continuations?.getContinuation()
-                val fbSections = (fbSectionList?.contents?.mapNotNull {
-                    HomePage.Section.fromSectionListContent(it)
-                } ?: fbResponse.continuationContents?.sectionListContinuation?.contents?.mapNotNull {
-                    HomePage.Section.fromSectionListContent(it)
-                }.orEmpty()).toMutableList()
-                val fbChips = fbSectionList?.header?.chipCloudRenderer?.chips?.mapNotNull { HomePage.Chip.fromChipCloudChipRenderer(it) }
-                if (fbSections.isNotEmpty()) {
-                    return@runCatching HomePage(fbChips, fbSections, fbContinuation)
-                }
-            } catch (e: Exception) {
-                android.util.Log.w("YouTube", "US fallback failed for home: ${e.message}")
-            } finally {
-                innerTube.locale = originalLocale
-            }
-        }
-
-        HomePage(chips, sections, continuation)
-    }
-
-    private suspend fun homeContinuation(continuation: String): Result<HomePage> = runCatching {
-        val hasAuth = hasLoginCookie()
-        val forceAnon = !hasAuth && !personalizedExploreEnabled
-        val setLogin = hasAuth || !forceAnon
-        val response =
-            innerTube.browse(
+            val response = innerTube.browse(
                 WEB_REMIX,
                 continuation = continuation,
                 setLogin = setLogin,
-                forceAnonymous = forceAnon
+                forceAnonymous = forceAnon,
+                localeOverride = requestLocale,
             ).body<BrowseResponse>()
-        val sections = response.continuationContents?.sectionListContinuation?.contents
-            ?.mapNotNull {
-                HomePage.Section.fromSectionListContent(it)
-            }.orEmpty()
-        val nextContinuation = if (sections.isEmpty()) null else {
-            response.continuationContents?.sectionListContinuation?.continuations?.getContinuation()
+            return@runCatching HomeBrowseResult(response, requestLocale, usedRegionFallback = false)
         }
-        HomePage(
-            chips = null,
-            sections = sections,
-            continuation = nextContinuation
-        )
+
+        val key = listOf(homeIdentityKey(), requestLocale.hl, requestLocale.gl, params.orEmpty()).joinToString("|")
+        fun cachedOrNull(): HomeBrowseResult? = cachedHomeResponse
+            ?.takeIf { !forceRefresh && it.key == key && System.currentTimeMillis() - it.atMillis < HOME_RESPONSE_TTL_MS }
+            ?.result
+
+        cachedOrNull()?.let { return@runCatching it }
+        homeFetchMutex.withLock {
+            cachedOrNull()?.let { return@withLock it }
+            val primary = innerTube.browse(
+                WEB_REMIX,
+                browseId = "FEmusic_home",
+                params = params,
+                setLogin = setLogin,
+                forceAnonymous = forceAnon,
+                localeOverride = requestLocale,
+            ).body<BrowseResponse>()
+            var result = HomeBrowseResult(primary, requestLocale, usedRegionFallback = false)
+            if (params == null && !primary.hasHomeContent() && requestLocale.gl != "US") {
+                val fallbackLocale = requestLocale.copy(gl = "US")
+                val fallback = runCatching {
+                    innerTube.browse(
+                        WEB_REMIX,
+                        browseId = "FEmusic_home",
+                        setLogin = setLogin,
+                        forceAnonymous = forceAnon,
+                        localeOverride = fallbackLocale,
+                    ).body<BrowseResponse>()
+                }.getOrNull()
+                if (fallback != null && fallback.hasHomeContent()) {
+                    result = HomeBrowseResult(fallback, fallbackLocale, usedRegionFallback = true)
+                }
+            }
+            cachedHomeResponse = CachedHomeResponse(key, result, System.currentTimeMillis())
+            result
+        }
     }
 
-    suspend fun explore(browseId: String? = null, params: String? = null): Result<ExplorePage> = runCatching {
-        val targetBrowseId = browseId ?: "FEmusic_explore"
-        val hasAuth = hasLoginCookie()
-        val forceAnon = !hasAuth && !personalizedExploreEnabled
-        val setLogin = hasAuth || !forceAnon
-        val response = innerTube.browse(
-            WEB_REMIX,
-            browseId = targetBrowseId,
-            params = params,
-            setLogin = setLogin,
-            forceAnonymous = forceAnon
-        ).body<BrowseResponse>()
-        val sectionListRender = response.contents?.singleColumnBrowseResultsRenderer?.tabs?.firstOrNull()
-            ?.tabRenderer?.content?.sectionListRenderer
-        val sections = sectionListRender?.contents
-            ?.mapNotNull {
-                HomePage.Section.fromSectionListContent(it)
-            }.orEmpty()
-        val chips = sectionListRender?.header?.chipCloudRenderer?.chips?.mapNotNull { HomePage.Chip.fromChipCloudChipRenderer(it) }
-
-        val newReleases = if (targetBrowseId == "FEmusic_explore") {
-            response.contents?.singleColumnBrowseResultsRenderer?.tabs?.firstOrNull()?.tabRenderer?.content?.sectionListRenderer?.contents?.find {
-                it.musicCarouselShelfRenderer?.header?.musicCarouselShelfBasicHeaderRenderer?.moreContentButton?.buttonRenderer?.navigationEndpoint?.browseEndpoint?.browseId == "FEmusic_new_releases_albums"
-            }?.musicCarouselShelfRenderer?.contents
-                ?.mapNotNull { it.musicTwoRowItemRenderer }
-                ?.mapNotNull(NewReleaseAlbumPage::fromMusicTwoRowItemRenderer).orEmpty()
-        } else emptyList()
-
-        ExplorePage(
-            chips = chips,
+    /**
+     * Legacy, lossy [HomePage] view of the Home feed kept for Quick Picks and the new-releases
+     * detail screen. The Explore feed uses [homeBrowse] with its own lossless parser.
+     */
+    suspend fun home(continuation: String? = null, params: String? = null, forceRefresh: Boolean = false): Result<HomePage> = runCatching {
+        val response = homeBrowse(params = params, continuation = continuation, forceRefresh = forceRefresh)
+            .getOrThrow().response
+        val sectionList = response.homeSectionList()
+        val sections = (sectionList?.contents ?: response.continuationContents?.sectionListContinuation?.contents.orEmpty())
+            .mapNotNull { HomePage.Section.fromSectionListContent(it) }
+        val next = sectionList?.continuations?.getContinuation()
+            ?: response.continuationContents?.sectionListContinuation?.continuations?.getContinuation()
+        HomePage(
+            chips = sectionList?.header?.chipCloudRenderer?.chips?.mapNotNull { HomePage.Chip.fromChipCloudChipRenderer(it) },
             sections = sections,
-            newReleaseAlbums = newReleases
+            continuation = if (continuation != null && sections.isEmpty()) null else next,
         )
     }
 
@@ -1302,10 +1268,9 @@ object YouTube {
     }
 
     suspend fun getChartsPage(countryCode: String? = null, continuation: String? = null): Result<ChartsPage> = runCatching {
-        val originalLocale = innerTube.locale
         val effectiveRegion = countryCode?.takeIf { it.isNotBlank() } ?: "ZZ"
         val effectiveGl = countryCode?.takeIf { it.isNotBlank() } ?: "US"
-        innerTube.locale = originalLocale.copy(gl = effectiveGl)
+        val chartsLocale = innerTube.locale.copy(gl = effectiveGl)
         try {
             val chartFormData = unshoo.ianshulyadav.pixelmusic.innertube.models.body.BrowseBody.FormData(
                 selectedValues = listOf(effectiveRegion)
@@ -1316,7 +1281,8 @@ object YouTube {
                 params = null,
                 continuation = continuation,
                 formData = chartFormData,
-                forceAnonymous = true
+                forceAnonymous = true,
+                localeOverride = chartsLocale
             ).body<BrowseResponse>()
 
             var sections = parseChartsSections(response).toMutableList()
@@ -1327,7 +1293,8 @@ object YouTube {
                     params = "ggMGCgQIgAQ=",
                     continuation = null,
                     formData = chartFormData,
-                    forceAnonymous = true
+                    forceAnonymous = true,
+                    localeOverride = chartsLocale
                 ).body<BrowseResponse>()
                 sections = parseChartsSections(response).toMutableList()
             }
@@ -1366,8 +1333,6 @@ object YouTube {
         } catch (e: Exception) {
             android.util.Log.e("YouTube", "Error fetching charts page", e)
             throw e
-        } finally {
-            innerTube.locale = originalLocale
         }
     }
 

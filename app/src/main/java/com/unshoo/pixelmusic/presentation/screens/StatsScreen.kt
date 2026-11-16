@@ -401,30 +401,35 @@ private fun StatsHeroSection(
     modifier: Modifier = Modifier
 ) {
     val hasData = (summary?.totalDurationMs ?: 0L) > 0 || (summary?.totalPlayCount ?: 0) > 0
-    
+
     Row(
         modifier = modifier
             .fillMaxWidth()
             .height(IntrinsicSize.Min),
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Time Card - Primary Container
         HeroCard(
             title = stringResource(R.string.presentation_batch_g_stats_hero_listening),
             value = if (hasData) formatListeningDurationCompact(summary?.totalDurationMs ?: 0L) else "--",
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            supporting = if (hasData) formatListeningDurationCompact(summary?.averageDailyDurationMs ?: 0L) + " / day" else null,
+            icon = Icons.Outlined.Hearing,
+            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+            chipColor = MaterialTheme.colorScheme.secondary,
+            chipContentColor = MaterialTheme.colorScheme.onSecondary,
             modifier = Modifier
                 .weight(1f)
                 .fillMaxHeight()
         )
-
-        // Plays Card - Tertiary Container
         HeroCard(
             title = stringResource(R.string.presentation_batch_g_stats_hero_plays),
-            value = if (hasData) "${summary?.totalPlayCount ?: 0}" else "--",
+            value = if (hasData) (summary?.totalPlayCount ?: 0).toString() else "--",
+            supporting = if (hasData) (summary?.uniqueSongs ?: 0).toString() + " tracks" else null,
+            icon = Icons.Outlined.AutoGraph,
             containerColor = MaterialTheme.colorScheme.tertiaryContainer,
             contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+            chipColor = MaterialTheme.colorScheme.tertiary,
+            chipContentColor = MaterialTheme.colorScheme.onTertiary,
             modifier = Modifier
                 .weight(1f)
                 .fillMaxHeight()
@@ -436,29 +441,57 @@ private fun StatsHeroSection(
 private fun HeroCard(
     title: String,
     value: String,
+    supporting: String?,
+    icon: ImageVector,
     containerColor: Color,
     contentColor: Color,
+    chipColor: Color,
+    chipContentColor: Color,
     modifier: Modifier = Modifier
 ) {
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(24.dp))
+            .clip(RoundedCornerShape(28.dp))
             .background(containerColor)
-            .padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
+            .padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.Medium,
-            color = contentColor.copy(alpha = 0.85f)
-        )
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(
+                modifier = Modifier
+                    .size(30.dp)
+                    .clip(CircleShape)
+                    .background(chipColor.copy(alpha = 0.18f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(icon, contentDescription = null, tint = contentColor, modifier = Modifier.size(18.dp))
+            }
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = contentColor
+            )
+        }
         Text(
             text = value,
-            style = ExpTitleTypography.displayMedium.copy(fontSize = 32.sp),
+            style = ExpTitleTypography.displayMedium.copy(fontSize = 34.sp),
             fontWeight = FontWeight.Bold,
-            color = contentColor
+            color = contentColor,
+            maxLines = 1
         )
+        if (supporting != null) {
+            Text(
+                text = supporting,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = chipContentColor,
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .background(chipColor)
+                    .padding(horizontal = 10.dp, vertical = 4.dp)
+            )
+        }
     }
 }
 
@@ -700,76 +733,81 @@ private fun ListeningHabitsCard(
     summary: PlaybackStatsRepository.PlaybackStatsSummary?,
     modifier: Modifier = Modifier
 ) {
-    Card(
+    Column(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(28.dp), // Consistent with Hero
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 24.dp, vertical = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp)
-        ) {
-            Text(
-                text = stringResource(R.string.presentation_batch_g_stats_section_listening_habits),
-                style = MaterialTheme.typography.titleLargeEmphasized,
-                color = MaterialTheme.colorScheme.onSurface
+        Text(
+            text = stringResource(R.string.presentation_batch_g_stats_section_listening_habits),
+            style = MaterialTheme.typography.titleLargeEmphasized,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        if (summary == null) {
+            StatsEmptyState(
+                icon = Icons.Outlined.History,
+                title = stringResource(R.string.presentation_batch_g_stats_empty_no_habits_title),
+                subtitle = stringResource(R.string.presentation_batch_g_stats_empty_no_habits_subtitle)
             )
-            if (summary == null) {
-                StatsEmptyState(
-                    icon = Icons.Outlined.History,
-                    title = stringResource(R.string.presentation_batch_g_stats_empty_no_habits_title),
-                    subtitle = stringResource(R.string.presentation_batch_g_stats_empty_no_habits_subtitle)
+        } else {
+            val emDash = stringResource(R.string.presentation_batch_g_stats_em_dash)
+            val scheme = MaterialTheme.colorScheme
+            Row(
+                modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                HabitMetric(
+                    icon = Icons.Outlined.Hearing,
+                    label = stringResource(R.string.presentation_batch_g_stats_habit_avg_session),
+                    value = formatListeningDurationCompact(summary.averageSessionDurationMs),
+                    supporting = summary.totalSessions.toString() + " " +
+                        stringResource(R.string.presentation_batch_g_stats_habit_total_sessions).lowercase(),
+                    accent = scheme.primary,
+                    modifier = Modifier.weight(1f).fillMaxHeight()
                 )
-            } else {
-                val emDash = stringResource(R.string.presentation_batch_g_stats_em_dash)
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    HabitMetric(
-                        icon = Icons.Outlined.History,
-                        label = stringResource(R.string.presentation_batch_g_stats_habit_total_sessions),
-                        value = summary.totalSessions.toString()
-                    )
-                    HabitMetric(
-                        icon = Icons.Outlined.Hearing,
-                        label = stringResource(R.string.presentation_batch_g_stats_habit_avg_session),
-                        value = formatListeningDurationCompact(summary.averageSessionDurationMs)
-                    )
-                    HabitMetric(
-                        icon = Icons.Outlined.Bolt,
-                        label = stringResource(R.string.presentation_batch_g_stats_habit_longest_session),
-                        value = if (summary.longestSessionDurationMs > 0L) {
-                            formatListeningDurationCompact(summary.longestSessionDurationMs)
-                        } else {
-                            emDash
-                        }
-                    )
-                    HabitMetric(
-                        icon = Icons.Outlined.AutoGraph,
-                        label = stringResource(R.string.presentation_batch_g_stats_habit_sessions_per_day),
-                        value = String.format(Locale.US, "%.1f", summary.averageSessionsPerDay)
-                    )
-                }
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
-                HighlightRow(
-                    title = stringResource(R.string.presentation_batch_g_stats_habit_most_active_day),
+                HabitMetric(
+                    icon = Icons.Outlined.CalendarMonth,
+                    label = stringResource(R.string.presentation_batch_g_stats_habit_most_active_day),
                     value = summary.peakDayLabel ?: emDash,
                     supporting = if (summary.peakDayDurationMs > 0L) {
                         formatListeningDurationCompact(summary.peakDayDurationMs)
                     } else {
                         stringResource(R.string.presentation_batch_g_stats_habit_no_playback_yet)
                     },
-                    icon = Icons.Outlined.CalendarMonth
+                    accent = scheme.secondary,
+                    modifier = Modifier.weight(1f).fillMaxHeight()
                 )
-                summary.peakTimeline?.let { peak ->
-                    HighlightRow(
-                        title = stringResource(R.string.presentation_batch_g_stats_habit_peak_timeline_slot),
-                        value = peak.label,
-                        supporting = formatListeningDurationCompact(peak.totalDurationMs),
-                        icon = Icons.Outlined.AutoGraph
-                    )
-                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                HabitMetric(
+                    icon = Icons.Outlined.Bolt,
+                    label = stringResource(R.string.presentation_batch_g_stats_habit_longest_session),
+                    value = if (summary.longestSessionDurationMs > 0L) {
+                        formatListeningDurationCompact(summary.longestSessionDurationMs)
+                    } else emDash,
+                    supporting = null,
+                    accent = scheme.tertiary,
+                    modifier = Modifier.weight(1f).fillMaxHeight()
+                )
+                HabitMetric(
+                    icon = Icons.Outlined.AutoGraph,
+                    label = stringResource(R.string.presentation_batch_g_stats_habit_sessions_per_day),
+                    value = String.format(Locale.US, "%.1f", summary.averageSessionsPerDay),
+                    supporting = summary.activeDays.toString() + " active days",
+                    accent = scheme.primary,
+                    modifier = Modifier.weight(1f).fillMaxHeight()
+                )
+            }
+            summary.peakTimeline?.let { peak ->
+                HighlightRow(
+                    title = stringResource(R.string.presentation_batch_g_stats_habit_peak_timeline_slot),
+                    value = peak.label,
+                    supporting = formatListeningDurationCompact(peak.totalDurationMs),
+                    icon = Icons.Outlined.AutoGraph
+                )
             }
         }
     }
@@ -779,33 +817,46 @@ private fun ListeningHabitsCard(
 private fun HabitMetric(
     icon: ImageVector,
     label: String,
-    value: String
+    value: String,
+    supporting: String?,
+    accent: Color,
+    modifier: Modifier = Modifier
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerLowest)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(28.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(accent.copy(alpha = 0.18f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(imageVector = icon, contentDescription = null, tint = accent)
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = value,
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1
         )
-        Column {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        if (supporting != null) {
             Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall,
+                text = supporting,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = value,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onSurface
             )
         }
     }

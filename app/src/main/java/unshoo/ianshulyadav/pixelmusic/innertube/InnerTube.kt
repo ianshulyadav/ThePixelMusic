@@ -328,13 +328,14 @@ class InnerTube {
         query: String? = null,
         params: String? = null,
         continuation: String? = null,
+        localeOverride: YouTubeLocale? = null,
     ) = withRetry {
         httpClient.post("search") {
         ytClient(client, setLogin = useLoginForBrowse)
         setBody(
             SearchBody(
                 context = client.toContext(
-                    locale,
+                    localeOverride ?: locale,
                     visitorData,
                     if (useLoginForBrowse) dataSyncId else null
                 ),
@@ -471,6 +472,10 @@ class InnerTube {
         formData: BrowseBody.FormData? = null,
         setLogin: Boolean = false,
         forceAnonymous: Boolean = false,
+        // Per-request locale. Callers that need a different region for one request (fallbacks,
+        // charts) must pass it here instead of mutating the shared [locale], which would leak
+        // into every concurrent request.
+        localeOverride: YouTubeLocale? = null,
     ) = withRetry {
         httpClient.post("browse") {
             val finalSetLogin = if (forceAnonymous) false else (setLogin || useLoginForBrowse)
@@ -478,7 +483,7 @@ class InnerTube {
             setBody(
                 BrowseBody(
                     context = client.toContext(
-                        locale,
+                        localeOverride ?: locale,
                         if (forceAnonymous) null else visitorData,
                         if (finalSetLogin) dataSyncId else null
                     ),

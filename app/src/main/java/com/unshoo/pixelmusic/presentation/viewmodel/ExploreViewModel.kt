@@ -560,7 +560,10 @@ class ExploreViewModel @Inject constructor(
                 }
                 val json = cacheFile.readText()
                 val cache = gson.fromJson(json, ExploreCacheModel::class.java)
-                if (cache != null && cache.sections.isNotEmpty()) {
+                // Only restore when the cache holds the real compiled feed. Older caches only had raw
+                // shelves, and rebuilding the feed from those showed unrelated artists/picks until a
+                // forced refresh replaced them. Without it, fall through to a fresh online load.
+                if (cache != null && cache.sections.isNotEmpty() && cache.feedData != null) {
                     val age = System.currentTimeMillis() - cache.timestamp
                     if (age >= CACHE_TIER_EXPIRED_MS) {
                         // > 24 hours: Cache is expired. Invalidate completely.
@@ -607,18 +610,9 @@ class ExploreViewModel @Inject constructor(
                             browseId = album.browseId.takeIf { it.isNotBlank() } ?: album.playlistId
                         )
                     }.distinctBy { it.browseId ?: it.title }
-                    val cachedArtists = cache.sections.flatMap { it.items }
-                        .flatMap { item ->
-                            when (item) {
-                                is ArtistItem -> listOf(FeedArtist(item.title, item.id, item.thumbnail))
-                                is SongItem -> item.artists.map { FeedArtist(it.name, it.id, item.thumbnail) }
-                                is AlbumItem -> item.artists.orEmpty().map { FeedArtist(it.name, it.id, item.thumbnail) }
-                                else -> emptyList()
-                            }
-                        }
-                        .filter { it.name.isNotBlank() && !it.name.equals("Unknown artist", ignoreCase = true) }
-                        .distinctBy { it.name.trim().lowercase() }
-                        .take(10)
+                    // Use the personalised artists from the cached compiled feed, never every artist
+                    // found on every shelf (that produced the unrelated "Artists for you" list).
+                    val cachedArtists = cache.feedData?.topArtists.orEmpty()
                     val quickShelf = cache.sections.firstOrNull { 
                         val t = it.title.lowercase()
                         (t.contains("quick pick") || t.contains("quick picks")) && !t.contains("start radio")
@@ -702,17 +696,8 @@ class ExploreViewModel @Inject constructor(
                             artworkUrl = it.albumArtUriString
                         )
                     }
-                    _feedDataState.value = FeedData(
-                        isYtConnected = !isLocalModeCached,
-                        hasYtRecommendations = cachedYtQuickPicks.isNotEmpty(),
-                        hasPersonalContent = cachedYtQuickPicks.isNotEmpty(),
-                        quickPicks = cachedFeedPicks,
-                        newReleases = cachedNewReleases,
-                        recentAlbums = cachedAlbums,
-                        topArtists = cachedArtists,
-                        charts = cachedChartTracks,
-                        lastUpdatedMillis = cache.timestamp
-                    )
+                    @Suppress("UNUSED_VARIABLE") val unusedRebuiltPicks = cachedFeedPicks
+                    _feedDataState.value = cache.feedData
                     true
                 } else {
                     _isLoadingState.value = true
@@ -780,7 +765,8 @@ class ExploreViewModel @Inject constructor(
                     albums = albums.take(20),
                     charts = null,
                     continuation = continuation,
-                    timestamp = System.currentTimeMillis()
+                    timestamp = System.currentTimeMillis(),
+                    feedData = _feedDataState.value.takeIf { it.lastUpdatedMillis > 0L || it.quickPicks.isNotEmpty() || it.topArtists.isNotEmpty() }
                 )
                 val json = gson.toJson(cache)
                 if (json.length < 500 * 1024) {
@@ -1777,12 +1763,25 @@ class ExploreViewModel @Inject constructor(
                     }
                     val endpoint = effectiveChip.endpoint
                     if (endpoint != null && endpoint.browseId.isNotBlank()) {
+                        // The innertube client exposes generic browse(); map its shelves to
+                        // HomePage sections so the rest of the explore pipeline is unchanged.
                         val result = runCatching {
-                            YouTube.explore(browseId = endpoint.browseId, params = endpoint.params).getOrThrow()
+                            YouTube.browse(browseId = endpoint.browseId, params = endpoint.params)
+                                .getOrThrow()
+                                .items
+                                .filter { it.items.isNotEmpty() }
+                                .map { shelf ->
+                                    HomePage.Section(
+                                        title = shelf.title.orEmpty(),
+                                        label = null,
+                                        thumbnail = null,
+                                        endpoint = null,
+                                        items = shelf.items
+                                    )
+                                }
                         }
-                        if (result.isSuccess && result.getOrNull()?.sections?.isNotEmpty() == true) {
-                            val exp = result.getOrThrow()
-                            val rawSections = exp.sections
+                        if (result.isSuccess && result.getOrNull()?.isNotEmpty() == true) {
+                            val rawSections = result.getOrThrow()
                             val uiSections = rawSections.map { it.toUiModel() }
                             if (moodGen != currentMoodGeneration) return@withContext
                             _sectionsState.value = uiSections
@@ -2142,7 +2141,9 @@ data class ExploreCacheModel(
     val albums: List<AlbumItem> = emptyList(),
     val charts: ChartsPage? = null,
     val continuation: String? = null,
-    val timestamp: Long = 0L
+    val timestamp: Long = 0L,
+    /** The exact feed that was on screen when cached. Null in caches written by older versions. */
+    val feedData: FeedData? = null
 )
 
 private class YTItemTypeAdapter : com.google.gson.JsonSerializer<YTItem>, com.google.gson.JsonDeserializer<YTItem> {

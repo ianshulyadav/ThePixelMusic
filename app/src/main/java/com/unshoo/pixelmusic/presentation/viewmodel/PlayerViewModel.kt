@@ -499,22 +499,14 @@ class PlayerViewModel @Inject constructor(
                 }
             }
 
-            launch {
-                telegramRepository.downloadCompleted.collect {
-                    val currentSong = playbackStateHolder.stablePlayerState.value.currentSong
-                    if (currentSong != null && currentSong.contentUriString.startsWith("telegram:")) {
-                        val uri = Uri.parse(currentSong.contentUriString)
-                        val chatId = uri.host?.toLongOrNull()
-                        val messageId = uri.pathSegments.firstOrNull()?.toLongOrNull()
-
-                        if (chatId != null && messageId != null) {
-                            refreshArtwork("telegram_art://$chatId/$messageId")
-                        }
-                    }
-                }
-            }
+            // No longer refreshing artwork on every completed Telegram download: that fired for
+            // the audio file and prefetched tracks too, wiping the cover from cache each time and
+            // making the mini player flicker. artworkUpdated already signals real art changes.
         }
     }
+
+    /** Telegram covers already refreshed this session; each is refreshed at most once. */
+    private val refreshedTelegramArt = java.util.Collections.synchronizedSet(mutableSetOf<String>())
 
     private suspend fun refreshArtwork(updatedArtUri: String) {
         val currentState = playbackStateHolder.stablePlayerState.value
@@ -522,8 +514,11 @@ class PlayerViewModel @Inject constructor(
         // Check if it matches, ignoring query params for comparison
         val currentUriClean = currentSong?.albumArtUriString?.substringBefore('?')
         val updatedUriClean = updatedArtUri.substringBefore('?')
-        
-        if (currentUriClean == updatedUriClean) {
+
+        // A YouTube Music cover (cached by TelegramCoilFetcher) is final: nothing to swap in.
+        val artKey = updatedUriClean.removePrefix("telegram_art://").replace('/', '_')
+        if (java.io.File(context.cacheDir, "telegram_ytm_art_${artKey}.jpg").let { it.exists() && it.length() > 0 }) return
+        if (currentUriClean == updatedUriClean && refreshedTelegramArt.add(updatedUriClean)) {
             Timber.d("PlayerViewModel: Embedded art updated for current song, forcing refresh")
             
             // 1. Invalidate Coil cache for the BASE uri (without params)

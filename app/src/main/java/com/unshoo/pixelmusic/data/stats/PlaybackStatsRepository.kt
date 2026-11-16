@@ -492,9 +492,13 @@ class PlaybackStatsRepository @Inject constructor(
             .groupBy { (songId, _) ->
                 val song = songMap[songId]
                 // Use event-stored album as fallback; filter out known placeholder values
-                val rawAlbum = song?.album?.takeIf { it.isNotBlank() }
-                    ?: normalizedEvents.lastOrNull { it.songId == songId }?.album
-                if (rawAlbum.isNullOrBlank() || rawAlbum in UNKNOWN_ALBUM_KEYS) null else rawAlbum
+                val lastEvent = normalizedEvents.lastOrNull { it.songId == songId }
+                val rawAlbum = song?.album?.takeIf { it.isNotBlank() && it !in UNKNOWN_ALBUM_KEYS }
+                    ?: lastEvent?.album?.takeIf { it.isNotBlank() && it !in UNKNOWN_ALBUM_KEYS }
+                // Streaming singles usually carry no album name: treat the single as its album.
+                rawAlbum
+                    ?: song?.title?.takeIf { it.isNotBlank() }
+                    ?: lastEvent?.title?.takeIf { it.isNotBlank() }
             }
             .filterKeys { it != null }
             .map { (album, groupedSongs) ->
@@ -504,9 +508,12 @@ class PlaybackStatsRepository @Inject constructor(
                     .asSequence()
                     .mapNotNull { songMap[it.key] }
                     .firstOrNull()
+                val fallbackArt = groupedSongs.asSequence()
+                    .mapNotNull { entry -> normalizedEvents.lastOrNull { it.songId == entry.key }?.thumbnail }
+                    .firstOrNull()
                 AlbumPlaybackSummary(
                     album = album!!,
-                    albumArtUri = firstSong?.albumArtUriString,
+                    albumArtUri = firstSong?.albumArtUriString ?: fallbackArt,
                     totalDurationMs = flattened.sumOf { it.durationMs },
                     playCount = flattened.size,
                     uniqueSongs = uniqueSongCount
