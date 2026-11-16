@@ -904,7 +904,7 @@ fun FullPlayerContent(
                         Row(
                             modifier = Modifier
                                 .padding(end = 14.dp),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             val showCastLabel = isCastConnecting || (isRemotePlaybackActive && selectedRouteName != null)
