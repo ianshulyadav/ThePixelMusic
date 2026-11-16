@@ -39,10 +39,10 @@ import com.unshoo.pixelmusic.ui.theme.PixelMusicTheme
  * creating an authentic atmospheric smoke blend.
  */
 private val SmokeStops = floatArrayOf(
-    0.00f, 0.10f, 0.20f, 0.35f, 0.50f, 0.65f, 0.78f, 0.88f, 0.95f, 1.00f
+    0.00f, 0.12f, 0.25f, 0.38f, 0.50f, 0.62f, 0.72f, 0.82f, 0.90f, 1.00f
 )
 private val SmokeAlphas = floatArrayOf(
-    0.000f, 0.006f, 0.029f, 0.100f, 0.218f, 0.387f, 0.578f, 0.757f, 0.895f, 1.000f
+    0.000f, 0.040f, 0.120f, 0.260f, 0.480f, 0.750f, 0.920f, 0.990f, 1.000f, 1.000f
 )
 
 /**
