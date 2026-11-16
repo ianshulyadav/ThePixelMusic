@@ -448,7 +448,12 @@ class PlaybackStateHolder @Inject constructor(
                                     // just sets playWhenReady=true which does nothing if
                                     // the source is dead. Force stop()+prepare() to reset
                                     // the pipeline and restart from the (now-fresh) media item.
-                                    if (!player.playWhenReady) {
+                                    // Only when the pipeline is genuinely dead (nothing buffered
+                                    // ahead). ExoPlayer keeps loading while paused, so a healthy
+                                    // paused-while-buffering player has data ahead; stopping it threw
+                                    // that buffer away and caused a full reload on every resume.
+                                    val bufferedAheadMs = player.bufferedPosition - player.currentPosition
+                                    if (!player.playWhenReady && bufferedAheadMs < 500L) {
                                         player.stop()
                                         activeCtrl.prepare()
                                     }

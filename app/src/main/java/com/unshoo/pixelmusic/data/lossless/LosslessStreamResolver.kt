@@ -102,6 +102,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
@@ -258,8 +260,45 @@ object LosslessStreamResolver {
         return hasActiveInstalledAddons(context, p)
     }
 
-    fun isEnabledBlocking(context: Context): Boolean =
-        runCatching { runBlocking(Dispatchers.IO) { isEnabled(context) } }.getOrDefault(false)
+    /**
+     * BUGFIX (perf): this is called from ExoPlayer's loader thread on every DataSource open and
+     * from buildPlayer(); each call did a runBlocking DataStore read plus an addon disk load.
+     * Serve a short-lived snapshot instead; [enabledFlow] keeps it current on every toggle.
+     */
+    @Volatile private var enabledSnapshot: Boolean? = null
+    @Volatile private var enabledSnapshotAtMs: Long = 0L
+    private const val ENABLED_SNAPSHOT_TTL_MS = 5_000L
+
+    fun isEnabledBlocking(context: Context): Boolean {
+        val snapshot = enabledSnapshot
+        if (snapshot != null && System.currentTimeMillis() - enabledSnapshotAtMs < ENABLED_SNAPSHOT_TTL_MS) {
+            return snapshot
+        }
+        val fresh = runCatching { runBlocking(Dispatchers.IO) { isEnabled(context) } }.getOrDefault(false)
+        updateEnabledSnapshot(fresh)
+        return fresh
+    }
+
+    private fun updateEnabledSnapshot(enabled: Boolean) {
+        enabledSnapshot = enabled
+        enabledSnapshotAtMs = System.currentTimeMillis()
+    }
+
+    /**
+     * Emits the effective master switch ([isEnabled] semantics) whenever the lossless toggle or the
+     * set of enabled addons changes. Used by the player to purge stream decisions made under the
+     * previous policy so a toggle takes effect on the very next track instead of hours later.
+     */
+    fun enabledFlow(context: Context): Flow<Boolean> =
+        kotlinx.coroutines.flow.combine(
+            context.dataStore.data,
+            AddonManager.installedAddons,
+        ) { p, addons ->
+            val master = p[LosslessStreamingEnabledKey] ?: defaultEnabled()
+            master || ((p[AddonsEnabledKey] ?: true) && addons.any { it.enabled })
+        }
+            .distinctUntilChanged()
+            .onEach { updateEnabledSnapshot(it) }
 
     /** Default for the master switch when the user never touched it: off by default. */
     fun defaultEnabled(): Boolean = false
@@ -459,6 +498,7 @@ object LosslessStreamResolver {
     }
 
     fun clearAll() {
+        enabledSnapshot = null
         directStreamCache.clear()
         addonResultCache.clear()
         resolvedByMediaId.clear()

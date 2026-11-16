@@ -143,6 +143,13 @@ object DownloadHelper {
             return@withContext m4aFile.absolutePath
         }
         if (webmFile.exists() && webmFile.length() > 0) {
+            // Older builds saved AAC data under ".webm"; rename it to its real container so the
+            // library, MediaStore and tag writers recognise it.
+            val sniffed = sniffAudioContainer(webmFile)
+            if (sniffed != null && sniffed.first != "webm") {
+                val fixed = File(audioDir, "${song.youtubeId}.${sniffed.first}")
+                if (webmFile.renameTo(fixed)) return@withContext fixed.absolutePath
+            }
             return@withContext webmFile.absolutePath
         }
 
@@ -359,11 +366,20 @@ object DownloadHelper {
                     throw IOException("Downloaded file is zero bytes")
                 }
 
+                // BUGFIX: the container was guessed from the URL, but googlevideo URLs never contain
+                // ".mp4"/".m4a" (the format is only in the `mime=` query), so every YouTube AAC
+                // download was saved as ".webm" with mime audio/webm. Android then indexed it as a
+                // *video*, the library/Files app did not list it as music, and TagLib could not
+                // write tags. Name the file after its real container bytes instead.
+                val (finalExt, finalMime) = sniffAudioContainer(tempFile) ?: (ext to mimeType)
+                val finalFileName = "$safeTitle - $safeArtist.$finalExt"
+                val finalOutputFile = File(audioDir, "${song.youtubeId}.$finalExt")
+
                 // Copy to custom path if set
                 if (customPath.isNotBlank()) {
                     val treeUri = Uri.parse(customPath)
                     val documentDir = DocumentFile.fromTreeUri(context, treeUri)
-                    val file = documentDir?.createFile(mimeType, dynamicFileName)
+                    val file = documentDir?.createFile(finalMime, finalFileName)
                     val outputUri = file?.uri
                     if (outputUri != null) {
                         context.contentResolver.openOutputStream(outputUri)?.use { out ->
@@ -375,13 +391,17 @@ object DownloadHelper {
                 }
 
                 // Finished downloading audio file successfully
-                if (!tempFile.renameTo(outputFile)) {
-                    tempFile.copyTo(outputFile, overwrite = true)
+                if (!tempFile.renameTo(finalOutputFile)) {
+                    tempFile.copyTo(finalOutputFile, overwrite = true)
                     cleanupTempFile()
                 }
+                if (finalOutputFile != outputFile) {
+                    // A stale mis-named copy from an older build would shadow the correct file.
+                    runCatching { if (outputFile.exists()) outputFile.delete() }
+                }
 
-                enforceStorageLimit(context, keepFile = outputFile)
-                return@withContext outputFile.absolutePath
+                enforceStorageLimit(context, keepFile = finalOutputFile)
+                return@withContext finalOutputFile.absolutePath
 
             } catch (e: CancellationException) {
                 cleanupTempFile()
@@ -406,6 +426,26 @@ object DownloadHelper {
         PixelMusicHelper.printe("All $maxRetries download attempts failed for ${song.title}")
         return@withContext null
     }
+
+    /**
+     * Detects the audio container from its magic bytes: (extension, mime) or null if unknown.
+     * MP4/M4A: "ftyp" at offset 4; Matroska/WebM: 1A 45 DF A3; FLAC: "fLaC"; Ogg: "OggS"; MP3: ID3/frame sync.
+     */
+    internal fun sniffAudioContainer(file: File): Pair<String, String>? = runCatching {
+        val head = ByteArray(12)
+        val read = file.inputStream().use { it.read(head) }
+        if (read < 4) return@runCatching null
+        fun ascii(from: Int, len: Int) = String(head, from, len, Charsets.US_ASCII)
+        when {
+            read >= 8 && ascii(4, 4) == "ftyp" -> "m4a" to "audio/mp4"
+            head[0] == 0x1A.toByte() && head[1] == 0x45.toByte() && head[2] == 0xDF.toByte() && head[3] == 0xA3.toByte() ->
+                "webm" to "audio/webm"
+            ascii(0, 4) == "fLaC" -> "flac" to "audio/flac"
+            ascii(0, 4) == "OggS" -> "ogg" to "audio/ogg"
+            ascii(0, 3) == "ID3" || (head[0] == 0xFF.toByte() && (head[1].toInt() and 0xE0) == 0xE0) -> "mp3" to "audio/mpeg"
+            else -> null
+        }
+    }.getOrNull()
 
     private suspend fun enforceStorageLimit(context: Context, keepFile: File? = null) = withContext(Dispatchers.IO) {
         // User downloaded songs and thumbnails are permanent offline media and must NOT be silently deleted.

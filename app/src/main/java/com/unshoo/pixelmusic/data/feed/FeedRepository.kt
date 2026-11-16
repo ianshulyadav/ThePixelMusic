@@ -95,19 +95,12 @@ class FeedRepository @Inject constructor(
 
         val home = homeDef.await()
         val sections = home?.sections.orEmpty()
+        // Locale-independent shelf kinds (shelf titles are localized through `hl`).
+        val classifiedSections = HomeShelfClassifier.classifyAll(sections)
+        fun sectionsOf(vararg kinds: HomeShelfClassifier.Kind) =
+            classifiedSections.filter { it.second in kinds }.map { it.first }
 
-        val releaseSections = sections.filter { s ->
-            val t = s.title.lowercase()
-            !t.contains("video") && !t.contains("videos") && (
-                t.contains("released") ||
-                t.contains("new release") ||
-                t.contains("new album") || t.contains("latest release") ||
-                t.contains("new music") || t.contains("recent release") ||
-                t.contains("novedades") || t.contains("nouveautés") ||
-                t.contains("veröffentlichungen") || t.contains("release radar") ||
-                t.contains("new for you") || t.contains("fresh")
-            )
-        }
+        val releaseSections = sectionsOf(HomeShelfClassifier.Kind.NEW_RELEASES)
 
         val newReleaseSongTracks = releaseSections.flatMap { it.items }
             .filterIsInstance<unshoo.ianshulyadav.pixelmusic.innertube.models.SongItem>()
@@ -159,12 +152,7 @@ class FeedRepository @Inject constructor(
                 )
             }
 
-        val homeAlbums = sections.filter { s ->
-            val t = s.title.lowercase()
-            !t.contains("new release") && !t.contains("new album") && (
-                t.contains("album") || t.contains("disc") || t.contains("for you")
-            )
-        }
+        val homeAlbums = sectionsOf(HomeShelfClassifier.Kind.ALBUMS)
             .flatMap { it.items }
             .filterIsInstance<unshoo.ianshulyadav.pixelmusic.innertube.models.AlbumItem>()
             .map { album ->
@@ -176,15 +164,18 @@ class FeedRepository @Inject constructor(
                 )
             }
 
-        val homeSongsPreferred = sections.filter { s ->
-            val t = s.title.lowercase()
-            t.contains("quick") || t.contains("listen") || t.contains("recommend") || t.contains("pick")
-        }.flatMap { it.items }.filterIsInstance<unshoo.ianshulyadav.pixelmusic.innertube.models.SongItem>()
+        val homeSongsPreferred = sectionsOf(
+            HomeShelfClassifier.Kind.QUICK_PICKS,
+            HomeShelfClassifier.Kind.LISTEN_AGAIN,
+        ).flatMap { it.items }.filterIsInstance<unshoo.ianshulyadav.pixelmusic.innertube.models.SongItem>()
 
         val allHomeSongItems = if (homeSongsPreferred.isNotEmpty()) {
             homeSongsPreferred
         } else {
-            sections.flatMap { it.items }.filterIsInstance<unshoo.ianshulyadav.pixelmusic.innertube.models.SongItem>()
+            classifiedSections
+                .filter { it.second != HomeShelfClassifier.Kind.MUSIC_VIDEOS && it.second != HomeShelfClassifier.Kind.NEW_RELEASES }
+                .flatMap { it.first.items }
+                .filterIsInstance<unshoo.ianshulyadav.pixelmusic.innertube.models.SongItem>()
         }
 
         val parsedHomeSongs = allHomeSongItems.map { song ->
@@ -354,26 +345,16 @@ class FeedRepository @Inject constructor(
             }.awaitAll()
         }
 
-        val topArtists = topArtistNames.map { name ->
-            async(Dispatchers.IO) {
-                val trackArtwork = artistSignalTracks
-                    .firstOrNull { ArtistHelper.splitArtists(it.artist).any { artist -> artist.equals(name, ignoreCase = true) } }
-                    ?.artworkUrl
-                previous?.topArtists?.firstOrNull { it.name.equals(name, ignoreCase = true) && it.browseId != null }
-                    ?.let { return@async it }
-                val entity = artistSearchSemaphore.withPermit {
-                    runCatching {
-                        innerTube.searchArtists(name, limit = 3)
-                            .firstOrNull { it.name.trim().equals(name, ignoreCase = true) }
-                    }.getOrNull()
-                }
-                FeedArtist(
-                    name = name,
-                    browseId = entity?.browseId,
-                    artworkUrl = entity?.artworkUrl?.takeIf(ArtworkNormalizer::isRealImage) ?: trackArtwork,
-                )
+        // Artist photos come only from the artist's own channel (ArtistImageResolver); a song's
+        // cover is never used, so artists sharing a single no longer all show that single's art.
+        val topArtists = ArtistImageResolver.resolveAll(
+            topArtistNames.map { name ->
+                previous?.topArtists
+                    ?.firstOrNull { it.name.equals(name, ignoreCase = true) && it.browseId != null }
+                    ?.let { prev -> FeedArtist(name = name, browseId = prev.browseId, artworkUrl = null) }
+                    ?: FeedArtist(name = name)
             }
-        }.awaitAll()
+        ) { query, limit -> innerTube.searchArtists(query, limit) }
 
         val blockedReleaseIds = runCatching { userPreferencesRepository.blockedReleaseIdsFlow.first() }.getOrDefault(emptySet())
         val onlineNewReleases = runCatching { innerTube.fetchNewReleases(authenticated = isYtConnected) }.getOrDefault(emptyList())

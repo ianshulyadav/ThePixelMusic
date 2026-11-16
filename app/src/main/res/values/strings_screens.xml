@@ -502,4 +502,7 @@
     <string name="toast_download_cancelled">Download cancelled</string>
     <string name="toast_download_started">Download started</string>
     <string name="toast_removed_dislike">Removed dislike</string>
+    <string name="setcat_oem_background_title">Allow background activity</string>
+    <string name="setcat_oem_background_subtitle">Your phone stops apps cleared from Recents. Turn on \"High background power consumption\" (or \"Allow background activity\") for this app, and lock it in Recents, so music keeps playing.</string>
+    <string name="toast_oem_background_unavailable">Open Settings › Battery › Background power consumption and allow this app</string>
 </resources>
