@@ -54,9 +54,24 @@ class InnerTube {
     private var httpClient = createClient()
 
     var locale = YouTubeLocale(
-        gl = com.unshoo.pixelmusic.data.preferences.getSafeDefaultContentCountry(),
-        hl = com.unshoo.pixelmusic.data.preferences.getSafeDefaultContentLanguage()
+        gl = com.unshoo.pixelmusic.data.preferences.YtLocaleTags.defaultGl(
+            com.unshoo.pixelmusic.data.preferences.getSafeDefaultContentLanguage()
+        ),
+        hl = com.unshoo.pixelmusic.data.preferences.YtLocaleTags.hl(
+            com.unshoo.pixelmusic.data.preferences.getSafeDefaultContentLanguage()
+        )
     )
+
+    /**
+     * Search omits `gl` so YouTube ranks results for the connection's own region (what
+     * music.youtube.com does). Off when the user picked a Content country or for Chinese.
+     */
+    @Volatile
+    var searchOmitsGl: Boolean = true
+
+    /** Sent on every request; YouTube localises some strings from this rather than `hl`. */
+    @Volatile
+    var acceptLanguage: String = "en-US,en;q=0.9"
     @Volatile
     private var authState: PlaybackAuthState = PlaybackAuthState.EMPTY
 
@@ -239,14 +254,16 @@ class InnerTube {
             if (setLogin && client.loginSupported) {
                 authState.cookie?.let { cookie ->
                     append("cookie", cookie)
-                    if ("SAPISID" !in cookieMap) return@let
+                    val sapisid = cookieMap["SAPISID"] ?: cookieMap["__Secure-3PAPISID"] ?: cookieMap["__Secure-1PAPISID"]
+                    if (sapisid == null) return@let
                     val currentTime = System.currentTimeMillis() / 1000
-                    val sapisidHash = sha1("$currentTime ${cookieMap["SAPISID"]} $requestOrigin")
+                    val sapisidHash = sha1("$currentTime $sapisid $requestOrigin")
                     append("Authorization", "SAPISIDHASH ${currentTime}_${sapisidHash}")
                 }
             }
         }
         userAgent(client.userAgent)
+        header("Accept-Language", acceptLanguage)
         parameter("prettyPrint", false)
     }
 
@@ -328,16 +345,16 @@ class InnerTube {
         query: String? = null,
         params: String? = null,
         continuation: String? = null,
-        localeOverride: YouTubeLocale? = null,
     ) = withRetry {
         httpClient.post("search") {
         ytClient(client, setLogin = useLoginForBrowse)
         setBody(
             SearchBody(
                 context = client.toContext(
-                    localeOverride ?: locale,
+                    locale,
                     visitorData,
-                    if (useLoginForBrowse) dataSyncId else null
+                    if (useLoginForBrowse) dataSyncId else null,
+                    omitGl = searchOmitsGl
                 ),
                 query = query,
                 params = params
@@ -472,10 +489,6 @@ class InnerTube {
         formData: BrowseBody.FormData? = null,
         setLogin: Boolean = false,
         forceAnonymous: Boolean = false,
-        // Per-request locale. Callers that need a different region for one request (fallbacks,
-        // charts) must pass it here instead of mutating the shared [locale], which would leak
-        // into every concurrent request.
-        localeOverride: YouTubeLocale? = null,
     ) = withRetry {
         httpClient.post("browse") {
             val finalSetLogin = if (forceAnonymous) false else (setLogin || useLoginForBrowse)
@@ -483,7 +496,7 @@ class InnerTube {
             setBody(
                 BrowseBody(
                     context = client.toContext(
-                        localeOverride ?: locale,
+                        locale,
                         if (forceAnonymous) null else visitorData,
                         if (finalSetLogin) dataSyncId else null
                     ),

@@ -23,6 +23,7 @@ import unshoo.ianshulyadav.pixelmusic.innertube.models.PlaylistItem
 import unshoo.ianshulyadav.pixelmusic.innertube.models.SectionListRenderer
 import unshoo.ianshulyadav.pixelmusic.innertube.models.SongItem
 import unshoo.ianshulyadav.pixelmusic.innertube.models.YTItem
+import unshoo.ianshulyadav.pixelmusic.innertube.models.WatchEndpoint
 import unshoo.ianshulyadav.pixelmusic.innertube.models.oddElements
 import unshoo.ianshulyadav.pixelmusic.innertube.models.filterExplicit
 import unshoo.ianshulyadav.pixelmusic.innertube.models.MusicCardShelfRenderer
@@ -64,6 +65,12 @@ data class HomePage(
         val thumbnail: String?,
         val endpoint: BrowseEndpoint?,
         val items: List<YTItem>,
+        /**
+         * True when the shelf is rendered as a list (musicResponsiveListItemRenderer items) rather
+         * than two-row cards. YouTube Music uses this layout for "Quick picks"; it is the
+         * locale-independent way to find that shelf (see HomeShelfClassifier).
+         */
+        val isListShelf: Boolean = false,
     ) {
         companion object {
             fun fromSectionListContent(content: SectionListRenderer.Content): Section? {
@@ -96,7 +103,8 @@ data class HomePage(
                             label = null,
                             thumbnail = null,
                             endpoint = renderer.bottomEndpoint?.browseEndpoint,
-                            items = items
+                            items = items,
+                            isListShelf = true
                         )
                     }
                     else -> null
@@ -117,7 +125,8 @@ data class HomePage(
                         }
                     }.ifEmpty {
                         return null
-                    }
+                    },
+                    isListShelf = renderer.contents.count { it.musicResponsiveListItemRenderer != null } * 2 > renderer.contents.size
                 )
             }
 
@@ -168,25 +177,37 @@ data class HomePage(
                     }
 
                     renderer.isPlaylist -> {
+                        val playlistId = renderer.navigationEndpoint.browseEndpoint?.browseId?.removePrefix("VL") ?: return null
+                        val playlistTitle = renderer.title.runs?.firstOrNull()?.text ?: return null
+                        val playlistThumbnail = renderer.thumbnailRenderer.musicThumbnailRenderer?.getThumbnailUrl() ?: return null
+                        val authorName = renderer.subtitle?.runs?.lastOrNull()?.text
+                            ?: renderer.subtitle?.runs?.firstOrNull()?.text
+                            ?: "YouTube Music"
+                        val playEndpoint = renderer.thumbnailOverlay
+                            ?.musicItemThumbnailOverlayRenderer?.content
+                            ?.musicPlayButtonRenderer?.playNavigationEndpoint
+                            ?.watchPlaylistEndpoint
+                            ?: WatchEndpoint(playlistId = playlistId)
+                        val shuffleEndpoint = renderer.menu?.menuRenderer?.items?.find {
+                            it.menuNavigationItemRenderer?.icon?.iconType == "MUSIC_SHUFFLE"
+                        }?.menuNavigationItemRenderer?.navigationEndpoint?.watchPlaylistEndpoint
+                            ?: WatchEndpoint(playlistId = playlistId, params = "wAEB")
+                        val radioEndpoint = renderer.menu?.menuRenderer?.items?.find {
+                            it.menuNavigationItemRenderer?.icon?.iconType == "MIX"
+                        }?.menuNavigationItemRenderer?.navigationEndpoint?.watchPlaylistEndpoint
+
                         PlaylistItem(
-                            id = renderer.navigationEndpoint.browseEndpoint?.browseId?.removePrefix("VL") ?: return null,
-                            title = renderer.title.runs?.firstOrNull()?.text ?: return null,
+                            id = playlistId,
+                            title = playlistTitle,
                             author = Artist(
-                                name = renderer.subtitle?.runs?.lastOrNull()?.text ?: return null,
+                                name = authorName,
                                 id = null
                             ),
                             songCountText = null,
-                            thumbnail = renderer.thumbnailRenderer.musicThumbnailRenderer?.getThumbnailUrl() ?: return null,
-                            playEndpoint = renderer.thumbnailOverlay
-                                ?.musicItemThumbnailOverlayRenderer?.content
-                                ?.musicPlayButtonRenderer?.playNavigationEndpoint
-                                ?.watchPlaylistEndpoint ?: return null,
-                            shuffleEndpoint = renderer.menu?.menuRenderer?.items?.find {
-                                it.menuNavigationItemRenderer?.icon?.iconType == "MUSIC_SHUFFLE"
-                            }?.menuNavigationItemRenderer?.navigationEndpoint?.watchPlaylistEndpoint ?: return null,
-                            radioEndpoint = renderer.menu.menuRenderer.items.find {
-                                it.menuNavigationItemRenderer?.icon?.iconType == "MIX"
-                            }?.menuNavigationItemRenderer?.navigationEndpoint?.watchPlaylistEndpoint
+                            thumbnail = playlistThumbnail,
+                            playEndpoint = playEndpoint,
+                            shuffleEndpoint = shuffleEndpoint,
+                            radioEndpoint = radioEndpoint
                         )
                     }
 

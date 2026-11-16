@@ -5,6 +5,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import coil.imageLoader
 import coil.request.ImageRequest
+import com.unshoo.pixelmusic.utils.ContentFilterUtils
+import com.unshoo.pixelmusic.data.feed.HomeShelfClassifier
+import com.unshoo.pixelmusic.data.feed.ArtistImageResolver
 import com.unshoo.pixelmusic.data.database.MusicDao
 import com.unshoo.pixelmusic.data.model.Playlist
 import com.unshoo.pixelmusic.data.model.Song
@@ -430,6 +433,21 @@ class ExploreViewModel @Inject constructor(
                     loadData(forceRefresh = true)
                 }
         }
+        // Content rules changed (Pure YT Music, filtered words, cover/lo-fi, blocked releases):
+        // rebuild Explore so hidden items disappear everywhere without waiting for the next refresh.
+        viewModelScope.launch {
+            combine(
+                userPreferencesRepository.pureYtMusicOnlyFlow,
+                userPreferencesRepository.filterCoverAndLofiFlow,
+                userPreferencesRepository.filterKeywordsFlow,
+            ) { pure, cover, words -> Triple(pure, cover, words) }
+                .distinctUntilChanged()
+                .drop(1)
+                .collect {
+                    runCatching { cacheFile.delete() }
+                    loadData(forceRefresh = true)
+                }
+        }
         viewModelScope.launch {
             userPreferencesRepository.youtubePersonalizedQueueFlow
                 .distinctUntilChanged()
@@ -512,8 +530,10 @@ class ExploreViewModel @Inject constructor(
                         FeedArtist(
                             name = displayName,
                             browseId = null,
-                            artworkUrl = matchingEntry?.thumbnail
+                            artworkUrl = null // a played song's cover is not the artist's photo
                         )
+                    }.let { list ->
+                        ArtistImageResolver.resolveAll(list) { q, limit -> feedInnerTube.searchArtists(q, limit) }
                     }
 
                     _uiState.update { current ->
@@ -558,11 +578,27 @@ class ExploreViewModel @Inject constructor(
                     }
                     return false
                 }
-                val json = cacheFile.readText()
-                val cache = gson.fromJson(json, ExploreCacheModel::class.java)
-                // Only restore when the cache holds the real compiled feed. Older caches only had raw
-                // shelves, and rebuilding the feed from those showed unrelated artists/picks until a
-                // forced refresh replaced them. Without it, fall through to a fresh online load.
+                // BUGFIX (jank): the up-to-500KB cache read + Gson parse ran on the main thread
+                // (viewModelScope) on every Explore entry, dropping frames during the enter transition.
+                val parsedCache = withContext(ioDispatcher) {
+                    gson.fromJson(cacheFile.readText(), ExploreCacheModel::class.java)
+                }
+                // Never flash content fetched for a different account state (e.g. signed-out home
+                // that is then replaced by the personalised one): fetch fresh instead.
+                val currentAuthKey = syncYouTubeAuth()
+                if (parsedCache != null && parsedCache.authKey != currentAuthKey) {
+                    Timber.d("Explore cache belongs to %s, current is %s; skipping restore", parsedCache.authKey, currentAuthKey)
+                    return false
+                }
+                val activeFilter = loadContentFilter()
+                val cache = parsedCache?.let { c ->
+                    c.copy(
+                        newReleaseAlbums = c.newReleaseAlbums.filter(activeFilter::allowsAlbum),
+                        albumsForYou = c.albumsForYou.filter(activeFilter::allowsAlbum),
+                    )
+                }
+                // Only restore when the cache also holds the compiled feed that was on screen. Rebuilding
+                // the feed from raw shelves showed unrelated artists/picks until a forced refresh.
                 if (cache != null && cache.sections.isNotEmpty() && cache.feedData != null) {
                     val age = System.currentTimeMillis() - cache.timestamp
                     if (age >= CACHE_TIER_EXPIRED_MS) {
@@ -610,35 +646,18 @@ class ExploreViewModel @Inject constructor(
                             browseId = album.browseId.takeIf { it.isNotBlank() } ?: album.playlistId
                         )
                     }.distinctBy { it.browseId ?: it.title }
-                    // Use the personalised artists from the cached compiled feed, never every artist
-                    // found on every shelf (that produced the unrelated "Artists for you" list).
+                    // Personalised artists from the cached compiled feed, never every artist found on
+                    // every shelf (that produced an unrelated "Artists for you" list on cached opens).
                     val cachedArtists = cache.feedData?.topArtists.orEmpty()
-                    val quickShelf = cache.sections.firstOrNull { 
-                        val t = it.title.lowercase()
-                        (t.contains("quick pick") || t.contains("quick picks")) && !t.contains("start radio")
-                    }
-                    val cachedYtQuickPicks = quickShelf?.items
-                        ?.filterIsInstance<SongItem>()
-                        ?.filterVideo(true)
-                        ?.map { it.toNativeSong() }
-                        .orEmpty()
-                    val cachedOtherSections = cache.sections.filter { section ->
-                        val t = section.title.lowercase()
-                        !t.contains("quick pick") &&
-                        !(cachedAlbums.isNotEmpty() && t.contains("albums for you")) &&
-                        !(cachedNewReleases.isNotEmpty() && (t.contains("new release") || t.contains("new for you"))) &&
-                        !t.contains("video")
-                    }
-                    val cachedDiscoverSongs = cache.sections
-                        .filter { section ->
-                            val title = section.title
-                            title.contains("daily discover", ignoreCase = true) ||
-                            (title.contains("discover", ignoreCase = true) && title.contains("daily", ignoreCase = true))
-                        }
-                        .flatMap { section ->
-                            section.items.filterIsInstance<SongItem>().map { it.toNativeSong() }
-                        }
-                        .distinctBy { it.id }
+                    // Same structural classification as the network path so a cache restore and the
+                    // following refresh never disagree on which shelf is which.
+                    val cachedShelves = classifyHomeShelves(cache.sections)
+                    val cachedYtQuickPicks = cachedShelves.quickPickSongs
+                    val cachedOtherSections = cachedShelves.otherSections(
+                        hasAlbums = cachedAlbums.isNotEmpty(),
+                        hasNewReleases = cachedNewReleases.isNotEmpty()
+                    )
+                    val cachedDiscoverSongs = cachedShelves.discoverSongs
 
                     val (cachedChartTracks, cachedChartSummaries) = parseChartData(cache.charts)
 
@@ -724,6 +743,132 @@ class ExploreViewModel @Inject constructor(
         }
     }
 
+    /** Result of classifying one `FEmusic_home` response; shared by the network and cache paths. */
+    private class HomeShelves(
+        val sections: List<HomePage.Section>,
+        val kindByTitle: Map<String, HomeShelfClassifier.Kind>,
+        val quickPickSongs: List<Song>,
+        val discoverSongs: List<Song>,
+    ) {
+        fun otherSections(hasAlbums: Boolean, hasNewReleases: Boolean): List<HomePage.Section> =
+            sections.filter { section ->
+                when (kindByTitle[section.title]) {
+                    HomeShelfClassifier.Kind.QUICK_PICKS,
+                    HomeShelfClassifier.Kind.MUSIC_VIDEOS -> false
+                    HomeShelfClassifier.Kind.ALBUMS -> !hasAlbums
+                    HomeShelfClassifier.Kind.NEW_RELEASES -> !hasNewReleases
+                    else -> true
+                }
+            }
+    }
+
+    /** User content rules applied to every Explore shelf (same rules FeedRepository applies). */
+    private data class ExploreContentFilter(
+        val pureYtMusicOnly: Boolean = false,
+        val filterCoverAndLofi: Boolean = false,
+        val keywords: List<String> = emptyList(),
+        val blockedReleaseIds: Set<String> = emptySet(),
+    ) {
+        fun rejects(title: String?, artist: String?, album: String?): Boolean =
+            ContentFilterUtils.matchesFilterKeywords(title, artist, album, keywords) ||
+                (filterCoverAndLofi && ContentFilterUtils.isCoverOrLofi(title, artist, album, keywords))
+
+        fun allows(item: YTItem): Boolean = when (item) {
+            is SongItem -> !(pureYtMusicOnly && (item.isMusicVideo || ContentFilterUtils.isVideoTitle(item.title))) &&
+                !rejects(item.title, item.artists.joinToString(", ") { it.name }, item.album?.name)
+            is AlbumItem -> item.browseId !in blockedReleaseIds &&
+                !rejects(item.title, item.artists?.joinToString(", ") { it.name }, null)
+            is PlaylistItem -> !rejects(item.title, item.author?.name, null)
+            else -> true
+        }
+
+        fun allowsAlbum(album: AlbumItem): Boolean = allows(album)
+    }
+
+    @Volatile private var contentFilter = ExploreContentFilter()
+
+    private suspend fun loadContentFilter(): ExploreContentFilter = ExploreContentFilter(
+        pureYtMusicOnly = runCatching { userPreferencesRepository.pureYtMusicOnlyFlow.first() }.getOrDefault(false),
+        filterCoverAndLofi = runCatching { userPreferencesRepository.filterCoverAndLofiFlow.first() }.getOrDefault(true),
+        keywords = runCatching { userPreferencesRepository.filterKeywordsFlow.first() }
+            .getOrDefault(ContentFilterUtils.DEFAULT_FILTER_KEYWORDS.toList()),
+        blockedReleaseIds = runCatching { userPreferencesRepository.blockedReleaseIdsFlow.first() }.getOrDefault(emptySet()),
+    ).also { contentFilter = it }
+
+    /**
+     * Makes sure the signed-in cookie is on the InnerTube client BEFORE the first home request.
+     * MainViewModel copies it asynchronously, so on a cold start Explore used to fetch the
+     * anonymous home first and then swap in the personalised one a moment later.
+     * Returns the account key used to tag/validate the disk cache.
+     */
+    private suspend fun syncYouTubeAuth(): String {
+        val raw = runCatching { datastoreRepository.cookies.first().toRawCookie() }.getOrDefault("")
+        val hasAuth = raw.contains("SAPISID=") || raw.contains("__Secure-3PAPISID=") || raw.contains("__Secure-1PAPISID=")
+        val dataSyncId = runCatching { datastoreRepository.dataSyncId.first() }.getOrNull()
+        if (!dataSyncId.isNullOrBlank() && YouTube.dataSyncId != dataSyncId) {
+            YouTube.dataSyncId = dataSyncId
+        }
+        if (hasAuth) {
+            if (YouTube.cookie != raw) {
+                YouTube.cookie = raw
+                YouTube.invalidateHomeCache()
+            }
+            YouTube.useLoginForBrowse = true
+        }
+        if (!hasAuth) return "anon"
+        val account = runCatching { datastoreRepository.ytUsername.first() }.getOrDefault("")
+        return "auth:" + account.ifBlank { "account" }
+    }
+
+    private fun classifyHomeShelves(input: List<HomePage.Section>): HomeShelves {
+        val filter = contentFilter
+        val classified = HomeShelfClassifier.classifyAll(
+            input.map { it.copy(items = it.items.filter(filter::allows)) }.filter { it.items.isNotEmpty() }
+        )
+        val kinds = LinkedHashMap<String, HomeShelfClassifier.Kind>()
+        val sections = ArrayList<HomePage.Section>(classified.size)
+        for ((section, kind) in classified) {
+            if (kind == HomeShelfClassifier.Kind.TRENDING) continue
+            // Pure YT Music mode hides videos everywhere, including the dedicated video shelves.
+            if (kind == HomeShelfClassifier.Kind.MUSIC_VIDEOS && filter.pureYtMusicOnly) continue
+            if (kinds.containsKey(section.title)) continue
+            val title = section.title.lowercase()
+            if (title.contains("long listens") || title.contains("local")) continue
+            val cleaned = if (kind == HomeShelfClassifier.Kind.MUSIC_VIDEOS) {
+                section
+            } else {
+                section.copy(items = section.items.filterVideo(true))
+            }
+            if (cleaned.items.isEmpty()) continue
+            kinds[section.title] = kind
+            sections.add(cleaned)
+        }
+
+        val quickShelf = sections.firstOrNull { kinds[it.title] == HomeShelfClassifier.Kind.QUICK_PICKS }
+        // BUGFIX: without a recognised Quick picks shelf (every non-English locale before the
+        // classifier) this fell back to every song on the whole page, mixing "Listen again",
+        // new-release singles and mood shelves into Quick picks. Fall back to the songs of the
+        // first audio song shelf only.
+        val quickSource = quickShelf ?: sections.firstOrNull { section ->
+            val kind = kinds[section.title]
+            kind != HomeShelfClassifier.Kind.MUSIC_VIDEOS && kind != HomeShelfClassifier.Kind.NEW_RELEASES &&
+                section.items.count { it is SongItem } * 2 >= section.items.size
+        }
+        val quickPicks = quickSource?.items.orEmpty()
+            .filterIsInstance<SongItem>()
+            .filterNot { it.isMusicVideo }
+            .distinctBy { it.id }
+            .map { it.toNativeSong() }
+            .take(20)
+
+        val discover = sections
+            .filter { kinds[it.title] == HomeShelfClassifier.Kind.DAILY_DISCOVER }
+            .flatMap { section -> section.items.filterIsInstance<SongItem>().map { it.toNativeSong() } }
+            .distinctBy { it.id }
+
+        return HomeShelves(sections, kinds, quickPicks, discover)
+    }
+
     private data class PreparedExploreData(
         val rawSections: List<HomePage.Section>,
         val resolvedNewReleases: List<AlbumItem>,
@@ -753,7 +898,8 @@ class ExploreViewModel @Inject constructor(
         moodChips: List<HomePage.Chip> = emptyList(),
         newReleases: List<AlbumItem> = emptyList(),
         albums: List<AlbumItem> = emptyList(),
-        continuation: String? = null
+        continuation: String? = null,
+        authKey: String? = null
     ) {
         viewModelScope.launch(ioDispatcher) {
             try {
@@ -766,6 +912,7 @@ class ExploreViewModel @Inject constructor(
                     charts = null,
                     continuation = continuation,
                     timestamp = System.currentTimeMillis(),
+                    authKey = authKey,
                     feedData = _feedDataState.value.takeIf { it.lastUpdatedMillis > 0L || it.quickPicks.isNotEmpty() || it.topArtists.isNotEmpty() }
                 )
                 val json = gson.toJson(cache)
@@ -870,6 +1017,23 @@ class ExploreViewModel @Inject constructor(
         return job
     }
 
+    /**
+     * BUGFIX: a failed background refresh (stale-cache silent refresh, pull-to-refresh, flaky
+     * network) replaced the visible Content with the full-screen Error state, so users lost the
+     * shelves they were looking at. When content is on screen keep it, stop the refresh indicator
+     * and only expose the error message. Returns true when content was kept.
+     */
+    private fun keepContentOnRefreshFailure(message: String): Boolean {
+        val content = _screenUiState.value as? ExploreScreenUiState.Content ?: return false
+        _errorState.value = message
+        _isLoadingState.value = false
+        _isRefreshingState.value = false
+        _isSettledState.value = true
+        _uiState.update { it.copy(isLoading = false, isRefreshing = false, isSettled = true, error = message) }
+        _screenUiState.value = content.copy(isRefreshing = false)
+        return true
+    }
+
     fun loadData(forceRefresh: Boolean = false) {
         refreshOnEntry(force = forceRefresh)
     }
@@ -908,13 +1072,18 @@ class ExploreViewModel @Inject constructor(
         stage2Job?.cancel()
 
         try {
+            // BUGFIX (race): init launched refreshOnEntry() before the coroutine that copies the
+            // "personalized explore" preference into YouTube.personalizedExploreEnabled, so the first
+            // home request of a session could ignore the user's choice. Apply it before any request.
+            YouTube.personalizedExploreEnabled = runCatching {
+                userPreferencesRepository.youtubePersonalizedExploreFlow.first()
+            }.getOrDefault(YouTube.personalizedExploreEnabled)
             val isAdvancedExploreEnabled = userPreferencesRepository.advancedExplorePageFlow.first()
             _uiState.update { it.copy(isAdvancedExploreEnabled = isAdvancedExploreEnabled) }
 
-            val cookies = runCatching { datastoreRepository.cookies.first() }.getOrNull()
-            val isYtConnected = cookies?.toRawCookie()?.let {
-                it.contains("SAPISID=") || it.contains("__Secure-3PAPISID=")
-            } == true
+            val authKey = syncYouTubeAuth()
+            val isYtConnected = authKey != "anon"
+            val filter = loadContentFilter()
 
             // Stage 1: Fetch source payloads on IO dispatcher
             val onlinePayload = withContext(ioDispatcher) {
@@ -945,8 +1114,8 @@ class ExploreViewModel @Inject constructor(
             }
 
             val initialHome = onlinePayload.initialHome
-            val ytNewReleases = onlinePayload.ytNewReleases
-            val authAccountAlbums = onlinePayload.authAccountAlbums
+            val ytNewReleases = onlinePayload.ytNewReleases.filter(filter::allowsAlbum)
+            val authAccountAlbums = onlinePayload.authAccountAlbums.filter(filter::allowsAlbum)
             val feedDataResult = onlinePayload.feedDataResult
 
             if (generation != currentRefreshGeneration) return
@@ -958,31 +1127,15 @@ class ExploreViewModel @Inject constructor(
                     combinedSections.addAll(initialHome.sections)
                     val continuation = initialHome.continuation
 
-                    // Preserve video sections (e.g. Music videos for you) while keeping pure audio for other shelves
-                    val rawSections = combinedSections.map { section ->
-                        val isVideoSection = section.title.contains("video", ignoreCase = true)
-                        if (isVideoSection) section else section.copy(items = section.items.filterVideo(true))
-                    }.filter { section ->
-                        val title = section.title.lowercase()
-                        !title.contains("trending") &&
-                        !title.contains("long listens") &&
-                        !title.contains("local") &&
-                        section.items.isNotEmpty()
-                    }.distinctBy { it.title }
+                    // Classify shelves structurally (locale independent, see HomeShelfClassifier)
+                    // and keep pure audio everywhere except dedicated music-video shelves.
+                    val shelves = classifyHomeShelves(combinedSections)
+                    val rawSections = shelves.sections
+                    val kindOf = shelves.kindByTitle
 
                     // Extract personalized new releases directly from user's YouTube Home feed
                     val personalizedNewReleases = rawSections.filter { section ->
-                        val t = section.title.lowercase()
-                        !t.contains("video") && !t.contains("videos") && (
-                            t.contains("released") ||
-                            t.contains("new release") || t.contains("new releases") ||
-                            t.contains("new album") || t.contains("latest release") ||
-                            t.contains("new music") || t.contains("recent release") ||
-                            t.contains("novedades") || t.contains("nouveautés") ||
-                            t.contains("veröffentlichungen") || t.contains("release radar") ||
-                            t.contains("new for you") ||
-                            section.label?.lowercase()?.contains("release") == true
-                        )
+                        kindOf[section.title] == HomeShelfClassifier.Kind.NEW_RELEASES
                     }.flatMap { it.items }.mapNotNull { item ->
                         when (item) {
                             is AlbumItem -> item
@@ -1003,11 +1156,7 @@ class ExploreViewModel @Inject constructor(
 
                     // Extract dedicated YouTube homepage albums
                     val dedicatedAlbumSections = rawSections.filter { section ->
-                        val t = section.title.lowercase()
-                        !t.contains("video") && !t.contains("videos") && (
-                            t.contains("album") || section.label?.lowercase()?.contains("album") == true ||
-                            (t.contains("for you") && section.items.any { it is AlbumItem })
-                        )
+                        kindOf[section.title] == HomeShelfClassifier.Kind.ALBUMS
                     }
 
                     val dedicatedAlbums = dedicatedAlbumSections.flatMap { it.items }.mapNotNull { item ->
@@ -1029,7 +1178,10 @@ class ExploreViewModel @Inject constructor(
                     }
 
                     val otherHomeAlbums = rawSections.filterNot { dedicatedAlbumSections.contains(it) }
-                        .filter { !it.title.contains("video", ignoreCase = true) }
+                        .filter {
+                            val kind = kindOf[it.title]
+                            kind != HomeShelfClassifier.Kind.MUSIC_VIDEOS && kind != HomeShelfClassifier.Kind.NEW_RELEASES
+                        }
                         .flatMap { it.items }
                         .filterIsInstance<AlbumItem>()
 
@@ -1040,26 +1192,30 @@ class ExploreViewModel @Inject constructor(
                     val uiChips = rawChips.map { ExploreChipUiModel(it.title, it.endpoint?.browseId, it.endpoint?.params) }
 
                     // Quick picks extracted from Home
-                    val quickShelf = rawSections.firstOrNull { 
-                        val t = it.title.lowercase()
-                        (t.contains("quick pick") || t.contains("quick picks")) && !t.contains("start radio")
-                    }
-                    val ytHomeQuickPicks = (quickShelf?.items?.filterIsInstance<SongItem>()
-                        ?: rawSections.flatMap { it.items }.filterIsInstance<SongItem>())
-                        .filterVideo(true)
-                        .map { it.toNativeSong() }
-                        .take(20)
+                    val ytHomeQuickPicks = shelves.quickPickSongs
 
-                    // Artists for you: prioritize authentic top artists from feedRepository
-                    val artistsForYou = if (feedDataResult?.topArtists?.isNotEmpty() == true) {
+                    val knownArtistAvatars = rawSections.flatMap { it.items }
+                        .filterIsInstance<ArtistItem>()
+                        .associate { it.title.trim().lowercase() to it.thumbnail }
+
+                    // Artists for you: prioritize authentic top artists from feedRepository.
+                    // Avatars come only from ArtistItems or the artist's own channel, never a song cover
+                    // (that made every artist of one single share its art).
+                    val artistsForYouRaw = if (feedDataResult?.topArtists?.isNotEmpty() == true) {
                         feedDataResult.topArtists
                     } else {
                         rawSections.flatMap { it.items }
                             .flatMap { item ->
                                 when (item) {
                                     is ArtistItem -> listOf(FeedArtist(item.title, item.id, item.thumbnail))
-                                    is SongItem -> item.artists.map { FeedArtist(it.name, it.id, item.thumbnail) }
-                                    is AlbumItem -> item.artists.orEmpty().map { FeedArtist(it.name, it.id, item.thumbnail) }
+                                    is SongItem -> item.artists.map { artistRef ->
+                                        val realAvatar = knownArtistAvatars[artistRef.name.trim().lowercase()]
+                                        FeedArtist(artistRef.name, artistRef.id, realAvatar)
+                                    }
+                                    is AlbumItem -> item.artists.orEmpty().map { artistRef ->
+                                        val realAvatar = knownArtistAvatars[artistRef.name.trim().lowercase()]
+                                        FeedArtist(artistRef.name, artistRef.id, realAvatar)
+                                    }
                                     else -> emptyList()
                                 }
                             }
@@ -1067,6 +1223,14 @@ class ExploreViewModel @Inject constructor(
                             .distinctBy { it.name.trim().lowercase() }
                             .take(10)
                     }
+
+                    // Real channel photos for artists without one (bounded so Explore never waits long;
+                    // anything unresolved shows the placeholder and is cached for the next refresh).
+                    val artistsForYou = kotlinx.coroutines.withTimeoutOrNull(2_500L) {
+                        ArtistImageResolver.resolveAll(artistsForYouRaw) { q, limit ->
+                            feedInnerTube.searchArtists(q, limit)
+                        }
+                    } ?: artistsForYouRaw.map(ArtistImageResolver::cached)
 
                     // New Releases mapped to YouTubePlaylistSummary
                     val newReleasesSummaries = resolvedNewReleases.map { album ->
@@ -1102,26 +1266,14 @@ class ExploreViewModel @Inject constructor(
                     }
 
                     // Other home sections
-                    val otherSections = rawSections.filter { section ->
-                        val t = section.title.lowercase()
-                        !t.contains("quick pick") &&
-                        !(preparedAlbums.isNotEmpty() && t.contains("albums for you")) &&
-                        !(newReleasesSummaries.isNotEmpty() && (t.contains("new release") || t.contains("new for you"))) &&
-                        !t.contains("video")
-                    }
+                    val otherSections = shelves.otherSections(
+                        hasAlbums = preparedAlbums.isNotEmpty(),
+                        hasNewReleases = newReleasesSummaries.isNotEmpty()
+                    )
                     val uiSections = rawSections.map { it.toUiModel() }
 
                     // Discover songs for HomeScreen
-                    val discoverSongs = rawSections
-                        .filter { section ->
-                            val title = section.title
-                            title.contains("daily discover", ignoreCase = true) ||
-                            (title.contains("discover", ignoreCase = true) && title.contains("daily", ignoreCase = true))
-                        }
-                        .flatMap { section ->
-                            section.items.filterIsInstance<SongItem>().map { it.toNativeSong() }
-                        }
-                        .distinctBy { it.id }
+                    val discoverSongs = shelves.discoverSongs
 
                     val uiQuickPicks = ytHomeQuickPicks.map { it.toSongUiModel() }
                     val uiNewReleases = resolvedNewReleases.map { it.toAlbumUiModel() }
@@ -1185,7 +1337,7 @@ class ExploreViewModel @Inject constructor(
                         mixesFromQuickPicks.ifEmpty {
                             rawSections.flatMap { it.items }
                                 .filterIsInstance<PlaylistItem>()
-                                .filter { it.id.startsWith("RD") || it.id.startsWith("PL") || it.title.contains("mix", ignoreCase = true) }
+                                .filter { HomeShelfClassifier.isRadioMixId(it.id) || it.title.contains("mix", ignoreCase = true) }
                                 .map { item ->
                                     FeedMix(
                                         title = item.title,
@@ -1362,12 +1514,14 @@ class ExploreViewModel @Inject constructor(
                     moodChips = prepared.rawChips,
                     newReleases = prepared.resolvedNewReleases,
                     albums = prepared.personalizedAlbums,
-                    continuation = prepared.currentContinuation
+                    continuation = prepared.currentContinuation,
+                    authKey = authKey
                 )
             } else {
                 // If primary data failed or was empty, surface error per contract (do NOT silently show stale cache)
                 if (generation != currentRefreshGeneration) return
                 val msg = "Failed to fetch explore data. Check connection."
+                if (keepContentOnRefreshFailure(msg)) return
                 _errorState.value = msg
                 _isLoadingState.value = false
                 _isRefreshingState.value = false
@@ -1392,6 +1546,7 @@ class ExploreViewModel @Inject constructor(
             Timber.e(e, "Error loading Explore screen data")
             if (generation != currentRefreshGeneration) return
             val msg = e.localizedMessage ?: "Unknown error occurred"
+            if (keepContentOnRefreshFailure(msg)) return
             _errorState.value = msg
             _isLoadingState.value = false
             _isRefreshingState.value = false
@@ -2142,8 +2297,10 @@ data class ExploreCacheModel(
     val charts: ChartsPage? = null,
     val continuation: String? = null,
     val timestamp: Long = 0L,
+    /** Account the payload was fetched for ("anon" or "auth:<account>"); null in old caches. */
+    val authKey: String? = null,
     /** The exact feed that was on screen when cached. Null in caches written by older versions. */
-    val feedData: FeedData? = null
+    val feedData: FeedData? = null,
 )
 
 private class YTItemTypeAdapter : com.google.gson.JsonSerializer<YTItem>, com.google.gson.JsonDeserializer<YTItem> {

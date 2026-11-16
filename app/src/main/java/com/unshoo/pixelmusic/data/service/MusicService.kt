@@ -246,6 +246,8 @@ class MusicService : MediaLibraryService() {
 
     companion object {
         private const val TAG = "MusicService_PixelMusic"
+        /** Only auto-resume when the service comes back soon after the kill (sticky restart). */
+        private const val RESUME_AFTER_KILL_WINDOW_MS = 3 * 60 * 1000L
         const val NOTIFICATION_ID = 101
         const val ACTION_SLEEP_TIMER_EXPIRED = "com.unshoo.pixelmusic.ACTION_SLEEP_TIMER_EXPIRED"
         const val EXTRA_FORCE_FOREGROUND_ON_START =
@@ -1523,7 +1525,7 @@ class MusicService : MediaLibraryService() {
                 mediaSession?.let { refreshMediaSessionUi(it, force = false) }
             }
         }
-        return startCommandResult
+        return if (keepPlayingInBackground) START_STICKY else startCommandResult
     }
 
 
@@ -1778,6 +1780,10 @@ class MusicService : MediaLibraryService() {
         }
 
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            // The user (or a pause action) stopped playback: never auto-resume it after a later restart.
+            if (!playWhenReady) {
+                runCatching { resumeAfterKillPrefs.edit().remove("marked_at").apply() }
+            }
             when {
                 playWhenReady -> clearHeadsetReconnectResume()
                 !resumeOnHeadsetReconnectEnabled -> clearHeadsetReconnectResume()
@@ -2036,11 +2042,15 @@ class MusicService : MediaLibraryService() {
                         val rawUriString = rawItem.localConfiguration?.uri?.toString().orEmpty()
                         // BUGFIX: also handle bare 11-char mediaIds for googlevideo remap
                         val rawIsLossless = com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver.isLosslessUri(rawUriString)
+                        // BUGFIX: JioSaavn links were re-fed unchanged; their 2h freshness mark made
+                        // preResolveForPlayback() treat the failing URL as fresh -> recovery loop.
+                        val rawIsSaavn = rawUriString.contains("saavncdn.com") || rawUriString.contains("jiosaavn.com")
+                        val rawNeedsSourceReset = rawUriString.contains("googlevideo.com") || rawIsLossless || rawIsSaavn
                         val ytVideoId = rawItem.mediaId
                             .takeIf { it.startsWith("youtube_") }
                             ?.removePrefix("youtube_")
                             ?: rawItem.mediaId.takeIf {
-                                (rawUriString.contains("googlevideo.com") || rawIsLossless) && it.length == 11 && !it.contains("_")
+                                rawNeedsSourceReset && it.length == 11 && !it.all(Char::isDigit)
                             }
 
                         if (!ytVideoId.isNullOrBlank()) {
@@ -2057,10 +2067,15 @@ class MusicService : MediaLibraryService() {
                         } else null
 
                         val item = if (
-                            (rawUriString.contains("googlevideo.com") || rawIsLossless || isMonochrome) && !ytVideoId.isNullOrBlank()
+                            (rawNeedsSourceReset || isMonochrome) && !ytVideoId.isNullOrBlank()
                         ) {
+                            if (rawIsSaavn) {
+                                com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver.markUriFresh(rawUriString, 0L)
+                            }
                             rawItem.buildUpon()
                                 .setUri(android.net.Uri.parse("youtube://$ytVideoId"))
+                                .setCustomCacheKey(null)
+                                .setMimeType(null)
                                 .build()
                         } else if (isMonochrome && !monoTrackId.isNullOrBlank()) {
                             rawItem.buildUpon()
@@ -2470,16 +2485,35 @@ class MusicService : MediaLibraryService() {
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         val session = mediaSession
-        val continuePlayback = session?.player?.hasForegroundPlaybackIntent() == true && keepPlayingInBackground
-        if (continuePlayback && session != null) {
-            if (!isPlaybackOngoing()) {
+        val activePlayer = session?.player ?: engine.masterPlayer
+        val hasMediaItems = activePlayer.mediaItemCount > 0 || engine.masterPlayer.currentMediaItem != null
+        val isPlaybackActive = activePlayer.playWhenReady || activePlayer.isPlaying || isPlaybackOngoing()
+
+        if (keepPlayingInBackground && (hasMediaItems || isPlaybackActive || session != null)) {
+            Timber.tag(TAG).i(
+                "Task removed with keepPlayingInBackground=true. Preserving service and playback."
+            )
+            // Vivo/OPPO-family cleaners kill the whole process right after this callback, which no
+            // service code can prevent. Save the exact queue/position now and leave a marker, so
+            // that when Android restarts this START_STICKY service it resumes playback by itself.
+            if (activePlayer.playWhenReady || activePlayer.isPlaying) {
+                runCatching { persistPlaybackSnapshotBlocking() }
+                markResumeAfterKill()
+            }
+            if (session != null && !isPlaybackOngoing()) {
                 Timber.tag(TAG).w(
                     "Task removed while playing without foreground state; re-promoting."
                 )
-                onUpdateNotification(session, startInForegroundRequired = true)
+                try {
+                    onUpdateNotification(session, startInForegroundRequired = true)
+                } catch (e: Exception) {
+                    Timber.tag(TAG).w(e, "Failed to re-promote foreground onTaskRemoved")
+                }
             }
             return
         }
+
+        Timber.tag(TAG).d("Task removed and keepPlayingInBackground is false. Stopping playback and unloading.")
         stopPlaybackAndUnload(reason = "task_removed", preservePlaybackSnapshot = true)
     }
 
@@ -2780,6 +2814,24 @@ class MusicService : MediaLibraryService() {
         )
     }
 
+    // ── Resume after an OEM "clear from Recents" kill ─────────────────────────────────────
+    private val resumeAfterKillPrefs by lazy {
+        getSharedPreferences("playback_resume_after_kill", MODE_PRIVATE)
+    }
+
+    private fun markResumeAfterKill() {
+        // commit(), not apply(): the process may die before an async write lands.
+        resumeAfterKillPrefs.edit().putLong("marked_at", System.currentTimeMillis()).commit()
+    }
+
+    /** True once if playback was interrupted by a Recents kill in the last few minutes. */
+    private fun consumeResumeAfterKill(): Boolean {
+        val markedAt = resumeAfterKillPrefs.getLong("marked_at", 0L)
+        if (markedAt == 0L) return false
+        resumeAfterKillPrefs.edit().remove("marked_at").commit()
+        return System.currentTimeMillis() - markedAt in 0L..RESUME_AFTER_KILL_WINDOW_MS
+    }
+
     private suspend fun restorePlaybackQueueSnapshotIfNeeded() {
         val alreadyHasQueue = withContext(Dispatchers.Main.immediate) {
             engine.masterPlayer.mediaItemCount > 0
@@ -2851,6 +2903,17 @@ class MusicService : MediaLibraryService() {
                 player.playWhenReady = false
             } finally {
                 isRestoringPlaybackSnapshot = false
+            }
+        }
+
+        if (consumeResumeAfterKill()) {
+            withContext(Dispatchers.Main.immediate) {
+                val player = engine.masterPlayer
+                if (player.mediaItemCount > 0) {
+                    Timber.tag(TAG).i("Resuming playback after the process was killed from Recents")
+                    player.prepare()
+                    player.playWhenReady = true
+                }
             }
         }
 
@@ -3544,10 +3607,9 @@ class MusicService : MediaLibraryService() {
         val isFocusPaused = engine.isFocusLossPaused
 
         // Android 12+ (API 31+): Keep foreground when actively playing OR when transiently paused
-        // by audio focus (e.g. phone call). This prevents Android 12+ runtime from rejecting
-        // startForeground when the call ends while the app is in the background.
+        // by audio focus (e.g. phone call), or when keepPlayingInBackground is active with a queue.
         val shouldStartInForeground = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            startInForegroundRequired && (playWhenReady || isFocusPaused)
+            startInForegroundRequired && (playWhenReady || isFocusPaused || (keepPlayingInBackground && session.player.mediaItemCount > 0))
                     && playbackState != Player.STATE_IDLE
                     && playbackState != Player.STATE_ENDED
         } else {

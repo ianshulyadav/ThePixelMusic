@@ -29,7 +29,8 @@ data class Context(
         val deviceMake: String? = null,
         val deviceModel: String? = null,
         val androidSdkVersion: String? = null,
-        val gl: String,
+        /** Omitted from the request when null (search lets YouTube use the connection's region). */
+        val gl: String?,
         val hl: String,
         val visitorData: String?,
     )

@@ -31,8 +31,6 @@ data class MusicTwoRowItemRenderer(
     val thumbnailRenderer: ThumbnailRenderer,
     val navigationEndpoint: NavigationEndpoint,
     val thumbnailOverlay: MusicResponsiveListItemRenderer.Overlay?,
-    // e.g. MUSIC_TWO_ROW_ITEM_THUMBNAIL_ASPECT_RATIO_RECTANGLE_16_9 for video cards.
-    val aspectRatio: String? = null,
 ) {
     val isSong: Boolean
         get() = navigationEndpoint.endpoint is WatchEndpoint

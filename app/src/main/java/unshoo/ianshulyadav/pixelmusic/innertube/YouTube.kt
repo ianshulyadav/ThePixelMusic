@@ -55,6 +55,7 @@ import unshoo.ianshulyadav.pixelmusic.innertube.pages.ArtistItemsPage
 import unshoo.ianshulyadav.pixelmusic.innertube.pages.ArtistPage
 import unshoo.ianshulyadav.pixelmusic.innertube.pages.ChartsPage
 import unshoo.ianshulyadav.pixelmusic.innertube.pages.BrowseResult
+import unshoo.ianshulyadav.pixelmusic.innertube.pages.ExplorePage
 import unshoo.ianshulyadav.pixelmusic.innertube.pages.HistoryPage
 import unshoo.ianshulyadav.pixelmusic.innertube.pages.HomePage
 import unshoo.ianshulyadav.pixelmusic.innertube.pages.LibraryContinuationPage
@@ -113,6 +114,7 @@ object YouTube {
     var locale: YouTubeLocale
         get() = innerTube.locale
         set(value) {
+            if (value.gl != REGION_FALLBACK_GL) regionFallbackActive = false
             val oldLocale = innerTube.locale
             if (oldLocale.gl != value.gl || oldLocale.hl != value.hl) {
                 visitorData = null
@@ -245,7 +247,56 @@ object YouTube {
         )
     }
 
-    suspend fun searchSummary(query: String): Result<SearchSummaryPage> = runCatching {
+    // ── Region fallback ──────────────────────────────────────────────────────────────────────
+    // In countries where YouTube Music is not offered, InnerTube answers with EMPTY home/search
+    // payloads for that `gl` (no error), so users saw zero results. When a request comes back
+    // empty for a non-US region we retry once on the US catalogue (keeping the user's `hl`
+    // language) and stay on it for the rest of the session, so later requests don't pay twice.
+    // The user's own Content country choice is restored whenever they change it in settings.
+    private const val REGION_FALLBACK_GL = "US"
+    @Volatile var regionFallbackActive: Boolean = false
+        private set
+
+    private fun activateRegionFallback(reason: String) {
+        if (!canTryRegionFallback()) return
+        android.util.Log.w("YouTube", "Empty $reason for gl=${innerTube.locale.gl} (searchOmitsGl=${innerTube.searchOmitsGl}); switching to $REGION_FALLBACK_GL catalogue")
+        regionFallbackActive = true
+        innerTube.searchOmitsGl = false
+        locale = innerTube.locale.copy(gl = REGION_FALLBACK_GL)
+    }
+
+    private fun canTryRegionFallback(): Boolean =
+        !regionFallbackActive && (innerTube.locale.gl != REGION_FALLBACK_GL || innerTube.searchOmitsGl)
+
+    /** Applied by the app whenever the Content language / country settings change. */
+    fun applyLocaleSettings(newLocale: YouTubeLocale, omitGlForSearch: Boolean, acceptLanguage: String) {
+        regionFallbackActive = false
+        innerTube.searchOmitsGl = omitGlForSearch
+        innerTube.acceptLanguage = acceptLanguage
+        locale = newLocale
+    }
+
+    suspend fun searchSummary(query: String): Result<SearchSummaryPage> {
+        val first = searchSummaryInternal(query)
+        val empty = first.getOrNull()?.summaries?.all { it.items.isEmpty() } ?: false
+        if (empty && query.isNotBlank() && canTryRegionFallback()) {
+            activateRegionFallback("search")
+            return searchSummaryInternal(query)
+        }
+        return first
+    }
+
+    suspend fun search(query: String, filter: SearchFilter): Result<SearchResult> {
+        val first = searchInternal(query, filter)
+        val empty = first.getOrNull()?.items?.isEmpty() ?: false
+        if (empty && query.isNotBlank() && canTryRegionFallback()) {
+            activateRegionFallback("search")
+            return searchInternal(query, filter)
+        }
+        return first
+    }
+
+    private suspend fun searchSummaryInternal(query: String): Result<SearchSummaryPage> = runCatching {
         var response = innerTube.search(WEB_REMIX, query).body<SearchResponse>()
         var contents =
             response.contents
@@ -260,9 +311,10 @@ object YouTube {
 
         if (contents.isEmpty() && innerTube.locale.gl != "US") {
             android.util.Log.w("YouTube", "Empty searchSummary for gl=${innerTube.locale.gl}. Retrying with US fallback.")
-            val fallbackLocale = innerTube.locale.copy(gl = "US")
+            val originalLocale = innerTube.locale
+            innerTube.locale = originalLocale.copy(gl = "US")
             try {
-                response = innerTube.search(WEB_REMIX, query, localeOverride = fallbackLocale).body<SearchResponse>()
+                response = innerTube.search(WEB_REMIX, query).body<SearchResponse>()
                 contents =
                     response.contents
                         ?.tabbedSearchResultsRenderer
@@ -275,6 +327,8 @@ object YouTube {
                         .orEmpty()
             } catch (e: Exception) {
                 android.util.Log.w("YouTube", "US fallback failed for searchSummary: ${e.message}")
+            } finally {
+                innerTube.locale = originalLocale
             }
         }
         val topItems = mutableListOf<YTItem>()
@@ -331,7 +385,7 @@ object YouTube {
         )
     }
 
-    suspend fun search(query: String, filter: SearchFilter): Result<SearchResult> = runCatching {
+    private suspend fun searchInternal(query: String, filter: SearchFilter): Result<SearchResult> = runCatching {
         var response = innerTube.search(WEB_REMIX, query, filter.value).body<SearchResponse>()
         var contents =
             response.contents
@@ -346,9 +400,10 @@ object YouTube {
 
         if (contents.isEmpty() && innerTube.locale.gl != "US") {
             android.util.Log.w("YouTube", "Empty search for gl=${innerTube.locale.gl}. Retrying with US fallback.")
-            val fallbackLocale = innerTube.locale.copy(gl = "US")
+            val originalLocale = innerTube.locale
+            innerTube.locale = originalLocale.copy(gl = "US")
             try {
-                response = innerTube.search(WEB_REMIX, query, filter.value, localeOverride = fallbackLocale).body<SearchResponse>()
+                response = innerTube.search(WEB_REMIX, query, filter.value).body<SearchResponse>()
                 contents =
                     response.contents
                         ?.tabbedSearchResultsRenderer
@@ -361,6 +416,8 @@ object YouTube {
                         .orEmpty()
             } catch (e: Exception) {
                 android.util.Log.w("YouTube", "US fallback failed for search: ${e.message}")
+            } finally {
+                innerTube.locale = originalLocale
             }
         }
         val shelves =
@@ -817,139 +874,140 @@ object YouTube {
         playlistContinuationPageFromResponse(response)
     }
 
-    // -----------------------------------------------------------------------------------------
-    // Home feed (FEmusic_home)
-    //
-    // One raw-response fetch shared by every Home consumer (the Explore feed, Quick Picks, the
-    // new-releases detail). Concurrent callers for the same identity/locale/params coalesce on
-    // [homeFetchMutex]; the short-lived cache is keyed so that an account, locale, personalisation
-    // or chip change can never be served another partition's response. The region fallback uses a
-    // per-request locale override instead of mutating the shared InnerTube locale, so it cannot
-    // leak into requests running concurrently on other screens.
-    // -----------------------------------------------------------------------------------------
-
-    /** Result of a Home browse request, including the locale that actually produced it. */
-    data class HomeBrowseResult(
-        val response: BrowseResponse,
-        val locale: YouTubeLocale,
-        val usedRegionFallback: Boolean,
-    )
-
-    private class CachedHomeResponse(val key: String, val result: HomeBrowseResult, val atMillis: Long)
-
     @Volatile
-    private var cachedHomeResponse: CachedHomeResponse? = null
+    private var inMemoryCachedHome: HomePage? = null
+    @Volatile
+    private var inMemoryCachedHomeTimestamp: Long = 0L
     private val homeFetchMutex = Mutex()
-    private const val HOME_RESPONSE_TTL_MS = 60_000L
 
     fun invalidateHomeCache() {
-        cachedHomeResponse = null
+        inMemoryCachedHome = null
+        inMemoryCachedHomeTimestamp = 0L
     }
 
-    /**
-     * Opaque partition key for personalised browse responses: anonymous, visitor or a hash of the
-     * signed-in account. The raw cookie / sync id never leaves this function and is never logged.
-     */
-    fun homeIdentityKey(): String {
-        val hasAuth = hasLoginCookie()
-        val forceAnon = !hasAuth && !personalizedExploreEnabled
-        return when {
-            forceAnon -> "anon"
-            hasAuth -> {
-                val material = dataSyncId?.takeIf { it.isNotBlank() } ?: cookie.orEmpty()
-                "acct:" + material.hashCode().toUInt().toString(16)
+    suspend fun home(continuation: String? = null, params: String? = null, forceRefresh: Boolean = false): Result<HomePage> = runCatching {
+        if (continuation != null) {
+            return@runCatching homeContinuation(continuation).getOrThrow()
+        }
+
+        // Cache and deduplicate default home feed (continuation == null && params == null)
+        if (params == null) {
+            if (!forceRefresh) {
+                val cached = inMemoryCachedHome
+                val ts = inMemoryCachedHomeTimestamp
+                if (cached != null && (System.currentTimeMillis() - ts) < 60_000L) {
+                    return@runCatching cached
+                }
             }
-            else -> "visitor"
+
+            homeFetchMutex.withLock {
+                if (!forceRefresh) {
+                    val cached = inMemoryCachedHome
+                    val ts = inMemoryCachedHomeTimestamp
+                    if (cached != null && (System.currentTimeMillis() - ts) < 60_000L) {
+                        return@runCatching cached
+                    }
+                }
+                val fresh = fetchHomeInternal(null).getOrThrow()
+                inMemoryCachedHome = fresh
+                inMemoryCachedHomeTimestamp = System.currentTimeMillis()
+                fresh
+            }
+        } else {
+            fetchHomeInternal(params).getOrThrow()
         }
     }
 
-    private fun BrowseResponse.homeSectionList() =
-        contents?.singleColumnBrowseResultsRenderer?.tabs?.firstOrNull()?.tabRenderer?.content?.sectionListRenderer
-            ?: contents?.sectionListRenderer
-
-    private fun BrowseResponse.hasHomeContent(): Boolean =
-        !homeSectionList()?.contents.isNullOrEmpty() ||
-            !continuationContents?.sectionListContinuation?.contents.isNullOrEmpty()
-
-    /**
-     * Fetches the raw `FEmusic_home` browse response (or one of its continuations / chip variants)
-     * exactly as YouTube Music returns it. Parsing is left to the caller.
-     */
-    suspend fun homeBrowse(
-        params: String? = null,
-        continuation: String? = null,
-        forceRefresh: Boolean = false,
-    ): Result<HomeBrowseResult> = runCatching {
+    private suspend fun fetchHomeInternal(params: String?): Result<HomePage> = runCatching {
         val hasAuth = hasLoginCookie()
         val forceAnon = !hasAuth && !personalizedExploreEnabled
         val setLogin = hasAuth || !forceAnon
-        // Snapshot the locale once so every request of this call uses the same one.
-        val requestLocale = innerTube.locale
+        val response = innerTube.browse(
+            WEB_REMIX,
+            browseId = "FEmusic_home",
+            params = params,
+            setLogin = setLogin,
+            forceAnonymous = forceAnon
+        ).body<BrowseResponse>()
+        val sectionListRender = response.contents?.singleColumnBrowseResultsRenderer?.tabs?.firstOrNull()
+            ?.tabRenderer?.content?.sectionListRenderer
+            ?: response.contents?.sectionListRenderer
+        val continuation = sectionListRender?.continuations?.getContinuation()
+            ?: response.continuationContents?.sectionListContinuation?.continuations?.getContinuation()
+        val sections = (sectionListRender?.contents?.mapNotNull {
+            HomePage.Section.fromSectionListContent(it)
+        } ?: response.continuationContents?.sectionListContinuation?.contents?.mapNotNull {
+            HomePage.Section.fromSectionListContent(it)
+        }.orEmpty()).toMutableList()
+        val chips = sectionListRender?.header?.chipCloudRenderer?.chips?.mapNotNull { HomePage.Chip.fromChipCloudChipRenderer(it) }
 
-        if (continuation != null) {
-            val response = innerTube.browse(
+        if (sections.isEmpty() && params == null && canTryRegionFallback()) {
+            // Sticky session-wide fallback (see activateRegionFallback). The old code swapped the
+            // GLOBAL locale for one request and back, racing every concurrent request.
+            activateRegionFallback("home")
+            return@runCatching fetchHomeInternal(params).getOrThrow()
+        }
+
+        HomePage(chips, sections, continuation)
+    }
+
+    private suspend fun homeContinuation(continuation: String): Result<HomePage> = runCatching {
+        val hasAuth = hasLoginCookie()
+        val forceAnon = !hasAuth && !personalizedExploreEnabled
+        val setLogin = hasAuth || !forceAnon
+        val response =
+            innerTube.browse(
                 WEB_REMIX,
                 continuation = continuation,
                 setLogin = setLogin,
-                forceAnonymous = forceAnon,
-                localeOverride = requestLocale,
+                forceAnonymous = forceAnon
             ).body<BrowseResponse>()
-            return@runCatching HomeBrowseResult(response, requestLocale, usedRegionFallback = false)
+        val sections = response.continuationContents?.sectionListContinuation?.contents
+            ?.mapNotNull {
+                HomePage.Section.fromSectionListContent(it)
+            }.orEmpty()
+        val nextContinuation = if (sections.isEmpty()) null else {
+            response.continuationContents?.sectionListContinuation?.continuations?.getContinuation()
         }
-
-        val key = listOf(homeIdentityKey(), requestLocale.hl, requestLocale.gl, params.orEmpty()).joinToString("|")
-        fun cachedOrNull(): HomeBrowseResult? = cachedHomeResponse
-            ?.takeIf { !forceRefresh && it.key == key && System.currentTimeMillis() - it.atMillis < HOME_RESPONSE_TTL_MS }
-            ?.result
-
-        cachedOrNull()?.let { return@runCatching it }
-        homeFetchMutex.withLock {
-            cachedOrNull()?.let { return@withLock it }
-            val primary = innerTube.browse(
-                WEB_REMIX,
-                browseId = "FEmusic_home",
-                params = params,
-                setLogin = setLogin,
-                forceAnonymous = forceAnon,
-                localeOverride = requestLocale,
-            ).body<BrowseResponse>()
-            var result = HomeBrowseResult(primary, requestLocale, usedRegionFallback = false)
-            if (params == null && !primary.hasHomeContent() && requestLocale.gl != "US") {
-                val fallbackLocale = requestLocale.copy(gl = "US")
-                val fallback = runCatching {
-                    innerTube.browse(
-                        WEB_REMIX,
-                        browseId = "FEmusic_home",
-                        setLogin = setLogin,
-                        forceAnonymous = forceAnon,
-                        localeOverride = fallbackLocale,
-                    ).body<BrowseResponse>()
-                }.getOrNull()
-                if (fallback != null && fallback.hasHomeContent()) {
-                    result = HomeBrowseResult(fallback, fallbackLocale, usedRegionFallback = true)
-                }
-            }
-            cachedHomeResponse = CachedHomeResponse(key, result, System.currentTimeMillis())
-            result
-        }
+        HomePage(
+            chips = null,
+            sections = sections,
+            continuation = nextContinuation
+        )
     }
 
-    /**
-     * Legacy, lossy [HomePage] view of the Home feed kept for Quick Picks and the new-releases
-     * detail screen. The Explore feed uses [homeBrowse] with its own lossless parser.
-     */
-    suspend fun home(continuation: String? = null, params: String? = null, forceRefresh: Boolean = false): Result<HomePage> = runCatching {
-        val response = homeBrowse(params = params, continuation = continuation, forceRefresh = forceRefresh)
-            .getOrThrow().response
-        val sectionList = response.homeSectionList()
-        val sections = (sectionList?.contents ?: response.continuationContents?.sectionListContinuation?.contents.orEmpty())
-            .mapNotNull { HomePage.Section.fromSectionListContent(it) }
-        val next = sectionList?.continuations?.getContinuation()
-            ?: response.continuationContents?.sectionListContinuation?.continuations?.getContinuation()
-        HomePage(
-            chips = sectionList?.header?.chipCloudRenderer?.chips?.mapNotNull { HomePage.Chip.fromChipCloudChipRenderer(it) },
+    suspend fun explore(browseId: String? = null, params: String? = null): Result<ExplorePage> = runCatching {
+        val targetBrowseId = browseId ?: "FEmusic_explore"
+        val hasAuth = hasLoginCookie()
+        val forceAnon = !hasAuth && !personalizedExploreEnabled
+        val setLogin = hasAuth || !forceAnon
+        val response = innerTube.browse(
+            WEB_REMIX,
+            browseId = targetBrowseId,
+            params = params,
+            setLogin = setLogin,
+            forceAnonymous = forceAnon
+        ).body<BrowseResponse>()
+        val sectionListRender = response.contents?.singleColumnBrowseResultsRenderer?.tabs?.firstOrNull()
+            ?.tabRenderer?.content?.sectionListRenderer
+        val sections = sectionListRender?.contents
+            ?.mapNotNull {
+                HomePage.Section.fromSectionListContent(it)
+            }.orEmpty()
+        val chips = sectionListRender?.header?.chipCloudRenderer?.chips?.mapNotNull { HomePage.Chip.fromChipCloudChipRenderer(it) }
+
+        val newReleases = if (targetBrowseId == "FEmusic_explore") {
+            response.contents?.singleColumnBrowseResultsRenderer?.tabs?.firstOrNull()?.tabRenderer?.content?.sectionListRenderer?.contents?.find {
+                it.musicCarouselShelfRenderer?.header?.musicCarouselShelfBasicHeaderRenderer?.moreContentButton?.buttonRenderer?.navigationEndpoint?.browseEndpoint?.browseId == "FEmusic_new_releases_albums"
+            }?.musicCarouselShelfRenderer?.contents
+                ?.mapNotNull { it.musicTwoRowItemRenderer }
+                ?.mapNotNull(NewReleaseAlbumPage::fromMusicTwoRowItemRenderer).orEmpty()
+        } else emptyList()
+
+        ExplorePage(
+            chips = chips,
             sections = sections,
-            continuation = if (continuation != null && sections.isEmpty()) null else next,
+            newReleaseAlbums = newReleases
         )
     }
 
@@ -1268,9 +1326,10 @@ object YouTube {
     }
 
     suspend fun getChartsPage(countryCode: String? = null, continuation: String? = null): Result<ChartsPage> = runCatching {
+        val originalLocale = innerTube.locale
         val effectiveRegion = countryCode?.takeIf { it.isNotBlank() } ?: "ZZ"
         val effectiveGl = countryCode?.takeIf { it.isNotBlank() } ?: "US"
-        val chartsLocale = innerTube.locale.copy(gl = effectiveGl)
+        innerTube.locale = originalLocale.copy(gl = effectiveGl)
         try {
             val chartFormData = unshoo.ianshulyadav.pixelmusic.innertube.models.body.BrowseBody.FormData(
                 selectedValues = listOf(effectiveRegion)
@@ -1281,8 +1340,7 @@ object YouTube {
                 params = null,
                 continuation = continuation,
                 formData = chartFormData,
-                forceAnonymous = true,
-                localeOverride = chartsLocale
+                forceAnonymous = true
             ).body<BrowseResponse>()
 
             var sections = parseChartsSections(response).toMutableList()
@@ -1293,8 +1351,7 @@ object YouTube {
                     params = "ggMGCgQIgAQ=",
                     continuation = null,
                     formData = chartFormData,
-                    forceAnonymous = true,
-                    localeOverride = chartsLocale
+                    forceAnonymous = true
                 ).body<BrowseResponse>()
                 sections = parseChartsSections(response).toMutableList()
             }
@@ -1333,6 +1390,8 @@ object YouTube {
         } catch (e: Exception) {
             android.util.Log.e("YouTube", "Error fetching charts page", e)
             throw e
+        } finally {
+            innerTube.locale = originalLocale
         }
     }
 

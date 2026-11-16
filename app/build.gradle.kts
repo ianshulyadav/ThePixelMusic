@@ -368,6 +368,7 @@ dependencies {
     implementation(libs.fuel.android)
     implementation(libs.fuel.json)
     implementation(libs.androidx.media3.exoplayer.dash)
+    implementation(libs.androidx.media3.datasource.okhttp)
     implementation(libs.androidx.media3.exoplayer.hls)
     implementation(libs.quickjs.kt)
     implementation(libs.retrofit)
