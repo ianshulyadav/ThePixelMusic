@@ -32,7 +32,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.foundation.layout.size
@@ -259,12 +258,7 @@ private fun ExpressiveFloatingPillNavigationBar(
 
                 // Tab navigation container scale with overshoot spring
                 val containerScale by animateFloatAsState(
-                    targetValue = when {
-                        isSelected -> 1.0f
-                        isItemPressed -> 0.70f
-                        isItemHovered -> 0.85f
-                        else -> 0.35f
-                    },
+                    targetValue = if (isSelected) 1.0f else 0.0f,
                     animationSpec = motionScheme.fastSpatialSpec(),
                     label = "pill_container_scale_$index"
                 )
@@ -278,12 +272,7 @@ private fun ExpressiveFloatingPillNavigationBar(
 
                 // Selection container alpha fade
                 val containerAlpha by animateFloatAsState(
-                    targetValue = when {
-                        isSelected -> 1.0f
-                        isItemPressed -> 0.35f
-                        isItemHovered -> 0.15f
-                        else -> 0.0f
-                    },
+                    targetValue = if (isSelected) 1.0f else 0.0f,
                     animationSpec = motionScheme.fastEffectsSpec(),
                     label = "pill_container_alpha_$index"
                 )
@@ -348,15 +337,7 @@ private fun ExpressiveFloatingPillNavigationBar(
                                     }
                                     .clip(selectionContainerShape)
                                     .background(containerColor, selectionContainerShape)
-                                    .then(
-                                        if (frostedBlur) {
-                                            Modifier.border(
-                                                width = 1.dp,
-                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f),
-                                                shape = selectionContainerShape
-                                            )
-                                        } else Modifier
-                                    )
+
                             )
                         }
 
@@ -462,15 +443,6 @@ private fun ExpressiveFloatingPillNavigationBar(
                             Modifier
                                 .clip(SearchButtonShape)
                                 .frostedBackdrop(source = backdropSource, tint = frostedGlassTint(songTintStrength = 0.42f))
-                                .then(
-                                    if (isSearchSelected) {
-                                        Modifier.border(
-                                            width = 1.dp,
-                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f),
-                                            shape = SearchButtonShape
-                                        )
-                                    } else Modifier
-                                )
                         } else Modifier
                     ),
                 shape = SearchButtonShape,
