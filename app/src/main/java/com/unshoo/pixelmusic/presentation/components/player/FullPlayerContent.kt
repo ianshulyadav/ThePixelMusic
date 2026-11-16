@@ -128,6 +128,7 @@ import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.ThumbDown
 import androidx.compose.material.icons.rounded.ThumbDownOffAlt
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.draw.shadow
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -760,21 +761,32 @@ fun FullPlayerContent(
     }
 
     // Top bar buttons sit over the cover art:
-    // Frosted glass appearance with dynamic player color (delicate translucent frosted glass feel);
-    // otherwise use solid high-contrast pill styling.
+    // Frosted blur appearance with dynamic pastel color influence.
+    // For light artwork/theme, blend with pure frosted white + saturated dynamic pastel accent
+    // so buttons never look dark/murky; for dark artwork, keep subtle sleek tone.
     val isDarkTheme = com.unshoo.pixelmusic.ui.theme.LocalPixelMusicDarkTheme.current
     val currentTheme = LocalMaterialTheme.current
-    val dynamicGlassTint = androidx.compose.ui.graphics.lerp(
-        currentTheme.surfaceContainerHigh,
-        currentTheme.primaryContainer,
-        0.40f
-    )
+    val isLightAlbum = currentTheme.surface.luminance() > 0.45f || !isDarkTheme
+    val dynamicGlassTint = if (isLightAlbum) {
+        // Bright milky frosted base with rich dynamic pastel color saturation
+        androidx.compose.ui.graphics.lerp(
+            Color.White,
+            currentTheme.primaryContainer,
+            0.52f
+        )
+    } else {
+        androidx.compose.ui.graphics.lerp(
+            currentTheme.surfaceContainerHigh,
+            currentTheme.primaryContainer,
+            0.40f
+        )
+    }
     val topButtonContainer = when {
-        isBlurActive -> dynamicGlassTint.copy(alpha = if (isDarkTheme) 0.35f else 0.42f)
+        isBlurActive -> dynamicGlassTint.copy(alpha = if (isLightAlbum) 0.68f else 0.38f)
         else -> currentTheme.onPrimaryFixed
     }
     val topButtonContent = when {
-        isBlurActive -> currentTheme.primary
+        isBlurActive -> if (isLightAlbum) currentTheme.onPrimaryContainer else currentTheme.primary
         else -> currentTheme.primaryFixed
     }
 
