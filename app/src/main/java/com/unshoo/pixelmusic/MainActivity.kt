@@ -124,6 +124,8 @@ import com.unshoo.pixelmusic.presentation.components.PlayStoreAnnouncementDialog
 import com.unshoo.pixelmusic.presentation.components.PlayStoreAnnouncementUiModel
 import com.unshoo.pixelmusic.presentation.components.UnifiedPlayerSheetV2
 import com.unshoo.pixelmusic.presentation.components.calculatePlayerSheetCollapsedTargetY
+import com.unshoo.pixelmusic.presentation.components.rememberBottomNavigationSmokeBrush
+import com.unshoo.pixelmusic.presentation.components.bottomNavigationSmokeBackground
 import com.unshoo.pixelmusic.presentation.components.resolveNavBarOccupiedHeight
 import com.unshoo.pixelmusic.presentation.components.resolveNavBarSurfaceHeight
 import com.unshoo.pixelmusic.presentation.components.sanitizeNavigationBarBottomInset
@@ -1104,6 +1106,9 @@ class MainActivity : ComponentActivity() {
                             }
 
                             val isFloatingPill = navBarStyle == NavBarStyle.FLOATING_PILL
+                            val smokeBrush = rememberBottomNavigationSmokeBrush(
+                                backgroundColor = MaterialTheme.colorScheme.background
+                            )
                             val navBarContainerModifier = Modifier
                                 .align(Alignment.BottomCenter)
                                 .fillMaxWidth()
@@ -1149,6 +1154,21 @@ class MainActivity : ComponentActivity() {
                             }
 
                             if (isFloatingPill) {
+                                // Edge-to-edge smooth smoke blur background
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .graphicsLayer {
+                                            val hideFraction = if (showPlayerContentArea) {
+                                                quantizedFraction
+                                            } else {
+                                                0f
+                                            }
+                                            translationY = (componentHeightPx + shadowOverflowPx + bottomBarPaddingPx) * hideFraction
+                                            alpha = (1f - hideFraction).coerceIn(0f, 1f)
+                                        }
+                                        .bottomNavigationSmokeBackground(brush = smokeBrush)
+                                )
                                 // No parent Surface — floating pill draws its own containers
                                 Box(modifier = navBarContainerModifier) {
                                     navBarContent()

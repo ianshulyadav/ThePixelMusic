@@ -1,5 +1,6 @@
 package com.unshoo.pixelmusic.presentation.components
 
+import android.content.res.Configuration
 import android.os.SystemClock
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -30,6 +31,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.lerp
@@ -60,16 +62,21 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
+import androidx.navigation.compose.rememberNavController
 import com.unshoo.pixelmusic.BottomNavItem
+import com.unshoo.pixelmusic.R
 import com.unshoo.pixelmusic.data.preferences.NavBarStyle
 import com.unshoo.pixelmusic.presentation.components.scoped.CustomNavigationBarItem
 import com.unshoo.pixelmusic.presentation.navigation.Screen
 import com.unshoo.pixelmusic.presentation.navigation.navigateToTopLevelSafely
+import com.unshoo.pixelmusic.ui.theme.PixelMusicTheme
 import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -168,6 +175,9 @@ private fun ExpressiveFloatingPillNavigationBar(
     val pillItemHeight = if (compactMode) 40.dp else 50.dp
     val searchButtonSize = if (compactMode) 50.dp else 60.dp
     val pillIconSize = if (compactMode) 21.dp else 23.dp
+    val selectionContainerWidth = if (compactMode) 52.dp else 58.dp
+    val selectionContainerHeight = if (compactMode) 28.dp else 34.dp
+    val selectionContainerShape = CircleShape
     val latestCurrentRoute by rememberUpdatedState(currentRoute)
     val latestNavigationEnabled by rememberUpdatedState(currentRoute != null)
     val backdropSource = LocalBackdropSource.current
@@ -236,9 +246,10 @@ private fun ExpressiveFloatingPillNavigationBar(
                 val isItemPressed by itemInteractionSource.collectIsPressedAsState()
                 val isItemHovered by itemInteractionSource.collectIsHoveredAsState()
 
+                // Tactile touch spring on touch press/release
                 val itemTactileScale by animateFloatAsState(
                     targetValue = when {
-                        isItemPressed -> 0.93f
+                        isItemPressed -> 0.92f
                         isItemHovered -> 1.03f
                         else -> 1.0f
                     },
@@ -246,36 +257,56 @@ private fun ExpressiveFloatingPillNavigationBar(
                     label = "pill_item_tactile_$index"
                 )
 
-                val dynamicActiveWeight = 1.4f + (item.label.length * 0.20f)
-                val itemWeight by animateFloatAsState(
-                    targetValue = if (isSelected && !shouldHideLabel) dynamicActiveWeight else 1.0f,
+                // Tab navigation container scale with overshoot spring
+                val containerScale by animateFloatAsState(
+                    targetValue = when {
+                        isSelected -> 1.0f
+                        isItemPressed -> 0.70f
+                        isItemHovered -> 0.85f
+                        else -> 0.35f
+                    },
                     animationSpec = motionScheme.fastSpatialSpec(),
-                    label = "pill_item_weight_$index"
+                    label = "pill_container_scale_$index"
                 )
 
-                val animColor by animateColorAsState(
-                    targetValue = when {
-                    isSelected && frostedBlur -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
-                    isSelected -> MaterialTheme.colorScheme.primary
-                    else -> Color.Transparent
-                },
-                    animationSpec = motionScheme.defaultEffectsSpec(),
-                    label = "pill_bg_$index"
+                // Vertical jumping hop displacement on tab navigation
+                val containerJumpOffsetY by animateDpAsState(
+                    targetValue = if (isSelected) 0.dp else 3.dp,
+                    animationSpec = motionScheme.fastSpatialSpec(),
+                    label = "pill_container_jump_$index"
                 )
+
+                // Selection container alpha fade
+                val containerAlpha by animateFloatAsState(
+                    targetValue = when {
+                        isSelected -> 1.0f
+                        isItemPressed -> 0.35f
+                        isItemHovered -> 0.15f
+                        else -> 0.0f
+                    },
+                    animationSpec = motionScheme.fastEffectsSpec(),
+                    label = "pill_container_alpha_$index"
+                )
+
+                // Tinted frosted solid container styling with Material theme container color
+                val containerColor = when {
+                    frostedBlur -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.85f)
+                    else -> MaterialTheme.colorScheme.secondaryContainer
+                }
 
                 val animContentColor by animateColorAsState(
                     targetValue = when {
-                        isSelected && frostedBlur -> MaterialTheme.colorScheme.onSurface
-                        isSelected -> MaterialTheme.colorScheme.onPrimary
+                        isSelected -> MaterialTheme.colorScheme.onSecondaryContainer
                         frostedBlur -> MaterialTheme.colorScheme.onSurface
-                        else -> MaterialTheme.colorScheme.primary
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
                     },
                     animationSpec = motionScheme.defaultEffectsSpec(),
                     label = "pill_content_$index"
                 )
 
+                // Icon spring bounce on selection
                 val iconBounceScale by animateFloatAsState(
-                    targetValue = if (isSelected) 1.15f else 1.0f,
+                    targetValue = if (isSelected) 1.12f else 1.0f,
                     animationSpec = motionScheme.fastSpatialSpec(),
                     label = "pill_icon_bounce_$index"
                 )
@@ -288,24 +319,47 @@ private fun ExpressiveFloatingPillNavigationBar(
                         }
                     },
                     modifier = Modifier
-                        .weight(itemWeight)
+                        .weight(1.0f)
                         .height(pillItemHeight)
                         .graphicsLayer {
                             scaleX = itemTactileScale
                             scaleY = itemTactileScale
                         },
                     shape = CircleShape,
-                    color = animColor,
+                    color = Color.Transparent,
                     contentColor = animContentColor,
                     interactionSource = itemInteractionSource
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 10.dp)
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier.fillMaxSize()
                     ) {
+                        // Inner selection container: compact stadium capsule with jumping bounce
+                        if (containerAlpha > 0.005f) {
+                            Box(
+                                modifier = Modifier
+                                    .width(selectionContainerWidth)
+                                    .height(selectionContainerHeight)
+                                    .graphicsLayer {
+                                        scaleX = containerScale
+                                        scaleY = containerScale
+                                        translationY = containerJumpOffsetY.toPx()
+                                        alpha = containerAlpha
+                                    }
+                                    .clip(selectionContainerShape)
+                                    .background(containerColor, selectionContainerShape)
+                                    .then(
+                                        if (frostedBlur) {
+                                            Modifier.border(
+                                                width = 1.dp,
+                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f),
+                                                shape = selectionContainerShape
+                                            )
+                                        } else Modifier
+                                    )
+                            )
+                        }
+
                         val iconRes = if (isSelected && item.selectedIconResId != null && item.selectedIconResId != 0) {
                             item.selectedIconResId
                         } else {
@@ -322,31 +376,6 @@ private fun ExpressiveFloatingPillNavigationBar(
                                     scaleY = iconBounceScale
                                 }
                         )
-
-                        AnimatedVisibility(
-                            visible = isSelected && !shouldHideLabel,
-                            enter = fadeIn(animationSpec = motionScheme.defaultEffectsSpec()) +
-                                expandHorizontally(
-                                    expandFrom = Alignment.Start,
-                                    animationSpec = motionScheme.fastSpatialSpec()
-                                ),
-                            exit = fadeOut(animationSpec = motionScheme.defaultEffectsSpec()) +
-                                shrinkHorizontally(
-                                    shrinkTowards = Alignment.Start,
-                                    animationSpec = motionScheme.fastSpatialSpec()
-                                )
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = item.label,
-                                    style = MaterialTheme.typography.labelLarge.copy(fontSize = 14.5.sp),
-                                    maxLines = 1,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    softWrap = false
-                                )
-                            }
-                        }
                     }
                 }
             }
@@ -386,9 +415,9 @@ private fun ExpressiveFloatingPillNavigationBar(
 
             val searchColor by animateColorAsState(
                 targetValue = when {
-                    // Frosted: no solid accent fill, just a soft light layer over the glass.
-                    frostedBlur -> if (isSearchSelected) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f) else Color.Transparent
-                    isSearchSelected -> MaterialTheme.colorScheme.primary
+                    // Frosted: soft tinted solid container fill over the glass.
+                    frostedBlur -> if (isSearchSelected) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.85f) else Color.Transparent
+                    isSearchSelected -> MaterialTheme.colorScheme.secondaryContainer
                     else -> solidTintedColor
                 },
                 animationSpec = motionScheme.defaultEffectsSpec(),
@@ -397,7 +426,7 @@ private fun ExpressiveFloatingPillNavigationBar(
 
             val searchContentColor by animateColorAsState(
                 targetValue = if (isSearchSelected) {
-                    MaterialTheme.colorScheme.onPrimary
+                    MaterialTheme.colorScheme.onSecondaryContainer
                 } else {
                     MaterialTheme.colorScheme.primary
                 },
@@ -433,6 +462,15 @@ private fun ExpressiveFloatingPillNavigationBar(
                             Modifier
                                 .clip(SearchButtonShape)
                                 .frostedBackdrop(source = backdropSource, tint = frostedGlassTint(songTintStrength = 0.42f))
+                                .then(
+                                    if (isSearchSelected) {
+                                        Modifier.border(
+                                            width = 1.dp,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f),
+                                            shape = SearchButtonShape
+                                        )
+                                    } else Modifier
+                                )
                         } else Modifier
                     ),
                 shape = SearchButtonShape,
@@ -665,3 +703,62 @@ internal fun frostedGlassTint(songTintStrength: Float = 0.14f): Color {
 @Composable
 internal fun frostedGlassRim(): Color =
     MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)
+
+// -----------------------------------------------------------------------------
+// Compose Previews
+// -----------------------------------------------------------------------------
+
+@Composable
+private fun ExpressiveFloatingPillPreviewWrapper(
+    frosted: Boolean,
+    compact: Boolean = false
+) {
+    val navController = rememberNavController()
+    val navItems = remember {
+        persistentListOf(
+            BottomNavItem("Home", R.drawable.rounded_home_24, R.drawable.home_24_rounded_filled, Screen.Home),
+            BottomNavItem("Explore", R.drawable.rounded_album_24, R.drawable.rounded_album_24, Screen.Explore),
+            BottomNavItem("Search", R.drawable.rounded_search_24, R.drawable.rounded_search_24, Screen.Search),
+            BottomNavItem("Library", R.drawable.rounded_library_music_24, R.drawable.round_library_music_24, Screen.Library)
+        )
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        ExpressiveFloatingPillNavigationBar(
+            navController = navController,
+            navItems = navItems,
+            currentRoute = Screen.Home.route,
+            frostedBlur = frosted,
+            compactMode = compact
+        )
+    }
+}
+
+@Preview(name = "Expressive Floating Pill - Light Solid", showBackground = true)
+@Composable
+fun ExpressiveFloatingPillLightPreview() {
+    PixelMusicTheme(darkTheme = false) {
+        ExpressiveFloatingPillPreviewWrapper(frosted = false)
+    }
+}
+
+@Preview(name = "Expressive Floating Pill - Dark Frosted", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+fun ExpressiveFloatingPillDarkFrostedPreview() {
+    PixelMusicTheme(darkTheme = true) {
+        ExpressiveFloatingPillPreviewWrapper(frosted = true)
+    }
+}
+
+@Preview(name = "Expressive Floating Pill - Compact Mode", showBackground = true)
+@Composable
+fun ExpressiveFloatingPillCompactPreview() {
+    PixelMusicTheme(darkTheme = false) {
+        ExpressiveFloatingPillPreviewWrapper(frosted = false, compact = true)
+    }
+}
