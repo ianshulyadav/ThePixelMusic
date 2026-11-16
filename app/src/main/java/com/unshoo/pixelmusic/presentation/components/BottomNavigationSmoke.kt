@@ -65,6 +65,23 @@ fun rememberBottomNavigationSmokeBrush(
 }
 
 /**
+ * Creates and remembers an inverted vertical gradient [Brush] representing a smooth top
+ * status-bar smoke effect tinted with the container [backgroundColor].
+ * 100% opaque at top edge, fading down smoothly to 0% at the bottom edge.
+ */
+@Composable
+fun rememberTopBarSmokeBrush(
+    backgroundColor: Color = MaterialTheme.colorScheme.background
+): Brush {
+    return remember(backgroundColor) {
+        val stops = Array(SmokeStops.size) { i ->
+            SmokeStops[i] to backgroundColor.copy(alpha = SmokeAlphas[SmokeAlphas.size - 1 - i])
+        }
+        Brush.verticalGradient(colorStops = stops)
+    }
+}
+
+/**
  * Modifier extension to draw the bottom navigation smoke effect directly in the HWUI/Skia
  * draw pass via [drawBehind], avoiding additional layout nodes or measurement overhead.
  */
