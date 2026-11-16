@@ -1270,7 +1270,7 @@ class MainActivity : ComponentActivity() {
                             )
 
                             // Smoke overlay directly above scrolling content, fading up from navbar
-                            if (navBarStyle == NavBarStyle.FLOATING_PILL && shouldRenderNavigationBar) {
+                            if (shouldRenderNavigationBar) {
                                 val smokeHeight = remember(navBarOccupiedHeight, systemNavBarInset) {
                                     navBarOccupiedHeight + 36.dp
                                 }
