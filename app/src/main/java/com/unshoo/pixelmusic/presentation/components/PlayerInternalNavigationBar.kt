@@ -118,7 +118,7 @@ internal fun resolveNavBarContentHeight(compactMode: Boolean, heightOffset: Dp =
 internal fun resolveNavBarContentHeight(navBarStyle: String, compactMode: Boolean, heightOffset: Dp = 0.dp): Dp =
     when (navBarStyle) {
         NavBarStyle.FLOATING_PILL ->
-            (if (compactMode) FloatingPillCompactContentHeight else FloatingPillContentHeight) + heightOffset
+            FloatingPillContentHeight + heightOffset
         else -> resolveNavBarContentHeight(compactMode, heightOffset)
     }
 
@@ -168,15 +168,14 @@ private fun ExpressiveFloatingPillNavigationBar(
     modifier: Modifier = Modifier,
     frostedBlur: Boolean = false,
     searchColorScheme: androidx.compose.material3.ColorScheme? = null,
-    compactMode: Boolean = false,
     onSearchIconDoubleTap: () -> Unit = {}
 ) {
-    // Compact mode shrinks the pill, its items and the search button.
-    val pillItemHeight = if (compactMode) 40.dp else 50.dp
-    val searchButtonSize = if (compactMode) 50.dp else 60.dp
-    val pillIconSize = if (compactMode) 21.dp else 23.dp
-    val selectionContainerWidth = if (compactMode) 52.dp else 58.dp
-    val selectionContainerHeight = if (compactMode) 28.dp else 34.dp
+    // The expressive pill maintains its full intended proportions and is never shrunken by compact mode.
+    val pillItemHeight = 50.dp
+    val searchButtonSize = 60.dp
+    val pillIconSize = 23.dp
+    val selectionContainerWidth = 58.dp
+    val selectionContainerHeight = 34.dp
     val selectionContainerShape = CircleShape
     val latestCurrentRoute by rememberUpdatedState(currentRoute)
     val latestNavigationEnabled by rememberUpdatedState(currentRoute != null)
@@ -376,7 +375,7 @@ private fun ExpressiveFloatingPillNavigationBar(
                 targetValue = when {
                     isSearchSelected -> MaterialTheme.colorScheme.secondaryContainer
                     frostedBlur -> Color.Transparent
-                    else -> solidTintedColor
+                    else -> MaterialTheme.colorScheme.primaryContainer
                 },
                 animationSpec = motionScheme.defaultEffectsSpec(),
                 label = "search_fab_bg"
@@ -386,7 +385,7 @@ private fun ExpressiveFloatingPillNavigationBar(
                 targetValue = if (isSearchSelected) {
                     MaterialTheme.colorScheme.onSecondaryContainer
                 } else {
-                    MaterialTheme.colorScheme.primary
+                    MaterialTheme.colorScheme.onPrimaryContainer
                 },
                 animationSpec = motionScheme.defaultEffectsSpec(),
                 label = "search_fab_content"
@@ -621,7 +620,6 @@ fun PlayerInternalNavigationBar(
             modifier = modifier,
             frostedBlur = frostedBlur,
             searchColorScheme = searchColorScheme,
-            compactMode = compactMode,
             onSearchIconDoubleTap = onSearchIconDoubleTap
         )
     } else {
@@ -682,8 +680,7 @@ private fun ExpressiveFloatingPillPreviewWrapper(
             navController = navController,
             navItems = navItems,
             currentRoute = Screen.Home.route,
-            frostedBlur = frosted,
-            compactMode = compact
+            frostedBlur = frosted
         )
     }
 }
@@ -708,6 +705,6 @@ fun ExpressiveFloatingPillDarkFrostedPreview() {
 @Composable
 fun ExpressiveFloatingPillCompactPreview() {
     PixelMusicTheme(darkTheme = false) {
-        ExpressiveFloatingPillPreviewWrapper(frosted = false, compact = true)
+        ExpressiveFloatingPillPreviewWrapper(frosted = false)
     }
 }

@@ -28,6 +28,10 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.ui.zIndex
 import androidx.compose.foundation.lazy.LazyColumn
@@ -105,6 +109,8 @@ import com.unshoo.pixelmusic.presentation.components.BetaInfoBottomSheet
 import com.unshoo.pixelmusic.presentation.components.ChangelogBottomSheet
 import com.unshoo.pixelmusic.presentation.components.DailyMixSection
 import com.unshoo.pixelmusic.presentation.components.HomeGradientTopBar
+import com.unshoo.pixelmusic.presentation.components.rememberTopBarSmokeBrush
+import com.unshoo.pixelmusic.presentation.components.bottomNavigationSmokeBackground
 import com.unshoo.pixelmusic.presentation.components.HomeOptionsBottomSheet
 import com.unshoo.pixelmusic.presentation.components.MiniPlayerHeight
 import com.unshoo.pixelmusic.presentation.components.QuickPicksSection
@@ -414,29 +420,42 @@ fun HomeScreen(
     Box(
         modifier = Modifier.fillMaxSize()
     ) {
+        val topSmokeBrush = rememberTopBarSmokeBrush(
+            backgroundColor = MaterialTheme.colorScheme.background
+        )
         Scaffold(
             modifier = Modifier.fillMaxSize(),
             topBar = {
-                HomeGradientTopBar(
-                    onNavigationIconClick = {
-                        navController.navigateSafely(Screen.Settings.route)
-                    },
-                    onMoreOptionsClick = {
-                        showChangelogBottomSheet = true
-                    },
-                    onBetaClick = {
-                        showBetaInfoBottomSheet = true
-                    },
-                    onTelegramClick = {
-                         showStreamingProviderSheet = true
-                    },
-                    onMenuClick = {
-                        // onOpenSidebar() // Disabled
-                    },
-                    isScrolled = isScrolledPastThreshold.value,
-                    // Home always uses the floating pill header (logo pill + separate circle buttons).
-                    floatingHeaderEnabled = true
-                )
+                Box(
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 68.dp)
+                            .bottomNavigationSmokeBackground(brush = topSmokeBrush)
+                    )
+                    HomeGradientTopBar(
+                        onNavigationIconClick = {
+                            navController.navigateSafely(Screen.Settings.route)
+                        },
+                        onMoreOptionsClick = {
+                            showChangelogBottomSheet = true
+                        },
+                        onBetaClick = {
+                            showBetaInfoBottomSheet = true
+                        },
+                        onTelegramClick = {
+                             showStreamingProviderSheet = true
+                        },
+                        onMenuClick = {
+                            // onOpenSidebar() // Disabled
+                        },
+                        isScrolled = isScrolledPastThreshold.value,
+                        // Home always uses the floating pill header (logo pill + separate circle buttons).
+                        floatingHeaderEnabled = true
+                    )
+                }
             }
         ) { innerPadding ->
             val pullRefreshState = rememberPullToRefreshState()
