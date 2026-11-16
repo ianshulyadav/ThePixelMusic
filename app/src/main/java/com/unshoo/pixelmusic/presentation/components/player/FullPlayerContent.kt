@@ -760,17 +760,15 @@ fun FullPlayerContent(
     }
 
     // Top bar buttons sit over the cover art:
-    // When blur is on, adopt a frosted glass look influenced by the dynamic player/material colours;
-    // otherwise use solid high-contrast pill styling.
+    // Match the exact appearance of the like button (translucent on-base tint + dynamic content icon)
+    // when blur is active; otherwise use solid high-contrast pill styling.
     val isDarkTheme = com.unshoo.pixelmusic.ui.theme.LocalPixelMusicDarkTheme.current
     val topButtonContainer = when {
-        isBlurActive && isDarkTheme -> Color.Black.copy(alpha = 0.35f)
-        isBlurActive && !isDarkTheme -> Color.White.copy(alpha = 0.55f)
+        isBlurActive -> playerOnBaseColor.copy(alpha = 0.12f)
         else -> LocalMaterialTheme.current.onPrimaryFixed
     }
     val topButtonContent = when {
-        isBlurActive && isDarkTheme -> LocalMaterialTheme.current.primary
-        isBlurActive && !isDarkTheme -> LocalMaterialTheme.current.primary
+        isBlurActive -> playerOnBaseColor
         else -> LocalMaterialTheme.current.primaryFixed
     }
 
@@ -880,16 +878,13 @@ fun FullPlayerContent(
                     navigationIcon = {
                         Box(
                             modifier = Modifier
-                                // Ancho total = 14dp de padding + 42dp del botón
-                                .width(62.dp)
-                                .height(50.dp),
-                            // 2. Alinea el contenido (el botón) al final (derecha) y centrado verticalmente
+                                .width(56.dp)
+                                .height(46.dp),
                             contentAlignment = Alignment.CenterEnd
                         ) {
-                            // 3. Tu botón circular original, sin cambios
                             Box(
                                 modifier = Modifier
-                                    .size(50.dp)
+                                    .size(46.dp)
                                     .clip(CircleShape)
                                     .then(
                                         if (isGradientTheme) {
@@ -905,7 +900,7 @@ fun FullPlayerContent(
                                     painter = painterResource(R.drawable.rounded_keyboard_arrow_down_24),
                                     contentDescription = stringResource(R.string.presentation_batch_g_player_cd_collapse),
                                     tint = topButtonContent,
-                                    modifier = Modifier.size(28.dp)
+                                    modifier = Modifier.size(26.dp)
                                 )
                             }
                         }
@@ -946,7 +941,7 @@ fun FullPlayerContent(
                             )
                             Box(
                                 modifier = Modifier
-                                    .height(50.dp)
+                                    .height(46.dp)
                                     .align(Alignment.CenterVertically)
                                     .animateContentSize(
                                         animationSpec = spring(
@@ -955,8 +950,8 @@ fun FullPlayerContent(
                                         )
                                     )
                                     .widthIn(
-                                        min = 58.dp,
-                                        max = if (showCastLabel) 190.dp else 58.dp
+                                        min = 52.dp,
+                                        max = if (showCastLabel) 180.dp else 52.dp
                                     )
                                     .clip(castShape)
                                     .then(
@@ -972,7 +967,7 @@ fun FullPlayerContent(
                                 Row(
                                     modifier = Modifier
                                         .then(
-                                            if (showCastLabel) Modifier.padding(start = 16.dp)
+                                            if (showCastLabel) Modifier.padding(start = 14.dp)
                                             else Modifier.fillMaxWidth()
                                         ),
                                     verticalAlignment = Alignment.CenterVertically,
@@ -985,7 +980,8 @@ fun FullPlayerContent(
                                             isBluetoothActive -> stringResource(R.string.presentation_batch_g_player_cd_bluetooth)
                                             else -> stringResource(R.string.presentation_batch_g_player_cd_local_playback)
                                         },
-                                        tint = topButtonContent
+                                        tint = topButtonContent,
+                                        modifier = Modifier.size(24.dp)
                                     )
                                     AnimatedVisibility(visible = showCastLabel) {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1046,7 +1042,7 @@ fun FullPlayerContent(
                             )
                             Box(
                                 modifier = Modifier
-                                    .size(height = 50.dp, width = 58.dp)
+                                    .size(height = 46.dp, width = 52.dp)
                                     .clip(topQueueShape)
                                     .then(
                                         if (isGradientTheme) {
@@ -1063,7 +1059,8 @@ fun FullPlayerContent(
                                 Icon(
                                     painter = painterResource(R.drawable.rounded_queue_music_24),
                                     contentDescription = stringResource(R.string.presentation_batch_g_player_cd_queue),
-                                    tint = topButtonContent
+                                    tint = topButtonContent,
+                                    modifier = Modifier.size(24.dp)
                                 )
                             }
                         }
@@ -3498,110 +3495,4 @@ private fun expressiveSkipButtonColors(colorScheme: ColorScheme): TransportButto
     )
 }
 
-@Composable
-private fun BottomToggleRow(
-    modifier: Modifier,
-    isShuffleEnabled: Boolean,
-    isShuffleTransitionInProgress: Boolean,
-    repeatMode: Int,
-    isFavoriteProvider: () -> Boolean,
-    onShuffleToggle: () -> Unit,
-    onRepeatToggle: () -> Unit,
-    onFavoriteToggle: () -> Unit,
-    isGradientTheme: Boolean = false
-) {
-    val isFavorite = isFavoriteProvider()
-    val rowCorners = 60.dp
-    val isDark = LocalPixelMusicDarkTheme.current
-    val containerBg = if (isDark) {
-        LocalMaterialTheme.current.surfaceContainer.copy(alpha = if (isGradientTheme) 0.65f else 0.90f)
-    } else {
-        Color.White.copy(alpha = if (isGradientTheme) 0.70f else 0.92f)
-    }
-    val inactiveBg = LocalMaterialTheme.current.onSurface.copy(alpha = 0.08f)
-    val inactiveContentColor = LocalMaterialTheme.current.onSurface
 
-
-    Box(
-        modifier = modifier.background(
-            color = containerBg,
-            shape = AbsoluteSmoothCornerShape(
-                cornerRadiusBL = rowCorners,
-                smoothnessAsPercentTR = 60,
-                cornerRadiusBR = rowCorners,
-                smoothnessAsPercentBL = 60,
-                cornerRadiusTL = rowCorners,
-                smoothnessAsPercentBR = 60,
-                cornerRadiusTR = rowCorners,
-                smoothnessAsPercentTL = 60
-            )
-        )
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(6.dp)
-                .clip(
-                    AbsoluteSmoothCornerShape(
-                        cornerRadiusBL = rowCorners,
-                        smoothnessAsPercentTR = 60,
-                        cornerRadiusBR = rowCorners,
-                        smoothnessAsPercentBL = 60,
-                        cornerRadiusTL = rowCorners,
-                        smoothnessAsPercentBR = 60,
-                        cornerRadiusTR = rowCorners,
-                        smoothnessAsPercentTL = 60
-                    )
-                )
-                .background(Color.Transparent),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            val commonModifier = Modifier.weight(1f)
-
-            ToggleSegmentButton(
-                modifier = commonModifier,
-                active = isShuffleEnabled,
-                enabled = !isShuffleTransitionInProgress,
-                activeColor = LocalMaterialTheme.current.primary,
-                activeCornerRadius = rowCorners,
-                activeContentColor = LocalMaterialTheme.current.onPrimary,
-                inactiveColor = inactiveBg,
-                inactiveContentColor = inactiveContentColor,
-                onClick = onShuffleToggle,
-                iconId = R.drawable.rounded_shuffle_24,
-                contentDesc = "Shuffle"
-            )
-            val repeatActive = repeatMode != Player.REPEAT_MODE_OFF
-            val repeatIcon = when (repeatMode) {
-                Player.REPEAT_MODE_ONE -> R.drawable.rounded_repeat_one_24
-                Player.REPEAT_MODE_ALL -> R.drawable.rounded_repeat_24
-                else -> R.drawable.rounded_repeat_24
-            }
-            ToggleSegmentButton(
-                modifier = commonModifier,
-                active = repeatActive,
-                activeColor = LocalMaterialTheme.current.secondary,
-                activeCornerRadius = rowCorners,
-                activeContentColor = LocalMaterialTheme.current.onSecondary,
-                inactiveColor = inactiveBg,
-                inactiveContentColor = inactiveContentColor,
-                onClick = onRepeatToggle,
-                iconId = repeatIcon,
-                contentDesc = "Repeat"
-            )
-            ToggleSegmentButton(
-                modifier = commonModifier,
-                active = isFavorite,
-                activeColor = LocalMaterialTheme.current.tertiary,
-                activeCornerRadius = rowCorners,
-                activeContentColor = LocalMaterialTheme.current.onTertiary,
-                inactiveColor = inactiveBg,
-                inactiveContentColor = inactiveContentColor,
-                onClick = onFavoriteToggle,
-                iconId = if (isFavorite) R.drawable.round_favorite_24 else R.drawable.rounded_favorite_24,
-                contentDesc = "Favorite"
-            )
-        }
-    }
-}
