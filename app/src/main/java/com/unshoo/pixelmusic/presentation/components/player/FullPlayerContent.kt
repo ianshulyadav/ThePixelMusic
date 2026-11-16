@@ -760,15 +760,22 @@ fun FullPlayerContent(
     }
 
     // Top bar buttons sit over the cover art:
-    // Match the exact appearance of the like button (translucent on-base tint + dynamic content icon)
-    // when blur is active; otherwise use solid high-contrast pill styling.
+    // Frosted glass appearance with dynamic material color intensity when blur is active;
+    // otherwise use solid high-contrast pill styling.
     val isDarkTheme = com.unshoo.pixelmusic.ui.theme.LocalPixelMusicDarkTheme.current
+    val dynamicGlassTint = androidx.compose.ui.graphics.lerp(
+        if (isDarkTheme) Color.Black else Color.White,
+        LocalMaterialTheme.current.primary,
+        0.30f
+    )
     val topButtonContainer = when {
-        isBlurActive -> playerOnBaseColor.copy(alpha = 0.12f)
+        isBlurActive && isDarkTheme -> dynamicGlassTint.copy(alpha = 0.45f)
+        isBlurActive && !isDarkTheme -> dynamicGlassTint.copy(alpha = 0.65f)
         else -> LocalMaterialTheme.current.onPrimaryFixed
     }
     val topButtonContent = when {
-        isBlurActive -> playerOnBaseColor
+        isBlurActive && isDarkTheme -> LocalMaterialTheme.current.primary
+        isBlurActive && !isDarkTheme -> LocalMaterialTheme.current.primary
         else -> LocalMaterialTheme.current.primaryFixed
     }
 
