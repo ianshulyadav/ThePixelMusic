@@ -886,6 +886,9 @@ class MainActivity : ComponentActivity() {
             label = "BottomBarPadding"
         )
         val bottomBarPadding = animatedBottomBarPadding
+        val smokeBrush = rememberBottomNavigationSmokeBrush(
+            backgroundColor = MaterialTheme.colorScheme.background
+        )
         val navBarHeight = resolveNavBarSurfaceHeight(navBarStyle, systemNavBarInset, navBarCompactMode, navBarHeightOffset)
         val navBarOccupiedHeight by remember(systemNavBarInset, navBarCompactMode, navBarStyle, navBarHeightOffset) {
             derivedStateOf { resolveNavBarOccupiedHeight(navBarStyle, systemNavBarInset, navBarCompactMode, navBarHeightOffset) }
@@ -1105,22 +1108,12 @@ class MainActivity : ComponentActivity() {
                                 { playerViewModel.onSearchNavIconDoubleTapped() }
                             }
 
-                            val isFloatingPill = navBarStyle == NavBarStyle.FLOATING_PILL
-                            val smokeBrush = rememberBottomNavigationSmokeBrush(
-                                backgroundColor = MaterialTheme.colorScheme.background
-                            )
                             val navBarContainerModifier = Modifier
                                 .align(Alignment.BottomCenter)
                                 .fillMaxWidth()
                                 .padding(bottom = bottomBarPadding)
                                 .onSizeChanged { componentHeightPx = it.height }
                                 .graphicsLayer {
-                                    // BUGFIX: read the snapshot value captured via
-                                    // collectAsStateWithLifecycle at the top of the
-                                    // bottomBar scope. Reading .value directly off a
-                                    // StateFlow inside a graphicsLayer skipped Compose's
-                                    // recomposition tracking and forced the layer to
-                                    // re-evaluate on every PlayerViewModel emission.
                                     val hideFraction = if (showPlayerContentArea) {
                                         quantizedFraction
                                     } else {
@@ -1132,7 +1125,6 @@ class MainActivity : ComponentActivity() {
                                 .height(navBarHeight)
                                 .padding(horizontal = horizontalPadding)
 
-                            // Only the search button takes the playing song's colours (all tabs).
                             val songSchemePair by playerViewModel.currentAlbumArtColorSchemePair.collectAsStateWithLifecycle()
                             val isDarkForNav = com.unshoo.pixelmusic.ui.theme.LocalPixelMusicDarkTheme.current
                             val searchColorScheme = if (navBarFrostedBlur) {
@@ -1153,29 +1145,9 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
 
+                            val isFloatingPill = navBarStyle == NavBarStyle.FLOATING_PILL
                             if (isFloatingPill) {
-                                // Edge-to-edge smooth smoke blur background
-                                // Positioned to start from the nav bar top edge and extend
-                                // upward ~half the nav bar height, fading from transparent
-                                // (above) to the Material background color (at nav bar)
-                                val smokeHeight = navBarHeight + bottomBarPadding
-                                Box(
-                                    modifier = Modifier
-                                        .align(Alignment.BottomCenter)
-                                        .fillMaxWidth()
-                                        .height(smokeHeight)
-                                        .graphicsLayer {
-                                            val hideFraction = if (showPlayerContentArea) {
-                                                quantizedFraction
-                                            } else {
-                                                0f
-                                            }
-                                            translationY = (componentHeightPx + shadowOverflowPx + bottomBarPaddingPx) * hideFraction
-                                            alpha = (1f - hideFraction).coerceIn(0f, 1f)
-                                        }
-                                        .bottomNavigationSmokeBackground(brush = smokeBrush)
-                                )
-                                // No parent Surface — floating pill draws its own containers
+                                // Floating pill draws its own containers without parent surface
                                 Box(modifier = navBarContainerModifier) {
                                     navBarContent()
                                 }
@@ -1296,6 +1268,23 @@ class MainActivity : ComponentActivity() {
                                 onSearchBarActiveChange = { isSearchBarActive = it },
                                 onOpenSidebar = { scope.launch { drawerState.open() } }
                             )
+
+                            // Smoke overlay directly above scrolling content, fading up from navbar
+                            if (navBarStyle == NavBarStyle.FLOATING_PILL && shouldRenderNavigationBar) {
+                                val smokeHeight = remember(navBarOccupiedHeight, systemNavBarInset) {
+                                    navBarOccupiedHeight + 36.dp
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomCenter)
+                                        .fillMaxWidth()
+                                        .height(smokeHeight)
+                                        .graphicsLayer {
+                                            alpha = navBarVisibilityProgress
+                                        }
+                                        .bottomNavigationSmokeBackground(brush = smokeBrush)
+                                )
+                            }
                         }
 
                         // BUGFIX (recompose storm — read .value off a StateFlow):
