@@ -760,21 +760,21 @@ fun FullPlayerContent(
     }
 
     // Top bar buttons sit over the cover art:
-    // Frosted glass appearance with rich dynamic player color (colored opaque glass feel, no murky black);
+    // Frosted glass appearance with dynamic player color (delicate translucent frosted glass feel);
     // otherwise use solid high-contrast pill styling.
     val isDarkTheme = com.unshoo.pixelmusic.ui.theme.LocalPixelMusicDarkTheme.current
     val currentTheme = LocalMaterialTheme.current
     val dynamicGlassTint = androidx.compose.ui.graphics.lerp(
-        currentTheme.surfaceContainerHighest,
+        currentTheme.surfaceContainerHigh,
         currentTheme.primaryContainer,
-        0.55f
+        0.40f
     )
     val topButtonContainer = when {
-        isBlurActive -> dynamicGlassTint.copy(alpha = 0.85f)
+        isBlurActive -> dynamicGlassTint.copy(alpha = if (isDarkTheme) 0.35f else 0.42f)
         else -> currentTheme.onPrimaryFixed
     }
     val topButtonContent = when {
-        isBlurActive -> currentTheme.onPrimaryContainer
+        isBlurActive -> currentTheme.primary
         else -> currentTheme.primaryFixed
     }
 
