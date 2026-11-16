@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.foundation.layout.size
@@ -242,19 +243,6 @@ private fun ExpressiveFloatingPillNavigationBar(
             mainItems.forEachIndexed { index, item ->
                 val isSelected = selectedIndex == index
                 val itemInteractionSource = remember { MutableInteractionSource() }
-                val isItemPressed by itemInteractionSource.collectIsPressedAsState()
-                val isItemHovered by itemInteractionSource.collectIsHoveredAsState()
-
-                // Tactile touch spring on touch press/release
-                val itemTactileScale by animateFloatAsState(
-                    targetValue = when {
-                        isItemPressed -> 0.92f
-                        isItemHovered -> 1.03f
-                        else -> 1.0f
-                    },
-                    animationSpec = motionScheme.fastSpatialSpec(),
-                    label = "pill_item_tactile_$index"
-                )
 
                 // Selection container transition matching CustomNavigationBarItem
                 val containerAlpha by animateFloatAsState(
@@ -298,62 +286,56 @@ private fun ExpressiveFloatingPillNavigationBar(
                     label = "pill_icon_bounce_$index"
                 )
 
-                Surface(
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        if (latestNavigationEnabled && latestCurrentRoute != item.screen.route) {
-                            navController.navigateToTopLevelSafely(item.screen.route)
-                        }
-                    },
+                Box(
                     modifier = Modifier
                         .weight(1.0f)
                         .height(pillItemHeight)
-                        .graphicsLayer {
-                            scaleX = itemTactileScale
-                            scaleY = itemTactileScale
+                        .clip(CircleShape)
+                        .clickable(
+                            interactionSource = itemInteractionSource,
+                            indication = null,
+                            enabled = latestNavigationEnabled
+                        ) {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            if (latestCurrentRoute != item.screen.route) {
+                                navController.navigateToTopLevelSafely(item.screen.route)
+                            }
                         },
-                    shape = CircleShape,
-                    color = Color.Transparent,
-                    contentColor = animContentColor,
-                    interactionSource = itemInteractionSource
+                    contentAlignment = Alignment.Center
                 ) {
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier.fillMaxSize()
-                    ) {
-                        // Inner selection container: capsule with exact default nav bar spring & scale
-                        if (containerAlpha > 0.005f) {
-                            Box(
-                                modifier = Modifier
-                                    .width(selectionContainerWidth)
-                                    .height(selectionContainerHeight)
-                                    .graphicsLayer {
-                                        scaleX = containerScale
-                                        scaleY = containerScale
-                                        alpha = containerAlpha
-                                    }
-                                    .clip(selectionContainerShape)
-                                    .background(containerColor, selectionContainerShape)
-                            )
-                        }
-
-                        val iconRes = if (isSelected && item.selectedIconResId != null && item.selectedIconResId != 0) {
-                            item.selectedIconResId
-                        } else {
-                            item.iconResId
-                        }
-
-                        Icon(
-                            painter = painterResource(id = iconRes),
-                            contentDescription = item.label,
+                    // Inner selection container: capsule with exact default nav bar spring & scale
+                    if (containerAlpha > 0.005f) {
+                        Box(
                             modifier = Modifier
-                                .size(pillIconSize)
+                                .width(selectionContainerWidth)
+                                .height(selectionContainerHeight)
                                 .graphicsLayer {
-                                    scaleX = iconBounceScale
-                                    scaleY = iconBounceScale
+                                    scaleX = containerScale
+                                    scaleY = containerScale
+                                    alpha = containerAlpha
                                 }
+                                .clip(selectionContainerShape)
+                                .background(containerColor, selectionContainerShape)
                         )
                     }
+
+                    val iconRes = if (isSelected && item.selectedIconResId != null && item.selectedIconResId != 0) {
+                        item.selectedIconResId
+                    } else {
+                        item.iconResId
+                    }
+
+                    Icon(
+                        painter = painterResource(id = iconRes),
+                        contentDescription = item.label,
+                        tint = animContentColor,
+                        modifier = Modifier
+                            .size(pillIconSize)
+                            .graphicsLayer {
+                                scaleX = iconBounceScale
+                                scaleY = iconBounceScale
+                            }
+                    )
                 }
             }
         }
