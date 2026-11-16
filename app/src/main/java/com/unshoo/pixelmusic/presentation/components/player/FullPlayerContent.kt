@@ -760,23 +760,22 @@ fun FullPlayerContent(
     }
 
     // Top bar buttons sit over the cover art:
-    // Frosted glass appearance with dynamic material color intensity when blur is active;
+    // Frosted glass appearance with rich dynamic player color (colored opaque glass feel, no murky black);
     // otherwise use solid high-contrast pill styling.
     val isDarkTheme = com.unshoo.pixelmusic.ui.theme.LocalPixelMusicDarkTheme.current
+    val currentTheme = LocalMaterialTheme.current
     val dynamicGlassTint = androidx.compose.ui.graphics.lerp(
-        if (isDarkTheme) Color.Black else Color.White,
-        LocalMaterialTheme.current.primary,
-        0.30f
+        currentTheme.surfaceContainerHighest,
+        currentTheme.primaryContainer,
+        0.55f
     )
     val topButtonContainer = when {
-        isBlurActive && isDarkTheme -> dynamicGlassTint.copy(alpha = 0.45f)
-        isBlurActive && !isDarkTheme -> dynamicGlassTint.copy(alpha = 0.65f)
-        else -> LocalMaterialTheme.current.onPrimaryFixed
+        isBlurActive -> dynamicGlassTint.copy(alpha = 0.85f)
+        else -> currentTheme.onPrimaryFixed
     }
     val topButtonContent = when {
-        isBlurActive && isDarkTheme -> LocalMaterialTheme.current.primary
-        isBlurActive && !isDarkTheme -> LocalMaterialTheme.current.primary
-        else -> LocalMaterialTheme.current.primaryFixed
+        isBlurActive -> currentTheme.onPrimaryContainer
+        else -> currentTheme.primaryFixed
     }
 
     Scaffold(
