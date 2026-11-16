@@ -89,7 +89,7 @@ fun ExpressivePlayerControls(
     val toolbarContainer = if (isDark) {
         if (isBlurActive) Color.Black.copy(alpha = 0.30f) else currentTheme.surfaceContainer.copy(alpha = 0.90f)
     } else {
-        Color.White.copy(alpha = if (isBlurActive) 0.60f else 0.92f)
+        Color.White.copy(alpha = if (isBlurActive) 0.55f else 0.92f)
     }
     val segmentInactive = if (isDark) {
         Color.White.copy(alpha = 0.07f)

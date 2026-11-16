@@ -759,10 +759,20 @@ fun FullPlayerContent(
         )
     }
 
-    // Top bar buttons sit over the cover art: dark translucent tint + light dynamic icon,
-    // using the fixed colour roles so they read well in light and dark schemes.
-    val topButtonContainer = LocalMaterialTheme.current.onPrimaryFixed
-    val topButtonContent = LocalMaterialTheme.current.primaryFixed
+    // Top bar buttons sit over the cover art:
+    // When blur is on, adopt a frosted glass look influenced by the dynamic player/material colours;
+    // otherwise use solid high-contrast pill styling.
+    val isDarkTheme = com.unshoo.pixelmusic.ui.theme.LocalPixelMusicDarkTheme.current
+    val topButtonContainer = when {
+        isBlurActive && isDarkTheme -> Color.Black.copy(alpha = 0.35f)
+        isBlurActive && !isDarkTheme -> Color.White.copy(alpha = 0.55f)
+        else -> LocalMaterialTheme.current.onPrimaryFixed
+    }
+    val topButtonContent = when {
+        isBlurActive && isDarkTheme -> LocalMaterialTheme.current.primary
+        isBlurActive && !isDarkTheme -> LocalMaterialTheme.current.primary
+        else -> LocalMaterialTheme.current.primaryFixed
+    }
 
     Scaffold(
         containerColor = Color.Transparent,
