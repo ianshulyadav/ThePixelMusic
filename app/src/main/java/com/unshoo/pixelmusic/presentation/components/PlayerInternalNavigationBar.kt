@@ -256,25 +256,23 @@ private fun ExpressiveFloatingPillNavigationBar(
                     label = "pill_item_tactile_$index"
                 )
 
-                // Tab navigation container scale with overshoot spring
-                val containerScale by animateFloatAsState(
-                    targetValue = if (isSelected) 1.0f else 0.0f,
-                    animationSpec = motionScheme.fastSpatialSpec(),
-                    label = "pill_container_scale_$index"
-                )
-
-                // Vertical jumping hop displacement on tab navigation
-                val containerJumpOffsetY by animateDpAsState(
-                    targetValue = if (isSelected) 0.dp else 3.dp,
-                    animationSpec = motionScheme.fastSpatialSpec(),
-                    label = "pill_container_jump_$index"
-                )
-
-                // Selection container alpha fade
+                // Selection container transition matching CustomNavigationBarItem
                 val containerAlpha by animateFloatAsState(
                     targetValue = if (isSelected) 1.0f else 0.0f,
-                    animationSpec = motionScheme.fastEffectsSpec(),
+                    animationSpec = tween(durationMillis = 100),
                     label = "pill_container_alpha_$index"
+                )
+                val containerScale by animateFloatAsState(
+                    targetValue = if (isSelected) 1.0f else 0.0f,
+                    animationSpec = if (isSelected) {
+                        androidx.compose.animation.core.spring(
+                            dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy,
+                            stiffness = androidx.compose.animation.core.Spring.StiffnessLow
+                        )
+                    } else {
+                        tween(durationMillis = 100, easing = androidx.compose.animation.core.CubicBezierEasing(0.5f, 0f, 0.75f, 0f))
+                    },
+                    label = "pill_container_scale_$index"
                 )
 
                 // Tinted frosted solid container styling with Material theme container color
@@ -293,10 +291,13 @@ private fun ExpressiveFloatingPillNavigationBar(
                     label = "pill_content_$index"
                 )
 
-                // Icon spring bounce on selection
+                // Icon spring bounce on selection matching CustomNavigationBarItem
                 val iconBounceScale by animateFloatAsState(
-                    targetValue = if (isSelected) 1.12f else 1.0f,
-                    animationSpec = motionScheme.fastSpatialSpec(),
+                    targetValue = if (isSelected) 1.1f else 1.0f,
+                    animationSpec = androidx.compose.animation.core.spring(
+                        dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy,
+                        stiffness = androidx.compose.animation.core.Spring.StiffnessMedium
+                    ),
                     label = "pill_icon_bounce_$index"
                 )
 
@@ -323,7 +324,7 @@ private fun ExpressiveFloatingPillNavigationBar(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier.fillMaxSize()
                     ) {
-                        // Inner selection container: compact stadium capsule with jumping bounce
+                        // Inner selection container: capsule with exact default nav bar spring & scale
                         if (containerAlpha > 0.005f) {
                             Box(
                                 modifier = Modifier
@@ -332,12 +333,10 @@ private fun ExpressiveFloatingPillNavigationBar(
                                     .graphicsLayer {
                                         scaleX = containerScale
                                         scaleY = containerScale
-                                        translationY = containerJumpOffsetY.toPx()
                                         alpha = containerAlpha
                                     }
                                     .clip(selectionContainerShape)
                                     .background(containerColor, selectionContainerShape)
-
                             )
                         }
 
