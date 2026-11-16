@@ -1155,9 +1155,15 @@ class MainActivity : ComponentActivity() {
 
                             if (isFloatingPill) {
                                 // Edge-to-edge smooth smoke blur background
+                                // Positioned to start from the nav bar top edge and extend
+                                // upward ~half the nav bar height, fading from transparent
+                                // (above) to the Material background color (at nav bar)
+                                val smokeHeight = navBarHeight + bottomBarPadding
                                 Box(
                                     modifier = Modifier
-                                        .fillMaxSize()
+                                        .align(Alignment.BottomCenter)
+                                        .fillMaxWidth()
+                                        .height(smokeHeight)
                                         .graphicsLayer {
                                             val hideFraction = if (showPlayerContentArea) {
                                                 quantizedFraction
