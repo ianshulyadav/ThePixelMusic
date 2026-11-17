@@ -154,7 +154,7 @@ internal fun resolveNavBarOccupiedHeight(
     return if (navBarStyle == NavBarStyle.FULL_WIDTH) {
         contentHeight + systemNavBarInset
     } else {
-        val bottomMargin = if (systemNavBarInset > 0.dp) systemNavBarInset else 14.dp
+        val bottomMargin = if (systemNavBarInset > 0.dp) (systemNavBarInset - 2.dp).coerceAtLeast(0.dp) else 2.dp
         contentHeight + bottomMargin
     }
 }
