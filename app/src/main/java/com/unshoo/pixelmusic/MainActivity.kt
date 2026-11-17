@@ -871,7 +871,7 @@ class MainActivity : ComponentActivity() {
         }
 
         val horizontalPadding = when (navBarStyle) {
-            NavBarStyle.DEFAULT -> if (systemNavBarInset > 0.dp) 12.dp else 1.dp
+            NavBarStyle.DEFAULT -> if (systemNavBarInset > 0.dp) 12.dp else 2.dp
             NavBarStyle.FLOATING_PILL -> 16.dp
             else -> 0.dp
         }
