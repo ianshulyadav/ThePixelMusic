@@ -74,8 +74,9 @@ fun rememberTopBarSmokeBrush(
     backgroundColor: Color = MaterialTheme.colorScheme.background
 ): Brush {
     return remember(backgroundColor) {
+        val lastIdx = SmokeAlphas.lastIndex
         val stops = Array(SmokeStops.size) { i ->
-            SmokeStops[i] to backgroundColor.copy(alpha = SmokeAlphas[SmokeAlphas.size - 1 - i])
+            SmokeStops[i] to backgroundColor.copy(alpha = SmokeAlphas[lastIdx - i])
         }
         Brush.verticalGradient(colorStops = stops)
     }

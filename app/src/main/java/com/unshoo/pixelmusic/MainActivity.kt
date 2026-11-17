@@ -878,7 +878,7 @@ class MainActivity : ComponentActivity() {
         val targetBottomBarPadding = if (navBarStyle == NavBarStyle.FULL_WIDTH) {
             0.dp
         } else {
-            if (systemNavBarInset > 0.dp) (systemNavBarInset - 2.dp).coerceAtLeast(0.dp) else 2.dp
+            com.unshoo.pixelmusic.presentation.components.resolveFloatingNavBarBottomPadding(systemNavBarInset)
         }
         val animatedBottomBarPadding by animateDpAsState(
             targetValue = targetBottomBarPadding,
@@ -1125,11 +1125,6 @@ class MainActivity : ComponentActivity() {
                                 .height(navBarHeight)
                                 .padding(horizontal = horizontalPadding)
 
-                            val songSchemePair by playerViewModel.currentAlbumArtColorSchemePair.collectAsStateWithLifecycle()
-                            val isDarkForNav = com.unshoo.pixelmusic.ui.theme.LocalPixelMusicDarkTheme.current
-                            val searchColorScheme = if (navBarFrostedBlur) {
-                                songSchemePair?.let { if (isDarkForNav) it.dark else it.light }
-                            } else null
                             val navBarContent: @Composable () -> Unit = {
                                 PlayerInternalNavigationBar(
                                     navController = navController,
@@ -1139,7 +1134,6 @@ class MainActivity : ComponentActivity() {
                                     compactMode = navBarCompactMode,
                                     bottomBarPadding = bottomBarPadding,
                                     frostedBlur = navBarFrostedBlur,
-                                    searchColorScheme = searchColorScheme,
                                     onSearchIconDoubleTap = onSearchIconDoubleTap,
                                     modifier = Modifier.fillMaxSize()
                                 )

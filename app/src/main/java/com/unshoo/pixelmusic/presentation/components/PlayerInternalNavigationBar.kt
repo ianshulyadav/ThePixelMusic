@@ -139,6 +139,9 @@ internal fun resolveNavBarSurfaceHeight(
     }
 }
 
+internal fun resolveFloatingNavBarBottomPadding(systemNavBarInset: Dp): Dp =
+    if (systemNavBarInset > 0.dp) (systemNavBarInset - 2.dp).coerceAtLeast(0.dp) else 2.dp
+
 internal fun resolveNavBarOccupiedHeight(
     systemNavBarInset: Dp,
     compactMode: Boolean
@@ -154,8 +157,7 @@ internal fun resolveNavBarOccupiedHeight(
     return if (navBarStyle == NavBarStyle.FULL_WIDTH) {
         contentHeight + systemNavBarInset
     } else {
-        val bottomMargin = if (systemNavBarInset > 0.dp) (systemNavBarInset - 2.dp).coerceAtLeast(0.dp) else 2.dp
-        contentHeight + bottomMargin
+        contentHeight + resolveFloatingNavBarBottomPadding(systemNavBarInset)
     }
 }
 
@@ -167,7 +169,6 @@ private fun ExpressiveFloatingPillNavigationBar(
     currentRoute: String?,
     modifier: Modifier = Modifier,
     frostedBlur: Boolean = false,
-    searchColorScheme: androidx.compose.material3.ColorScheme? = null,
     onSearchIconDoubleTap: () -> Unit = {}
 ) {
     // The expressive pill maintains its full intended proportions and is never shrunken by compact mode.
@@ -184,18 +185,9 @@ private fun ExpressiveFloatingPillNavigationBar(
     var lastSearchTapTimestamp by remember { mutableStateOf(0L) }
 
     val haptic = LocalHapticFeedback.current
-    val configuration = LocalConfiguration.current
-    val fontScale = LocalDensity.current.fontScale
-    val screenWidth = configuration.screenWidthDp
 
     val searchItem = navItems.find { it.screen.route == Screen.Search.route }
     val mainItems = navItems.filter { it.screen.route != Screen.Search.route }
-
-    val isLargeFont = fontScale > 1.25f
-    val isCompactScreen = screenWidth < 400
-    // Icon-only pill (reference design): labels are never shown in the floating pill.
-    @Suppress("UNUSED_VARIABLE") val labelsWouldHide = isLargeFont || (isCompactScreen && mainItems.size > 3)
-    val shouldHideLabel = true
 
     val selectedIndex = mainItems.indexOfFirst { it.screen.route == latestCurrentRoute }
 
@@ -600,7 +592,6 @@ fun PlayerInternalNavigationBar(
     compactMode: Boolean,
     bottomBarPadding: Dp = 0.dp,
     frostedBlur: Boolean = false,
-    searchColorScheme: androidx.compose.material3.ColorScheme? = null,
     onSearchIconDoubleTap: () -> Unit = {}
 ) {
     if (navBarStyle == NavBarStyle.FLOATING_PILL) {
@@ -610,7 +601,6 @@ fun PlayerInternalNavigationBar(
             currentRoute = currentRoute,
             modifier = modifier,
             frostedBlur = frostedBlur,
-            searchColorScheme = searchColorScheme,
             onSearchIconDoubleTap = onSearchIconDoubleTap
         )
     } else {
