@@ -1961,7 +1961,7 @@ private fun FullPlayerControlsSection(
         ExpressivePlayerControls(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 8.dp),
+                .padding(top = 8.dp, bottom = 4.dp),
             isPlayingProvider = isPlayingProvider,
             isBufferingProvider = isBufferingProvider,
             onPlayPause = onPlayPause,
@@ -2200,7 +2200,12 @@ private fun FullPlayerPortraitContent(
         val infoH = with(density) { infoHeightPx.toDp() }
         val controlsH = with(density) { controlsHeightPx.toDp() }
         val squareTopSpace = (maxWidth - overlap - padTop).coerceAtLeast(0.dp)
-        val availableTopSpace = (maxHeight - padTop - padBottom - infoH - controlsH - 40.dp).coerceAtLeast(0.dp)
+        // On phones with 3-button navigation, padBottom is large (~48dp). Adding extra fixed bottom
+        // space pushes the toggle row unnaturally far up above the buttons. We adjust the bottom
+        // spacing dynamically: for gesture nav (~16-24dp or less), keep ~16-20dp breathing room;
+        // for 3-button nav (>32dp), taper the bottom space down to avoid a double gap.
+        val extraBottomSpace = (22.dp - (padBottom - 16.dp).coerceAtLeast(0.dp)).coerceIn(4.dp, 22.dp)
+        val availableTopSpace = (maxHeight - padTop - padBottom - extraBottomSpace - infoH - controlsH - 18.dp).coerceAtLeast(0.dp)
         val topSpace = when {
             infoHeightPx == 0 || controlsHeightPx == 0 -> squareTopSpace
             // Tall screens: the cover takes all spare height, so there is no gap between the
@@ -2269,7 +2274,7 @@ private fun FullPlayerPortraitContent(
             ) {
                 controlsSection()
             }
-            Spacer(Modifier.height(22.dp))
+            Spacer(Modifier.height(extraBottomSpace))
         }
     }
 }
