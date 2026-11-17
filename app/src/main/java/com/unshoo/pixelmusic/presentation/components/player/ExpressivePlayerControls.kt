@@ -107,8 +107,8 @@ fun ExpressivePlayerControls(
     androidx.compose.foundation.layout.BoxWithConstraints(modifier = modifier) {
     // Auto-size to the display width: bigger buttons on wide phones, compact on small ones.
     val transportHeight = (maxWidth * 0.30f).coerceIn(68.dp, 118.dp)
-    // Reference proportions: round button ≈ 21% of the width, bar fills the rest.
-    val toolbarHeight = (maxWidth * 0.17f).coerceIn(48.dp, 64.dp)
+    // Reference proportions: round button ≈ 18% of the width, bar fills the rest.
+    val toolbarHeight = (maxWidth * 0.18f).coerceIn(52.dp, 68.dp)
     Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(20.dp)) {
         Row(
             modifier = Modifier
@@ -253,7 +253,7 @@ fun ExpressivePlayerControls(
                     imageVector = Icons.Rounded.Menu,
                     contentDescription = "More options",
                     tint = segmentInactiveContent,
-                    modifier = Modifier.size(22.dp)
+                    modifier = Modifier.size(25.dp)
                 )
             }
         }
@@ -334,7 +334,7 @@ private fun RowScope.ToolbarSegment(
             painter = painterResource(iconRes),
             contentDescription = contentDescription,
             tint = fg,
-            modifier = Modifier.size(22.dp)
+            modifier = Modifier.size(25.dp)
         )
     }
 }

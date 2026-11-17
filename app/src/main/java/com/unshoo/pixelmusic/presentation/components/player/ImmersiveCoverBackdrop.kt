@@ -67,11 +67,17 @@ internal fun ImmersiveCoverBackdrop(
             SmartImage(
                 model = model,
                 contentDescription = null,
-                contentScale = ContentScale.FillWidth,
-                alignment = Alignment.TopCenter,
+                contentScale = ContentScale.Crop,
                 targetSize = targetSize,
                 crossfadeDurationMillis = 0,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        // Very subtle zoom-out (0.96x) so the artwork isn't over-cropped,
+                        // keeping the natural full immersive backdrop feel.
+                        scaleX = 0.96f
+                        scaleY = 0.96f
+                    }
             )
         }
         // Soft top scrim keeps the status bar and top buttons readable on bright art.
