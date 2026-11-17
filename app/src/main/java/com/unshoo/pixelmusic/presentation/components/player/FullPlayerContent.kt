@@ -3123,9 +3123,11 @@ private fun PlayerSongInfo(
     val resolvedArtistId by remember(artists, artistId) {
         derivedStateOf { artists.firstOrNull { it.id != 0L && it.id != -1L }?.id ?: artistId }
     }
-    val titleStyle = MaterialTheme.typography.headlineSmall.copy(
+    val titleStyle = MaterialTheme.typography.headlineMedium.copy(
         fontWeight = FontWeight.Bold,
         fontFamily = GoogleSansRounded,
+        fontSize = 28.sp,
+        lineHeight = 34.sp,
         color = textColor
     )
 

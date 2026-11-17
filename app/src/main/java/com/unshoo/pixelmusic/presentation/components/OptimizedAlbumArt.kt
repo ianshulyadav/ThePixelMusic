@@ -35,10 +35,9 @@ import coil.size.Size
 import com.unshoo.pixelmusic.R
 import com.unshoo.pixelmusic.utils.LocalArtworkUri
 
-// Keep "original" album art bounded. Many embedded covers are 3000-6000px; decoding
-// those into a 256 MB heap can OOM after long sessions. 1280px is visually sharp for
-// the full player while using ~60% less memory than 2048px.
-internal const val MaxSafeAlbumArtDimensionPx = 1280
+// Keep "original" album art bounded. 1920px provides pristine sharpness and texture
+// for high-resolution displays in the full player without risking OOM.
+internal const val MaxSafeAlbumArtDimensionPx = 1920
 internal val SafeOriginalAlbumArtSize = Size(MaxSafeAlbumArtDimensionPx, MaxSafeAlbumArtDimensionPx)
 
 @OptIn(ExperimentalComposeUiApi::class)
