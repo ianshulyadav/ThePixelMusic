@@ -171,11 +171,11 @@ private fun ExpressiveFloatingPillNavigationBar(
     onSearchIconDoubleTap: () -> Unit = {}
 ) {
     // The expressive pill maintains its full intended proportions and is never shrunken by compact mode.
-    val pillItemHeight = 50.dp
-    val searchButtonSize = 60.dp
-    val pillIconSize = 23.dp
-    val selectionContainerWidth = 58.dp
-    val selectionContainerHeight = 34.dp
+    val pillItemHeight = 52.dp
+    val searchButtonSize = 64.dp
+    val pillIconSize = 24.dp
+    val selectionContainerWidth = 64.dp
+    val selectionContainerHeight = 36.dp
     val selectionContainerShape = CircleShape
     val latestCurrentRoute by rememberUpdatedState(currentRoute)
     val latestNavigationEnabled by rememberUpdatedState(currentRoute != null)
@@ -224,7 +224,7 @@ private fun ExpressiveFloatingPillNavigationBar(
             expanded = true,
             modifier = Modifier
                 .weight(1f)
-                .height(pillItemHeight + 10.dp)
+                .height(64.dp)
                 .then(
                     if (frostedBlur) {
                         Modifier
@@ -237,7 +237,7 @@ private fun ExpressiveFloatingPillNavigationBar(
             colors = FloatingToolbarDefaults.standardFloatingToolbarColors(
                 toolbarContainerColor = if (frostedBlur) Color.Transparent else solidTintedColor
             ),
-            contentPadding = PaddingValues(start = 10.dp, end = 10.dp, top = 5.dp, bottom = 5.dp)
+            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
         ) {
             mainItems.forEachIndexed { index, item ->
                 val isSelected = selectedIndex == index
@@ -288,7 +288,7 @@ private fun ExpressiveFloatingPillNavigationBar(
                 Box(
                     modifier = Modifier
                         .weight(1.0f)
-                        .height(pillItemHeight)
+                        .height(64.dp)
                         .clip(CircleShape)
                         .clickable(
                             interactionSource = itemInteractionSource,
@@ -340,8 +340,7 @@ private fun ExpressiveFloatingPillNavigationBar(
         }
 
         // Disconnected Search FAB — M3 Expressive floating action button
-        // The search button alone is tinted with the playing song's colours (frosted mode).
-        MaterialTheme(colorScheme = searchColorScheme ?: MaterialTheme.colorScheme) {
+        // Uses the solid app theme-based primary color (matching Library header title)
         if (searchItem != null) {
             val isSearchSelected = latestCurrentRoute == searchItem.screen.route
             val searchInteractionSource = remember { MutableInteractionSource() }
@@ -372,10 +371,10 @@ private fun ExpressiveFloatingPillNavigationBar(
             }
 
             val searchColor by animateColorAsState(
-                targetValue = when {
-                    isSearchSelected -> MaterialTheme.colorScheme.secondaryContainer
-                    frostedBlur -> Color.Transparent
-                    else -> MaterialTheme.colorScheme.primaryContainer
+                targetValue = if (isSearchSelected) {
+                    MaterialTheme.colorScheme.secondaryContainer
+                } else {
+                    MaterialTheme.colorScheme.primary
                 },
                 animationSpec = motionScheme.defaultEffectsSpec(),
                 label = "search_fab_bg"
@@ -385,7 +384,7 @@ private fun ExpressiveFloatingPillNavigationBar(
                 targetValue = if (isSearchSelected) {
                     MaterialTheme.colorScheme.onSecondaryContainer
                 } else {
-                    MaterialTheme.colorScheme.onPrimaryContainer
+                    MaterialTheme.colorScheme.onPrimary
                 },
                 animationSpec = motionScheme.defaultEffectsSpec(),
                 label = "search_fab_content"
@@ -413,19 +412,12 @@ private fun ExpressiveFloatingPillNavigationBar(
                     .graphicsLayer {
                         scaleX = fabScale
                         scaleY = fabScale
-                    }
-                    .then(
-                        if (frostedBlur) {
-                            Modifier
-                                .clip(SearchButtonShape)
-                                .frostedBackdrop(source = backdropSource, tint = frostedGlassTint(songTintStrength = 0.42f))
-                        } else Modifier
-                    ),
+                    },
                 shape = SearchButtonShape,
                 color = searchColor,
-                contentColor = if (frostedBlur) MaterialTheme.colorScheme.onSurface else searchContentColor,
-                tonalElevation = if (frostedBlur) 0.dp else if (isSearchHovered) 4.dp else 2.dp,
-                shadowElevation = if (frostedBlur) 0.dp else if (isSearchHovered) 8.dp else 6.dp,
+                contentColor = searchContentColor,
+                tonalElevation = if (isSearchHovered) 4.dp else 2.dp,
+                shadowElevation = if (isSearchHovered) 8.dp else 6.dp,
                 interactionSource = searchInteractionSource
             ) {
                 Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
@@ -441,7 +433,6 @@ private fun ExpressiveFloatingPillNavigationBar(
                     )
                 }
             }
-        }
         }
     }
 }
