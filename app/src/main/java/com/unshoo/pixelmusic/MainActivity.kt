@@ -878,7 +878,7 @@ class MainActivity : ComponentActivity() {
         val targetBottomBarPadding = if (navBarStyle == NavBarStyle.FULL_WIDTH) {
             0.dp
         } else {
-            if (systemNavBarInset > 0.dp) systemNavBarInset else 14.dp
+            if (systemNavBarInset > 0.dp) (systemNavBarInset - 2.dp).coerceAtLeast(0.dp) else 2.dp
         }
         val animatedBottomBarPadding by animateDpAsState(
             targetValue = targetBottomBarPadding,
