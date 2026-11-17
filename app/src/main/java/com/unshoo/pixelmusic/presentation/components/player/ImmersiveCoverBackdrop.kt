@@ -67,10 +67,11 @@ internal fun ImmersiveCoverBackdrop(
             SmartImage(
                 model = model,
                 contentDescription = null,
-                contentScale = ContentScale.Crop,
+                contentScale = ContentScale.FillWidth,
+                alignment = Alignment.TopCenter,
                 targetSize = targetSize,
                 crossfadeDurationMillis = 0,
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier.fillMaxWidth()
             )
         }
         // Soft top scrim keeps the status bar and top buttons readable on bright art.

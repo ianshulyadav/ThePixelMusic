@@ -99,16 +99,16 @@ fun ExpressivePlayerControls(
     val segmentActive = skipContainer
     val segmentActiveContent = skipContent
     val segmentInactiveContent = if (isDark) {
-        skipContainer
+        Color.White.copy(alpha = 0.72f)
     } else {
-        currentTheme.onSurface.copy(alpha = 0.85f)
+        currentTheme.onSurface.copy(alpha = 0.75f)
     }
 
     androidx.compose.foundation.layout.BoxWithConstraints(modifier = modifier) {
     // Auto-size to the display width: bigger buttons on wide phones, compact on small ones.
     val transportHeight = (maxWidth * 0.30f).coerceIn(68.dp, 118.dp)
     // Reference proportions: round button ≈ 21% of the width, bar fills the rest.
-    val toolbarHeight = (maxWidth * 0.21f).coerceIn(58.dp, 96.dp)
+    val toolbarHeight = (maxWidth * 0.17f).coerceIn(48.dp, 64.dp)
     Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(20.dp)) {
         Row(
             modifier = Modifier
@@ -253,7 +253,7 @@ fun ExpressivePlayerControls(
                     imageVector = Icons.Rounded.Menu,
                     contentDescription = "More options",
                     tint = segmentInactiveContent,
-                    modifier = Modifier.size(34.dp)
+                    modifier = Modifier.size(22.dp)
                 )
             }
         }
@@ -334,7 +334,7 @@ private fun RowScope.ToolbarSegment(
             painter = painterResource(iconRes),
             contentDescription = contentDescription,
             tint = fg,
-            modifier = Modifier.size(30.dp)
+            modifier = Modifier.size(22.dp)
         )
     }
 }

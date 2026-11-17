@@ -110,7 +110,8 @@ fun smartImageBucketForPx(rawPx: Int, isThumbnail: Boolean = false): Int {
         rawPx <= 320 -> 256
         rawPx <= 448 -> 384
         rawPx <= 768 -> 512
-        else -> 1024
+        rawPx <= 1024 -> 1024
+        else -> 1920
     }
 }
 
@@ -134,6 +135,7 @@ fun SmartImage(
     errorResId: Int = R.drawable.ic_music_placeholder,
     shape: Shape = RectangleShape,
     contentScale: ContentScale = ContentScale.Crop,
+    alignment: Alignment = Alignment.Center,
     // BUGFIX (was: 300ms crossfade everywhere): the previous default
     // of 300ms applied to every thumbnail in every LazyColumn, which
     // meant scrolling the library fired 6-8 crossfade animations per
