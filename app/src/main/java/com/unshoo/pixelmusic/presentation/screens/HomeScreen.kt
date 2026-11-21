@@ -258,11 +258,10 @@ fun HomeScreen(
     val usesFallbackHomeMix = remember(curatedYourMixSongs, dailyMixSongs) {
         curatedYourMixSongs.isEmpty() && dailyMixSongs.isEmpty()
     }
+    val allLibrarySongs by playerViewModel.allSongsFlow.collectAsStateWithLifecycle()
     val yourMixSongs by produceState(
         initialValue = if (isEffectivelyOnline) dailyMixSongs else persistentListOf(),
-        key1 = dailyMixSongs,
-        key2 = curatedYourMixSongs,
-        key3 = isEffectivelyOnline
+        dailyMixSongs, curatedYourMixSongs, isEffectivelyOnline, allLibrarySongs.size
     ) {
         val baseList = when {
             dailyMixSongs.isNotEmpty() -> dailyMixSongs
@@ -271,7 +270,12 @@ fun HomeScreen(
         }
         value = if (!isEffectivelyOnline) {
             withContext(Dispatchers.IO) {
-                baseList.filter { com.unshoo.pixelmusic.utils.OfflineAudioResolver.hasOfflineAudio(context, it) }.toImmutableList()
+                val offline = baseList.filter { com.unshoo.pixelmusic.utils.OfflineAudioResolver.hasOfflineAudio(context, it) }
+                // BUGFIX (Local mode stuck on the loader): the mix is built from online picks, so
+                // offline it often filters down to nothing. Fall back to the on-device library.
+                offline.ifEmpty {
+                    allLibrarySongs.filter { it.isLocal }.shuffled(java.util.Random(java.time.LocalDate.now().toEpochDay())).take(30)
+                }.toImmutableList()
             }
         } else {
             baseList
@@ -539,10 +543,18 @@ fun HomeScreen(
                     }
                 }
 
+                // Offline/Local mode: never spin forever when there is simply nothing to show.
+                var offlineLoaderTimedOut by remember(isEffectivelyOnline) { mutableStateOf(false) }
+                LaunchedEffect(isEffectivelyOnline) {
+                    if (!isEffectivelyOnline) {
+                        kotlinx.coroutines.delay(3000L)
+                        offlineLoaderTimedOut = true
+                    }
+                }
                 val showHomeLoading = if (isEffectivelyOnline) {
                     !isInitialFetchFinished || isQuickPicksLoading
                 } else {
-                    yourMixSongs.isEmpty() && quickPicks.isEmpty()
+                    yourMixSongs.isEmpty() && quickPicks.isEmpty() && !offlineLoaderTimedOut
                 }
                 Crossfade(
                     targetState = showHomeLoading,
@@ -577,13 +589,14 @@ fun HomeScreen(
                             ),
                             verticalArrangement = Arrangement.spacedBy(24.dp)
                         ) {
-                            if (quickPicksDisplayMode != QuickPicksDisplayMode.CARD) {
+                            if (homeLayout.showGreeting) {
                                 item(
                                     key = "home_greeting",
                                     contentType = "home_greeting"
                                 ) {
                                     HomeGreetingHeader(
-                                        userName = userName
+                                        userName = userName,
+                                        customGreeting = homeLayout.customGreeting
                                     )
                                 }
                             }
@@ -1177,7 +1190,8 @@ private fun rememberYourMixTitleStyle(): TextStyle {
 @Composable
 fun HomeGreetingHeader(
     userName: String?,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    customGreeting: String = ""
 ) {
     val calendar = remember { java.util.Calendar.getInstance() }
     val hour = remember(calendar) { calendar.get(java.util.Calendar.HOUR_OF_DAY) }
@@ -1247,11 +1261,17 @@ fun HomeGreetingHeader(
         }
         resIds.random()
     }
-    val greeting = if (userName != null) {
+    val automatic = if (userName != null) {
         stringResource(greetingRes, userName)
     } else {
         stringResource(greetingRes)
     }
+    // Customize Home › Greeting: the user's own text ("{name}" becomes the account name).
+    val greeting = customGreeting.trim().takeIf { it.isNotEmpty() }
+        ?.replace("{name}", userName.orEmpty(), ignoreCase = true)
+        ?.replace(Regex("""\s+([,!.?])"""), "$1")
+        ?.trim()
+        ?: automatic
 
     Column(
         modifier = modifier

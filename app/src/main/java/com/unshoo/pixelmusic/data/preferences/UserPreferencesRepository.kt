@@ -110,7 +110,7 @@ enum class QuickPicks {
 }
 
 enum class QuickPicksDisplayMode {
-    CARD, CARD_CLASSIC, LIST, UNCONTAINED
+    CARD, CARD_CLASSIC, LIST, UNCONTAINED, CARD_FROSTED, CARD_ALBUM_TINT
 }
 
 enum class SearchSource {
@@ -438,6 +438,7 @@ constructor(
         val DEDUPLICATE_QUEUE_ENTRIES = booleanPreferencesKey("deduplicate_queue_entries")
         val PREFER_TELEGRAM_ALTERNATIVE = booleanPreferencesKey("prefer_telegram_alternative")
         val TELEGRAM_USE_ONLINE_ALBUM_ART = booleanPreferencesKey("telegram_use_online_album_art")
+        val USE_DEVICE_LIBRARY_MATCHES = booleanPreferencesKey("use_device_library_matches")
         val LASTFM_SESSION = stringPreferencesKey("lastfm_session")
         val LASTFM_USERNAME = stringPreferencesKey("lastfm_username")
         val LASTFM_API_KEY = stringPreferencesKey("lastfm_api_key_v1")
@@ -2596,6 +2597,22 @@ constructor(
     suspend fun setPlaylistSuggestionSource(source: PlaylistSuggestionSource) {
         dataStore.edit { preferences ->
             preferences[PreferencesKeys.PLAYLIST_SUGGESTION_SOURCE] = source.name
+        }
+    }
+
+    /**
+     * When true, an online song is played from (and "downloaded" as) a file already in the
+     * phone's own music library whose title/artist/duration matches. Off by default: the fuzzy
+     * match could swap the app's saved song for a different copy or version on the phone.
+     */
+    val useDeviceLibraryMatchesFlow: Flow<Boolean> =
+        dataStore.data.map { preferences ->
+            preferences[PreferencesKeys.USE_DEVICE_LIBRARY_MATCHES] ?: false
+        }.distinctUntilChanged()
+
+    suspend fun setUseDeviceLibraryMatches(enabled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.USE_DEVICE_LIBRARY_MATCHES] = enabled
         }
     }
 

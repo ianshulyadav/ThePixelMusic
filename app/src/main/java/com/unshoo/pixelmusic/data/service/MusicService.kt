@@ -655,6 +655,11 @@ class MusicService : MediaLibraryService() {
         // "next" API calls may return items with higher overlap against the user's
         // library, amplifying the duplicate-page problem in AutoQueueManager.
         serviceScope.launch {
+            userPreferencesRepository.useDeviceLibraryMatchesFlow.collect { enabled ->
+                com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.useDeviceLibraryMatches = enabled
+            }
+        }
+        serviceScope.launch {
             userPreferencesRepository.youtubePersonalizedQueueFlow.collect { enabled ->
                 unshoo.ianshulyadav.pixelmusic.innertube.YouTube.personalizedQueueEnabled = enabled
             }

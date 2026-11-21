@@ -1732,10 +1732,16 @@ object YoutubeHelper {
         }
         val saved = runCatching { AppDatabase.getInstance(context).songRepository().getSong(videoId) }.getOrNull()
         val savedPath = saved?.audioFilePath
+            // Older builds recorded a matching phone-library file as the song's "download".
+            // Without the opt-in, only trust files the app itself saved.
+            ?.takeIf { useDeviceLibraryMatches || isAppSavedAudioPath(context, it) }
         if (!savedPath.isNullOrBlank() && (savedPath.startsWith("content://") || File(savedPath).exists())) {
             localFilePathCache.put(videoId, savedPath)
             return savedPath
         }
+        // BUGFIX: the phone's own copy of a song used to replace the app's saved/streamed song
+        // whenever titles roughly matched. Only do this when the user opted in.
+        if (!useDeviceLibraryMatches) return null
         val lastMiss = localMatchMissCache[videoId]
         if (lastMiss != null && System.currentTimeMillis() - lastMiss < LOCAL_MATCH_MISS_TTL_MS) return null
         val matched = com.unshoo.pixelmusic.utils.LocalAudioDuplicateMatcher
@@ -1751,6 +1757,29 @@ object YoutubeHelper {
     }
 
     private val OFFLINE_AUDIO_EXTENSIONS = arrayOf("m4a", "opus", "flac", "mp3", "ogg", "webm")
+
+    /** True for audio the app downloaded itself: its audio folder, a SAF download folder, or Download/PixelMusic. */
+    private fun isAppSavedAudioPath(context: Context, path: String): Boolean {
+        if (path.startsWith("content://")) return true
+        val audioDir = runCatching {
+            PixelMusicHelper.getDownloadDirectory(context, Constants.Downloads.AUDIO_FILES_FOLDER).absolutePath
+        }.getOrNull()
+        return (audioDir != null && path.startsWith(audioDir)) ||
+            path.contains("/Download/PixelMusic/", ignoreCase = true) ||
+            path.contains("/PixelMusic/", ignoreCase = true)
+    }
+
+    /** Mirrors the "Use matching songs from phone storage" setting (set by MusicService). */
+    @Volatile
+    var useDeviceLibraryMatches: Boolean = false
+        set(value) {
+            if (field != value) {
+                field = value
+                // Drop paths resolved under the old rule so the change applies immediately.
+                localFilePathCache.evictAll()
+                localMatchMissCache.clear()
+            }
+        }
 
     /** Forget negative local-library matches (call after a media rescan). */
     fun clearLocalMatchMisses() = localMatchMissCache.clear()

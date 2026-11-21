@@ -38,9 +38,16 @@ class FeedRepository @Inject constructor(
         val exploreLastFmEnabled = runCatching { userPreferencesRepository.exploreLastfmEnabledFlow.first() }.getOrDefault(true)
         val resolvedUsername = if (!exploreLastFmEnabled) "" else (username ?: runCatching { userPreferencesRepository.lastfmUsernameFlow.first() }.getOrDefault(""))
         val cookies = runCatching { datastoreRepository.cookies.first() }.getOrNull()
-        val isYtConnected = cookies?.toRawCookie()?.let {
-            it.contains("SAPISID=") || it.contains("__Secure-3PAPISID=")
-        } == true
+        val rawCookie = cookies?.toRawCookie().orEmpty()
+        val isYtConnected = rawCookie.contains("SAPISID=") || rawCookie.contains("__Secure-3PAPISID=")
+        // BUGFIX: on a cold start MainViewModel copies the cookie onto the InnerTube client
+        // asynchronously; without this the feed could build from the anonymous home and be
+        // cached under the signed-in key, showing generic mixes/artists until a forced refresh.
+        if (isYtConnected) {
+            val yt = unshoo.ianshulyadav.pixelmusic.innertube.YouTube
+            if (yt.cookie != rawCookie) yt.cookie = rawCookie
+            yt.useLoginForBrowse = true
+        }
         val ytAccountName = runCatching { datastoreRepository.ytUsername.first() }.getOrDefault("")
         val connectionKey = if (isYtConnected) ytAccountName else "disconnected"
 

@@ -312,7 +312,10 @@ fun AppNavigation(
             }
             composable(
                 route = Screen.SettingsCategory.route,
-                arguments = listOf(navArgument("categoryId") { type = NavType.StringType }),
+                arguments = listOf(
+                    navArgument("categoryId") { type = NavType.StringType },
+                    navArgument("highlight") { type = NavType.StringType; nullable = true; defaultValue = null }
+                ),
                 enterTransition = { enterTransition() },
                 exitTransition = { exitTransition() },
                 popEnterTransition = { popEnterTransition() },
@@ -322,12 +325,17 @@ fun AppNavigation(
                     val categoryId = backStackEntry.arguments?.getString("categoryId")
                     if (categoryId != null) {
                         androidx.compose.runtime.key(categoryId) {
-                            SettingsCategoryScreen(
-                                categoryId = categoryId,
-                                navController = navController,
-                                playerViewModel = playerViewModel,
-                                onBackClick = { navController.popBackStackSafely() }
-                            )
+                            androidx.compose.runtime.CompositionLocalProvider(
+                                com.unshoo.pixelmusic.presentation.screens.LocalSettingsHighlight provides
+                                    backStackEntry.arguments?.getString("highlight")
+                            ) {
+                                SettingsCategoryScreen(
+                                    categoryId = categoryId,
+                                    navController = navController,
+                                    playerViewModel = playerViewModel,
+                                    onBackClick = { navController.popBackStackSafely() }
+                                )
+                            }
                         }
                     }
                 }

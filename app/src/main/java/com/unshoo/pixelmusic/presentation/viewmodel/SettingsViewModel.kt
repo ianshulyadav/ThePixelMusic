@@ -162,6 +162,7 @@ data class SettingsUiState(
     val contentCountry: String = com.unshoo.pixelmusic.data.preferences.getSafeDefaultContentCountry(),
     val playlistSuggestionSource: PlaylistSuggestionSource = PlaylistSuggestionSource.BOTH,
     val hideExplicit: Boolean = false,
+    val useDeviceLibraryMatches: Boolean = false,
     val hideVideo: Boolean = false,
     val topSize: String = "50",
     val discover: QuickPicks = QuickPicks.QUICK_PICKS,
@@ -1063,6 +1064,11 @@ class SettingsViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
+            userPreferencesRepository.useDeviceLibraryMatchesFlow.collect { value ->
+                _uiState.update { it.copy(useDeviceLibraryMatches = value) }
+            }
+        }
+        viewModelScope.launch {
             userPreferencesRepository.hideVideoFlow.collect { value ->
                 _uiState.update { it.copy(hideVideo = value) }
             }
@@ -1195,6 +1201,10 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             userPreferencesRepository.setDiscover(discover)
         }
+    }
+
+    fun setUseDeviceLibraryMatches(enabled: Boolean) {
+        viewModelScope.launch { userPreferencesRepository.setUseDeviceLibraryMatches(enabled) }
     }
 
     fun setQuickPicksDisplayMode(mode: QuickPicksDisplayMode) {

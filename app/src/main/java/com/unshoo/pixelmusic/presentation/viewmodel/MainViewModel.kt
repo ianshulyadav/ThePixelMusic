@@ -87,7 +87,7 @@ class MainViewModel @Inject constructor(
             }
 
             // Low-priority gentle background sync for playlists & library when account is connected.
-            // syncNow() internally enforces a 6-hour interval, uses boundary detection (skipping unchanged playlists),
+            // syncNow() internally enforces a 10-minute interval, uses boundary detection (skipping unchanged playlists),
             // and yields between pages so it never overheats the CPU or causes UI stutters.
             try {
                 delay(4_000L) // Wait for UI to settle after startup

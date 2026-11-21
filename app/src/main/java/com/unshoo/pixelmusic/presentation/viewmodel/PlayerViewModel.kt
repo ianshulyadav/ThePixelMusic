@@ -515,10 +515,16 @@ class PlayerViewModel @Inject constructor(
         val currentUriClean = currentSong?.albumArtUriString?.substringBefore('?')
         val updatedUriClean = updatedArtUri.substringBefore('?')
 
-        // A YouTube Music cover (cached by TelegramCoilFetcher) is final: nothing to swap in.
+        // BUGFIX (blurred cover): this used to return early whenever the YouTube Music cover
+        // existed on disk — but that is exactly the case where it arrived AFTER a fallback image
+        // was already shown, so the UI kept the low-res Telegram cover. Now: the YT Music cover
+        // gets exactly one swap-in (its own one-shot key); other upgrades (TDLib thumbnail) are
+        // ignored once the YT cover exists, so the art changes at most once and never flickers.
         val artKey = updatedUriClean.removePrefix("telegram_art://").replace('/', '_')
-        if (java.io.File(context.cacheDir, "telegram_ytm_art_${artKey}.jpg").let { it.exists() && it.length() > 0 }) return
-        if (currentUriClean == updatedUriClean && refreshedTelegramArt.add(updatedUriClean)) {
+        val hasYtmCover = java.io.File(context.cacheDir, "telegram_ytm_art_${artKey}.jpg").let { it.exists() && it.length() > 0 }
+        val refreshKey = if (hasYtmCover) "ytm:$updatedUriClean" else updatedUriClean
+        if (!hasYtmCover && refreshedTelegramArt.contains("ytm:$updatedUriClean")) return
+        if (currentUriClean == updatedUriClean && refreshedTelegramArt.add(refreshKey)) {
             Timber.d("PlayerViewModel: Embedded art updated for current song, forcing refresh")
             
             // 1. Invalidate Coil cache for the BASE uri (without params)

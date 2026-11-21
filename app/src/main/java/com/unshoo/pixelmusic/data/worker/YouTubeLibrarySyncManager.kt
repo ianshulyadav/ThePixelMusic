@@ -64,13 +64,14 @@ class YouTubeLibrarySyncManager @Inject constructor(
     suspend fun syncNow(force: Boolean = false) = withContext(Dispatchers.IO) {
         val lastTimestamp = userPreferencesRepository.getLastSyncTimestamp()
         val now = System.currentTimeMillis()
-        if (!force && now - lastTimestamp < 6L * 60L * 60L * 1000L) {
+        // BUGFIX: was 6 hours, so playlists edited in YouTube Music took hours to show up here.
+        if (!force && now - lastTimestamp < MIN_SYNC_INTERVAL_MS) {
             return@withContext
         }
 
         syncMutex.withLock {
             val lockedNow = System.currentTimeMillis()
-            if (!force && lockedNow - userPreferencesRepository.getLastSyncTimestamp() < 6L * 60L * 60L * 1000L) {
+            if (!force && lockedNow - userPreferencesRepository.getLastSyncTimestamp() < MIN_SYNC_INTERVAL_MS) {
                 return@withLock
             }
             if (!YouTube.hasLoginCookie()) {
@@ -87,23 +88,33 @@ class YouTubeLibrarySyncManager @Inject constructor(
             }
             try {
                 syncSubscribedArtists()
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                Timber.w(e, "YouTubeLibrarySyncManager: syncSubscribedArtists failed")
             }
             try {
                 syncLikedSongs()
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                Timber.w(e, "YouTubeLibrarySyncManager: syncLikedSongs failed")
             }
             try {
                 syncLikedAlbums()
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                Timber.w(e, "YouTubeLibrarySyncManager: syncLikedAlbums failed")
             }
             try {
                 syncLikedPlaylists()
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                Timber.w(e, "YouTubeLibrarySyncManager: syncLikedPlaylists failed")
             }
             try {
                 syncListeningHistory()
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                Timber.w(e, "YouTubeLibrarySyncManager: syncListeningHistory failed")
             }
             userPreferencesRepository.setLastSyncTimestamp(System.currentTimeMillis())
         }
@@ -354,9 +365,13 @@ class YouTubeLibrarySyncManager @Inject constructor(
                     i < existingSongs.size && page1Songs[i].id == existingSongs[i].youtubeId
                 }
 
+            // Self-made playlists often come back without a thumbnail in the library listing,
+            // which left them coverless (e.g. "Bhajan"); fall back to the first song's art.
+            val coverSource = item.thumbnail?.takeIf { it.isNotBlank() }
+                ?: page1Songs.firstOrNull { !it.thumbnail.isNullOrBlank() }?.thumbnail
             val highQualityCover = com.unshoo.pixelmusic.data.remote.youtube.upgradeThumbnailUrlToHighQuality(
-                item.thumbnail
-            ) ?: item.thumbnail ?: ""
+                coverSource
+            ) ?: coverSource ?: ""
 
             val info = PlaylistInfo(
                 id = item.id,

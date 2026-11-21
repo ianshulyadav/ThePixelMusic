@@ -878,11 +878,39 @@ object YouTube {
     private var inMemoryCachedHome: HomePage? = null
     @Volatile
     private var inMemoryCachedHomeTimestamp: Long = 0L
+    @Volatile
+    private var inMemoryCachedHomeKey: String? = null
     private val homeFetchMutex = Mutex()
 
     fun invalidateHomeCache() {
         inMemoryCachedHome = null
         inMemoryCachedHomeTimestamp = 0L
+        inMemoryCachedHomeKey = null
+    }
+
+    /**
+     * Identity of the request context a cached home belongs to. BUGFIX: the cache used to be
+     * shared regardless of auth, so a home fetched (by Quick Picks / Feed) before the signed-in
+     * cookie reached the client was served to Explore as the "personalised" home — Explore showed
+     * generic/anonymous shelves until a pull-to-refresh invalidated the cache.
+     */
+    private fun homeCacheKey(): String {
+        val state = authState
+        return listOf(
+            state.cookie?.hashCode()?.toString().orEmpty(),
+            state.dataSyncId.orEmpty(),
+            innerTube.useLoginForBrowse.toString(),
+            personalizedExploreEnabled.toString(),
+            innerTube.locale.gl,
+            innerTube.locale.hl,
+        ).joinToString("|")
+    }
+
+    private fun cachedHomeFor(key: String): HomePage? {
+        val cached = inMemoryCachedHome ?: return null
+        if (inMemoryCachedHomeKey != key) return null
+        if (System.currentTimeMillis() - inMemoryCachedHomeTimestamp >= 60_000L) return null
+        return cached
     }
 
     suspend fun home(continuation: String? = null, params: String? = null, forceRefresh: Boolean = false): Result<HomePage> = runCatching {
@@ -893,24 +921,22 @@ object YouTube {
         // Cache and deduplicate default home feed (continuation == null && params == null)
         if (params == null) {
             if (!forceRefresh) {
-                val cached = inMemoryCachedHome
-                val ts = inMemoryCachedHomeTimestamp
-                if (cached != null && (System.currentTimeMillis() - ts) < 60_000L) {
-                    return@runCatching cached
-                }
+                cachedHomeFor(homeCacheKey())?.let { return@runCatching it }
             }
 
             homeFetchMutex.withLock {
+                // Snapshot the context BEFORE fetching so a response is only ever cached under the
+                // auth/locale it was actually requested with.
+                val requestKey = homeCacheKey()
                 if (!forceRefresh) {
-                    val cached = inMemoryCachedHome
-                    val ts = inMemoryCachedHomeTimestamp
-                    if (cached != null && (System.currentTimeMillis() - ts) < 60_000L) {
-                        return@runCatching cached
-                    }
+                    cachedHomeFor(requestKey)?.let { return@runCatching it }
                 }
                 val fresh = fetchHomeInternal(null).getOrThrow()
-                inMemoryCachedHome = fresh
-                inMemoryCachedHomeTimestamp = System.currentTimeMillis()
+                if (homeCacheKey() == requestKey) {
+                    inMemoryCachedHome = fresh
+                    inMemoryCachedHomeTimestamp = System.currentTimeMillis()
+                    inMemoryCachedHomeKey = requestKey
+                }
                 fresh
             }
         } else {

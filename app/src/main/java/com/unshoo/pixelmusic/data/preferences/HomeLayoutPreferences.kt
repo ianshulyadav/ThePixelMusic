@@ -49,7 +49,11 @@ enum class MostListenedKind(val storageKey: String) {
 data class HomeLayoutConfig(
     val sections: List<HomeSectionId> = HomeSectionId.DEFAULT_ORDER,
     val mostListenedRange: MostListenedRange = MostListenedRange.WEEK,
-    val mostListenedKind: MostListenedKind = MostListenedKind.SONGS
+    val mostListenedKind: MostListenedKind = MostListenedKind.SONGS,
+    /** Show the greeting line at the top of Home. */
+    val showGreeting: Boolean = true,
+    /** User's own greeting; blank = the automatic time-of-day greeting. "{name}" = account name. */
+    val customGreeting: String = ""
 )
 
 /**
@@ -60,6 +64,8 @@ object HomeLayoutPreferences {
     private val SECTIONS = stringPreferencesKey("home_layout_sections")
     private val MOST_LISTENED_RANGE = stringPreferencesKey("home_most_listened_range")
     private val MOST_LISTENED_KIND = stringPreferencesKey("home_most_listened_kind")
+    private val SHOW_GREETING = androidx.datastore.preferences.core.booleanPreferencesKey("home_show_greeting")
+    private val CUSTOM_GREETING = stringPreferencesKey("home_custom_greeting")
 
     fun configFlow(context: Context): Flow<HomeLayoutConfig> =
         context.applicationContext.dataStore.data.map { prefs ->
@@ -72,7 +78,9 @@ object HomeLayoutPreferences {
             HomeLayoutConfig(
                 sections = sections,
                 mostListenedRange = MostListenedRange.fromKey(prefs[MOST_LISTENED_RANGE]),
-                mostListenedKind = MostListenedKind.fromKey(prefs[MOST_LISTENED_KIND])
+                mostListenedKind = MostListenedKind.fromKey(prefs[MOST_LISTENED_KIND]),
+                showGreeting = prefs[SHOW_GREETING] ?: true,
+                customGreeting = prefs[CUSTOM_GREETING].orEmpty()
             )
         }.distinctUntilChanged()
 
@@ -88,6 +96,14 @@ object HomeLayoutPreferences {
 
     suspend fun setMostListenedKind(context: Context, kind: MostListenedKind) {
         context.applicationContext.dataStore.edit { it[MOST_LISTENED_KIND] = kind.storageKey }
+    }
+
+    suspend fun setShowGreeting(context: Context, show: Boolean) {
+        context.applicationContext.dataStore.edit { it[SHOW_GREETING] = show }
+    }
+
+    suspend fun setCustomGreeting(context: Context, text: String) {
+        context.applicationContext.dataStore.edit { it[CUSTOM_GREETING] = text.take(80) }
     }
 
     suspend fun reset(context: Context) {

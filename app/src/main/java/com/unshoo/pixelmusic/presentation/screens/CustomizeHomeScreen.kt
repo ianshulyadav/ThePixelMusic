@@ -46,6 +46,7 @@ import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Bolt
+import androidx.compose.material.icons.rounded.WavingHand
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -109,13 +110,20 @@ fun homeSectionIcon(section: HomeSectionId): ImageVector = when (section) {
 
 /** Sections that have settings on the Options tab. */
 private fun HomeSectionId.hasOptions(): Boolean =
-    this == HomeSectionId.MOST_LISTENED || this == HomeSectionId.DAILY_MIX
+    this == HomeSectionId.MOST_LISTENED || this == HomeSectionId.DAILY_MIX ||
+        this == HomeSectionId.QUICK_PICKS || this == HomeSectionId.YOUR_MIX
+
+/** LazyColumn key of the Options card for a section (used to jump straight to it). */
+private fun HomeSectionId.optionsKey(): String = "opt_" + storageKey
 
 @Composable
 fun CustomizeHomeScreen(
     onBackClick: () -> Unit,
-    onRegenerateDailyMix: () -> Unit
+    onRegenerateDailyMix: () -> Unit,
+    settingsViewModel: com.unshoo.pixelmusic.presentation.viewmodel.SettingsViewModel =
+        androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel()
 ) {
+    val settingsState by settingsViewModel.uiState.collectAsState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val haptics = LocalHapticFeedback.current
@@ -128,6 +136,8 @@ fun CustomizeHomeScreen(
         if (sections == null && stored != null) sections = stored!!.sections
     }
     var selectedTab by remember { mutableStateOf(0) }
+    // Section whose gear was tapped: the Options tab scrolls to (and highlights) its card.
+    var focusedOptions by remember { mutableStateOf<HomeSectionId?>(null) }
     val config = stored ?: HomeLayoutConfig()
     val current = sections ?: config.sections
 
@@ -193,7 +203,7 @@ fun CustomizeHomeScreen(
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = bottomInset + 112.dp),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = bottomInset + DoneButtonClearance),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     item(key = "header_on_home") {
@@ -239,7 +249,10 @@ fun CustomizeHomeScreen(
                                 trailing = {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         if (section.hasOptions()) {
-                                            IconButton(onClick = { selectedTab = 1 }) {
+                                            IconButton(onClick = {
+                                                focusedOptions = section
+                                                selectedTab = 1
+                                            }) {
                                                 Icon(Icons.Rounded.Settings, contentDescription = stringResource(R.string.customize_home_tab_options))
                                             }
                                         }
@@ -277,10 +290,19 @@ fun CustomizeHomeScreen(
             } else {
                 HomeOptionsTab(
                     config = config,
-                    bottomPadding = bottomInset + 112.dp,
+                    settingsState = settingsState,
+                    focusedSection = focusedOptions,
+                    bottomPadding = bottomInset + DoneButtonClearance,
                     onRangeChange = { scope.launch { HomeLayoutPreferences.setMostListenedRange(context, it) } },
                     onKindChange = { scope.launch { HomeLayoutPreferences.setMostListenedKind(context, it) } },
                     onRegenerateDailyMix = onRegenerateDailyMix,
+                    onShowGreetingChange = { scope.launch { HomeLayoutPreferences.setShowGreeting(context, it) } },
+                    onCustomGreetingChange = { scope.launch { HomeLayoutPreferences.setCustomGreeting(context, it) } },
+                    onQuickPicksModeChange = settingsViewModel::setQuickPicksDisplayMode,
+                    onQuickPicksSourceChange = settingsViewModel::setDiscover,
+                    onCollageEnabledChange = settingsViewModel::setCollageEnabled,
+                    onCollagePatternChange = settingsViewModel::setCollagePattern,
+                    onCollageAutoRotateChange = settingsViewModel::setCollageAutoRotate,
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -297,7 +319,12 @@ fun CustomizeHomeScreen(
             contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(end = 20.dp, bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 20.dp)
+                // BUGFIX: sat behind the mini player whenever a song was loaded. Keep it above it.
+                .padding(
+                    end = 20.dp,
+                    bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() +
+                        com.unshoo.pixelmusic.presentation.components.MiniPlayerHeight + 28.dp
+                )
         )
     }
 }
@@ -340,22 +367,145 @@ private fun SectionRow(
     }
 }
 
+private val DoneButtonClearance = com.unshoo.pixelmusic.presentation.components.MiniPlayerHeight + 112.dp
+
 @Composable
 private fun HomeOptionsTab(
     config: HomeLayoutConfig,
+    settingsState: com.unshoo.pixelmusic.presentation.viewmodel.SettingsUiState,
+    focusedSection: HomeSectionId?,
     bottomPadding: androidx.compose.ui.unit.Dp,
     onRangeChange: (MostListenedRange) -> Unit,
     onKindChange: (MostListenedKind) -> Unit,
     onRegenerateDailyMix: () -> Unit,
+    onShowGreetingChange: (Boolean) -> Unit,
+    onCustomGreetingChange: (String) -> Unit,
+    onQuickPicksModeChange: (com.unshoo.pixelmusic.data.preferences.QuickPicksDisplayMode) -> Unit,
+    onQuickPicksSourceChange: (com.unshoo.pixelmusic.data.preferences.QuickPicks) -> Unit,
+    onCollageEnabledChange: (Boolean) -> Unit,
+    onCollagePatternChange: (com.unshoo.pixelmusic.data.preferences.CollagePattern) -> Unit,
+    onCollageAutoRotateChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val optionsListState = rememberLazyListState()
+    val cardKeys = listOf(
+        "opt_greeting",
+        HomeSectionId.QUICK_PICKS.optionsKey(),
+        HomeSectionId.YOUR_MIX.optionsKey(),
+        HomeSectionId.MOST_LISTENED.optionsKey(),
+        HomeSectionId.DAILY_MIX.optionsKey()
+    )
+    LaunchedEffect(focusedSection) {
+        val index = focusedSection?.let { cardKeys.indexOf(it.optionsKey()) } ?: -1
+        if (index >= 0) optionsListState.animateScrollToItem(index)
+    }
     LazyColumn(
+        state = optionsListState,
         modifier = modifier,
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = bottomPadding),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        item(key = "opt_most_listened") {
-            OptionsCard(title = homeSectionLabel(HomeSectionId.MOST_LISTENED), icon = homeSectionIcon(HomeSectionId.MOST_LISTENED)) {
+        item(key = "opt_greeting") {
+            OptionsCard(title = stringResource(R.string.customize_home_greeting), icon = Icons.Rounded.WavingHand) {
+                ToggleRow(
+                    title = stringResource(R.string.customize_home_greeting_show),
+                    subtitle = stringResource(R.string.customize_home_greeting_show_desc),
+                    checked = config.showGreeting,
+                    onCheckedChange = onShowGreetingChange
+                )
+                AnimatedVisibility(
+                    visible = config.showGreeting,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+                ) {
+                    var text by remember(config.customGreeting) { mutableStateOf(config.customGreeting) }
+                    androidx.compose.material3.OutlinedTextField(
+                        value = text,
+                        onValueChange = {
+                            text = it.take(80)
+                            onCustomGreetingChange(text)
+                        },
+                        label = { Text(stringResource(R.string.customize_home_greeting_custom)) },
+                        placeholder = { Text(stringResource(R.string.customize_home_greeting_custom_hint)) },
+                        supportingText = { Text(stringResource(R.string.customize_home_greeting_custom_desc)) },
+                        singleLine = true,
+                        shape = RoundedCornerShape(18.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+        }
+        item(key = HomeSectionId.QUICK_PICKS.optionsKey()) {
+            OptionsCard(
+                title = homeSectionLabel(HomeSectionId.QUICK_PICKS),
+                icon = homeSectionIcon(HomeSectionId.QUICK_PICKS),
+                highlighted = focusedSection == HomeSectionId.QUICK_PICKS
+            ) {
+                OptionLabel(stringResource(R.string.settings_quick_picks_mode_title))
+                ChipRow(
+                    options = listOf(
+                        com.unshoo.pixelmusic.data.preferences.QuickPicksDisplayMode.CARD_FROSTED to stringResource(R.string.settings_quick_picks_mode_frosted),
+                        com.unshoo.pixelmusic.data.preferences.QuickPicksDisplayMode.CARD_ALBUM_TINT to stringResource(R.string.settings_quick_picks_mode_album_tint),
+                        com.unshoo.pixelmusic.data.preferences.QuickPicksDisplayMode.CARD to stringResource(R.string.settings_quick_picks_mode_square),
+                        com.unshoo.pixelmusic.data.preferences.QuickPicksDisplayMode.CARD_CLASSIC to stringResource(R.string.settings_quick_picks_mode_classic),
+                        com.unshoo.pixelmusic.data.preferences.QuickPicksDisplayMode.UNCONTAINED to stringResource(R.string.settings_quick_picks_mode_uncontained),
+                        com.unshoo.pixelmusic.data.preferences.QuickPicksDisplayMode.LIST to stringResource(R.string.settings_quick_picks_mode_list)
+                    ),
+                    selected = settingsState.quickPicksDisplayMode,
+                    onSelect = onQuickPicksModeChange
+                )
+                Spacer(Modifier.height(6.dp))
+                OptionLabel(stringResource(R.string.settings_set_quick_picks_title))
+                ChipRow(
+                    options = listOf(
+                        com.unshoo.pixelmusic.data.preferences.QuickPicks.QUICK_PICKS to stringResource(R.string.customize_home_quick_picks_discover),
+                        com.unshoo.pixelmusic.data.preferences.QuickPicks.LAST_LISTEN to stringResource(R.string.customize_home_quick_picks_last_listen)
+                    ),
+                    selected = settingsState.discover,
+                    onSelect = onQuickPicksSourceChange
+                )
+            }
+        }
+        item(key = HomeSectionId.YOUR_MIX.optionsKey()) {
+            OptionsCard(
+                title = homeSectionLabel(HomeSectionId.YOUR_MIX),
+                icon = homeSectionIcon(HomeSectionId.YOUR_MIX),
+                highlighted = focusedSection == HomeSectionId.YOUR_MIX
+            ) {
+                ToggleRow(
+                    title = stringResource(R.string.setcat_show_collage_title),
+                    subtitle = stringResource(R.string.setcat_show_collage_subtitle),
+                    checked = settingsState.collageEnabled,
+                    onCheckedChange = onCollageEnabledChange
+                )
+                AnimatedVisibility(
+                    visible = settingsState.collageEnabled,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        OptionLabel(stringResource(R.string.setcat_collage_pattern_label))
+                        ChipRow(
+                            options = com.unshoo.pixelmusic.data.preferences.CollagePattern.entries.map { it to it.label },
+                            selected = settingsState.collagePattern,
+                            onSelect = onCollagePatternChange
+                        )
+                        ToggleRow(
+                            title = stringResource(R.string.setcat_auto_rotate_patterns_title),
+                            subtitle = stringResource(R.string.setcat_auto_rotate_patterns_subtitle),
+                            checked = settingsState.collageAutoRotate,
+                            onCheckedChange = onCollageAutoRotateChange
+                        )
+                    }
+                }
+            }
+        }
+        item(key = HomeSectionId.MOST_LISTENED.optionsKey()) {
+            OptionsCard(
+                title = homeSectionLabel(HomeSectionId.MOST_LISTENED),
+                icon = homeSectionIcon(HomeSectionId.MOST_LISTENED),
+                highlighted = focusedSection == HomeSectionId.MOST_LISTENED
+            ) {
                 Text(
                     text = stringResource(R.string.customize_home_most_listened_range),
                     style = MaterialTheme.typography.labelLarge,
@@ -389,8 +539,12 @@ private fun HomeOptionsTab(
                 )
             }
         }
-        item(key = "opt_daily_mix") {
-            OptionsCard(title = homeSectionLabel(HomeSectionId.DAILY_MIX), icon = homeSectionIcon(HomeSectionId.DAILY_MIX)) {
+        item(key = HomeSectionId.DAILY_MIX.optionsKey()) {
+            OptionsCard(
+                title = homeSectionLabel(HomeSectionId.DAILY_MIX),
+                icon = homeSectionIcon(HomeSectionId.DAILY_MIX),
+                highlighted = focusedSection == HomeSectionId.DAILY_MIX
+            ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -420,12 +574,56 @@ private fun HomeOptionsTab(
 }
 
 @Composable
-private fun OptionsCard(title: String, icon: ImageVector, content: @Composable () -> Unit) {
+private fun OptionLabel(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+}
+
+@Composable
+private fun ToggleRow(title: String, subtitle: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+            .clickable { onCheckedChange(!checked) }
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Spacer(Modifier.width(12.dp))
+        androidx.compose.material3.Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+@Composable
+private fun OptionsCard(
+    title: String,
+    icon: ImageVector,
+    highlighted: Boolean = false,
+    content: @Composable () -> Unit
+) {
+    // Briefly pulse the card the user jumped to from a section's gear button.
+    val highlightAlpha = remember { androidx.compose.animation.core.Animatable(0f) }
+    LaunchedEffect(highlighted) {
+        if (highlighted) {
+            highlightAlpha.snapTo(1f)
+            kotlinx.coroutines.delay(900)
+            highlightAlpha.animateTo(0f, androidx.compose.animation.core.tween(700))
+        }
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(28.dp))
             .background(MaterialTheme.colorScheme.surfaceContainer)
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.16f * highlightAlpha.value))
             .padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {

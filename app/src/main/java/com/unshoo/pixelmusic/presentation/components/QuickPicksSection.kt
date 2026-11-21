@@ -219,7 +219,18 @@ fun QuickPicksSection(
             }
         }
         
-        if (displayMode == QuickPicksDisplayMode.CARD) {
+        if (displayMode == QuickPicksDisplayMode.CARD_FROSTED || displayMode == QuickPicksDisplayMode.CARD_ALBUM_TINT) {
+            val limitSongs = remember(songs) { songs.take(20) }
+            QuickPicksMaterialCarousel(
+                songs = limitSongs,
+                look = if (displayMode == QuickPicksDisplayMode.CARD_FROSTED) QuickPicksCarouselLook.FROSTED else QuickPicksCarouselLook.ALBUM_TINT,
+                activePlayingSongId = activePlayingSongId,
+                onSongClick = onSongClick,
+                onPlayNext = handlePlayNext,
+                onAddToQueue = handleAddToQueue,
+                onDownload = handleDownload
+            )
+        } else if (displayMode == QuickPicksDisplayMode.CARD) {
             val limitSongs = remember(songs) { songs.take(20) }
             val carouselState = rememberCarouselState { limitSongs.size }
             val animationScope = rememberCoroutineScope()
@@ -549,7 +560,7 @@ private val EQUALIZER_DURATIONS = intArrayOf(550, 750, 450, 650)
 private val EQUALIZER_DELAYS = intArrayOf(0, 120, 240, 360)
 
 @Composable
-private fun EqualizerAnimation(
+internal fun EqualizerAnimation(
     modifier: Modifier = Modifier,
     isPlaying: Boolean = true,
     color: Color = MaterialTheme.colorScheme.primary,
@@ -632,7 +643,7 @@ private fun EqualizerBar(
 }
 
 @Composable
-private fun rememberAlbumVibrantColor(
+internal fun rememberAlbumVibrantColor(
     imageUrl: String?,
     fallbackColor: Color
 ): Color {

@@ -1,5 +1,8 @@
 package com.unshoo.pixelmusic.presentation.screens
 
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -130,7 +133,7 @@ fun SettingsItem(
             color = MaterialTheme.colorScheme.surfaceContainer,
             shape = shape,
             onClick = onClick,
-            modifier = Modifier.fillMaxWidth().clip(shape)
+            modifier = Modifier.fillMaxWidth().settingsHighlight(title).clip(shape)
     ) {
         Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -198,7 +201,7 @@ fun SwitchSettingItem(
                     onCheckedChange(!checked)
                 }
             },
-            modifier = Modifier.fillMaxWidth().clip(shape)
+            modifier = Modifier.fillMaxWidth().settingsHighlight(title).clip(shape)
     ) {
         Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -295,7 +298,7 @@ fun ThemeSelectorItem(
             color = MaterialTheme.colorScheme.surfaceContainer,
             shape = shape,
             onClick = { showSheet = true },
-            modifier = Modifier.fillMaxWidth().clip(shape)
+            modifier = Modifier.fillMaxWidth().settingsHighlight(label).clip(shape)
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -441,7 +444,7 @@ fun SliderSettingsItem(
     Surface(
             color = MaterialTheme.colorScheme.surfaceContainer,
             shape = shape,
-            modifier = Modifier.fillMaxWidth().clip(shape)
+            modifier = Modifier.fillMaxWidth().settingsHighlight(label).clip(shape)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
@@ -1495,3 +1498,46 @@ fun ThemePresetSelectorItem(
 
 
 
+
+
+/**
+ * Title of the setting a Settings search result asked to show. Rows whose title matches scroll
+ * themselves into view and pulse once, so the user lands exactly on the setting they searched for.
+ */
+val LocalSettingsHighlight = androidx.compose.runtime.staticCompositionLocalOf<String?> { null }
+
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+fun Modifier.settingsHighlight(title: String): Modifier {
+    val target = LocalSettingsHighlight.current
+    if (target.isNullOrBlank() || !target.equals(title, ignoreCase = true)) return this
+    val requester = remember { androidx.compose.foundation.relocation.BringIntoViewRequester() }
+    val pulse = remember { androidx.compose.animation.core.Animatable(0f) }
+    var rowSize by remember { androidx.compose.runtime.mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    LaunchedEffect(target) {
+        // Let the category screen lay out (and its enter transition settle) before scrolling.
+        kotlinx.coroutines.delay(350)
+        // Ask for extra room around the row so it lands clear of the collapsed top bar and the
+        // mini player instead of being scrolled just to the screen edge (half hidden).
+        val above = with(density) { 140.dp.toPx() }
+        val below = with(density) { 240.dp.toPx() }
+        requester.bringIntoView(
+            androidx.compose.ui.geometry.Rect(0f, -above, rowSize.width.toFloat(), rowSize.height + below)
+        )
+        repeat(2) {
+            pulse.animateTo(1f, androidx.compose.animation.core.tween(260))
+            pulse.animateTo(0.25f, androidx.compose.animation.core.tween(320))
+        }
+        kotlinx.coroutines.delay(900)
+        pulse.animateTo(0f, androidx.compose.animation.core.tween(600))
+    }
+    val color = MaterialTheme.colorScheme.primary
+    return this
+        .bringIntoViewRequester(requester)
+        .onSizeChanged { rowSize = it }
+        .drawWithContent {
+            drawContent()
+            drawRect(color.copy(alpha = 0.22f * pulse.value))
+        }
+}

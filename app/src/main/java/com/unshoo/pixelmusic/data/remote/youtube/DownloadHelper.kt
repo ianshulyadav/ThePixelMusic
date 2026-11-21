@@ -92,11 +92,13 @@ object DownloadHelper {
         val allowLossless = (downloadQuality == DownloadAudioQuality.MAX)
 
         // ── Check if audio file already exists locally with >= 80% data similarity and matching artist ──
-        val existingLocalFile = com.unshoo.pixelmusic.utils.LocalAudioDuplicateMatcher.findMatchingLocalFilePath(
-            context,
-            song,
-            allowLossless = allowLossless
-        )
+        val existingLocalFile = if (YoutubeHelper.useDeviceLibraryMatches) {
+            com.unshoo.pixelmusic.utils.LocalAudioDuplicateMatcher.findMatchingLocalFilePath(
+                context,
+                song,
+                allowLossless = allowLossless
+            )
+        } else null
         if (existingLocalFile != null) {
             PixelMusicHelper.printd("Download skipped: '${song.title}' already exists locally at $existingLocalFile (>=80% match)")
             return@withContext existingLocalFile
@@ -111,23 +113,26 @@ object DownloadHelper {
             try {
                 val treeUri = Uri.parse(customPath)
                 val documentDir = DocumentFile.fromTreeUri(context, treeUri)
-                if (allowLossless) {
-                    val existingFlac = documentDir?.findFile("$safeTitle - $safeArtist.flac")
-                    if (existingFlac != null && existingFlac.exists()) {
-                        return@withContext existingFlac.uri.toString()
+                val baseName = "$safeTitle - $safeArtist"
+                // Leftovers from interrupted attempts: our own ".partial" files, plus the
+                // unplayable "<name>.<ext> (N)" duplicates older builds created on retry.
+                documentDir?.listFiles()?.forEach { doc ->
+                    val name = doc.name ?: return@forEach
+                    if (name.startsWith(baseName) &&
+                        (name.endsWith(".partial") || Regex("""\.(webm|m4a|opus|ogg|flac|mp3) ?\(\d+\)$""", RegexOption.IGNORE_CASE).containsMatchIn(name))
+                    ) {
+                        runCatching { doc.delete() }
                     }
                 }
-                val existingM4a = documentDir?.findFile("$safeTitle - $safeArtist.m4a")
-                if (existingM4a != null && existingM4a.exists()) {
-                    return@withContext existingM4a.uri.toString()
+                val extensions = buildList {
+                    if (allowLossless) add("flac")
+                    addAll(listOf("m4a", "opus", "ogg", "webm"))
                 }
-                val existingOpus = documentDir?.findFile("$safeTitle - $safeArtist.opus")
-                if (existingOpus != null && existingOpus.exists()) {
-                    return@withContext existingOpus.uri.toString()
-                }
-                val existingWebm = documentDir?.findFile("$safeTitle - $safeArtist.webm")
-                if (existingWebm != null && existingWebm.exists()) {
-                    return@withContext existingWebm.uri.toString()
+                for (ext in extensions) {
+                    val existing = documentDir?.findFile("$baseName.$ext")
+                    if (existing != null && existing.isCompleteFile()) {
+                        return@withContext existing.uri.toString()
+                    }
                 }
             } catch (e: Exception) {
                 PixelMusicHelper.printe("Error checking custom download path exists: ${e.message}")
@@ -227,14 +232,9 @@ object DownloadHelper {
                         throw IOException("Assembled manifest file is zero bytes")
                     }
                     if (customPath.isNotBlank()) {
-                        val treeUri = Uri.parse(customPath)
-                        val documentDir = DocumentFile.fromTreeUri(context, treeUri)
-                        val file = documentDir?.createFile(segMime, segDynamicName)
-                        val outputUri = file?.uri
+                        val documentDir = DocumentFile.fromTreeUri(context, Uri.parse(customPath))
+                        val outputUri = documentDir?.let { writeToDocumentTree(context, it, segDynamicName, tempFile) }
                         if (outputUri != null) {
-                            context.contentResolver.openOutputStream(outputUri)?.use { out ->
-                                tempFile.inputStream().use { it.copyTo(out) }
-                            }
                             cleanupTempFile()
                             return@withContext outputUri.toString()
                         }
@@ -405,14 +405,9 @@ object DownloadHelper {
 
                 // Copy to custom path if set
                 if (customPath.isNotBlank()) {
-                    val treeUri = Uri.parse(customPath)
-                    val documentDir = DocumentFile.fromTreeUri(context, treeUri)
-                    val file = documentDir?.createFile(finalMime, finalFileName)
-                    val outputUri = file?.uri
+                    val documentDir = DocumentFile.fromTreeUri(context, Uri.parse(customPath))
+                    val outputUri = documentDir?.let { writeToDocumentTree(context, it, finalFileName, tempFile) }
                     if (outputUri != null) {
-                        context.contentResolver.openOutputStream(outputUri)?.use { out ->
-                            tempFile.inputStream().use { it.copyTo(out) }
-                        }
                         cleanupTempFile()
                         return@withContext outputUri.toString()
                     }
@@ -454,6 +449,45 @@ object DownloadHelper {
         PixelMusicHelper.printe("All $maxRetries download attempts failed for ${song.title}")
         return@withContext null
     }
+
+    /**
+     * Copies [source] into the user's download folder as exactly [fileName], atomically.
+     *
+     * BUGFIX ("Song.webm (1)" files): this used to `createFile(mime, fileName)` straight into
+     * the folder on every attempt. When a copy died midway (network drop, worker stopped) the
+     * half-written document stayed behind, and the retry's createFile got an auto-renamed
+     * duplicate. For MIME types Android has no extension for (audio/webm) the counter lands
+     * AFTER the extension ("…webm (1)"), so no player could open it. Partial files were also
+     * mistaken for finished downloads by the "already exists" check.
+     *
+     * Now the data is written to "<name>.partial" first, and only a complete copy is renamed to
+     * the final name (replacing any stale file of that name). On failure the partial is removed.
+     */
+    private fun writeToDocumentTree(context: Context, documentDir: DocumentFile, fileName: String, source: File): Uri? {
+        val partialName = "$fileName.partial"
+        documentDir.findFile(partialName)?.delete()
+        val partial = documentDir.createFile("application/octet-stream", partialName) ?: return null
+        try {
+            val out = context.contentResolver.openOutputStream(partial.uri, "wt")
+                ?: throw IOException("Cannot open ${partial.uri}")
+            out.use { stream -> source.inputStream().use { it.copyTo(stream) } }
+            if (partial.length() != source.length()) {
+                throw IOException("Incomplete copy (${partial.length()}/${source.length()} bytes)")
+            }
+            documentDir.findFile(fileName)?.let { stale -> if (stale.uri != partial.uri) stale.delete() }
+            if (!partial.renameTo(fileName)) throw IOException("Rename to $fileName failed")
+            // renameTo updates the DocumentFile's uri in place; re-resolve by name to be safe.
+            return (documentDir.findFile(fileName) ?: partial).uri
+        } catch (e: Exception) {
+            runCatching { partial.delete() }
+            if (e is CancellationException) throw e
+            PixelMusicHelper.printe("Failed to write $fileName to download folder: ${e.message}")
+            return null
+        }
+    }
+
+    /** A finished file in the download folder (not a leftover partial / empty document). */
+    private fun DocumentFile.isCompleteFile(): Boolean = exists() && isFile && length() > 0
 
     /**
      * Detects the audio container from its magic bytes: (extension, mime) or null if unknown.

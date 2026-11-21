@@ -30,6 +30,8 @@
     <string name="settings_quick_picks_mode_classic">Classic Carousel</string>
     <string name="settings_quick_picks_mode_list">List Grid</string>
     <string name="settings_quick_picks_mode_uncontained">Uncontained Carousel</string>
+    <string name="settings_quick_picks_mode_frosted">Material Frosted Carousel</string>
+    <string name="settings_quick_picks_mode_album_tint">Material Album Color Carousel</string>
     <string name="settings_category_appearance_title">Appearance</string>
     <string name="settings_category_appearance_subtitle">Themes, layout, and visual styles</string>
     <string name="settings_category_playback_title">Playback</string>
@@ -526,4 +528,18 @@
     <string name="home_most_played_songs">Songs</string>
     <string name="home_most_played_albums">Albums</string>
     <string name="home_most_played_artists">Artists</string>
+    <string name="settings_search_hint">Search settings…</string>
+    <string name="settings_search_clear">Clear search</string>
+    <string name="settings_search_no_results">No matching settings</string>
+    <string name="settings_device_library_section">Songs on this phone</string>
+    <string name="settings_use_device_library_matches_title">Use matching songs from phone storage</string>
+    <string name="settings_use_device_library_matches_desc">Play and \"download\" online songs from a file already on your phone when the title and artist match. Off: always use the app\'s own saved or streamed song.</string>
+    <string name="customize_home_greeting">Greeting</string>
+    <string name="customize_home_greeting_show">Show greeting</string>
+    <string name="customize_home_greeting_show_desc">Display a greeting at the top of Home.</string>
+    <string name="customize_home_greeting_custom">Custom greeting</string>
+    <string name="customize_home_greeting_custom_hint">e.g. Let\'s vibe, {name}!</string>
+    <string name="customize_home_greeting_custom_desc">Leave empty for the automatic time-of-day greeting. {name} = your name.</string>
+    <string name="customize_home_quick_picks_discover">Quick Picks (Discover)</string>
+    <string name="customize_home_quick_picks_last_listen">Last Listen</string>
 </resources>

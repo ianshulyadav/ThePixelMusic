@@ -598,58 +598,6 @@ fun SettingsCategoryScreen(
                                     },
                                     leadingIcon = { Icon(Icons.AutoMirrored.Outlined.TrendingUp, null, tint = MaterialTheme.colorScheme.secondary) }
                                 )
-                                ThemeSelectorItem(
-                                    label = stringResource(R.string.settings_set_quick_picks_title),
-                                    description = stringResource(R.string.settings_set_quick_picks_desc),
-                                    options = mapOf(
-                                        com.unshoo.pixelmusic.data.preferences.QuickPicks.QUICK_PICKS.name to "Quick Picks (Discover)",
-                                        com.unshoo.pixelmusic.data.preferences.QuickPicks.LAST_LISTEN.name to "Last Listen",
-                                        com.unshoo.pixelmusic.data.preferences.QuickPicks.DONT_SHOW.name to "Don't Show"
-                                    ),
-                                    selectedKey = uiState.discover.name,
-                                    onSelectionChanged = { key ->
-                                        settingsViewModel.setDiscover(
-                                            com.unshoo.pixelmusic.data.preferences.QuickPicks.valueOf(key)
-                                        )
-                                    },
-                                    leadingIcon = { Icon(Icons.Outlined.AutoAwesome, null, tint = MaterialTheme.colorScheme.secondary) }
-                                )
-                                ThemeSelectorItem(
-                                     label = stringResource(R.string.settings_quick_picks_mode_title),
-                                     description = stringResource(R.string.settings_quick_picks_mode_desc),
-                                     options = mapOf(
-                                         com.unshoo.pixelmusic.data.preferences.QuickPicksDisplayMode.CARD.name to stringResource(R.string.settings_quick_picks_mode_square),
-                                         com.unshoo.pixelmusic.data.preferences.QuickPicksDisplayMode.CARD_CLASSIC.name to stringResource(R.string.settings_quick_picks_mode_classic),
-                                         com.unshoo.pixelmusic.data.preferences.QuickPicksDisplayMode.LIST.name to stringResource(R.string.settings_quick_picks_mode_list),
-                                         com.unshoo.pixelmusic.data.preferences.QuickPicksDisplayMode.UNCONTAINED.name to stringResource(R.string.settings_quick_picks_mode_uncontained)
-                                     ),
-                                     selectedKey = uiState.quickPicksDisplayMode.name,
-                                     onSelectionChanged = { key ->
-                                         settingsViewModel.setQuickPicksDisplayMode(
-                                             com.unshoo.pixelmusic.data.preferences.QuickPicksDisplayMode.valueOf(key)
-                                         )
-                                     },
-                                     leadingIcon = { Icon(Icons.Outlined.GridView, null, tint = MaterialTheme.colorScheme.secondary) }
-                                 )
-                            }
-                            SettingsSubsection(title = stringResource(R.string.settings_network_section)) {
-                                val proxySubtitle = if (uiState.proxyEnabled && uiState.proxyHost.isNotBlank()) {
-                                    stringResource(
-                                        R.string.proxy_status_format,
-                                        uiState.proxyType.name,
-                                        uiState.proxyHost,
-                                        uiState.proxyPort
-                                    )
-                                } else {
-                                    stringResource(R.string.proxy_status_disabled)
-                                }
-                                SettingsItem(
-                                    title = stringResource(R.string.settings_proxy_title),
-                                    subtitle = proxySubtitle,
-                                    leadingIcon = { Icon(Icons.Outlined.Dns, null, tint = MaterialTheme.colorScheme.secondary) },
-                                    trailingIcon = { Icon(Icons.Rounded.ChevronRight, stringResource(R.string.cd_open), tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-                                    onClick = { showProxyDialog = true }
-                                )
                             }
                         }
                         SettingsCategory.LIBRARY -> {
@@ -1036,35 +984,6 @@ fun SettingsCategoryScreen(
                                 )
                             }
 
-                            SettingsSubsection(title = stringResource(R.string.setcat_home_collage)) {
-                                SwitchSettingItem(
-                                    title = stringResource(R.string.setcat_show_collage_title),
-                                    subtitle = stringResource(R.string.setcat_show_collage_subtitle),
-                                    checked = uiState.collageEnabled,
-                                    onCheckedChange = { settingsViewModel.setCollageEnabled(it) },
-                                    leadingIcon = { Icon(Icons.Outlined.GridView, null, tint = MaterialTheme.colorScheme.secondary) }
-                                )
-                                if (uiState.collageEnabled) {
-                                    ThemeSelectorItem(
-                                        label = stringResource(R.string.setcat_collage_pattern_label),
-                                        description = stringResource(R.string.setcat_collage_pattern_desc),
-                                        options = CollagePattern.entries.associate { it.storageKey to it.label },
-                                        selectedKey = uiState.collagePattern.storageKey,
-                                        onSelectionChanged = { key ->
-                                            settingsViewModel.setCollagePattern(CollagePattern.fromStorageKey(key))
-                                        },
-                                        leadingIcon = { Icon(painterResource(R.drawable.rounded_view_column_24), null, tint = MaterialTheme.colorScheme.secondary) }
-                                    )
-                                    SwitchSettingItem(
-                                        title = stringResource(R.string.setcat_auto_rotate_patterns_title),
-                                        subtitle = stringResource(R.string.setcat_auto_rotate_patterns_subtitle),
-                                        checked = uiState.collageAutoRotate,
-                                        onCheckedChange = { settingsViewModel.setCollageAutoRotate(it) },
-                                        leadingIcon = { Icon(painterResource(R.drawable.rounded_shuffle_24), null, tint = MaterialTheme.colorScheme.secondary) }
-                                    )
-                                }
-                            }
-
                             SettingsSubsection(title = stringResource(R.string.setcat_navigation_bar)) {
                                 ThemeSelectorItem(
                                     label = stringResource(R.string.setcat_navbar_style_label),
@@ -1210,6 +1129,15 @@ fun SettingsCategoryScreen(
                             }
                         }
                         SettingsCategory.PLAYBACK -> {
+                            SettingsSubsection(title = stringResource(R.string.settings_device_library_section)) {
+                                SwitchSettingItem(
+                                    title = stringResource(R.string.settings_use_device_library_matches_title),
+                                    subtitle = stringResource(R.string.settings_use_device_library_matches_desc),
+                                    checked = uiState.useDeviceLibraryMatches,
+                                    onCheckedChange = { settingsViewModel.setUseDeviceLibraryMatches(it) },
+                                    leadingIcon = { Icon(Icons.Rounded.MusicNote, null, tint = MaterialTheme.colorScheme.secondary) }
+                                )
+                            }
                             SettingsSubsection(title = stringResource(R.string.setcat_background_playback)) {
                                 ThemeSelectorItem(
                                     label = stringResource(R.string.setcat_keep_playing_label),

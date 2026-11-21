@@ -60,6 +60,7 @@ import com.unshoo.pixelmusic.presentation.viewmodel.PlaylistViewModel
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -415,6 +416,17 @@ fun PlaylistItem(
 
     val isLikedMusicHero = playlist.id == "ytm_liked_music"
 
+    // Small circular badge for playlists whose online songs are all saved on the device.
+    var isFullyDownloaded by remember(playlist.id, playlist.songIds) { mutableStateOf(false) }
+    LaunchedEffect(playlist.id, playlist.songIds) {
+        isFullyDownloaded = playlist.songIds.isNotEmpty() && runCatching {
+            val songs = playerViewModel.getSongs(playlist.songIds)
+            songs.size >= playlist.songIds.size &&
+                songs.any { !it.isLocal } &&
+                songs.all { it.isLocal || it.path.isNotBlank() }
+        }.getOrDefault(false)
+    }
+
     val selectionScale by animateFloatAsState(
         targetValue = if (isSelected) 0.98f else 1f,
         animationSpec = spring(
@@ -586,6 +598,23 @@ fun PlaylistItem(
                 "QQMUSIC" -> "QQ Music"
                 "LOCAL", "", null -> "Local"
                 else -> playlist.source?.lowercase()?.replaceFirstChar { if (it.isLowerCase()) it.titlecase(java.util.Locale.ROOT) else it.toString() } ?: "Local"
+            }
+
+            if (isFullyDownloaded) {
+                Box(
+                    modifier = Modifier
+                        .size(16.dp)
+                        .background(MaterialTheme.colorScheme.primary, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.ArrowDownward,
+                        contentDescription = "Downloaded",
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(11.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(6.dp))
             }
 
             Surface(

@@ -301,26 +301,7 @@ internal fun ExpressiveFullPlayerContent(
         }
     }
 
-    // Full screen mode: hide status + navigation bars while the full player is open.
-    val fullscreenPlayerEnabled by com.unshoo.pixelmusic.presentation.components.rememberBooleanPreference(
-        context = LocalContext.current,
-        key = com.unshoo.pixelmusic.presentation.components.UiEffectPreferenceKeys.FULL_PLAYER_FULLSCREEN,
-        default = true
-    )
-    // Toggling system bars changes window insets and re-lays out the whole app, so only hide
-    // them once the expand animation has fully settled (never mid-animation, which stutters).
-    var fullscreenActive by remember { mutableStateOf(false) }
-    LaunchedEffect(fullscreenPlayerEnabled, currentSheetState) {
-        if (fullscreenPlayerEnabled && currentSheetState == PlayerSheetState.EXPANDED) {
-            kotlinx.coroutines.delay(320)
-            fullscreenActive = true
-        } else {
-            fullscreenActive = false
-        }
-    }
-    com.unshoo.pixelmusic.presentation.components.FullscreenSystemBarsEffect(
-        enabled = fullscreenActive
-    )
+    // Full screen (hidden system bars) is handled once for both layouts in FullPlayerContent.
 
     androidx.activity.compose.BackHandler(enabled = showLyricsSheet) {
         showLyricsSheet = false

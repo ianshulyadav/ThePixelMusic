@@ -1839,17 +1839,29 @@ constructor(
             )
             
             // 6. Artwork Warmup with Progress
-            Log.i(TAG, "Warming up artwork for Telegram songs...")
-            val artTargets = rawTelegramSongs.asSequence()
-                .map { it.chatId to it.messageId }
+            // BUGFIX: this used to walk EVERY Telegram song on every run and report per-song
+            // progress, so re-syncing an already-added channel showed a "1 / 1993" progress
+            // dialog. Only songs that are new to the unified library need warming (existing ones
+            // were warmed when first added, and the channel sync already warms in the background).
+            val existingIdSet = existingUnifiedTelegramIds.toHashSet()
+            val artTargets = songsToInsert.asSequence()
+                .filter { it.id !in existingIdSet }
+                .mapNotNull { entity ->
+                    val parts = entity.contentUriString.removePrefix("telegram://").split('/')
+                    val chatId = parts.getOrNull(0)?.toLongOrNull()
+                    val messageId = parts.getOrNull(1)?.toLongOrNull()
+                    if (chatId != null && messageId != null) chatId to messageId else null
+                }
                 .distinct()
                 .toList()
-            
+
             val totalArt = artTargets.size
+            if (totalArt > 0) Log.i(TAG, "Warming up artwork for $totalArt new Telegram songs...")
             artTargets.forEachIndexed { index, (chatId, messageId) ->
                 try {
                     telegramRepository.warmUpArtwork(chatId, messageId)
                 } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
                     // Ignore non-fatal errors
                 }
                 onArtProgress(index + 1, totalArt)

@@ -132,6 +132,17 @@ fun SettingsScreen(
 
     var showCornerRadiusOverlay by remember { mutableStateOf(false) }
     var showAccountDialog by remember { mutableStateOf(false) }
+    var searchQuery by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+    val searchResults = rememberSettingsSearchResults(searchQuery, uiState.localModeEnabled)
+    val openCategory: (SettingsCategory, String?) -> Unit = { category, highlight ->
+        when (category) {
+            SettingsCategory.EQUALIZER -> navController.navigateSafely(Screen.Equalizer.route)
+            SettingsCategory.STORAGE -> navController.navigateSafely(Screen.SmartStorage.route)
+            SettingsCategory.DEVICE_CAPABILITIES -> navController.navigateSafely(Screen.DeviceCapabilities.route)
+            SettingsCategory.ABOUT -> navController.navigateSafely("about")
+            else -> navController.navigateSafely(Screen.SettingsCategory.createRoute(category.id, highlight))
+        }
+    }
 
     val topBarHeight = remember { Animatable(maxTopBarHeightPx) }
     val collapseFraction by remember(minTopBarHeightPx, maxTopBarHeightPx) {
@@ -203,6 +214,22 @@ fun SettingsScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxSize()
         ) {
+            item(key = "settings_search", contentType = "settings_search") {
+                SettingsSearchBar(
+                    query = searchQuery,
+                    onQueryChange = { searchQuery = it },
+                    modifier = Modifier.padding(bottom = 4.dp)
+                )
+            }
+            if (searchQuery.isNotBlank()) {
+                item(key = "settings_search_results", contentType = "settings_search_results") {
+                    SettingsSearchResults(
+                        results = searchResults,
+                        onResultClick = { openCategory(it.category, it.title.takeIf { _ -> it.isSetting }) }
+                    )
+                }
+                return@LazyColumn
+            }
             item(key = "header_card", contentType = "header_card") {
                 androidx.compose.animation.AnimatedContent(
                     targetState = uiState.localModeEnabled,

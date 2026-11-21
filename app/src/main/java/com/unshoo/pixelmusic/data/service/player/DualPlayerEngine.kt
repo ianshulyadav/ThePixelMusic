@@ -465,13 +465,12 @@ class DualPlayerEngine @Inject constructor(
         }
 
         override fun onAudioSessionIdChanged(audioSessionId: Int) {
+            // BUGFIX (equalizer silent): the session reported here is the one the audio sink
+            // actually opened its AudioTrack with. It used to be "pinned" and forced onto every
+            // player, but with Media3 1.10 an externally assigned session never reaches the
+            // AudioTrack (each track got a fresh session), so the Equalizer/BassBoost were
+            // attached to a session with no audio. Follow the reported session instead, like v1.5.
             if (audioSessionId != 0 && audioSessionId != C.AUDIO_SESSION_ID_UNSET) {
-                if (pinnedAudioSessionId == C.AUDIO_SESSION_ID_UNSET) {
-                    pinnedAudioSessionId = audioSessionId
-                    if (::playerB.isInitialized) {
-                        try { playerB.audioSessionId = audioSessionId } catch (_: Exception) {}
-                    }
-                }
                 if (_activeAudioSessionId.value != audioSessionId) {
                     _activeAudioSessionId.value = audioSessionId
                     Timber.tag("TransitionDebug").d("Master audio session changed: %d", audioSessionId)
@@ -752,12 +751,8 @@ class DualPlayerEngine @Inject constructor(
         return expectedMediaId == null || playerB.currentMediaItem?.mediaId == expectedMediaId
     }
 
-    fun getAudioSessionId(): Int {
-        if (pinnedAudioSessionId != C.AUDIO_SESSION_ID_UNSET && pinnedAudioSessionId != 0) {
-            return pinnedAudioSessionId
-        }
-        return if (::playerA.isInitialized) playerA.audioSessionId else 0
-    }
+    fun getAudioSessionId(): Int =
+        if (::playerA.isInitialized) playerA.audioSessionId else 0
 
     fun setAudioSessionId(sessionId: Int) {
         if (sessionId == 0 || sessionId == C.AUDIO_SESSION_ID_UNSET) return
@@ -1333,12 +1328,7 @@ class DualPlayerEngine @Inject constructor(
         }
         releaseStandbyPlayer()
 
-        if (pinnedAudioSessionId == C.AUDIO_SESSION_ID_UNSET || pinnedAudioSessionId == 0) {
-            val generated = audioManager.generateAudioSessionId()
-            if (generated != 0 && generated != C.AUDIO_SESSION_ID_UNSET) {
-                pinnedAudioSessionId = generated
-            }
-        }
+        // No pinned session: see onAudioSessionIdChanged (Media3 1.10 ignores it for the AudioTrack).
 
         playerA = buildPlayer()
 

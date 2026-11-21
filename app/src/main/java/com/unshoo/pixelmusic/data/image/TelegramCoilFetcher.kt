@@ -71,6 +71,7 @@ class TelegramCoilFetcher(
         if (chatId == null || messageId == null) return null
 
         val key = "${chatId}_${messageId}"
+        val isThumbRequest = uri.getQueryParameter("quality") == "thumb"
 
         // 0. YOUTUBE MUSIC ART (preferred): proper full-resolution album art matched by
         // title + artist. Resolved once, cached on disk, and returned before any low-res
@@ -83,10 +84,21 @@ class TelegramCoilFetcher(
                 dataSource = DataSource.DISK
             )
         }
-        // Run the online lookup detached so a slow network never cancels it: if it misses the
-        // 4 s window we show the Telegram cover now and swap to the online one once it lands.
+
+        // BUGFIX (flicker): `?quality=thumb` is the placeholder request the mini player / carousel
+        // issue alongside the real one. It used to run the whole pipeline (network lookup, deep
+        // fetch) a second time in parallel and race the main request. It now only returns what is
+        // already on disk / in the message, and kicks off the YT Music lookup for the main request.
+        if (isThumbRequest) {
+            backgroundArtScope.launch { runCatching { fetchYtMusicCover(chatId, messageId, key, ytmFile) } }
+            return fastLocalResult(chatId, messageId, key, allowMinithumbnail = true)
+        }
+
+        // Run the online lookup detached so a slow network never cancels it. The placeholder
+        // (thumb) request is on screen meanwhile, so wait long enough that the YT Music cover is
+        // normally the FIRST full-size image shown instead of a blurry Telegram one swapped later.
         val ytmJob = backgroundArtScope.async { fetchYtMusicCover(chatId, messageId, key, ytmFile) }
-        val ytmResolved = withTimeoutOrNull(4000L) { ytmJob.await() }
+        val ytmResolved = withTimeoutOrNull(6000L) { ytmJob.await() }
         if (ytmResolved == null) {
             backgroundArtScope.launch {
                 if (runCatching { ytmJob.await() }.getOrDefault(false)) {
@@ -104,79 +116,61 @@ class TelegramCoilFetcher(
 
         val cachedDeezerFile = File(cacheDir, "telegram_deezer_art_${key}.jpg")
         val cachedArtFile = File(cacheDir, "telegram_embedded_art_${key}.jpg")
-        val persistentArtFile = telegramCacheManager?.getPersistentArtFile(chatId, messageId)
 
-        // 1. FAST PATH: Return cached high-quality files immediately
-        if (persistentArtFile?.exists() == true && persistentArtFile.length() > 0) {
-            return SourceResult(
-                source = coil.decode.ImageSource(persistentArtFile.absolutePath.toPath(), okio.FileSystem.SYSTEM),
-                mimeType = "image/jpeg",
-                dataSource = DataSource.DISK
-            )
-        }
+        // 1. Anything full-size already available locally (never the blurry minithumbnail here:
+        // returning it as the main image is what left the full player with a blurred cover).
+        fastLocalResult(chatId, messageId, key, allowMinithumbnail = false)?.let { return it }
 
-        if (cachedDeezerFile.exists() && cachedDeezerFile.length() > 0) {
-            return SourceResult(
-                source = coil.decode.ImageSource(cachedDeezerFile.absolutePath.toPath(), okio.FileSystem.SYSTEM),
-                mimeType = "image/jpeg",
-                dataSource = DataSource.DISK
-            )
-        }
-
-        if (cachedArtFile.exists() && cachedArtFile.length() > 0) {
-            return SourceResult(
-                source = coil.decode.ImageSource(cachedArtFile.absolutePath.toPath(), okio.FileSystem.SYSTEM),
-                mimeType = "image/jpeg",
-                dataSource = DataSource.DISK
-            )
-        }
-
-        // 2. CHECK TDLib: If high-quality thumbnail is already downloaded
-        val message = telegramRepository.getMessage(chatId, messageId)
-        if (message != null) {
-            val fileId = extractFileIdFromContent(message.content)
-            if (fileId != null) {
-                val file = telegramRepository.getFile(fileId)
-                if (file?.local?.isDownloadingCompleted == true && !file.local.path.isNullOrEmpty()) {
-                    return SourceResult(
-                        source = coil.decode.ImageSource(file.local.path.toPath(), okio.FileSystem.SYSTEM),
-                        mimeType = null,
-                        dataSource = DataSource.DISK
-                    )
-                }
-            }
-        }
-
-        // 3. FALLBACK: Return minithumbnail immediately if available
-        if (message != null) {
-            val minithumbnailData = extractMinithumbnail(message.content)
-            if (minithumbnailData != null) {
-                val bitmap = BitmapFactory.decodeByteArray(minithumbnailData, 0, minithumbnailData.size)
-                if (bitmap != null) {
-                    // Trigger background refinement now that we've committed to a low-res preview
-                    telegramRepository.enqueueHighQualityArtFetch(chatId, messageId)
-                    
-                    return DrawableResult(
-                        drawable = BitmapDrawable(context.resources, bitmap),
-                        isSampled = true,
-                        dataSource = DataSource.MEMORY
-                    )
-                }
-            }
-        }
-
-        // 4. DEEP FETCH: Only for first load without even a minithumbnail
-        // We'll allow a short 2s window for a quick Deezer or Embedded search.
+        // 2. DEEP FETCH: short window for a quick Deezer / embedded-art match.
         val result = withTimeoutOrNull(2000L) {
-             performDeepFetch(chatId, messageId, key, cachedDeezerFile, cachedArtFile)
+            performDeepFetch(chatId, messageId, key, cachedDeezerFile, cachedArtFile)
         }
-        
-        // If deep fetch failed/timed out, still ensure background task is running
-        if (result == null) {
-            telegramRepository.enqueueHighQualityArtFetch(chatId, messageId)
+        if (result != null) return result
+
+        // 3. Last resort: low-res minithumbnail now, refined in the background.
+        telegramRepository.enqueueHighQualityArtFetch(chatId, messageId)
+        return minithumbnailResult(chatId, messageId)
+    }
+
+    /** Cached full-size covers, then TDLib's downloaded thumbnail, then (optionally) the minithumbnail. No network. */
+    private suspend fun fastLocalResult(chatId: Long, messageId: Long, key: String, allowMinithumbnail: Boolean): FetchResult? {
+        val candidates = listOfNotNull(
+            telegramCacheManager?.getPersistentArtFile(chatId, messageId),
+            File(cacheDir, "telegram_deezer_art_${key}.jpg"),
+            File(cacheDir, "telegram_embedded_art_${key}.jpg"),
+        )
+        candidates.firstOrNull { it.exists() && it.length() > 0 }?.let { file ->
+            return SourceResult(
+                source = coil.decode.ImageSource(file.absolutePath.toPath(), okio.FileSystem.SYSTEM),
+                mimeType = "image/jpeg",
+                dataSource = DataSource.DISK
+            )
         }
 
-        return result
+        val message = telegramRepository.getMessage(chatId, messageId) ?: return null
+        val fileId = extractFileIdFromContent(message.content)
+        if (fileId != null) {
+            val file = telegramRepository.getFile(fileId)
+            if (file?.local?.isDownloadingCompleted == true && !file.local.path.isNullOrEmpty()) {
+                return SourceResult(
+                    source = coil.decode.ImageSource(file.local.path.toPath(), okio.FileSystem.SYSTEM),
+                    mimeType = null,
+                    dataSource = DataSource.DISK
+                )
+            }
+        }
+        return if (allowMinithumbnail) minithumbnailResult(chatId, messageId) else null
+    }
+
+    private suspend fun minithumbnailResult(chatId: Long, messageId: Long): FetchResult? {
+        val message = telegramRepository.getMessage(chatId, messageId) ?: return null
+        val data = extractMinithumbnail(message.content) ?: return null
+        val bitmap = BitmapFactory.decodeByteArray(data, 0, data.size) ?: return null
+        return DrawableResult(
+            drawable = BitmapDrawable(context.resources, bitmap),
+            isSampled = true,
+            dataSource = DataSource.MEMORY
+        )
     }
 
     private suspend fun performDeepFetch(

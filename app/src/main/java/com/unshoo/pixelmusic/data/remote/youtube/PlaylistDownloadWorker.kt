@@ -110,7 +110,7 @@ class PlaylistDownloadWorker(
                                         }
                                     }
 
-                                val localMatching = com.unshoo.pixelmusic.utils.LocalAudioDuplicateMatcher.findMatchingLocalSong(
+                                val localMatching = if (!com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.useDeviceLibraryMatches) null else com.unshoo.pixelmusic.utils.LocalAudioDuplicateMatcher.findMatchingLocalSong(
                                     localSongs = localSongs,
                                     song = song,
                                     allowLossless = allowLossless

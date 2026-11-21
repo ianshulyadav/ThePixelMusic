@@ -383,7 +383,10 @@ class ExploreViewModel @Inject constructor(
     }
 
     private val cacheFile by lazy {
-        java.io.File(context.cacheDir, "explore_cache.json")
+        // v2: caches written before the auth-keyed YouTube home cache fix could contain the
+        // anonymous home tagged as the signed-in account; never restore those.
+        runCatching { java.io.File(context.cacheDir, "explore_cache.json").delete() }
+        java.io.File(context.cacheDir, "explore_cache_v2.json")
     }
 
     init {
@@ -987,28 +990,24 @@ class ExploreViewModel @Inject constructor(
                 return@launch
             }
 
-            if (!force && cacheFile.exists()) {
+            // Only a fresh disk cache may be shown, and then as the final content (no later swap).
+            // BUGFIX: older caches used to be rendered first and replaced by the network result a
+            // few seconds later, so Explore opened on outdated/irrelevant shelves. Anything older
+            // than the fresh tier now goes straight to the loader -> fetch -> atomic commit path.
+            if (!force && !hasContent && cacheFile.exists()) {
                 val fileAge = now - cacheFile.lastModified()
                 if (fileAge < CACHE_TIER_FRESH_MS) {
                     val restored = restoreFromCache(forceSilent = true)
                     if (restored) {
                         return@launch
                     }
-                } else if (fileAge < CACHE_TIER_STALE_MS) {
-                    val restored = restoreFromCache(forceSilent = true)
-                    if (restored) {
-                        executeOnlineRefresh(generation, isSilent = true)
-                        return@launch
-                    }
-                } else if (fileAge < CACHE_TIER_EXPIRED_MS) {
-                    val restored = restoreFromCache(forceSilent = false)
-                    if (restored) {
-                        executeOnlineRefresh(generation, isSilent = false)
-                        return@launch
-                    }
-                } else {
+                } else if (fileAge >= CACHE_TIER_EXPIRED_MS) {
                     try { cacheFile.delete() } catch (_: Exception) {}
                 }
+                // A rejected/stale restore may have flipped state flags; make sure the loader shows.
+                _isLoadingState.value = true
+                _isSettledState.value = false
+                _uiState.update { it.copy(isLoading = true, isRefreshing = false, isSettled = false) }
             }
 
             executeOnlineRefresh(generation, isSilent = false)

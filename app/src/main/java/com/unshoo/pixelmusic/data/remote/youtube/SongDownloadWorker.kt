@@ -111,7 +111,7 @@ class SongDownloadWorker(
                 val downloadQuality = userPreferencesRepository.downloadAudioQualityFlow.first()
                 val allowLossless = (downloadQuality == com.unshoo.pixelmusic.data.preferences.DownloadAudioQuality.MAX)
                 val localSongs = musicDao.getSongsBySourceType(0)
-                val localMatching = com.unshoo.pixelmusic.utils.LocalAudioDuplicateMatcher.findMatchingLocalSong(
+                val localMatching = if (!com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.useDeviceLibraryMatches) null else com.unshoo.pixelmusic.utils.LocalAudioDuplicateMatcher.findMatchingLocalSong(
                     localSongs = localSongs,
                     song = song,
                     allowLossless = allowLossless

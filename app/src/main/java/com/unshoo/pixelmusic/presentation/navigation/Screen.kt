@@ -11,8 +11,10 @@ sealed class Screen(val route: String) {
     object Explore : Screen("explore")
     object Settings : Screen("settings")
     object Accounts : Screen("settings_accounts")
-    object SettingsCategory : Screen("settings_category/{categoryId}") {
-        fun createRoute(categoryId: String) = "settings_category/$categoryId"
+    object SettingsCategory : Screen("settings_category/{categoryId}?highlight={highlight}") {
+        fun createRoute(categoryId: String, highlight: String? = null): String =
+            if (highlight.isNullOrBlank()) "settings_category/$categoryId"
+            else "settings_category/$categoryId?highlight=${android.net.Uri.encode(highlight)}"
     }
     object PaletteStyle : Screen("palette_style_settings")
     object Experimental : Screen("experimental_settings")

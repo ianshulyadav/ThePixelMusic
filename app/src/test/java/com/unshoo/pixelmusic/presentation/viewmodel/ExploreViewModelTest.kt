@@ -184,9 +184,11 @@ class ExploreViewModelTest {
             sections = sections,
             moodChips = chips,
             timestamp = timestamp,
-            authKey = "anon" // the tests run signed out (empty cookie)
+            authKey = "anon", // the tests run signed out (empty cookie)
+            // Real caches always carry the compiled feed; restore refuses caches without it.
+            feedData = com.unshoo.pixelmusic.data.feed.FeedData(lastUpdatedMillis = timestamp)
         )
-        val file = File(tempCacheDir, "explore_cache.json")
+        val file = File(tempCacheDir, "explore_cache_v2.json")
         file.writeText(testGson.toJson(cache))
         file.setLastModified(timestamp)
         return file
@@ -236,7 +238,7 @@ class ExploreViewModelTest {
     }
 
     @Test
-    @DisplayName("03: Stale cache (30m-4h) loads cache immediately and triggers silent background refresh")
+    @DisplayName("03: Stale cache (30m-4h) is not shown; network result is the first content")
     fun initialLoad_whenStaleCacheExists_loadsCacheImmediatelyAndTriggersSilentRefresh() = runTest(testDispatcher) {
         val cachedSection = sampleSection("Stale Initial Section", listOf(sampleSong("s1", "Stale Track 1")))
         writeCache(
@@ -638,6 +640,9 @@ class ExploreViewModelTest {
         // Category endpoints fail with IOException
         coEvery { YouTube.home(continuation = null, params = "wAEB_focus", forceRefresh = any()) } throws IOException("503 Service Unavailable")
         coEvery { YouTube.explore(browseId = any(), params = any()) } throws IOException("503 Service Unavailable")
+        // Category fallback goes through browse(); unmocked it made a real network call off the
+        // test dispatcher, so advanceUntilIdle() returned before the failure was observed.
+        coEvery { YouTube.browse(browseId = any(), params = any()) } throws IOException("503 Service Unavailable")
         coEvery { YouTube.search(any(), any()) } throws IOException("503 Service Unavailable")
 
         val viewModel = createViewModel()
