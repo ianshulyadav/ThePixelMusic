@@ -76,6 +76,7 @@ import androidx.compose.material.icons.outlined.ClearAll
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Language
+import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
@@ -940,6 +941,31 @@ fun SettingsCategoryScreen(
                             }
 
                             SettingsSubsection(title = stringResource(R.string.setcat_now_playing)) {
+                                run {
+                                    val ctx = LocalContext.current
+                                    val prefScope = rememberCoroutineScope()
+                                    val expressiveLayout by com.unshoo.pixelmusic.presentation.components.rememberBooleanPreference(
+                                        ctx, com.unshoo.pixelmusic.presentation.components.UiEffectPreferenceKeys.NOW_PLAYING_EXPRESSIVE_LAYOUT, false
+                                    )
+                                    ThemeSelectorItem(
+                                        label = stringResource(R.string.setcat_now_playing_layout_label),
+                                        description = stringResource(R.string.setcat_now_playing_layout_desc),
+                                        options = mapOf(
+                                            "classic" to stringResource(R.string.setcat_now_playing_layout_classic),
+                                            "expressive" to stringResource(R.string.setcat_now_playing_layout_expressive)
+                                        ),
+                                        selectedKey = if (expressiveLayout) "expressive" else "classic",
+                                        onSelectionChanged = { key ->
+                                            prefScope.launch {
+                                                ctx.applicationContext.setBooleanPreference(
+                                                    com.unshoo.pixelmusic.presentation.components.UiEffectPreferenceKeys.NOW_PLAYING_EXPRESSIVE_LAYOUT,
+                                                    key == "expressive"
+                                                )
+                                            }
+                                        },
+                                        leadingIcon = { Icon(Icons.Outlined.Layers, null, tint = MaterialTheme.colorScheme.secondary) }
+                                    )
+                                }
                                 ThemeSelectorItem(
                                     label = stringResource(R.string.setcat_player_theme_label),
                                     description = stringResource(R.string.setcat_player_theme_desc),
@@ -997,6 +1023,16 @@ fun SettingsCategoryScreen(
                                     selectedKey = uiState.carouselStyle,
                                     onSelectionChanged = { settingsViewModel.setCarouselStyle(it) },
                                     leadingIcon = { Icon(painterResource(R.drawable.rounded_view_carousel_24), null, tint = MaterialTheme.colorScheme.secondary) }
+                                )
+                            }
+
+                            SettingsSubsection(title = stringResource(R.string.tab_home)) {
+                                SettingsItem(
+                                    title = stringResource(R.string.customize_home_title),
+                                    subtitle = stringResource(R.string.customize_home_desc),
+                                    leadingIcon = { Icon(Icons.Outlined.GridView, null, tint = MaterialTheme.colorScheme.secondary) },
+                                    trailingIcon = { Icon(Icons.Rounded.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                                    onClick = { navController.navigateSafely(Screen.CustomizeHome.route) }
                                 )
                             }
 
@@ -1338,13 +1374,6 @@ fun SettingsCategoryScreen(
                                     checked = uiState.preferTelegramAlternative,
                                     onCheckedChange = { settingsViewModel.setPreferTelegramAlternative(it) },
                                     leadingIcon = { Icon(painterResource(R.drawable.rounded_all_inclusive_24), null, tint = MaterialTheme.colorScheme.secondary) }
-                                )
-                                SwitchSettingItem(
-                                    title = stringResource(R.string.setcat_telegram_artwork_title),
-                                    subtitle = stringResource(R.string.setcat_telegram_artwork_desc),
-                                    checked = uiState.telegramUseOnlineAlbumArt,
-                                    onCheckedChange = { settingsViewModel.setTelegramUseOnlineAlbumArt(it) },
-                                    leadingIcon = { Icon(painterResource(R.drawable.rounded_imagesmode_24), null, tint = MaterialTheme.colorScheme.secondary) }
                                 )
                                 SwitchSettingItem(
                                     title = stringResource(R.string.setcat_preload_queue_enabled_title),

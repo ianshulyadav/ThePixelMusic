@@ -166,6 +166,7 @@ class SongDownloadWorker(
                         File(audioPath).parentFile?.absolutePath ?: ""
                     }
                     musicDao.updateSongFilePathAndParent(mainId, audioPath, parentDir)
+                    com.unshoo.pixelmusic.utils.OfflineAudioResolver.invalidateCache()
                     playlistRepository.insertCrossRef(
                         com.unshoo.pixelmusic.data.model.youtube.PlaylistSongCrossRef(
                             playlistId = Constants.Downloads.DOWNLOADED_PLAYLIST_ID,

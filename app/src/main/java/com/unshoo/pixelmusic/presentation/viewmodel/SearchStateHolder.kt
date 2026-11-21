@@ -128,6 +128,27 @@ class SearchStateHolder @Inject constructor(
                         _searchResults.value = persistentListOf()
                         _isSearching.value = true
                     }
+                    if (source == SearchSource.JIOSAAVN) {
+                        try {
+                            val songs = com.unshoo.pixelmusic.data.remote.saavn.SaavnService
+                                .searchSongs(query, limit = 30)
+                                .getOrDefault(emptyList())
+                                .mapNotNull { it.toPlayableSong() }
+                            if (request.requestId == latestSearchRequestId.get()) {
+                                val immutable = songs.map { SearchResultItem.SongItem(it) }.toImmutableList()
+                                _searchResults.value = immutable
+                                _isSearching.value = false
+                                if (immutable.isNotEmpty()) searchResultCache.put(key, immutable)
+                            }
+                        } catch (_: CancellationException) {
+                        } catch (e: Exception) {
+                            if (request.requestId == latestSearchRequestId.get()) {
+                                Timber.e(e, "JioSaavn search error: $query")
+                                _isSearching.value = false
+                            }
+                        }
+                        return@collectLatest
+                    }
                     if (source == SearchSource.LOCAL) {
                         try {
                             val results = musicRepository.searchAllOnce(query, currentFilter)
@@ -438,4 +459,31 @@ class SearchStateHolder @Inject constructor(
 
     private fun ytAlbumId(name: String): Long =
         -(16_000_000_000_000L + kotlin.math.abs(name.lowercase().hashCode().toLong()))
+}
+
+/**
+ * JioSaavn search hit -> playable [com.unshoo.pixelmusic.data.model.Song]. The song streams
+ * straight from JioSaavn's CDN (320 kbps when available); its art uses the largest image.
+ */
+private fun com.unshoo.pixelmusic.data.remote.saavn.SaavnSong.toPlayableSong(): com.unshoo.pixelmusic.data.model.Song? {
+    val streamUrl = com.unshoo.pixelmusic.data.remote.saavn.SaavnService.selectBestUrl(downloadUrl, "320kbps")
+        ?: return null
+    fun clean(text: String?): String = androidx.core.text.HtmlCompat
+        .fromHtml(text.orEmpty(), androidx.core.text.HtmlCompat.FROM_HTML_MODE_LEGACY)
+        .toString()
+        .trim()
+    val primary = artists.primary.ifEmpty { artists.all }
+    val artistName = clean(primary.joinToString(", ") { it.name }).ifBlank { "Unknown Artist" }
+    val art = image.lastOrNull { it.url.isNotBlank() }?.url
+        ?.replace("150x150", "500x500")?.replace("50x50", "500x500")
+    return com.unshoo.pixelmusic.data.model.Song.emptySong().copy(
+        id = "saavn_$id",
+        title = clean(name),
+        artist = artistName,
+        album = clean(album?.name),
+        contentUriString = streamUrl,
+        albumArtUriString = art,
+        duration = (duration ?: 0) * 1000L,
+        mimeType = "audio/mp4"
+    )
 }

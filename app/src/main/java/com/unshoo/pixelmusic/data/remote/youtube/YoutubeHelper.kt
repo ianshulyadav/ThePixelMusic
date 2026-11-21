@@ -801,6 +801,12 @@ object YoutubeHelper {
             PixelMusicHelper.printd("$videoId : Playing from in-memory local file cache")
             return cachedLocalPath
         }
+        // Downloaded copy or the same track in the user's own folders always wins over a
+        // (possibly cached) network stream.
+        resolveOfflineFirst(context, song)?.let { localPath ->
+            PixelMusicHelper.printd("$videoId : Playing on-device copy: $localPath")
+            return localPath
+        }
 
         val plan = resolveStreamQualityPlan(context)
         val maxBitrate = plan.maxBitrateKbps
@@ -1309,6 +1315,12 @@ object YoutubeHelper {
                 }
             }
             if (effectiveTitle.isBlank()) return null
+            // The real song length is what lets the matcher reject slowed/sped/extended uploads
+            // that share the title and artist (they play back sounding 0.7-0.9x). Queue items
+            // often carry no duration, so look it up instead of resolving without the check.
+            if ((effectiveDuration ?: 0) <= 0 && videoId.isNotBlank()) {
+                effectiveDuration = fetchSongMetadata(videoId)?.duration?.let { parseDurationToSeconds(it) }
+            }
 
             val artistsList = effectiveArtist.split(",", "&", "feat.", "ft.", ";")
                 .map { it.trim() }
@@ -1331,6 +1343,18 @@ object YoutubeHelper {
                 )
             } ?: return null
 
+            // Safety net: a lossless catalog can hand back a slowed / sped-up / extended upload
+            // under the original title. Its real length gives it away, so for direct FLAC
+            // streams read the header and refuse a track whose length doesn't match the song.
+            val expectedMs = effectiveDuration?.takeIf { it > 0 }?.let { it * 1000L }
+            if (expectedMs != null && isLengthMismatchedFlac(result.uri, result.headers, expectedMs)) {
+                PixelMusicHelper.printe(
+                    "$videoId : Lossless stream rejected (length differs from the song; likely a slowed/sped version), falling back"
+                )
+                LosslessStreamResolver.markFailedForTrack(videoId)
+                return null
+            }
+
             cacheKeys.forEach { key ->
                 streamUrlLruCache.put(key, result.uri)
                 streamMimeTypeLruCache.put(key, result.mimeType)
@@ -1346,6 +1370,46 @@ object YoutubeHelper {
             PixelMusicHelper.printe("$videoId : Lossless resolve exception: ${e.message}, falling back")
             null
         }
+    }
+
+    /**
+     * True when [uri] is a plain FLAC file whose STREAMINFO length differs from [expectedMs] by
+     * more than 6 s and 3%. Reads only the first few hundred bytes; any failure returns false
+     * (never blocks a stream we could not inspect).
+     */
+    private suspend fun isLengthMismatchedFlac(
+        uri: String,
+        headers: Map<String, String>,
+        expectedMs: Long,
+    ): Boolean = withContext(Dispatchers.IO) {
+        if (!uri.startsWith("http://") && !uri.startsWith("https://")) return@withContext false
+        runCatching {
+            val request = okhttp3.Request.Builder()
+                .url(uri)
+                .header("Range", "bytes=0-511")
+                .apply { headers.forEach { (k, v) -> header(k, v) } }
+                .build()
+            val bytes = withTimeoutOrNull(2_500L) {
+                client.newCall(request).execute().use { resp ->
+                    if (!resp.isSuccessful) return@use null
+                    resp.body.byteStream().use { input ->
+                        val buf = ByteArray(512)
+                        var read = 0
+                        while (read < buf.size) {
+                            val n = input.read(buf, read, buf.size - read)
+                            if (n <= 0) break
+                            read += n
+                        }
+                        buf.copyOf(read)
+                    }
+                }
+            } ?: return@runCatching false
+            val info = com.unshoo.pixelmusic.data.lossless.audiosource.FlacStreamInfo.parse(bytes)
+                ?: return@runCatching false
+            val actualMs = info.durationMs ?: return@runCatching false
+            val diff = kotlin.math.abs(actualMs - expectedMs)
+            diff > 6_000L && diff > expectedMs * 3 / 100
+        }.getOrDefault(false)
     }
 
     /** Inline budget for the lossless chain on a user tap (YouTube result is used after this). */
@@ -1411,6 +1475,7 @@ object YoutubeHelper {
                 localFilePathCache.put(videoId, savedSong.audioFilePath)
                 return savedSong.audioFilePath
             }
+            resolveOfflineFirst(context, song)?.let { return it }
         }
 
         val entryPoint = EntryPointAccessors.fromApplication(
@@ -1638,6 +1703,57 @@ object YoutubeHelper {
 
 
     private const val MAX_TRACKING_CACHE_ENTRIES = 300
+
+    /** videoId -> time of the last "no matching file in the local library" lookup. */
+    private val localMatchMissCache = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private const val LOCAL_MATCH_MISS_TTL_MS = 10 * 60_000L
+
+
+    /**
+     * Offline-first lookup shared by every playback resolve:
+     *  1. a finished download in the app's audio folder (any container),
+     *  2. the downloaded-songs DB record,
+     *  3. a matching file in the user's own music library (title/artist/duration match).
+     * Positive hits are cached in [localFilePathCache]; library misses are cached briefly in
+     * [localMatchMissCache] so streaming never pays for the scan twice.
+     */
+    private suspend fun resolveOfflineFirst(context: Context, song: Song): String? {
+        val videoId = song.youtubeId
+        if (videoId.isBlank()) return null
+        runCatching {
+            val audioDir = PixelMusicHelper.getDownloadDirectory(context, Constants.Downloads.AUDIO_FILES_FOLDER)
+            for (ext in OFFLINE_AUDIO_EXTENSIONS) {
+                val f = File(audioDir, "$videoId.$ext")
+                if (f.isFile && f.length() > 0L) {
+                    localFilePathCache.put(videoId, f.absolutePath)
+                    return f.absolutePath
+                }
+            }
+        }
+        val saved = runCatching { AppDatabase.getInstance(context).songRepository().getSong(videoId) }.getOrNull()
+        val savedPath = saved?.audioFilePath
+        if (!savedPath.isNullOrBlank() && (savedPath.startsWith("content://") || File(savedPath).exists())) {
+            localFilePathCache.put(videoId, savedPath)
+            return savedPath
+        }
+        val lastMiss = localMatchMissCache[videoId]
+        if (lastMiss != null && System.currentTimeMillis() - lastMiss < LOCAL_MATCH_MISS_TTL_MS) return null
+        val matched = com.unshoo.pixelmusic.utils.LocalAudioDuplicateMatcher
+            .findMatchingLocalFilePath(context, song, allowLossless = true)
+        if (matched != null) {
+            localFilePathCache.put(videoId, matched)
+            localMatchMissCache.remove(videoId)
+            return matched
+        }
+        if (localMatchMissCache.size > 2_000) localMatchMissCache.clear()
+        localMatchMissCache[videoId] = System.currentTimeMillis()
+        return null
+    }
+
+    private val OFFLINE_AUDIO_EXTENSIONS = arrayOf("m4a", "opus", "flac", "mp3", "ogg", "webm")
+
+    /** Forget negative local-library matches (call after a media rescan). */
+    fun clearLocalMatchMisses() = localMatchMissCache.clear()
 
     /**
      * Drops expired entries from the resolved-candidate-URL cache and caps the size of the

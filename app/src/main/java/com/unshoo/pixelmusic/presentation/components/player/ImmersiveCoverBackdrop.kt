@@ -1,5 +1,9 @@
 package com.unshoo.pixelmusic.presentation.components.player
 
+import com.unshoo.pixelmusic.presentation.components.fullBackdropSource
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -33,7 +37,9 @@ internal fun ImmersiveCoverBackdrop(
     artworkModel: String?,
     albumArtQuality: AlbumArtQuality,
     visibleProvider: () -> Boolean,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /** How far below the top edge the artwork starts (it still fills the full width). */
+    topOffset: androidx.compose.ui.unit.Dp = 0.dp
 ) {
     val targetSize = remember(albumArtQuality) {
         if (albumArtQuality.maxSize == 0) SafeOriginalAlbumArtSize
@@ -46,23 +52,35 @@ internal fun ImmersiveCoverBackdrop(
                 // Offscreen so the DstIn gradient below masks only the artwork.
                 compositingStrategy = CompositingStrategy.Offscreen
             }
-            .drawWithContent {
-                drawContent()
-                drawRect(
-                    brush = Brush.verticalGradient(
-                        0f to Color.Black,
-                        0.72f to Color.Black,
-                        0.86f to Color.Black.copy(alpha = 0.55f),
-                        1f to Color.Transparent
-                    ),
-                    blendMode = BlendMode.DstIn
+            .drawWithCache {
+                // Full-bleed cover, nudged down by [topOffset]: fade it in from the top so the
+                // poster's upper edge sits clear of the status bar / top buttons, and keep the
+                // soft fade into the title at the bottom.
+                val h = size.height.coerceAtLeast(1f)
+                val topStart = (topOffset.toPx() * 0.35f / h).coerceIn(0f, 0.3f)
+                val topEnd = ((topOffset.toPx() + 28.dp.toPx()) / h).coerceIn(topStart, 0.4f)
+                val mask = Brush.verticalGradient(
+                    0f to Color.Transparent,
+                    topStart to Color.Black.copy(alpha = 0.35f),
+                    topEnd to Color.Black,
+                    0.72f.coerceAtLeast(topEnd) to Color.Black,
+                    0.86f.coerceAtLeast(topEnd) to Color.Black.copy(alpha = 0.55f),
+                    1f to Color.Transparent
                 )
+                onDrawWithContent {
+                    drawContent()
+                    drawRect(brush = mask, blendMode = BlendMode.DstIn)
+                }
             }
     ) {
         Crossfade(
             targetState = artworkModel,
             animationSpec = tween(350),
-            label = "immersiveCover"
+            label = "immersiveCover",
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(top = topOffset)
+                .fullBackdropSource(com.unshoo.pixelmusic.presentation.components.LocalCoverBackdropSource.current)
         ) { model ->
             SmartImage(
                 model = model,

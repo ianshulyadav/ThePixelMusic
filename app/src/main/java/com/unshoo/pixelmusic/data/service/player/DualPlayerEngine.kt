@@ -426,6 +426,30 @@ class DualPlayerEngine @Inject constructor(
             }
         }
 
+        override fun onAudioInputFormatChanged(
+            eventTime: AnalyticsListener.EventTime,
+            format: androidx.media3.common.Format,
+            decoderReuseEvaluation: androidx.media3.exoplayer.DecoderReuseEvaluation?
+        ) {
+            lastAudioInputSampleRate = format.sampleRate
+            Timber.tag("AudioRateCheck").i(
+                "input format: mime=%s codecs=%s rate=%d ch=%d pcm=%d container=%s",
+                format.sampleMimeType, format.codecs, format.sampleRate, format.channelCount,
+                format.pcmEncoding, format.containerMimeType
+            )
+        }
+
+        override fun onAudioTrackInitialized(
+            eventTime: AnalyticsListener.EventTime,
+            audioTrackConfig: androidx.media3.exoplayer.audio.AudioSink.AudioTrackConfig
+        ) {
+            Timber.tag("AudioRateCheck").i(
+                "audio track: rate=%d encoding=%d offload=%b (decoder input rate=%d)",
+                audioTrackConfig.sampleRate, audioTrackConfig.encoding, audioTrackConfig.offload,
+                lastAudioInputSampleRate
+            )
+        }
+
         override fun onAudioDecoderInitialized(
             eventTime: AnalyticsListener.EventTime,
             decoderName: String,
@@ -720,6 +744,13 @@ class DualPlayerEngine @Inject constructor(
         get() = playerA
 
     fun isTransitionRunning(): Boolean = transitionRunning
+
+    /** True when the standby player holds [expectedMediaId] fully buffered and ready to fade in. */
+    fun isPreparedNextReady(expectedMediaId: String?): Boolean {
+        if (!::playerB.isInitialized || playerBReleased || playerB.mediaItemCount == 0) return false
+        if (playerB.playbackState != Player.STATE_READY) return false
+        return expectedMediaId == null || playerB.currentMediaItem?.mediaId == expectedMediaId
+    }
 
     fun getAudioSessionId(): Int {
         if (pinnedAudioSessionId != C.AUDIO_SESSION_ID_UNSET && pinnedAudioSessionId != 0) {
@@ -1399,6 +1430,8 @@ class DualPlayerEngine @Inject constructor(
         bufferingFallbackJob?.cancel()
         bufferingFallbackJob = null
     }
+
+    @Volatile private var lastAudioInputSampleRate: Int = -1
 
     private var losslessStallFallbackJob: Job? = null
 
@@ -2084,10 +2117,13 @@ class DualPlayerEngine @Inject constructor(
         // Expanding maxMs to 90s–120s lets the player continuously bank up to 2 minutes of audio,
         // while minMs (20s–30s) starts fetching the next chunk long before the buffer is endangered.
         val profile = when {
-            isRecentlyUnstable -> BufferProfile(45_000, 150_000, 500, 4_000)
-            bandwidthKbps < 1_000 -> BufferProfile(40_000, 150_000, 400, 3_500)
-            bandwidthKbps < 5_000 -> BufferProfile(30_000, 150_000, 400, 2_500)
-            else -> BufferProfile(25_000, 150_000, 300, 2_000)
+            // afterRebuffer = how much audio must be re-banked before resuming after a stall.
+            // 2–4 s made every hiccup feel like a long freeze; 1.5–3 s resumes sooner while still
+            // leaving enough cushion (minMs keeps refilling in the background) to avoid a stall loop.
+            isRecentlyUnstable -> BufferProfile(45_000, 150_000, 500, 3_000)
+            bandwidthKbps < 1_000 -> BufferProfile(40_000, 150_000, 400, 2_500)
+            bandwidthKbps < 5_000 -> BufferProfile(30_000, 150_000, 350, 2_000)
+            else -> BufferProfile(25_000, 150_000, 250, 1_500)
         }
 
         // BUGFIX: the buffer profile used to be chosen from the lossless *toggle* at player-build

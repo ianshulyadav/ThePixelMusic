@@ -92,7 +92,11 @@ fun AppNavigation(
     val isFloatingPill = navBarStyle == NavBarStyle.FLOATING_PILL
 
     LaunchedEffect(Unit) {
-        startDestination = launchTabToRoute(userPreferencesRepository.launchTabFlow.first())
+        val launchRoute = launchTabToRoute(userPreferencesRepository.launchTabFlow.first())
+        // Local Mode has no Explore tab; fall back to Home.
+        startDestination = if (launchRoute == Screen.Explore.route &&
+            userPreferencesRepository.localModeEnabledFlow.first()
+        ) Screen.Home.route else launchRoute
     }
 
     startDestination?.let { initialRoute ->
@@ -339,6 +343,20 @@ fun AppNavigation(
                     PaletteStyleSettingsScreen(
                         playerViewModel = playerViewModel,
                         onBackClick = { navController.popBackStackSafely() }
+                    )
+                }
+            }
+            composable(
+                Screen.CustomizeHome.route,
+                enterTransition = { enterTransition() },
+                exitTransition = { exitTransition() },
+                popEnterTransition = { popEnterTransition() },
+                popExitTransition = { popExitTransition() },
+            ) {
+                ScreenWrapper(navController = navController, playerViewModel = playerViewModel) {
+                    com.unshoo.pixelmusic.presentation.screens.CustomizeHomeScreen(
+                        onBackClick = { navController.popBackStackSafely() },
+                        onRegenerateDailyMix = { playerViewModel.forceUpdateDailyMix() }
                     )
                 }
             }

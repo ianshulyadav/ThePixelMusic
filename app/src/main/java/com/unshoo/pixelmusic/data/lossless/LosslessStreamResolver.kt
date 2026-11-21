@@ -256,7 +256,14 @@ object LosslessStreamResolver {
      */
     suspend fun isEnabled(context: Context): Boolean {
         val p = prefs(context)
-        if (p[LosslessStreamingEnabledKey] ?: defaultEnabled()) return true
+        // The master switch is authoritative once the user has set it: OFF turns every lossless
+        // source (and addon) off; ON uses whatever sources were enabled last time.
+        when (p[LosslessStreamingEnabledKey]) {
+            true -> return true
+            false -> return false
+            null -> Unit
+        }
+        if (defaultEnabled()) return true
         return hasActiveInstalledAddons(context, p)
     }
 
@@ -294,8 +301,11 @@ object LosslessStreamResolver {
             context.dataStore.data,
             AddonManager.installedAddons,
         ) { p, addons ->
-            val master = p[LosslessStreamingEnabledKey] ?: defaultEnabled()
-            master || ((p[AddonsEnabledKey] ?: true) && addons.any { it.enabled })
+            when (p[LosslessStreamingEnabledKey]) {
+                true -> true
+                false -> false
+                null -> defaultEnabled() || ((p[AddonsEnabledKey] ?: true) && addons.any { it.enabled })
+            }
         }
             .distinctUntilChanged()
             .onEach { updateEnabledSnapshot(it) }
@@ -318,13 +328,14 @@ object LosslessStreamResolver {
     }
 
     fun hasAnyActiveLosslessSource(p: androidx.datastore.preferences.core.Preferences): Boolean {
+        if (p[LosslessStreamingEnabledKey] == false) return false
         if ((p[AddonsEnabledKey] ?: true) && AddonManager.installedAddons.value.any { it.enabled }) {
             return true
         }
         val masterEnabled = p[LosslessStreamingEnabledKey] ?: defaultEnabled()
         if (!masterEnabled) return false
 
-        val monochromeEnabled = p[MonochromeEnabledKey] ?: true
+        val monochromeEnabled = p[MonochromeEnabledKey] ?: false
         val hasMonochrome = monochromeEnabled && isMonochromeUp()
 
         val hasBuildKey = com.unshoo.pixelmusic.BuildConfig.SOURCE_PROVIDER_KEY.isNotBlank()
@@ -596,7 +607,7 @@ object LosslessStreamResolver {
             installedAddons = addons,
             unifiedOrder = AddonManager.readUnifiedOrder(p, addons),
             saavnEnabled = p[SaavnEnabledPrefKey] ?: true,
-            monochromeEnabled = p[MonochromeEnabledKey] ?: true,
+            monochromeEnabled = p[MonochromeEnabledKey] ?: false,
             monochromeInstances = parseMultiline(p[MonochromeInstancesKey]),
             tidalEnabled = p[TidalEnabledKey] ?: true,
             qobuzEnabled = p[QobuzEnabledKey] ?: false,

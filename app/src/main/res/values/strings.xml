@@ -284,6 +284,8 @@
     <!-- Local Mode -->
     <string name="settings_local_mode_title">Local Mode</string>
     <string name="settings_local_mode_desc">Pure offline player. Disconnects all YouTube online services, recommendations, and remote shelves without logging out. Shows only local and downloaded music.</string>
+    <string name="settings_local_mode_card_title">Local Mode</string>
+    <string name="settings_local_mode_card_subtitle">On-device library only. Tap to go back online.</string>
     <string name="in_your_library">In Your Library</string>
     <!-- Network & Proxy Settings -->
     <string name="settings_network_section">Network</string>

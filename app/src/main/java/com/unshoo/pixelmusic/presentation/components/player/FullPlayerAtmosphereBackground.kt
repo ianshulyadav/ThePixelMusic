@@ -114,6 +114,14 @@ fun FullPlayerAtmosphereBackground(
                     } else {
                         lerpFloat(0.18f, 0.45f, expansionFraction)
                     }
+                    // Outside an artwork crossfade only one image is drawn, so applying the alpha
+                    // per draw is pixel-identical and avoids a full-screen offscreen layer every
+                    // frame. During the crossfade (two overlapping images) keep the offscreen pass.
+                    compositingStrategy = if (previousArtUri == null) {
+                        androidx.compose.ui.graphics.CompositingStrategy.ModulateAlpha
+                    } else {
+                        androidx.compose.ui.graphics.CompositingStrategy.Auto
+                    }
                 }
         ) {
             // Previous artwork held at 1.0f alpha underneath: eliminates Porter-Duff crossfade alpha dip

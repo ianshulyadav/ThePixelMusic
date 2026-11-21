@@ -83,6 +83,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
@@ -274,6 +275,12 @@ fun SearchScreen(
         if (isSearching) coolSearchMessages.random() else ""
     }
     val currentFilter = searchUiState.selectedSearchFilter
+    // Songs / artists opened from search results (shown under "Recent searches").
+    val recentPicksContext = LocalContext.current.applicationContext
+    val recentPicksScope = rememberCoroutineScope()
+    val recentPicks by remember(recentPicksContext) {
+        com.unshoo.pixelmusic.data.preferences.RecentSearchPicks.flow(recentPicksContext)
+    }.collectAsStateWithLifecycle(initialValue = emptyList())
     val genres by playerViewModel.genres.collectAsStateWithLifecycle()
     val currentPlayingSongId by remember(playerViewModel) {
         playerViewModel.stablePlayerState.map { it.currentSong?.id }.distinctUntilChanged()
@@ -505,9 +512,30 @@ fun SearchScreen(
                                     )
                                 }
 
-                                if (searchUiState.searchHistory.isNotEmpty()) {
+                                if (searchUiState.searchHistory.isNotEmpty() || recentPicks.isNotEmpty()) {
                                     item(key = "recent_searches_section", contentType = "recent_searches") {
                                         RecentSearchesSection(
+                                            picks = recentPicks,
+                                            onPickClick = { pick ->
+                                                keyboardController?.hide()
+                                                focusManager.clearFocus(force = true)
+                                                if (pick.type == com.unshoo.pixelmusic.data.preferences.RecentSearchPick.Type.ARTIST) {
+                                                    navController.navigateSafely(Screen.ArtistDetail.createRoute(pick.id))
+                                                } else {
+                                                    val song = pick.toSong()
+                                                    playerViewModel.showAndPlaySong(song, listOf(song), "Recent searches")
+                                                }
+                                                recentPicksScope.launch {
+                                                    if (pick.type == com.unshoo.pixelmusic.data.preferences.RecentSearchPick.Type.SONG) {
+                                                        com.unshoo.pixelmusic.data.preferences.RecentSearchPicks.addSong(recentPicksContext, pick.toSong())
+                                                    }
+                                                }
+                                            },
+                                            onPickDelete = { pick ->
+                                                recentPicksScope.launch {
+                                                    com.unshoo.pixelmusic.data.preferences.RecentSearchPicks.remove(recentPicksContext, pick.key)
+                                                }
+                                            },
                                             searchHistory = searchUiState.searchHistory,
                                             onItemClick = { query ->
                                                 searchQuery = query
@@ -523,6 +551,9 @@ fun SearchScreen(
                                             },
                                             onClearAll = {
                                                 playerViewModel.clearSearchHistory()
+                                                recentPicksScope.launch {
+                                                    com.unshoo.pixelmusic.data.preferences.RecentSearchPicks.clear(recentPicksContext)
+                                                }
                                             }
                                         )
                                     }
@@ -716,10 +747,10 @@ fun SearchScreen(
                                     contentAlignment = Alignment.CenterStart
                                 ) {
                                     if (searchQuery.isEmpty()) {
-                                        val placeholderText = if (searchSource == com.unshoo.pixelmusic.data.preferences.SearchSource.LOCAL) {
-                                            "Search Local Library..."
-                                        } else {
-                                            "Search for any tracks, albums, lyrics..."
+                                        val placeholderText = when (searchSource) {
+                                            com.unshoo.pixelmusic.data.preferences.SearchSource.LOCAL -> "Search Local Library..."
+                                            com.unshoo.pixelmusic.data.preferences.SearchSource.JIOSAAVN -> "Search JioSaavn..."
+                                            else -> "Search for any tracks, albums, lyrics..."
                                         }
                                         Text(
                                             text = placeholderText,
@@ -769,6 +800,12 @@ fun SearchScreen(
                                             contentDescription = "Toggle Search Source",
                                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                             modifier = Modifier.size(20.dp)
+                                        )
+                                    } else if (searchSource == com.unshoo.pixelmusic.data.preferences.SearchSource.JIOSAAVN) {
+                                        Image(
+                                            painter = painterResource(id = R.drawable.ic_jiosaavn),
+                                            contentDescription = "Toggle Search Source",
+                                            modifier = Modifier.size(22.dp)
                                         )
                                     } else {
                                         Image(
@@ -1146,11 +1183,14 @@ fun SearchResultsList(
             ?.let { "Search: $it" }
             ?: "Search Results"
     }
+    val recordPickContext = LocalContext.current.applicationContext
+    val recordPickScope = rememberCoroutineScope()
     val onSongResultClick = remember(playerViewModel, onItemSelected, searchQueueName, focusManager, keyboardController) {
         { song: Song ->
             focusManager.clearFocus(force = true)
             keyboardController?.hide()
             playerViewModel.showAndPlaySong(song, listOf(song), searchQueueName)
+            recordPickScope.launch { com.unshoo.pixelmusic.data.preferences.RecentSearchPicks.addSong(recordPickContext, song) }
             onItemSelected()
         }
     }
@@ -1158,12 +1198,14 @@ fun SearchResultsList(
     val onArtistPlayClick = remember(playerViewModel, onItemSelected) {
         { artist: Artist ->
             playerViewModel.playArtist(artist)
+            recordPickScope.launch { com.unshoo.pixelmusic.data.preferences.RecentSearchPicks.addArtist(recordPickContext, artist) }
             onItemSelected()
         }
     }
 
     val onArtistOpenClick = remember(navController, onItemSelected) {
         { artist: Artist ->
+            recordPickScope.launch { com.unshoo.pixelmusic.data.preferences.RecentSearchPicks.addArtist(recordPickContext, artist) }
             val targetId = artist.channelId ?: artist.id.toString()
             navController.navigateSafelyReplacing(
                 route = Screen.ArtistDetail.createRoute(targetId),

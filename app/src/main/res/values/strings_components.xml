@@ -15,6 +15,9 @@
     <!-- Lyrics more bottom sheet -->
     <string name="lyrics_more_appearance">Appearance</string>
     <string name="lyrics_more_alignment">Alignment</string>
+    <string name="lyrics_more_text_size">Text size</string>
+    <string name="lyrics_more_animated_lines">Animated lines</string>
+    <string name="lyrics_more_blur_other_lines">Blur other lines</string>
     <string name="lyrics_more_controls">Controls</string>
     <string name="lyrics_more_dialog_reset_title">Reset lyrics?</string>
     <string name="lyrics_more_dialog_reset_message">Are you sure you want to reset the lyrics for this song?</string>

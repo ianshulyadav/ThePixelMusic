@@ -164,6 +164,7 @@ class PlaylistDownloadWorker(
                                         File(audioPath).parentFile?.absolutePath ?: ""
                                     }
                                     musicDao.updateSongFilePathAndParent(mainId, audioPath, parentDir)
+                                    com.unshoo.pixelmusic.utils.OfflineAudioResolver.invalidateCache()
                                     
                                     playlistRepository.insertCrossRef(
                                         PlaylistSongCrossRef(

@@ -153,7 +153,12 @@ fun WavySliderExpressive(
         }
         lastProgressUpdateNanos = nowNanos
 
-        if (abs(start - target) <= 0.0001f) {
+        // Normal playback moves the thumb far less than a pixel between position samples
+        // (a 3-minute song across ~900 px is ~0.2 s per pixel). Interpolating that over
+        // ~120 ms of frames redrew the whole player at full refresh rate for no visible change,
+        // which kept the GPU/CPU busy for the entire song. Snap such tiny steps; only animate
+        // jumps that are actually visible.
+        if (abs(start - target) <= SUB_PIXEL_PROGRESS_STEP) {
             renderedNormalizedProgress.floatValue = target
             return@LaunchedEffect
         }
@@ -300,3 +305,6 @@ fun WavySliderExpressive(
         )
     }
 }
+
+/** ~2 px on a typical phone-width track: below this, interpolation is invisible. */
+private const val SUB_PIXEL_PROGRESS_STEP = 0.0025f

@@ -1,5 +1,7 @@
 package com.unshoo.pixelmusic.presentation.components
 
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
 import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Image
@@ -57,13 +59,24 @@ fun StreamingProviderSheet(
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         dragHandle = { BottomSheetDefaults.DragHandle() }
     ) {
+        // While typing a link the keyboard covers most of the sheet: collapse the provider
+        // cards so the link field (and what's being typed) stays visible above the keyboard.
+        @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+        val isTypingLink = androidx.compose.foundation.layout.WindowInsets.isImeVisible
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .imePadding()
                 .padding(horizontal = 24.dp)
                 .padding(bottom = 28.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+          androidx.compose.animation.AnimatedVisibility(
+              visible = !isTypingLink,
+              enter = androidx.compose.animation.expandVertically() + androidx.compose.animation.fadeIn(),
+              exit = androidx.compose.animation.shrinkVertically() + androidx.compose.animation.fadeOut()
+          ) {
+          Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
                 text = stringResource(R.string.presentation_batch_g_streaming_title),
                 style = MaterialTheme.typography.headlineSmall,
@@ -134,6 +147,8 @@ fun StreamingProviderSheet(
             }
 
             Spacer(Modifier.height(16.dp))
+          }
+          }
 
             QuickImportCard(
                 onImportSpotify = { url, onDone ->

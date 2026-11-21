@@ -50,6 +50,9 @@ object UiEffectPreferenceKeys {
 
     /** Hide the system bars while the full player is expanded. */
     val FULL_PLAYER_FULLSCREEN: Preferences.Key<Boolean> = booleanPreferencesKey("full_player_fullscreen")
+
+    /** Now Playing layout: false = Classic (unified sheet player, default), true = Expressive. */
+    val NOW_PLAYING_EXPRESSIVE_LAYOUT: Preferences.Key<Boolean> = booleanPreferencesKey("now_playing_expressive_layout")
 }
 
 @Composable
@@ -131,6 +134,23 @@ fun Modifier.backdropSource(source: BackdropSource?, enabled: Boolean = true): M
             drawContent()
         }
 }
+
+/**
+ * Records this node's whole content into [source] (no strip clipping). Used for the player
+ * cover art, which only redraws when the artwork changes, so recording is effectively free.
+ */
+fun Modifier.fullBackdropSource(source: BackdropSource?): Modifier {
+    if (source == null) return this
+    return this
+        .onGloballyPositioned { source.positionInRoot = it.positionInRoot() }
+        .drawWithContent {
+            source.layer.record { this@drawWithContent.drawContent() }
+            drawContent()
+        }
+}
+
+/** Cover-art backdrop that the full player's top controls blur behind themselves. */
+val LocalCoverBackdropSource = staticCompositionLocalOf<BackdropSource?> { null }
 
 val FrostedBlurSupported: Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
 

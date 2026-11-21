@@ -182,6 +182,8 @@ fun SongInfoBottomSheet(
             song.id.startsWith("youtube_") ||
             song.isYouTube
     }
+    // JioSaavn search results: streamed only, so offer Download and hide "delete from device".
+    val isSaavnSong = remember(song.id) { song.id.startsWith("saavn_") }
     var isDislikedState by remember(song.id, song.isDisliked) { mutableStateOf(song.isDisliked) }
     val isNotInterested = remember(song.id, song.youtubeId, notInterestedSongIds) {
         val ytId = song.youtubeId ?: if (song.id.startsWith("youtube_")) {
@@ -623,7 +625,7 @@ fun SongInfoBottomSheet(
                                             ) {
                                                 FilledTonalButton(
                                                     modifier = Modifier
-                                                        .weight(0.5f)
+                                                        .weight(if (isSaavnSong) 1f else 0.5f)
                                                         .heightIn(min = 66.dp),
                                                     colors = ButtonDefaults.filledTonalButtonColors(
                                                         containerColor = MaterialTheme.colorScheme.secondaryContainer,
@@ -644,6 +646,7 @@ fun SongInfoBottomSheet(
                                                     )
                                                 }
 
+                                                if (!isSaavnSong) {
                                                 FilledTonalButton(
                                                     modifier = Modifier
                                                         .weight(0.5f)
@@ -675,10 +678,11 @@ fun SongInfoBottomSheet(
                                                         overflow = TextOverflow.Ellipsis
                                                     )
                                                 }
+                                                }
                                             }
                                         }
 
-                                        if (song.youtubeId != null || song.telegramFileId != null) {
+                                        if (song.youtubeId != null || song.telegramFileId != null || isSaavnSong) {
                                             item {
                                                 FilledTonalButton(
                                                     modifier = Modifier
@@ -710,6 +714,8 @@ fun SongInfoBottomSheet(
                                                             else -> {
                                                                 if (song.telegramFileId != null && song.youtubeId == null) {
                                                                     songInfoViewModel.downloadTelegramSong(song)
+                                                                } else if (song.id.startsWith("saavn_")) {
+                                                                    songInfoViewModel.downloadSaavnSong(song)
                                                                 } else {
                                                                     songInfoViewModel.downloadYoutubeSong(song)
                                                                 }

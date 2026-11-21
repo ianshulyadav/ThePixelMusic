@@ -89,19 +89,22 @@ fun ExpressivePlayerControls(
     val toolbarContainer = if (isDark) {
         if (isBlurActive) Color.Black.copy(alpha = 0.30f) else currentTheme.surfaceContainer.copy(alpha = 0.90f)
     } else {
-        Color.White.copy(alpha = if (isBlurActive) 0.55f else 0.92f)
+        // Light theme: solid white with blur off; with blur on only lightly influenced by
+        // the frosted backdrop so the row still reads as clean white.
+        if (isBlurActive) Color.White.copy(alpha = 0.80f) else Color.White
     }
     val segmentInactive = if (isDark) {
         Color.White.copy(alpha = 0.07f)
     } else {
-        currentTheme.onSurface.copy(alpha = 0.08f)
+        // Neutral grey segments (not album-tinted) on the white bar.
+        Color(0xFF1F1F1F).copy(alpha = 0.07f)
     }
     val segmentActive = skipContainer
     val segmentActiveContent = skipContent
     val segmentInactiveContent = if (isDark) {
         Color.White.copy(alpha = 0.72f)
     } else {
-        currentTheme.onSurface.copy(alpha = 0.75f)
+        Color(0xFF1F1F1F).copy(alpha = 0.78f)
     }
 
     androidx.compose.foundation.layout.BoxWithConstraints(modifier = modifier) {

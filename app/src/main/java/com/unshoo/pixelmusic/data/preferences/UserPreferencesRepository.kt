@@ -114,7 +114,7 @@ enum class QuickPicksDisplayMode {
 }
 
 enum class SearchSource {
-    LOCAL, ONLINE
+    LOCAL, ONLINE, JIOSAAVN
 }
 
 enum class ProxyType {
@@ -594,10 +594,8 @@ constructor(
         }
     }
 
-    val telegramUseOnlineAlbumArtFlow: Flow<Boolean> =
-        dataStore.data.map { preferences ->
-            preferences[PreferencesKeys.TELEGRAM_USE_ONLINE_ALBUM_ART] ?: false
-        }.distinctUntilChanged()
+    /** Telegram songs always use online artwork when a match exists (option removed). */
+    val telegramUseOnlineAlbumArtFlow: Flow<Boolean> = kotlinx.coroutines.flow.flowOf(true)
 
     suspend fun setTelegramUseOnlineAlbumArt(enabled: Boolean) {
         dataStore.edit { preferences ->

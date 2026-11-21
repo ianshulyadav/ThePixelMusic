@@ -38,6 +38,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.animation.togetherWith
+import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Download
@@ -201,20 +203,39 @@ fun SettingsScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxSize()
         ) {
-            item {
-                ProfileHeaderCard(
-                    uiState = uiState,
-                    onClick = {
-                        if (uiState.ytUsername.isNotEmpty()) {
-                            showAccountDialog = true
-                        } else {
-                            navController.navigateSafely(Screen.YoutubeAuth.route)
-                        }
+            item(key = "header_card", contentType = "header_card") {
+                androidx.compose.animation.AnimatedContent(
+                    targetState = uiState.localModeEnabled,
+                    transitionSpec = {
+                        (androidx.compose.animation.fadeIn(tween(220)) +
+                            androidx.compose.animation.scaleIn(initialScale = 0.96f, animationSpec = tween(220)))
+                            .togetherWith(androidx.compose.animation.fadeOut(tween(150)))
                     },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 4.dp)
-                )
+                    label = "settings_header_card"
+                ) { isLocalMode ->
+                    if (isLocalMode) {
+                        LocalModeHeaderCard(
+                            onTurnOff = { settingsViewModel.setLocalModeEnabled(false) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 4.dp)
+                        )
+                    } else {
+                        ProfileHeaderCard(
+                            uiState = uiState,
+                            onClick = {
+                                if (uiState.ytUsername.isNotEmpty()) {
+                                    showAccountDialog = true
+                                } else {
+                                    navController.navigateSafely(Screen.YoutubeAuth.route)
+                                }
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 4.dp)
+                        )
+                    }
+                }
             }
             item {
                 val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
@@ -226,7 +247,9 @@ fun SettingsScreen(
                         it != SettingsCategory.LOSSLESS_SOURCES
                     }
 
-                    val totalItems = mainCategories.size + 4 // Device + Accounts + Downloads + About
+                    // Local Mode: online-only rows (accounts, cloud downloads) are hidden.
+                    val showOnlineRows = !uiState.localModeEnabled
+                    val totalItems = mainCategories.size + if (showOnlineRows) 4 else 2 // Device + [Accounts + Downloads] + About
                     fun shapeFor(index: Int) =
                         when {
                             totalItems == 1 -> RoundedCornerShape(24.dp)
@@ -273,6 +296,7 @@ fun SettingsScreen(
                     }
                     itemIndex++
 
+                    if (showOnlineRows) {
                     ExpressiveNavigationItem(
                         title = stringResource(R.string.settings_accounts_row_title),
                         subtitle = stringResource(R.string.settings_accounts_row_subtitle),
@@ -302,6 +326,7 @@ fun SettingsScreen(
                         Spacer(modifier = Modifier.height(2.dp))
                     }
                     itemIndex++
+                    }
 
                     ExpressiveCategoryItem(
                         category = SettingsCategory.ABOUT,
@@ -827,6 +852,68 @@ private fun ProfileHeaderCard(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun LocalModeHeaderCard(
+    onTurnOff: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = MaterialTheme.colorScheme
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(28.dp),
+        color = colors.secondaryContainer,
+        tonalElevation = 2.dp,
+        onClick = onTurnOff
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 18.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(62.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(colors.primary)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Folder,
+                    contentDescription = null,
+                    tint = colors.onPrimary,
+                    modifier = Modifier.size(30.dp)
+                )
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.settings_local_mode_card_title),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = colors.onSecondaryContainer,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = stringResource(R.string.settings_local_mode_card_subtitle),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.onSecondaryContainer.copy(alpha = 0.78f),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            androidx.compose.material3.Switch(
+                checked = true,
+                onCheckedChange = { if (!it) onTurnOff() }
+            )
         }
     }
 }

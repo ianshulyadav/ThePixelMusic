@@ -687,7 +687,20 @@ object AutoQueueManager {
         }
     }
 
+    /**
+     * True while the user is playing on-device music (local files / downloaded playlist) or
+     * Local Mode is on. Online radio songs have no audio offline, so they must never be
+     * appended to such a queue.
+     */
+    @Volatile
+    var offlineSessionActive: Boolean = false
+
     private suspend fun isAutoQueueEnabled(): Boolean {
+        if (offlineSessionActive) return false
+        val localMode = runCatching {
+            withTimeoutOrNull(SETTINGS_READ_TIMEOUT_MS) { userPreferencesRepository?.localModeEnabledFlow?.first() }
+        }.getOrNull() ?: false
+        if (localMode) return false
         val repo = datastoreRepository ?: return true
         return withTimeoutOrNull(SETTINGS_READ_TIMEOUT_MS) {
             repo.settings.first().autoQueueEnabled

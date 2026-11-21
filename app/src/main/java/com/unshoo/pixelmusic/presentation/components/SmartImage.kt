@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -244,7 +246,17 @@ fun SmartImage(
         }
     }
 
+    // Slow / flaky network: a failed remote cover used to stay on the placeholder forever.
+    // Retry a few times with backoff; the nonce only changes after an error.
+    var artRetryNonce by remember(model) { mutableIntStateOf(0) }
+    val isRemoteModel = remember(model) {
+        val str = (model as? String) ?: (model as? Uri)?.toString()
+        str != null && (str.startsWith("http://") || str.startsWith("https://") || str.contains("/remote"))
+    }
+    val retryScope = rememberCoroutineScope()
+
     val request = remember(
+        artRetryNonce,
         context,
         model,
         crossfadeDurationMillis,
@@ -363,9 +375,20 @@ val isStableLocalArtwork = when (optimizedModel) {
             com.unshoo.pixelmusic.utils.perf.PerfTracker.markFirstAlbumArt()
             onState?.invoke(state)
         },
-        onError = { state -> onState?.invoke(state) }
+        onError = { state ->
+            onState?.invoke(state)
+            if (isRemoteModel && artRetryNonce < SmartImageRetryDelaysMs.size) {
+                val attempt = artRetryNonce
+                retryScope.launch {
+                    kotlinx.coroutines.delay(SmartImageRetryDelaysMs[attempt])
+                    artRetryNonce = attempt + 1
+                }
+            }
+        }
     )
 }
+
+private val SmartImageRetryDelaysMs = longArrayOf(2_000L, 5_000L, 12_000L)
 
 @Composable
 private fun handleDirectModel(

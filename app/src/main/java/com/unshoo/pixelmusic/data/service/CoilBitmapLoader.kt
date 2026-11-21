@@ -10,13 +10,26 @@ import androidx.media3.common.util.UnstableApi
 import coil.imageLoader
 import coil.request.CachePolicy
 import coil.request.ImageRequest
+import coil.request.SuccessResult
 import coil.size.Precision
-import coil.size.Size
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.SettableFuture
+import com.unshoo.pixelmusic.data.provider.SharedArtworkContentProvider
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+/**
+ * Loads artwork for the media notification, lock screen and other system media surfaces.
+ *
+ * Slow-network behaviour matters here: system surfaces ask for a bitmap exactly once per
+ * metadata change. Previously remote art was routed through the artwork ContentProvider,
+ * which answers "not found" while it downloads in the background — so on a slow connection
+ * the full player showed the cover while the notification / lock screen stayed blank forever.
+ *
+ * Now remote URLs are unwrapped and loaded through Coil directly, so they share the very same
+ * memory/disk cache the in-app player already filled, and transient failures are retried.
+ */
 @OptIn(UnstableApi::class)
 class CoilBitmapLoader(private val context: Context, private val scope: CoroutineScope) : BitmapLoader {
 
@@ -24,10 +37,17 @@ class CoilBitmapLoader(private val context: Context, private val scope: Coroutin
         // Large enough for lock screen / media surfaces, but bounded so we never hand
         // unbounded original artwork to MediaSession/SystemUI IPC.
         private const val MAX_NOTIFICATION_ARTWORK_SIZE_PX = 1024
+        private val RETRY_DELAYS_MS = longArrayOf(0L, 1_500L, 4_000L, 9_000L)
     }
 
     override fun loadBitmap(uri: Uri): ListenableFuture<Bitmap> {
-        return loadBitmapInternal(uri)
+        val unwrapped = SharedArtworkContentProvider.unwrapRemoteUrl(uri.toString())
+        val data: Any = if (unwrapped != null && (unwrapped.startsWith("http://") || unwrapped.startsWith("https://"))) {
+            unwrapped
+        } else {
+            uri
+        }
+        return loadBitmapInternal(data)
     }
 
     override fun decodeBitmap(data: ByteArray): ListenableFuture<Bitmap> {
@@ -36,37 +56,49 @@ class CoilBitmapLoader(private val context: Context, private val scope: Coroutin
 
     private fun loadBitmapInternal(data: Any): ListenableFuture<Bitmap> {
         val future = SettableFuture.create<Bitmap>()
+        val isRemote = data is String
 
         scope.launch {
-            try {
-                val request = ImageRequest.Builder(context)
-                    .data(data)
-                    // Preserve enough resolution for media surfaces while preventing huge
-                    // album art from destabilizing notification/SystemUI rendering.
-                    .size(MAX_NOTIFICATION_ARTWORK_SIZE_PX, MAX_NOTIFICATION_ARTWORK_SIZE_PX)
-                    .precision(Precision.INEXACT)
-                    .allowHardware(false) // Bitmap must not be hardware for MediaSession
-                    // Disable memory cache so Coil does not hold a second reference to this
-                    // bitmap. Without this, Coil may recycle the cached copy while Media3
-                    // still uses it for MediaSession IPC ("Can't copy a recycled bitmap").
-                    // Disk cache is kept so repeated loads are still fast.
-                    .memoryCachePolicy(CachePolicy.DISABLED)
-                    .build()
-                
-                val result = context.imageLoader.execute(request)
-                val drawable = result.drawable
-                
-                if (drawable != null) {
-                    // toBitmap() now returns a bitmap owned exclusively by us (not in any
-                    // Coil cache), so Media3 can use and recycle it freely.
-                    val bitmap = drawable.toBitmap()
-                    future.set(bitmap)
-                } else {
-                    future.setException(IllegalStateException("Coil returned null drawable for data: $data"))
+            var lastError: Throwable? = null
+            val attempts = if (isRemote) RETRY_DELAYS_MS.size else 1
+            for (attempt in 0 until attempts) {
+                if (future.isCancelled) return@launch
+                val wait = RETRY_DELAYS_MS[attempt]
+                if (wait > 0) delay(wait)
+                try {
+                    val request = ImageRequest.Builder(context)
+                        .data(data)
+                        .size(MAX_NOTIFICATION_ARTWORK_SIZE_PX, MAX_NOTIFICATION_ARTWORK_SIZE_PX)
+                        .precision(Precision.INEXACT)
+                        .allowHardware(false) // Bitmap must not be hardware for MediaSession
+                        // Read from the shared memory cache (the player may already hold this
+                        // cover) but never write: we hand out a private copy below, so Coil
+                        // recycling its own entry can never break MediaSession IPC.
+                        .memoryCachePolicy(CachePolicy.READ_ONLY)
+                        .diskCachePolicy(CachePolicy.ENABLED)
+                        .build()
+
+                    val result = context.imageLoader.execute(request)
+                    val drawable = (result as? SuccessResult)?.drawable ?: result.drawable
+                    if (drawable != null) {
+                        val raw = drawable.toBitmap()
+                        // Private, software copy owned exclusively by Media3.
+                        val owned = if (raw.config == Bitmap.Config.HARDWARE || raw.isRecycled) {
+                            raw.copy(Bitmap.Config.ARGB_8888, false)
+                        } else {
+                            raw.copy(raw.config ?: Bitmap.Config.ARGB_8888, false)
+                        }
+                        if (owned != null) {
+                            future.set(owned)
+                            return@launch
+                        }
+                    }
+                    lastError = IllegalStateException("Coil returned no image for: $data")
+                } catch (e: Exception) {
+                    lastError = e
                 }
-            } catch (e: Exception) {
-                future.setException(e)
             }
+            future.setException(lastError ?: IllegalStateException("Artwork load failed: $data"))
         }
         return future
     }

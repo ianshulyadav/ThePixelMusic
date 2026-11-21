@@ -150,6 +150,10 @@ object CardColorExtractor {
     /**
      * Returns ARGB or null. Hits L1 -> L2 -> Deduplicated Palette Extraction.
      */
+    /** Non-suspending L1 lookup so cards can start with their final colour (no flash on scroll). */
+    fun peekColorArgb(imageUrl: String?): Int? =
+        if (imageUrl.isNullOrBlank()) null else colorCache.get(imageUrl)
+
     suspend fun extractColorArgb(context: Context, imageUrl: String?): Int? {
         if (imageUrl.isNullOrBlank()) return null
 

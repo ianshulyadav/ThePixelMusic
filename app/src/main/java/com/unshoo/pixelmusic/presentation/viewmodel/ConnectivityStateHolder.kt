@@ -66,7 +66,16 @@ class ConnectivityStateHolder @Inject constructor(
     private val _wifiName = MutableStateFlow<String?>(null)
     val wifiName: StateFlow<String?> = _wifiName.asStateFlow()
 
-    private val _isOnline = MutableStateFlow(false)
+    // Seeded with the real network state at construction. Starting at `false` made every
+    // screen render its offline/local fallback on launch and then swap to online content a
+    // moment later (local songs flashing before YouTube Music content).
+    private val _isOnline = MutableStateFlow(
+        runCatching {
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+            val caps = cm.getNetworkCapabilities(cm.activeNetwork)
+            caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+        }.getOrDefault(false)
+    )
     val isOnline: StateFlow<Boolean> = _isOnline.asStateFlow()
 
     // Metered Network State — single source of truth for all network-aware features
@@ -173,8 +182,9 @@ class ConnectivityStateHolder @Inject constructor(
             updateWifiInfo()
         }
         
-        _isOnline.value = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true &&
-                capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+        // Validation can lag a few hundred ms behind a usable connection on cold start; the
+        // network callback below refines this, so do not flip the seeded state to offline here.
+        _isOnline.value = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
         _isMeteredNetwork.value = capabilities?.hasCapability(
             NetworkCapabilities.NET_CAPABILITY_NOT_METERED
         ) != true

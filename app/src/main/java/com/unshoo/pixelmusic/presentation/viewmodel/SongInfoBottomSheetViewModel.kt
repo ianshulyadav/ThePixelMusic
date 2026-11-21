@@ -39,6 +39,8 @@ class SongInfoBottomSheetViewModel @Inject constructor(
     private val telegramRepository: TelegramRepository,
     private val downloadRepository: com.unshoo.pixelmusic.data.remote.youtube.DownloadRepository,
     private val userPreferencesRepository: com.unshoo.pixelmusic.data.preferences.UserPreferencesRepository,
+    private val offlineTrackDao: com.unshoo.pixelmusic.data.database.OfflineTrackDao,
+    private val syncManager: com.unshoo.pixelmusic.data.worker.SyncManager,
 ) : ViewModel() {
 
     data class SongLocationInfo(
@@ -352,6 +354,166 @@ class SongInfoBottomSheetViewModel @Inject constructor(
             )
             downloadRepository.downloadSong(playlist, youtubeSong)
         }
+    }
+
+    /**
+     * JioSaavn search result: save JioSaavn's own audio file to Music/PixelMusic (so it appears in
+     * the library and folder scans). Only when that file isn't available or the download fails is
+     * the song matched on YouTube Music and downloaded through the normal YouTube flow.
+     */
+    fun downloadSaavnSong(song: Song) {
+        viewModelScope.launch {
+            _isSongDownloading.value = true
+            val saved = runCatching { saveSaavnAudio(song) }.getOrElse {
+                timber.log.Timber.w(it, "JioSaavn download failed for %s", song.title)
+                false
+            }
+            if (saved) {
+                _isSongDownloading.value = false
+                _isSongDownloaded.value = true
+                return@launch
+            }
+            val match = com.unshoo.pixelmusic.data.remote.saavn.SaavnYouTubeMatcher.match(song)
+            if (match?.youtubeId != null) {
+                downloadYoutubeSong(match)
+            } else {
+                _isSongDownloading.value = false
+                android.widget.Toast.makeText(context, "Download not available for this song", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private suspend fun saveSaavnAudio(song: Song): Boolean = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val url = song.contentUriString
+        if (!url.startsWith("https://") || !(url.contains("saavncdn.com") || url.contains("jiosaavn.com"))) {
+            return@withContext false
+        }
+        val client = okhttp3.OkHttpClient.Builder()
+            .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+        val request = okhttp3.Request.Builder()
+            .url(url)
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36")
+            .header("Accept-Language", "en-IN,en;q=0.9")
+            .header("Cookie", "explicit_content=1")
+            .build()
+        val safeName = "${song.title} - ${song.artist.substringBefore(',')}"
+            .replace(Regex("[\\/:*?\"<>|]"), "_")
+            .trim()
+            .take(120)
+        val resolver = context.contentResolver
+        val collectionForLookup = android.provider.MediaStore.Audio.Media.getContentUri(android.provider.MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        // Already saved earlier (same name in Music/PixelMusic)? Reuse it instead of a duplicate copy.
+        val existing = runCatching {
+            resolver.query(
+                collectionForLookup,
+                arrayOf(android.provider.MediaStore.Audio.Media._ID, android.provider.MediaStore.Audio.Media.SIZE),
+                "${android.provider.MediaStore.Audio.Media.DISPLAY_NAME} = ? AND ${android.provider.MediaStore.Audio.Media.RELATIVE_PATH} LIKE ?",
+                arrayOf("$safeName.m4a", "Music/PixelMusic%"),
+                null
+            )?.use { c ->
+                if (c.moveToFirst() && c.getLong(1) > 0L) {
+                    android.content.ContentUris.withAppendedId(collectionForLookup, c.getLong(0))
+                } else null
+            }
+        }.getOrNull()
+        if (existing != null) {
+            finishSaavnDownload(song, existing)
+            return@withContext true
+        }
+        val values = android.content.ContentValues().apply {
+            put(android.provider.MediaStore.Audio.Media.DISPLAY_NAME, "$safeName.m4a")
+            put(android.provider.MediaStore.Audio.Media.MIME_TYPE, "audio/mp4")
+            put(android.provider.MediaStore.Audio.Media.RELATIVE_PATH, "Music/PixelMusic")
+            put(android.provider.MediaStore.Audio.Media.TITLE, song.title)
+            put(android.provider.MediaStore.Audio.Media.ARTIST, song.artist)
+            put(android.provider.MediaStore.Audio.Media.ALBUM, song.album)
+            put(android.provider.MediaStore.Audio.Media.IS_MUSIC, 1)
+            put(android.provider.MediaStore.Audio.Media.IS_PENDING, 1)
+        }
+        val collection = android.provider.MediaStore.Audio.Media.getContentUri(android.provider.MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        val itemUri = resolver.insert(collection, values) ?: return@withContext false
+        try {
+            client.newCall(request).execute().use { resp ->
+                if (!resp.isSuccessful) throw java.io.IOException("HTTP ${resp.code}")
+                val written = resolver.openOutputStream(itemUri, "w")?.use { out ->
+                    resp.body.byteStream().copyTo(out)
+                } ?: 0L
+                if (written <= 0L) throw java.io.IOException("Empty download")
+            }
+            resolver.update(itemUri, android.content.ContentValues().apply {
+                put(android.provider.MediaStore.Audio.Media.IS_PENDING, 0)
+            }, null, null)
+            finishSaavnDownload(song, itemUri)
+            true
+        } catch (e: Exception) {
+            runCatching { resolver.delete(itemUri, null, null) }
+            throw e
+        }
+    }
+
+    /**
+     * Makes a saved JioSaavn file a first-class download: embeds title/artist/album and the cover
+     * into the file, registers it as a completed download (so it is listed in Downloads), scans it
+     * into MediaStore and refreshes the app library so it shows with full metadata everywhere.
+     */
+    private suspend fun finishSaavnDownload(song: Song, itemUri: android.net.Uri) {
+        val resolver = context.contentResolver
+        val path = runCatching {
+            resolver.query(itemUri, arrayOf(android.provider.MediaStore.Audio.Media.DATA), null, null, null)
+                ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+        }.getOrNull()
+
+        // Cover art (JioSaavn 500x500) + tags embedded into the m4a.
+        runCatching {
+            val artUrl = song.albumArtUriString?.takeIf { it.startsWith("http") }
+            val artBytes = artUrl?.let { url ->
+                okhttp3.OkHttpClient().newCall(okhttp3.Request.Builder().url(url).build()).execute()
+                    .use { r -> if (r.isSuccessful) r.body.bytes() else null }
+            }
+            resolver.openFileDescriptor(itemUri, "rw")?.use { fd ->
+                val meta = com.kyant.taglib.TagLib.getMetadata(fd.dup().detachFd(), readPictures = false)
+                val props = HashMap(meta?.propertyMap ?: emptyMap())
+                if (song.title.isNotBlank()) props["TITLE"] = arrayOf(song.title)
+                if (song.artist.isNotBlank()) props["ARTIST"] = arrayOf(song.artist)
+                if (song.album.isNotBlank()) props["ALBUM"] = arrayOf(song.album)
+                com.kyant.taglib.TagLib.savePropertyMap(fd.dup().detachFd(), props)
+                if (artBytes != null && artBytes.isNotEmpty()) {
+                    com.kyant.taglib.TagLib.savePictures(
+                        fd.dup().detachFd(),
+                        arrayOf(com.kyant.taglib.Picture(data = artBytes, description = "Front Cover", pictureType = "Front Cover", mimeType = "image/jpeg"))
+                    )
+                }
+            }
+        }.onFailure { timber.log.Timber.w(it, "Tagging JioSaavn download failed") }
+
+        if (!path.isNullOrBlank()) {
+            val saavnId = song.id.removePrefix("saavn_")
+            val file = java.io.File(path)
+            val now = System.currentTimeMillis()
+            runCatching {
+                offlineTrackDao.upsert(
+                    com.unshoo.pixelmusic.data.database.OfflineTrackEntity(
+                        downloadId = "saavn_$saavnId",
+                        attemptId = "saavn",
+                        songId = song.id,
+                        sourceUri = "saavn://$saavnId",
+                        provider = "jiosaavn",
+                        title = song.title,
+                        mimeType = "audio/mp4",
+                        localPath = path,
+                        state = com.unshoo.pixelmusic.data.offline.OfflineDownloadStatus.COMPLETE.storageValue,
+                        bytesDownloaded = file.length(),
+                        totalBytes = file.length(),
+                        createdAt = now,
+                        updatedAt = now
+                    )
+                )
+            }.onFailure { timber.log.Timber.w(it, "Registering JioSaavn download failed") }
+            android.media.MediaScannerConnection.scanFile(context, arrayOf(path), arrayOf("audio/mp4"), null)
+        }
+        runCatching { syncManager.forceRefresh() }
     }
 
     fun deleteYoutubeSong(song: Song) {

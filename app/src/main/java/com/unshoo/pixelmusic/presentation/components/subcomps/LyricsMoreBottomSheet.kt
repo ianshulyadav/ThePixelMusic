@@ -1,5 +1,10 @@
 package com.unshoo.pixelmusic.presentation.components.subcomps
 
+import androidx.compose.ui.Alignment
+import kotlinx.coroutines.launch
+import com.unshoo.pixelmusic.data.preferences.dataStore
+import androidx.datastore.preferences.core.edit
+import androidx.compose.runtime.collectAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -289,6 +294,13 @@ fun LyricsMoreBottomSheet(
                             contentDesc = stringResource(R.string.cd_lyrics_align_right)
                         )
                     }
+
+                    LyricsAppearanceControls(
+                        accentColor = accentColor,
+                        onAccentColor = onAccentColor,
+                        containerColor = containerColor,
+                        contentColor = contentColor
+                    )
                 }
             }
 
@@ -555,5 +567,103 @@ fun LyricsMoreBottomSheet(
                 )
             }
         }
+    }
+}
+
+/**
+ * Lyrics text appearance & motion, stored in the shared settings DataStore and read live by
+ * the lyrics screen: text size, animated (spring/parallax) lines and blur of non-active lines.
+ */
+@Composable
+private fun LyricsAppearanceControls(
+    accentColor: Color,
+    onAccentColor: Color,
+    containerColor: Color,
+    contentColor: Color
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val textScaleKey = androidx.datastore.preferences.core.floatPreferencesKey("lyrics_text_scale")
+    val animatedKey = androidx.datastore.preferences.core.booleanPreferencesKey("use_animated_lyrics")
+    val blurKey = androidx.datastore.preferences.core.booleanPreferencesKey("animated_lyrics_blur_enabled")
+    val prefs by androidx.compose.runtime.remember(context) {
+        context.dataStore.data
+    }.collectAsState(initial = null)
+    val textScale = prefs?.get(textScaleKey) ?: 1f
+    val animated = prefs?.get(animatedKey) ?: false
+    val blur = prefs?.get(blurKey) ?: true
+
+    fun <T> put(key: androidx.datastore.preferences.core.Preferences.Key<T>, value: T) {
+        scope.launch { context.dataStore.edit { it[key] = value } }
+    }
+
+    Text(
+        text = stringResource(R.string.lyrics_more_text_size),
+        color = contentColor,
+        style = MaterialTheme.typography.bodyLarge,
+        fontWeight = FontWeight.Medium
+    )
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        listOf(0.85f to "S", 1f to "M", 1.15f to "L", 1.3f to "XL").forEach { (scale, label) ->
+            val active = kotlin.math.abs(textScale - scale) < 0.01f
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(48.dp)
+                    .clip(RoundedCornerShape(if (active) 50.dp else 14.dp))
+                    .background(if (active) accentColor else containerColor)
+                    .clickable { put(textScaleKey, scale) },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = label,
+                    color = if (active) onAccentColor else contentColor.copy(alpha = 0.78f),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
+    LyricsAppearanceSwitch(
+        title = stringResource(R.string.lyrics_more_animated_lines),
+        checked = animated,
+        contentColor = contentColor,
+        onCheckedChange = { put(animatedKey, it) }
+    )
+    if (animated) {
+        LyricsAppearanceSwitch(
+            title = stringResource(R.string.lyrics_more_blur_other_lines),
+            checked = blur,
+            contentColor = contentColor,
+            onCheckedChange = { put(blurKey, it) }
+        )
+    }
+}
+
+@Composable
+private fun LyricsAppearanceSwitch(
+    title: String,
+    checked: Boolean,
+    contentColor: Color,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .clickable { onCheckedChange(!checked) }
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = title,
+            color = contentColor,
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier.weight(1f)
+        )
+        androidx.compose.material3.Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }

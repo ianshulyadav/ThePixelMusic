@@ -1,5 +1,6 @@
 package com.unshoo.pixelmusic.presentation.components
 
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.fadeIn
@@ -68,9 +69,11 @@ fun MostPlayedSection(
     summary: PlaybackStatsRepository.PlaybackStatsSummary,
     onSeeAllClick: () -> Unit,
     modifier: Modifier = Modifier,
-    artistImages: Map<String, String> = emptyMap()
+    artistImages: Map<String, String> = emptyMap(),
+    initialTab: Int = 0,
+    rangeLabel: String? = null
 ) {
-    var tab by rememberSaveable { mutableIntStateOf(0) }
+    var tab by rememberSaveable(initialTab) { mutableIntStateOf(initialTab.coerceIn(0, 2)) }
 
     val songs = remember(summary.topSongs) {
         summary.topSongs.take(10).map {
@@ -107,13 +110,21 @@ fun MostPlayedSection(
                 .padding(start = 20.dp, end = 16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = stringResource(R.string.home_most_played_title),
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.weight(1f)
-            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.home_most_played_title),
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                if (!rangeLabel.isNullOrBlank()) {
+                    Text(
+                        text = rangeLabel,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
             Box(
                 modifier = Modifier
                     .height(40.dp)
@@ -234,20 +245,32 @@ private fun MostPlayedTab(
 @Composable
 private fun rememberArtworkCardColor(imageUrl: String?, fallback: Color, isDark: Boolean): Color {
     val context = androidx.compose.ui.platform.LocalContext.current
-    var target by androidx.compose.runtime.remember(imageUrl, isDark) {
-        androidx.compose.runtime.mutableStateOf(fallback)
+    // Start from the already-extracted colour when we have it: cards scrolling back into
+    // view must not flash the fallback colour and animate again (that animation ran on
+    // every card on every scroll and was the main source of the jank).
+    val cached = androidx.compose.runtime.remember(imageUrl, isDark) {
+        com.unshoo.pixelmusic.presentation.utils.CardColorExtractor.peekColorArgb(imageUrl)
+            ?.let { retoneCardColor(it, isDark) }
     }
+    var target by androidx.compose.runtime.remember(imageUrl, isDark) {
+        androidx.compose.runtime.mutableStateOf(cached ?: fallback)
+    }
+    if (cached != null) return cached
     androidx.compose.runtime.LaunchedEffect(imageUrl, isDark) {
         val argb = com.unshoo.pixelmusic.presentation.utils.CardColorExtractor.extractColorArgb(context, imageUrl)
             ?: return@LaunchedEffect
-        val hsl = FloatArray(3)
-        androidx.core.graphics.ColorUtils.colorToHSL(argb, hsl)
-        hsl[1] = hsl[1].coerceIn(0.28f, 0.62f)
-        hsl[2] = if (isDark) 0.30f else 0.80f
-        target = Color(androidx.core.graphics.ColorUtils.HSLToColor(hsl))
+        target = retoneCardColor(argb, isDark)
     }
     val animated by androidx.compose.animation.animateColorAsState(target, label = "artCardColor")
     return animated
+}
+
+private fun retoneCardColor(argb: Int, isDark: Boolean): Color {
+    val hsl = FloatArray(3)
+    androidx.core.graphics.ColorUtils.colorToHSL(argb, hsl)
+    hsl[1] = hsl[1].coerceIn(0.28f, 0.62f)
+    hsl[2] = if (isDark) 0.30f else 0.80f
+    return Color(androidx.core.graphics.ColorUtils.HSLToColor(hsl))
 }
 
 @Composable
@@ -306,19 +329,22 @@ private fun MostPlayedCard(rank: Int, item: RankedItem, onClick: () -> Unit) {
             SmartImage(
                 model = item.imageModel,
                 contentDescription = item.title,
+                targetSize = MostPlayedCardImageSize,
+                crossfadeDurationMillis = 0,
                 modifier = Modifier.fillMaxSize()
             )
             Box(
                 Modifier
                     .fillMaxSize()
-                    .background(
-                        androidx.compose.ui.graphics.Brush.verticalGradient(
+                    .drawWithCache {
+                        val fade = androidx.compose.ui.graphics.Brush.verticalGradient(
                             0f to Color.Transparent,
                             0.42f to Color.Transparent,
                             0.72f to container.copy(alpha = 0.78f),
                             1f to container
                         )
-                    )
+                        onDrawBehind { drawRect(fade) }
+                    }
             )
             badge(Modifier.align(Alignment.TopStart).padding(12.dp))
             texts(Modifier.align(Alignment.BottomStart).padding(start = 16.dp, end = 12.dp, bottom = 16.dp))
@@ -338,6 +364,8 @@ private fun MostPlayedCard(rank: Int, item: RankedItem, onClick: () -> Unit) {
                     model = item.imageModel,
                     contentDescription = item.title,
                     shape = CircleShape,
+                    targetSize = MostPlayedCardImageSize,
+                    crossfadeDurationMillis = 0,
                     modifier = Modifier
                         .fillMaxWidth()
                         .aspectRatio(1f)
@@ -349,3 +377,6 @@ private fun MostPlayedCard(rank: Int, item: RankedItem, onClick: () -> Unit) {
         }
     }
 }
+
+/** Cards are 186 dp wide: decode artwork once at a bounded size instead of full resolution. */
+private val MostPlayedCardImageSize = coil.size.Size(480, 480)

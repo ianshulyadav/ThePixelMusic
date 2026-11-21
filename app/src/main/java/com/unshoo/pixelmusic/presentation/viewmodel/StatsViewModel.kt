@@ -102,6 +102,32 @@ class StatsViewModel @Inject constructor(
         }
     }
 
+    /** Summary used by the Home "Most listened" card, for the range picked in Customize Home. */
+    private val _mostListenedOverview = MutableStateFlow<PlaybackStatsSummary?>(null)
+    val mostListenedOverview: StateFlow<PlaybackStatsSummary?> = _mostListenedOverview.asStateFlow()
+    private var mostListenedRange: StatsTimeRange? = null
+    private var mostListenedJob: kotlinx.coroutines.Job? = null
+
+    fun loadMostListened(range: StatsTimeRange, force: Boolean = false) {
+        if (!force && range == mostListenedRange && _mostListenedOverview.value != null) return
+        mostListenedRange = range
+        mostListenedJob?.cancel()
+        mostListenedJob = viewModelScope.launch {
+            AppReadinessSignal.awaitReady()
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    playbackStatsRepository.loadSummary(range, loadSongs())
+                }
+            }.onSuccess { summary ->
+                _mostListenedOverview.value = summary
+                loadArtistImages(summary)
+            }.onFailure { throwable ->
+                if (throwable is kotlinx.coroutines.CancellationException) throw throwable
+                Timber.e(throwable, "Failed to load most listened overview")
+            }
+        }
+    }
+
     fun refreshHomeOverview() {
         viewModelScope.launch {
             runCatching {
@@ -174,6 +200,7 @@ class StatsViewModel @Inject constructor(
                         refreshWeeklyOverview()
                     }
                     refreshHomeOverview()
+                    mostListenedRange?.let { loadMostListened(it, force = true) }
                 }
         }
     }

@@ -62,6 +62,7 @@ class TransitionController @Inject constructor(
      */
     fun initialize() {
         if (transitionListener != null) return // Already initialized
+        ensureSettingsCache()
 
         Timber.tag("TransitionDebug").d("Initializing TransitionController...")
 
@@ -120,6 +121,41 @@ class TransitionController @Inject constructor(
         currentObservedPlayer = engine.masterPlayer
         currentObservedPlayer?.addListener(transitionListener!!)
         engine.addPlayerSwapListener(swapListener)
+    }
+
+    @Volatile private var crossfadeEnabledCached = false
+    @Volatile private var globalSettingsCached: com.unshoo.pixelmusic.data.model.TransitionSettings? = null
+    private var settingsCacheJob: kotlinx.coroutines.Job? = null
+
+    private fun ensureSettingsCache() {
+        if (settingsCacheJob != null) return
+        settingsCacheJob = scope.launch {
+            launch { userPreferencesRepository.isCrossfadeEnabledFlow.collect { crossfadeEnabledCached = it } }
+            launch { transitionRepository.getGlobalSettings().collect { globalSettingsCached = it } }
+        }
+    }
+
+    /**
+     * Manual "next": when crossfade is on and the next track is already buffered on the standby
+     * player, blend into it with a short fade instead of a hard cut. Returns false (caller does
+     * a normal seek) when that is not possible right now.
+     */
+    fun tryManualCrossfadeToNext(): Boolean {
+        ensureSettingsCache()
+        if (!crossfadeEnabledCached) return false
+        val settings = globalSettingsCached ?: return false
+        if (settings.mode == TransitionMode.NONE || settings.durationMs <= 0) return false
+        if (engine.isTransitionRunning()) return false
+        val player = engine.masterPlayer
+        if (!player.isPlaying) return false
+        val current = player.currentMediaItem ?: return false
+        val target = engine.getNextTransitionTarget(current, player.repeatMode) ?: return false
+        if (!engine.isPreparedNextReady(target.mediaItem.mediaId)) return false
+        transitionSchedulerJob?.cancel()
+        Timber.tag("TransitionDebug").d("Manual skip: crossfading into prepared %s", target.mediaItem.mediaId)
+        engine.setPauseAtEndOfMediaItems(shouldPause = true)
+        engine.performTransition(settings.copy(durationMs = settings.durationMs.coerceIn(400, MANUAL_SKIP_MAX_FADE_MS)))
+        return true
     }
 
     /** FIX 4: Called on manual skip (previous/next song) to schedule crossfade. */
@@ -327,5 +363,9 @@ class TransitionController @Inject constructor(
         transitionListener = null
         currentObservedPlayer = null
         scope.cancel()
+    }
+
+    private companion object {
+        const val MANUAL_SKIP_MAX_FADE_MS = 1_500
     }
 }

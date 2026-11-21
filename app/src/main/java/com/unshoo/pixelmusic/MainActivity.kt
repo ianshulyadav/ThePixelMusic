@@ -1,6 +1,7 @@
 package com.unshoo.pixelmusic
 
 import com.unshoo.pixelmusic.presentation.navigation.navigateSafely
+import com.unshoo.pixelmusic.presentation.navigation.navigateToTopLevelSafely
 
 // import androidx.core.view.WindowInsetsCompat // No longer needed for this
 import android.Manifest
@@ -14,6 +15,7 @@ import android.os.Trace
 import android.provider.Settings
 import android.util.Log
 import android.widget.Toast
+import androidx.compose.ui.draw.drawBehind
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
@@ -799,16 +801,33 @@ class MainActivity : ComponentActivity() {
         val searchLabel = stringResource(R.string.search)
         val libraryLabel = stringResource(R.string.tab_library)
 
-        val commonNavItems = remember(homeLabel, exploreLabel, searchLabel, libraryLabel) {
-            persistentListOf(
-                BottomNavItem(homeLabel, R.drawable.rounded_home_24, R.drawable.home_24_rounded_filled, Screen.Home),
-                BottomNavItem(exploreLabel, R.drawable.rounded_album_24, R.drawable.rounded_album_24, Screen.Explore),
-                BottomNavItem(searchLabel, R.drawable.rounded_search_24, R.drawable.rounded_search_24, Screen.Search),
-                BottomNavItem(libraryLabel, R.drawable.rounded_library_music_24, R.drawable.round_library_music_24, Screen.Library)
-            )
+        // Local Mode turns the app into a pure on-device player: the Explore tab (which is
+        // entirely online-driven) is removed from the bar instead of showing an empty page.
+        val isLocalMode by playerViewModel.localModeEnabled.collectAsStateWithLifecycle()
+        val commonNavItems = remember(homeLabel, exploreLabel, searchLabel, libraryLabel, isLocalMode) {
+            if (isLocalMode) {
+                persistentListOf(
+                    BottomNavItem(homeLabel, R.drawable.rounded_home_24, R.drawable.home_24_rounded_filled, Screen.Home),
+                    BottomNavItem(searchLabel, R.drawable.rounded_search_24, R.drawable.rounded_search_24, Screen.Search),
+                    BottomNavItem(libraryLabel, R.drawable.rounded_library_music_24, R.drawable.round_library_music_24, Screen.Library)
+                )
+            } else {
+                persistentListOf(
+                    BottomNavItem(homeLabel, R.drawable.rounded_home_24, R.drawable.home_24_rounded_filled, Screen.Home),
+                    BottomNavItem(exploreLabel, R.drawable.rounded_album_24, R.drawable.rounded_album_24, Screen.Explore),
+                    BottomNavItem(searchLabel, R.drawable.rounded_search_24, R.drawable.rounded_search_24, Screen.Search),
+                    BottomNavItem(libraryLabel, R.drawable.rounded_library_music_24, R.drawable.round_library_music_24, Screen.Library)
+                )
+            }
         }
         val navBackStackEntry by navController.currentBackStackEntryAsState()
         val currentRoute = navBackStackEntry?.destination?.route
+        // If Local Mode is switched on while Explore is showing, move to Home.
+        LaunchedEffect(isLocalMode, currentRoute) {
+            if (isLocalMode && currentRoute == Screen.Explore.route) {
+                navController.navigateToTopLevelSafely(Screen.Home.route)
+            }
+        }
         var isSearchBarActive by remember { mutableStateOf(false) }
 
         // Positive whitelist. The nav bar is shown ONLY on the four root tabs;
@@ -1265,8 +1284,10 @@ class MainActivity : ComponentActivity() {
 
                             // Smoke overlay directly above scrolling content, fading up from navbar
                             if (shouldRenderNavigationBar) {
-                                val smokeHeight = remember(navBarOccupiedHeight, systemNavBarInset) {
-                                    navBarOccupiedHeight + 36.dp
+                                // Floating pill sits above the content, so give it a taller,
+                                // softer edge-to-edge fade under and around it.
+                                val smokeHeight = remember(navBarOccupiedHeight, systemNavBarInset, navBarStyle) {
+                                    navBarOccupiedHeight + if (navBarStyle == NavBarStyle.FLOATING_PILL) 64.dp else 36.dp
                                 }
                                 Box(
                                     modifier = Modifier
@@ -1314,10 +1335,15 @@ class MainActivity : ComponentActivity() {
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .graphicsLayer {
-                                        alpha = (playerViewModel.playerContentExpansionFraction.value * 0.6f).coerceIn(0f, 0.6f)
+                                    // Drawn with per-draw alpha instead of a layer alpha: a full-screen
+                                    // layer with alpha < 1 forced an offscreen copy of the whole screen
+                                    // on every frame while the player was open. Same look, no layer.
+                                    .drawBehind {
+                                        drawRect(
+                                            color = scrimColor,
+                                            alpha = (playerViewModel.playerContentExpansionFraction.value * 0.6f).coerceIn(0f, 0.6f)
+                                        )
                                     }
-                                    .background(scrimColor)
                                     .pointerInput(Unit) {
                                         detectTapGestures {
                                             playerViewModel.collapsePlayerSheet()

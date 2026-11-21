@@ -515,9 +515,13 @@ fun LyricsSheet(
         label = "fontScale"
     )
     
+    val lyricsTextScaleFlow = remember(context) {
+        context.dataStore.data.map { it[androidx.datastore.preferences.core.floatPreferencesKey("lyrics_text_scale")] ?: 1f }
+    }
+    val lyricsTextScale by lyricsTextScaleFlow.collectAsStateWithLifecycle(initialValue = 1f)
     val scaledTextStyle = lyricsTextStyle.copy(
-        fontSize = lyricsTextStyle.fontSize * fontScale,
-        lineHeight = lyricsTextStyle.lineHeight * fontScale
+        fontSize = lyricsTextStyle.fontSize * fontScale * lyricsTextScale,
+        lineHeight = lyricsTextStyle.lineHeight * fontScale * lyricsTextScale
     )
 
     fun resetImmersiveTimer() {
@@ -1333,9 +1337,19 @@ fun SyncedLyricsList(
             lastAutoScrolledLineIndex = currentLineIndex
         }
 
+        // Opening the sheet used to show line 0 for a frame, then jump/settle onto the current
+        // line (the visible "catch" when lyrics open). Keep the list invisible until the
+        // initial alignment is done, then fade it in already in place.
+        val listRevealAlpha by animateFloatAsState(
+            targetValue = if (hasAlignedInitialLine || currentLineIndex !in lines.indices) 1f else 0f,
+            animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+            label = "lyricsReveal"
+        )
         Box(modifier = Modifier.fillMaxSize()) {
             LazyColumn(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer { alpha = listRevealAlpha },
                 state = listState,
                 flingBehavior = flingBehavior,
                 contentPadding = contentPadding

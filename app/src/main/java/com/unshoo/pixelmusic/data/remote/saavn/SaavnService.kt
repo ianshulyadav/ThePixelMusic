@@ -168,7 +168,7 @@ object SaavnService {
     /**
      * Search for songs on JioSaavn directly by a query string.
      */
-    suspend fun searchSongs(query: String): Result<List<SaavnSong>> = withContext(Dispatchers.IO) {
+    suspend fun searchSongs(query: String, limit: Int = 10): Result<List<SaavnSong>> = withContext(Dispatchers.IO) {
         runCatching {
             Timber.tag(TAG).d("searchSongs: query=\"$query\"")
             val httpUrl = BASE_URL.toHttpUrl().newBuilder()
@@ -179,7 +179,7 @@ object SaavnService {
                 .addQueryParameter("ctx", "android")
                 .addQueryParameter("q", query)
                 .addQueryParameter("p", "1")
-                .addQueryParameter("n", "10")
+                .addQueryParameter("n", limit.coerceIn(1, 50).toString())
                 .build()
 
             val request = Request.Builder()

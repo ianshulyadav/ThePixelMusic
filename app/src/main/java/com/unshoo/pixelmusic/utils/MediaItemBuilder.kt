@@ -72,6 +72,9 @@ object MediaItemBuilder {
     )
     private val SUPPORTED_INTERNAL_ARTWORK_SCHEMES = setOf(
         LocalArtworkUri.SCHEME,
+        // Telegram covers are resolved in-process by TelegramCoilFetcher; the session's
+        // BitmapLoader (Coil) can load them for the notification and lock screen.
+        "telegram_art",
         "content",
         "file",
         "android.resource",
@@ -282,6 +285,12 @@ object MediaItemBuilder {
         if (rawArtworkUri.isNullOrBlank()) return null
         val appContext = context.applicationContext
         val pkg = applicationPackageName ?: appContext.packageName
+
+        if (rawArtworkUri.startsWith("telegram_art://")) {
+            // Resolved in-process by TelegramCoilFetcher (online cover first), which the
+            // session's Coil BitmapLoader uses for the notification and lock screen.
+            return Uri.parse(rawArtworkUri)
+        }
 
         if (rawArtworkUri.startsWith("content://${SharedArtworkContentProvider.authority(pkg)}")) {
             return Uri.parse(rawArtworkUri)

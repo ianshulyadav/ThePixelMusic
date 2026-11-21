@@ -243,11 +243,11 @@ object LocalAudioDuplicateMatcher {
             val path = localSong.filePath
             if (path.isBlank()) return@firstOrNull false
             if (!allowLossless && isLosslessPath(path)) return@firstOrNull false
-            val file = File(path)
-            if (!file.exists() || file.length() <= 0L) return@firstOrNull false
 
+            // Cheap metadata checks first; only touch the filesystem for an actual match
+            // (stat()-ing every song in a large library made each lookup take seconds).
             val localDurationSec = if (localSong.duration > 0) (localSong.duration / 1000).toInt() else null
-            isSongMatch(
+            val matches = isSongMatch(
                 targetTitle = title,
                 targetArtist = artist,
                 targetDurationSeconds = durationSeconds,
@@ -255,6 +255,9 @@ object LocalAudioDuplicateMatcher {
                 candidateArtist = localSong.artistName,
                 candidateDurationSeconds = localDurationSec
             )
+            if (!matches) return@firstOrNull false
+            val file = File(path)
+            file.exists() && file.length() > 0L
         }
     }
 

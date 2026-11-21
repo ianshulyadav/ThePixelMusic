@@ -1,5 +1,7 @@
 package com.unshoo.pixelmusic.data.image
 
+import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 import android.content.Context
 import android.graphics.BitmapFactory
 import android.graphics.drawable.BitmapDrawable
@@ -45,6 +47,9 @@ class TelegramCoilFetcher(
 ) : Fetcher {
 
     companion object {
+        private val backgroundArtScope = kotlinx.coroutines.CoroutineScope(
+            kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO
+        )
         private val recentlyLoggedFailures = ConcurrentHashMap<String, Long>()
         private const val LOG_FAILURE_COOLDOWN_MS = 60_000L
         private val extractionMapMutex = Mutex()
@@ -78,7 +83,17 @@ class TelegramCoilFetcher(
                 dataSource = DataSource.DISK
             )
         }
-        val ytmResolved = withTimeoutOrNull(4000L) { fetchYtMusicCover(chatId, messageId, key, ytmFile) }
+        // Run the online lookup detached so a slow network never cancels it: if it misses the
+        // 4 s window we show the Telegram cover now and swap to the online one once it lands.
+        val ytmJob = backgroundArtScope.async { fetchYtMusicCover(chatId, messageId, key, ytmFile) }
+        val ytmResolved = withTimeoutOrNull(4000L) { ytmJob.await() }
+        if (ytmResolved == null) {
+            backgroundArtScope.launch {
+                if (runCatching { ytmJob.await() }.getOrDefault(false)) {
+                    telegramCacheManager?.notifyEmbeddedArtExtracted(chatId, messageId)
+                }
+            }
+        }
         if (ytmResolved == true) {
             return SourceResult(
                 source = coil.decode.ImageSource(ytmFile.absolutePath.toPath(), okio.FileSystem.SYSTEM),

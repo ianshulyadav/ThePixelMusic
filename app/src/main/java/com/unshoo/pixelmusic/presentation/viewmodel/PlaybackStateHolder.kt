@@ -597,6 +597,8 @@ class PlaybackStateHolder @Inject constructor(
         if (castSession != null && castSession.remoteMediaClient != null) {
             castStateHolder.castPlayer?.next()
         } else {
+            // Crossfade into the already-buffered next song when crossfade is on.
+            if (transitionController.tryManualCrossfadeToNext()) return
             // FIX 4: Schedule crossfade on manual skip (next song), like BitChord/Mochy-Music.
             transitionController.onManualSkip()
             val controller = mediaController ?: return

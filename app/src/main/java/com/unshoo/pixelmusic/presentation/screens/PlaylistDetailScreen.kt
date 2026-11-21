@@ -104,6 +104,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -255,7 +256,7 @@ fun PlaylistDetailScreen(
     val isYoutubePlaylistHydrating = isYoutubePlaylist && currentPlaylist?.songIds.isNullOrEmpty() && songsInPlaylist.isEmpty()
     val isPlaylistFullyDownloaded by remember(songsInPlaylist) {
         derivedStateOf {
-            songsInPlaylist.isNotEmpty() && songsInPlaylist.all { it.path.isNotBlank() }
+            songsInPlaylist.isNotEmpty() && songsInPlaylist.all { it.path.isNotBlank() || it.isLocal }
         }
     }
     // remember() the Flow itself (keyed on playlistId), not just collectAsState, because
@@ -266,6 +267,22 @@ fun PlaylistDetailScreen(
         playerViewModel.observePlaylistDownloadStatus(playlistId)
     }.collectAsStateWithLifecycle(initialValue = PlayerViewModel.PlaylistDownloadStatus())
     val isPlaylistDownloading = playlistDownloadStatus.isActive
+    // Re-read the playlist as songs finish downloading (and once when the job ends) so the
+    // per-song downloaded badge and the header button reflect the real state without reopening.
+    var lastSeenDownloadCompleted by remember(playlistId) { mutableIntStateOf(-1) }
+    var wasPlaylistDownloading by remember(playlistId) { mutableStateOf(false) }
+    LaunchedEffect(playlistDownloadStatus.completed, isPlaylistDownloading) {
+        val finishedNow = wasPlaylistDownloading && !isPlaylistDownloading
+        val progressed = isPlaylistDownloading && lastSeenDownloadCompleted >= 0 &&
+            playlistDownloadStatus.completed != lastSeenDownloadCompleted
+        wasPlaylistDownloading = isPlaylistDownloading
+        lastSeenDownloadCompleted = playlistDownloadStatus.completed
+        if (finishedNow || progressed) {
+            com.unshoo.pixelmusic.utils.OfflineAudioResolver.invalidateCache()
+            if (progressed) kotlinx.coroutines.delay(600) // coalesce bursts of parallel completions
+            playlistViewModel.loadPlaylistDetails(playlistId)
+        }
+    }
 
     LaunchedEffect(playlistId) {
         playlistViewModel.loadPlaylistDetails(playlistId)

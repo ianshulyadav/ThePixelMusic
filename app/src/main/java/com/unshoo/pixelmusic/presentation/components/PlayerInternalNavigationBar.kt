@@ -1,5 +1,9 @@
 package com.unshoo.pixelmusic.presentation.components
 
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.animation.core.Animatable
 import android.content.res.Configuration
 import android.os.SystemClock
 import androidx.compose.animation.AnimatedVisibility
@@ -175,8 +179,8 @@ private fun ExpressiveFloatingPillNavigationBar(
     val pillItemHeight = 52.dp
     val searchButtonSize = 64.dp
     val pillIconSize = 24.dp
-    val selectionContainerWidth = 64.dp
-    val selectionContainerHeight = 36.dp
+    val selectionContainerWidth = 54.dp
+    val selectionContainerHeight = 32.dp
     val selectionContainerShape = CircleShape
     val latestCurrentRoute by rememberUpdatedState(currentRoute)
     val latestNavigationEnabled by rememberUpdatedState(currentRoute != null)
@@ -231,102 +235,126 @@ private fun ExpressiveFloatingPillNavigationBar(
             ),
             contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
         ) {
-            mainItems.forEachIndexed { index, item ->
-                val isSelected = selectedIndex == index
-                val itemInteractionSource = remember { MutableInteractionSource() }
-
-                // Selection container transition matching CustomNavigationBarItem
-                val containerAlpha by animateFloatAsState(
-                    targetValue = if (isSelected) 1.0f else 0.0f,
-                    animationSpec = tween(durationMillis = 100),
-                    label = "pill_container_alpha_$index"
-                )
-                val containerScale by animateFloatAsState(
-                    targetValue = if (isSelected) 1.0f else 0.0f,
-                    animationSpec = if (isSelected) {
-                        androidx.compose.animation.core.spring(
-                            dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy,
-                            stiffness = androidx.compose.animation.core.Spring.StiffnessLow
+            // One shared selection container that springs ("jumps") between tabs with a
+            // slight jelly stretch, matching the bounce of the other navigation bar styles.
+            BoxWithConstraints(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(64.dp)
+            ) {
+                val itemCount = mainItems.size.coerceAtLeast(1)
+                val itemWidth = maxWidth / itemCount
+                val targetIndex = selectedIndex.coerceAtLeast(0).toFloat()
+                val indicatorPosition = remember { Animatable(targetIndex) }
+                var hasPositionedIndicator by remember { mutableStateOf(false) }
+                LaunchedEffect(targetIndex) {
+                    if (!hasPositionedIndicator) {
+                        indicatorPosition.snapTo(targetIndex)
+                        hasPositionedIndicator = true
+                    } else {
+                        indicatorPosition.animateTo(
+                            targetIndex,
+                            androidx.compose.animation.core.spring(
+                                dampingRatio = 0.62f,
+                                stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow
+                            )
                         )
-                    } else {
-                        tween(durationMillis = 100, easing = androidx.compose.animation.core.CubicBezierEasing(0.5f, 0f, 0.75f, 0f))
-                    },
-                    label = "pill_container_scale_$index"
+                    }
+                }
+                val indicatorVisibility by animateFloatAsState(
+                    targetValue = if (selectedIndex >= 0) 1f else 0f,
+                    animationSpec = tween(durationMillis = 140),
+                    label = "pill_indicator_visibility"
                 )
-
-                // Container styling matching default/full navbar (vibrant solid container)
-                val containerColor = MaterialTheme.colorScheme.secondaryContainer
-
-                val animContentColor by animateColorAsState(
-                    targetValue = if (isSelected) {
-                        MaterialTheme.colorScheme.onSecondaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                    animationSpec = motionScheme.defaultEffectsSpec(),
-                    label = "pill_content_$index"
-                )
-
-                // Icon spring bounce on selection matching CustomNavigationBarItem
-                val iconBounceScale by animateFloatAsState(
-                    targetValue = if (isSelected) 1.1f else 1.0f,
-                    animationSpec = androidx.compose.animation.core.spring(
-                        dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy,
-                        stiffness = androidx.compose.animation.core.Spring.StiffnessMedium
-                    ),
-                    label = "pill_icon_bounce_$index"
-                )
-
-                Box(
-                    modifier = Modifier
-                        .weight(1.0f)
-                        .height(64.dp)
-                        .clip(CircleShape)
-                        .clickable(
-                            interactionSource = itemInteractionSource,
-                            indication = null,
-                            enabled = latestNavigationEnabled
-                        ) {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            if (latestCurrentRoute != item.screen.route) {
-                                navController.navigateToTopLevelSafely(item.screen.route)
+                val indicatorColor = if (frostedBlur) {
+                    MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.72f)
+                } else {
+                    MaterialTheme.colorScheme.secondaryContainer
+                }
+                if (indicatorVisibility > 0.005f) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.CenterStart)
+                            .width(selectionContainerWidth)
+                            .height(selectionContainerHeight)
+                            .graphicsLayer {
+                                val pos = indicatorPosition.value
+                                val travel = kotlin.math.abs(pos - targetIndex).coerceAtMost(1f)
+                                val itemWidthPx = itemWidth.toPx()
+                                translationX = pos * itemWidthPx + (itemWidthPx - size.width) / 2f
+                                // Stretch along the travel direction mid-jump, settle round.
+                                scaleX = (1f + 0.38f * travel) * (0.6f + 0.4f * indicatorVisibility)
+                                scaleY = (1f - 0.12f * travel) * (0.6f + 0.4f * indicatorVisibility)
+                                alpha = indicatorVisibility
                             }
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    // Inner selection container: capsule with exact default nav bar spring & scale
-                    if (containerAlpha > 0.005f) {
+                            .clip(selectionContainerShape)
+                            .background(indicatorColor, selectionContainerShape)
+                    )
+                }
+
+                Row(modifier = Modifier.fillMaxSize()) {
+                    mainItems.forEachIndexed { index, item ->
+                        val isSelected = selectedIndex == index
+                        val itemInteractionSource = remember { MutableInteractionSource() }
+                        val isPressed by itemInteractionSource.collectIsPressedAsState()
+
+                        val animContentColor by animateColorAsState(
+                            targetValue = if (isSelected) {
+                                MaterialTheme.colorScheme.onSecondaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            animationSpec = motionScheme.defaultEffectsSpec(),
+                            label = "pill_content_" + index
+                        )
+                        val iconScale by animateFloatAsState(
+                            targetValue = when {
+                                isPressed -> 0.86f
+                                isSelected -> 1.08f
+                                else -> 1.0f
+                            },
+                            animationSpec = androidx.compose.animation.core.spring(
+                                dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy,
+                                stiffness = androidx.compose.animation.core.Spring.StiffnessMedium
+                            ),
+                            label = "pill_icon_bounce_" + index
+                        )
+
                         Box(
                             modifier = Modifier
-                                .width(selectionContainerWidth)
-                                .height(selectionContainerHeight)
-                                .graphicsLayer {
-                                    scaleX = containerScale
-                                    scaleY = containerScale
-                                    alpha = containerAlpha
-                                }
-                                .clip(selectionContainerShape)
-                                .background(containerColor, selectionContainerShape)
-                        )
-                    }
-
-                    val iconRes = if (isSelected && item.selectedIconResId != null && item.selectedIconResId != 0) {
-                        item.selectedIconResId
-                    } else {
-                        item.iconResId
-                    }
-
-                    Icon(
-                        painter = painterResource(id = iconRes),
-                        contentDescription = item.label,
-                        tint = animContentColor,
-                        modifier = Modifier
-                            .size(pillIconSize)
-                            .graphicsLayer {
-                                scaleX = iconBounceScale
-                                scaleY = iconBounceScale
+                                .weight(1.0f)
+                                .fillMaxHeight()
+                                .clip(CircleShape)
+                                .clickable(
+                                    interactionSource = itemInteractionSource,
+                                    indication = null,
+                                    enabled = latestNavigationEnabled
+                                ) {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    if (latestCurrentRoute != item.screen.route) {
+                                        navController.navigateToTopLevelSafely(item.screen.route)
+                                    }
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            val iconRes = if (isSelected && item.selectedIconResId != null && item.selectedIconResId != 0) {
+                                item.selectedIconResId
+                            } else {
+                                item.iconResId
                             }
-                    )
+                            Icon(
+                                painter = painterResource(id = iconRes),
+                                contentDescription = item.label,
+                                tint = animContentColor,
+                                modifier = Modifier
+                                    .size(pillIconSize)
+                                    .graphicsLayer {
+                                        scaleX = iconScale
+                                        scaleY = iconScale
+                                    }
+                            )
+                        }
+                    }
                 }
             }
         }

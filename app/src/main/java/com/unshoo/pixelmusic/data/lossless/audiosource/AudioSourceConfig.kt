@@ -197,6 +197,9 @@ object TitleMatch {
             "live", "concert", "remix", "rework", "acoustic", "instrumental", "karaoke",
             "cover", "demo", "sped up", "nightcore", "slowed", "extended", "radio edit",
             "clean", "explicit", "film version", "dialogue", "mashup",
+            // Slowed/pitched fan versions are very common on lossless catalogs and sound like
+            // 0.7-0.9x playback when matched to the original.
+            "lofi", "lo fi", "reverb", "flip", "bass boosted", "8d", "chill version",
         )
 
     private fun hasVersionMismatch(wanted: String, candidate: String): Boolean {

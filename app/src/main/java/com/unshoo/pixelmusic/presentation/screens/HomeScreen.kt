@@ -347,6 +347,33 @@ fun HomeScreen(
     val scope = rememberCoroutineScope()
 
     val homeStatsOverview by statsViewModel.homeOverview.collectAsStateWithLifecycle()
+    val homeLayout by remember(context) {
+        com.unshoo.pixelmusic.data.preferences.HomeLayoutPreferences.configFlow(context)
+    }.collectAsStateWithLifecycle(initialValue = com.unshoo.pixelmusic.data.preferences.HomeLayoutConfig())
+    LaunchedEffect(homeLayout.mostListenedRange) {
+        statsViewModel.loadMostListened(
+            when (homeLayout.mostListenedRange) {
+                com.unshoo.pixelmusic.data.preferences.MostListenedRange.TODAY -> com.unshoo.pixelmusic.data.stats.StatsTimeRange.DAY
+                com.unshoo.pixelmusic.data.preferences.MostListenedRange.WEEK -> com.unshoo.pixelmusic.data.stats.StatsTimeRange.WEEK
+                com.unshoo.pixelmusic.data.preferences.MostListenedRange.MONTH -> com.unshoo.pixelmusic.data.stats.StatsTimeRange.MONTH
+                com.unshoo.pixelmusic.data.preferences.MostListenedRange.YEAR -> com.unshoo.pixelmusic.data.stats.StatsTimeRange.YEAR
+                com.unshoo.pixelmusic.data.preferences.MostListenedRange.ALL_TIME -> com.unshoo.pixelmusic.data.stats.StatsTimeRange.ALL
+            }
+        )
+    }
+    val mostListenedOverview by statsViewModel.mostListenedOverview.collectAsStateWithLifecycle()
+    val mostListenedRangeLabel = stringResource(
+        when (homeLayout.mostListenedRange) {
+            com.unshoo.pixelmusic.data.preferences.MostListenedRange.TODAY -> R.string.customize_home_range_today
+            com.unshoo.pixelmusic.data.preferences.MostListenedRange.WEEK -> R.string.customize_home_range_week
+            com.unshoo.pixelmusic.data.preferences.MostListenedRange.MONTH -> R.string.customize_home_range_month
+            com.unshoo.pixelmusic.data.preferences.MostListenedRange.YEAR -> R.string.customize_home_range_year
+            com.unshoo.pixelmusic.data.preferences.MostListenedRange.ALL_TIME -> R.string.customize_home_range_all
+        }
+    )
+    val recentlyAddedSongs = remember(homeMixPreviewSongs, isEffectivelyOnline) {
+        homeMixPreviewSongs.take(20).toImmutableList()
+    }
     val mostPlayedArtistImages by statsViewModel.artistImages.collectAsStateWithLifecycle()
     val quickPicksRaw by quickPicksViewModel.quickPicks.collectAsStateWithLifecycle()
     val quickPicks by produceState(
@@ -561,199 +588,235 @@ fun HomeScreen(
                                 }
                             }
 
-                            // Quick Picks (above Your Mix, shown when there is engagement data)
-                            if (quickPicks.isNotEmpty()) {
-                                item(
-                                    key = "quick_picks_section",
-                                    contentType = "quick_picks_section"
-                                ) {
-                                    QuickPicksSection(
-                                        songs = quickPicks,
-                                        onSongClick = { song ->
-                                            playerViewModel.showAndPlaySong(song, quickPicks, "Quick Picks")
-                                        },
-                                        onSeeAllClick = {
-                                            navController.navigateSafely(Screen.QuickPicksAll.route)
-                                        },
-                                        currentSongId = currentSong?.id,
-                                        displayMode = quickPicksDisplayMode
-                                    )
-                                }
-                            }
-                            if (yourMixSongs.isEmpty()) {
-                                item(
-                                    key = "your_mix_placeholder",
-                                    contentType = "your_mix_placeholder"
-                                ) {
-                                    YourMixEmptyPlaceholder(
-                                        onRefresh = {
-                                            settingsViewModel.refreshLibrary()
-                                            playerViewModel.forceUpdateDailyMix()
-                                        }
-                                    )
-                                }
-                            } else {
-                                item(
-                                    key = "your_mix_header",
-                                    contentType = "your_mix_header"
-                                ) {
-                                    YourMixHeader(
-                                        song = yourMixSong,
-                                        isShuffleEnabled = isShuffleEnabled,
-                                         onPlayShuffled = {
-                                             val songsToUse = quickPicks.ifEmpty { yourMixSongs }
-                                             if (songsToUse.isNotEmpty()) {
-                                                 playerViewModel.playSongsShuffled(songsToUse, "Your Mix")
-                                             }
-                                         }
-                                    )
-                                }
-                            }
-
-                            // Collage
-                            if (yourMixSongs.isNotEmpty() && settingsUiState.collageEnabled) {
-                                item(
-                                    key = "album_art_collage",
-                                    contentType = "album_art_collage"
-                                ) {
-                                    val basePattern = settingsUiState.collagePattern
-                                    val isAutoRotate = settingsUiState.collageAutoRotate
-                                    val patterns = remember { CollagePattern.entries }
-
-                                    val activePattern = if (isAutoRotate) {
-                                        var rotationIndex by rememberSaveable { mutableIntStateOf(-1) }
-                                        LaunchedEffect(Unit) { rotationIndex++ }
-                                        remember(rotationIndex) {
-                                            patterns[rotationIndex.coerceAtLeast(0) % patterns.size]
-                                        }
-                                    } else {
-                                        basePattern
-                                    }
-
-                                    AlbumArtCollage(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        songs = yourMixSongs,
-                                        padding = 14.dp,
-                                        height = 400.dp,
-                                        pattern = activePattern,
-                                        onSongClick = { song ->
-                                            if (usesFallbackHomeMix) {
-                                                playerViewModel.showAndPlaySongFromLibrary(song, queueName = "Your Mix")
-                                            } else {
-                                                playerViewModel.showAndPlaySong(song, yourMixSongs, "Your Mix")
-                                            }
-                                        }
-                                    )
-                                }
-                            }
-
-                            // Daily Mix (with YouTube Daily Discover songs merged)
-                            if (mergedDailyMixSongs.isNotEmpty()) {
-                                item(
-                                    key = "daily_mix_section",
-                                    contentType = "daily_mix_section"
-                                ) {
-                                    DailyMixSection(
-                                        songs = mergedDailyMixSongs,
-                                        onClickOpen = {
-                                            navController.navigateSafely(Screen.DailyMixScreen.route)
-                                        },
-                                        onNavigateToAlbum = { song ->
-                                            navController.navigateSafelyReplacing(
-                                                route = Screen.AlbumDetail.createRoute(song.albumId),
-                                                patternToPop = Screen.AlbumDetail.route
-                                            )
-                                        },
-                                        onNavigateToArtist = { song ->
-                                            navController.navigateSafelyReplacing(
-                                                route = Screen.ArtistDetail.createRoute(
-                                                    song.artists.firstOrNull()?.id?.takeIf { it != 0L && it != -1L }?.toString()
-                                                        ?: song.artists.firstOrNull()?.name
-                                                        ?: song.artist
-                                                ),
-                                                patternToPop = Screen.ArtistDetail.route
-                                            )
-                                        },
-                                        onNavigateToGenre = {},
-                                        playerViewModel = playerViewModel
-                                    )
-                                }
-                            }
-
-                            if (recentlyPlayedSongs.size >= RecentlyPlayedSectionMinSongsToShow) {
-                                item(
-                                    key = "recently_played_section",
-                                    contentType = "recently_played_section"
-                                ) {
-                                    RecentlyPlayedSection(
-                                        songs = recentlyPlayedSongs,
-                                        onSongClick = { song ->
-                                            if (recentlyPlayedQueue.isNotEmpty()) {
-                                                playerViewModel.playSongs(
-                                                    songsToPlay = recentlyPlayedQueue,
-                                                    startSong = song,
-                                                    queueName = "Recently Played"
+                            // Sections follow Settings › Appearance › Customize Home (order + visibility).
+                            homeLayout.sections.forEach { homeSection ->
+                                when (homeSection) {
+                                    com.unshoo.pixelmusic.data.preferences.HomeSectionId.QUICK_PICKS -> {
+                                        // Quick Picks (above Your Mix, shown when there is engagement data)
+                                        if (quickPicks.isNotEmpty()) {
+                                            item(
+                                                key = "quick_picks_section",
+                                                contentType = "quick_picks_section"
+                                            ) {
+                                                QuickPicksSection(
+                                                    songs = quickPicks,
+                                                    onSongClick = { song ->
+                                                        playerViewModel.showAndPlaySong(song, quickPicks, "Quick Picks")
+                                                    },
+                                                    onSeeAllClick = {
+                                                        navController.navigateSafely(Screen.QuickPicksAll.route)
+                                                    },
+                                                    currentSongId = currentSong?.id,
+                                                    displayMode = quickPicksDisplayMode
                                                 )
                                             }
-                                        },
-                                        onOpenAllClick = {
-                                            navController.navigateSafely(Screen.RecentlyPlayed.route)
-                                        },
-                                        themeStateHolder = playerViewModel.themeStateHolder,
-                                        currentSongId = currentSong?.id,
-                                        contentPadding = PaddingValues(start = 8.dp, end = 24.dp)
-                                    )
-                                }
-                            }
-
-                            if (isOnline && artistReleases.isNotEmpty()) {
-                                item(
-                                    key = "favorite_artist_releases_section",
-                                    contentType = "favorite_artist_releases_section"
-                                ) {
-                                    FavoriteArtistReleasesSection(
-                                        releases = artistReleases,
-                                        onSongClick = { songItem ->
-                                            val nativeSong = songItem.toNativeSong()
-                                            playerViewModel.showAndPlaySong(nativeSong)
-                                        },
-                                        onAlbumClick = { albumItem ->
-                                            val routeId = albumItem.browseId.takeIf { it.isNotBlank() } ?: albumItem.playlistId
-                                            if (routeId.startsWith("VL") || routeId.startsWith("PL") || routeId.startsWith("RD")) {
-                                                navController.navigateSafely(Screen.FeedPlaylistDetail.createRoute(routeId))
-                                            } else {
-                                                navController.navigateSafely(Screen.AlbumDetail.createRoute(routeId))
+                                        }
+                                    }
+                                    com.unshoo.pixelmusic.data.preferences.HomeSectionId.YOUR_MIX -> {
+                                        if (yourMixSongs.isEmpty()) {
+                                            item(
+                                                key = "your_mix_placeholder",
+                                                contentType = "your_mix_placeholder"
+                                            ) {
+                                                YourMixEmptyPlaceholder(
+                                                    onRefresh = {
+                                                        settingsViewModel.refreshLibrary()
+                                                        playerViewModel.forceUpdateDailyMix()
+                                                    }
+                                                )
+                                            }
+                                        } else {
+                                            item(
+                                                key = "your_mix_header",
+                                                contentType = "your_mix_header"
+                                            ) {
+                                                YourMixHeader(
+                                                    song = yourMixSong,
+                                                    isShuffleEnabled = isShuffleEnabled,
+                                                     onPlayShuffled = {
+                                                         val songsToUse = quickPicks.ifEmpty { yourMixSongs }
+                                                         if (songsToUse.isNotEmpty()) {
+                                                             playerViewModel.playSongsShuffled(songsToUse, "Your Mix")
+                                                         }
+                                                     }
+                                                )
                                             }
                                         }
-                                    )
-                                }
-                            }
 
-                            homeStatsOverview?.let { overview ->
-                                if (overview.topSongs.isNotEmpty() || overview.topArtists.isNotEmpty() || overview.topAlbums.isNotEmpty()) {
-                                    item(
-                                        key = "most_played_section",
-                                        contentType = "most_played_section"
-                                    ) {
-                                        com.unshoo.pixelmusic.presentation.components.MostPlayedSection(
-                                            summary = overview,
-                                            onSeeAllClick = { navController.navigateSafely(Screen.Stats.route) },
-                                            artistImages = mostPlayedArtistImages,
-                                            modifier = Modifier.padding(vertical = 8.dp)
-                                        )
+                                        // Collage
+                                        if (yourMixSongs.isNotEmpty() && settingsUiState.collageEnabled) {
+                                            item(
+                                                key = "album_art_collage",
+                                                contentType = "album_art_collage"
+                                            ) {
+                                                val basePattern = settingsUiState.collagePattern
+                                                val isAutoRotate = settingsUiState.collageAutoRotate
+                                                val patterns = remember { CollagePattern.entries }
+
+                                                val activePattern = if (isAutoRotate) {
+                                                    var rotationIndex by rememberSaveable { mutableIntStateOf(-1) }
+                                                    LaunchedEffect(Unit) { rotationIndex++ }
+                                                    remember(rotationIndex) {
+                                                        patterns[rotationIndex.coerceAtLeast(0) % patterns.size]
+                                                    }
+                                                } else {
+                                                    basePattern
+                                                }
+
+                                                AlbumArtCollage(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    songs = yourMixSongs,
+                                                    padding = 14.dp,
+                                                    height = 400.dp,
+                                                    pattern = activePattern,
+                                                    onSongClick = { song ->
+                                                        if (usesFallbackHomeMix) {
+                                                            playerViewModel.showAndPlaySongFromLibrary(song, queueName = "Your Mix")
+                                                        } else {
+                                                            playerViewModel.showAndPlaySong(song, yourMixSongs, "Your Mix")
+                                                        }
+                                                    }
+                                                )
+                                            }
+                                        }
                                     }
-                                }
-                            }
-
-                            if (homeStatsOverview != null) {
-                                item(
-                                    key = "listening_stats_preview",
-                                    contentType = "listening_stats_preview"
-                                ) {
-                                    StatsOverviewCard(
-                                        summary = homeStatsOverview,
-                                        onClick = { navController.navigateSafely(Screen.Stats.route) }
-                                    )
+                                    com.unshoo.pixelmusic.data.preferences.HomeSectionId.DAILY_MIX -> {
+                                        // Daily Mix (with YouTube Daily Discover songs merged)
+                                        if (mergedDailyMixSongs.isNotEmpty()) {
+                                            item(
+                                                key = "daily_mix_section",
+                                                contentType = "daily_mix_section"
+                                            ) {
+                                                DailyMixSection(
+                                                    songs = mergedDailyMixSongs,
+                                                    onClickOpen = {
+                                                        navController.navigateSafely(Screen.DailyMixScreen.route)
+                                                    },
+                                                    onNavigateToAlbum = { song ->
+                                                        navController.navigateSafelyReplacing(
+                                                            route = Screen.AlbumDetail.createRoute(song.albumId),
+                                                            patternToPop = Screen.AlbumDetail.route
+                                                        )
+                                                    },
+                                                    onNavigateToArtist = { song ->
+                                                        navController.navigateSafelyReplacing(
+                                                            route = Screen.ArtistDetail.createRoute(
+                                                                song.artists.firstOrNull()?.id?.takeIf { it != 0L && it != -1L }?.toString()
+                                                                    ?: song.artists.firstOrNull()?.name
+                                                                    ?: song.artist
+                                                            ),
+                                                            patternToPop = Screen.ArtistDetail.route
+                                                        )
+                                                    },
+                                                    onNavigateToGenre = {},
+                                                    playerViewModel = playerViewModel
+                                                )
+                                            }
+                                        }
+                                    }
+                                    com.unshoo.pixelmusic.data.preferences.HomeSectionId.RECENTLY_PLAYED -> {
+                                        if (recentlyPlayedSongs.size >= RecentlyPlayedSectionMinSongsToShow) {
+                                            item(
+                                                key = "recently_played_section",
+                                                contentType = "recently_played_section"
+                                            ) {
+                                                RecentlyPlayedSection(
+                                                    songs = recentlyPlayedSongs,
+                                                    onSongClick = { song ->
+                                                        if (recentlyPlayedQueue.isNotEmpty()) {
+                                                            playerViewModel.playSongs(
+                                                                songsToPlay = recentlyPlayedQueue,
+                                                                startSong = song,
+                                                                queueName = "Recently Played"
+                                                            )
+                                                        }
+                                                    },
+                                                    onOpenAllClick = {
+                                                        navController.navigateSafely(Screen.RecentlyPlayed.route)
+                                                    },
+                                                    themeStateHolder = playerViewModel.themeStateHolder,
+                                                    currentSongId = currentSong?.id,
+                                                    contentPadding = PaddingValues(start = 8.dp, end = 24.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                    com.unshoo.pixelmusic.data.preferences.HomeSectionId.RECENTLY_ADDED -> {
+                                        if (recentlyAddedSongs.isNotEmpty()) {
+                                            item(
+                                                key = "recently_added_section",
+                                                contentType = "recently_added_section"
+                                            ) {
+                                                com.unshoo.pixelmusic.presentation.components.RecentlyAddedSection(
+                                                    songs = recentlyAddedSongs,
+                                                    currentSongId = currentSong?.id,
+                                                    onSongClick = { song ->
+                                                        playerViewModel.playSongs(
+                                                            songsToPlay = recentlyAddedSongs,
+                                                            startSong = song,
+                                                            queueName = "Recently added"
+                                                        )
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
+                                    com.unshoo.pixelmusic.data.preferences.HomeSectionId.ARTIST_RELEASES -> {
+                                        if (isOnline && artistReleases.isNotEmpty()) {
+                                            item(
+                                                key = "favorite_artist_releases_section",
+                                                contentType = "favorite_artist_releases_section"
+                                            ) {
+                                                FavoriteArtistReleasesSection(
+                                                    releases = artistReleases,
+                                                    onSongClick = { songItem ->
+                                                        val nativeSong = songItem.toNativeSong()
+                                                        playerViewModel.showAndPlaySong(nativeSong)
+                                                    },
+                                                    onAlbumClick = { albumItem ->
+                                                        val routeId = albumItem.browseId.takeIf { it.isNotBlank() } ?: albumItem.playlistId
+                                                        if (routeId.startsWith("VL") || routeId.startsWith("PL") || routeId.startsWith("RD")) {
+                                                            navController.navigateSafely(Screen.FeedPlaylistDetail.createRoute(routeId))
+                                                        } else {
+                                                            navController.navigateSafely(Screen.AlbumDetail.createRoute(routeId))
+                                                        }
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
+                                    com.unshoo.pixelmusic.data.preferences.HomeSectionId.MOST_LISTENED -> {
+                                        mostListenedOverview?.let { overview ->
+                                            if (overview.topSongs.isNotEmpty() || overview.topArtists.isNotEmpty() || overview.topAlbums.isNotEmpty()) {
+                                                item(
+                                                    key = "most_played_section",
+                                                    contentType = "most_played_section"
+                                                ) {
+                                                    com.unshoo.pixelmusic.presentation.components.MostPlayedSection(
+                                                        summary = overview,
+                                                        onSeeAllClick = { navController.navigateSafely(Screen.Stats.route) },
+                                                        artistImages = mostPlayedArtistImages,
+                                                        initialTab = homeLayout.mostListenedKind.ordinal,
+                                                        rangeLabel = mostListenedRangeLabel,
+                                                        modifier = Modifier.padding(vertical = 8.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                    com.unshoo.pixelmusic.data.preferences.HomeSectionId.LISTENING_STATS -> {
+                                        if (homeStatsOverview != null) {
+                                            item(
+                                                key = "listening_stats_preview",
+                                                contentType = "listening_stats_preview"
+                                            ) {
+                                                StatsOverviewCard(
+                                                    summary = homeStatsOverview,
+                                                    onClick = { navController.navigateSafely(Screen.Stats.route) }
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }

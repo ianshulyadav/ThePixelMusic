@@ -27,6 +27,11 @@ object AddonTrackMatcher {
         "nightcore",
         "8d",
         "demo",
+        "lofi",
+        "lo fi",
+        "reverb",
+        "flip",
+        "bass boosted",
     ).map { marker -> Regex("(?:^|\\s)${Regex.escape(marker)}(?:\\s|$)") }
 
     data class RankedCandidate(

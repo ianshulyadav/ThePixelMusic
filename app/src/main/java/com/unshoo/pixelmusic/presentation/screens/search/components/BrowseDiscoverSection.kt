@@ -326,9 +326,12 @@ fun RecentSearchesSection(
     onItemClick: (String) -> Unit,
     onItemDelete: (String) -> Unit,
     onClearAll: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    picks: List<com.unshoo.pixelmusic.data.preferences.RecentSearchPick> = emptyList(),
+    onPickClick: (com.unshoo.pixelmusic.data.preferences.RecentSearchPick) -> Unit = {},
+    onPickDelete: (com.unshoo.pixelmusic.data.preferences.RecentSearchPick) -> Unit = {}
 ) {
-    if (searchHistory.isEmpty()) return
+    if (searchHistory.isEmpty() && picks.isEmpty()) return
     val isDark = LocalPixelMusicDarkTheme.current
 
     Column(
@@ -366,6 +369,15 @@ fun RecentSearchesSection(
             }
         }
 
+        // Songs / artists the user opened from results come first, with their artwork.
+        picks.take(10).forEach { pick ->
+            RecentSearchPickItem(
+                pick = pick,
+                onClick = { onPickClick(pick) },
+                onDelete = { onPickDelete(pick) }
+            )
+        }
+
         // Vertical stack of search pills
         searchHistory.take(15).forEach { item ->
             RecentSearchPillItem(
@@ -373,6 +385,74 @@ fun RecentSearchesSection(
                 onClick = { onItemClick(item.query) },
                 onDelete = { onItemDelete(item.query) }
             )
+        }
+    }
+}
+
+@Composable
+private fun RecentSearchPickItem(
+    pick: com.unshoo.pixelmusic.data.preferences.RecentSearchPick,
+    onClick: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val isArtist = pick.type == com.unshoo.pixelmusic.data.preferences.RecentSearchPick.Type.ARTIST
+    val artShape = if (isArtist) CircleShape else androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(60.dp)
+            .bounceClick(scaleDown = 0.98f) { onClick() },
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shadowElevation = 0.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(start = 8.dp, end = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            com.unshoo.pixelmusic.presentation.components.SmartImage(
+                model = pick.artUrl,
+                contentDescription = null,
+                shape = artShape,
+                targetSize = coil.size.Size(144, 144),
+                isThumbnail = true,
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(artShape)
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            androidx.compose.foundation.layout.Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = pick.title,
+                    fontFamily = GoogleSansRounded,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 14.5.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = if (isArtist) "Artist" else "Song · ${pick.subtitle}",
+                    fontFamily = GoogleSansRounded,
+                    fontSize = 12.5.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            IconButton(
+                onClick = onDelete,
+                modifier = Modifier.size(36.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.DeleteOutline,
+                    contentDescription = "Remove from recent",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f),
+                    modifier = Modifier.size(19.dp)
+                )
+            }
         }
     }
 }

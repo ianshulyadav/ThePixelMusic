@@ -121,6 +121,10 @@ object DownloadHelper {
                 if (existingM4a != null && existingM4a.exists()) {
                     return@withContext existingM4a.uri.toString()
                 }
+                val existingOpus = documentDir?.findFile("$safeTitle - $safeArtist.opus")
+                if (existingOpus != null && existingOpus.exists()) {
+                    return@withContext existingOpus.uri.toString()
+                }
                 val existingWebm = documentDir?.findFile("$safeTitle - $safeArtist.webm")
                 if (existingWebm != null && existingWebm.exists()) {
                     return@withContext existingWebm.uri.toString()
@@ -142,6 +146,10 @@ object DownloadHelper {
         if (m4aFile.exists() && m4aFile.length() > 0) {
             return@withContext m4aFile.absolutePath
         }
+        val opusFile = File(audioDir, "${song.youtubeId}.opus")
+        if (opusFile.exists() && opusFile.length() > 0) {
+            return@withContext opusFile.absolutePath
+        }
         if (webmFile.exists() && webmFile.length() > 0) {
             // Older builds saved AAC data under ".webm"; rename it to its real container so the
             // library, MediaStore and tag writers recognise it.
@@ -149,6 +157,11 @@ object DownloadHelper {
             if (sniffed != null && sniffed.first != "webm") {
                 val fixed = File(audioDir, "${song.youtubeId}.${sniffed.first}")
                 if (webmFile.renameTo(fixed)) return@withContext fixed.absolutePath
+            }
+            // Real WebM/Opus from an older build: rewrap to Ogg so it is visible as music.
+            if (AudioContainerRemuxer.remuxWebmToOgg(webmFile, opusFile)) {
+                runCatching { webmFile.delete() }
+                return@withContext opusFile.absolutePath
             }
             return@withContext webmFile.absolutePath
         }
@@ -371,7 +384,22 @@ object DownloadHelper {
                 // download was saved as ".webm" with mime audio/webm. Android then indexed it as a
                 // *video*, the library/Files app did not list it as music, and TagLib could not
                 // write tags. Name the file after its real container bytes instead.
-                val (finalExt, finalMime) = sniffAudioContainer(tempFile) ?: (ext to mimeType)
+                var (finalExt, finalMime) = sniffAudioContainer(tempFile) ?: (ext to mimeType)
+
+                // WebM is indexed by Android as video, so it never appears in the music library or
+                // folder scans. Rewrap the Opus stream into Ogg (no re-encode, no quality loss).
+                if (finalExt == "webm") {
+                    val oggTemp = File(audioDir, "${song.youtubeId}.remux.tmp")
+                    if (AudioContainerRemuxer.remuxWebmToOgg(tempFile, oggTemp)) {
+                        cleanupTempFile()
+                        if (!oggTemp.renameTo(tempFile)) {
+                            oggTemp.copyTo(tempFile, overwrite = true)
+                            runCatching { oggTemp.delete() }
+                        }
+                        finalExt = "opus"
+                        finalMime = "audio/ogg"
+                    }
+                }
                 val finalFileName = "$safeTitle - $safeArtist.$finalExt"
                 val finalOutputFile = File(audioDir, "${song.youtubeId}.$finalExt")
 
@@ -463,14 +491,20 @@ object DownloadHelper {
 
             val isFlac = sourceFilePath.endsWith(".flac", ignoreCase = true)
             val isM4a = sourceFilePath.endsWith(".m4a", ignoreCase = true) || sourceFilePath.endsWith(".mp4", ignoreCase = true)
+            val isOgg = sourceFilePath.endsWith(".opus", ignoreCase = true) || sourceFilePath.endsWith(".ogg", ignoreCase = true)
+            val isMp3 = sourceFilePath.endsWith(".mp3", ignoreCase = true)
             val ext = when {
                 isFlac -> "flac"
                 isM4a -> "m4a"
+                isOgg -> sourceFilePath.substringAfterLast('.').lowercase()
+                isMp3 -> "mp3"
                 else -> "webm"
             }
             val mimeType = when {
                 isFlac -> "audio/flac"
                 isM4a -> "audio/mp4"
+                isOgg -> "audio/ogg"
+                isMp3 -> "audio/mpeg"
                 else -> "audio/webm"
             }
             val safeTitle = songTitle.replace(Regex("[\\\\/:*?\"\\<>|]"), "_")

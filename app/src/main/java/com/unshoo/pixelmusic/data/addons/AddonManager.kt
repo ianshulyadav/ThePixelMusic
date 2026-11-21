@@ -235,7 +235,7 @@ object AddonManager {
     }
 
     fun isBuiltInEnabled(type: AudioSourceType, prefs: Preferences): Boolean = when (type) {
-        AudioSourceType.MONOCHROME -> prefs[MonochromeEnabledKey] ?: true
+        AudioSourceType.MONOCHROME -> prefs[MonochromeEnabledKey] ?: false
         AudioSourceType.TIDAL -> prefs[TidalEnabledKey] ?: true
         AudioSourceType.QOBUZ -> prefs[QobuzEnabledKey] ?: false
         AudioSourceType.DEEZER -> prefs[DeezerEnabledKey] ?: false

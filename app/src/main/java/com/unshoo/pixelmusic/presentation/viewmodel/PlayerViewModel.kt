@@ -371,10 +371,10 @@ class PlayerViewModel @Inject constructor(
     fun toggleSearchSource() {
         viewModelScope.launch {
             val current = searchSource.value
-            val next = if (current == com.unshoo.pixelmusic.data.preferences.SearchSource.ONLINE) {
-                com.unshoo.pixelmusic.data.preferences.SearchSource.LOCAL
-            } else {
-                com.unshoo.pixelmusic.data.preferences.SearchSource.ONLINE
+            val next = when (current) {
+                com.unshoo.pixelmusic.data.preferences.SearchSource.ONLINE -> com.unshoo.pixelmusic.data.preferences.SearchSource.JIOSAAVN
+                com.unshoo.pixelmusic.data.preferences.SearchSource.JIOSAAVN -> com.unshoo.pixelmusic.data.preferences.SearchSource.LOCAL
+                com.unshoo.pixelmusic.data.preferences.SearchSource.LOCAL -> com.unshoo.pixelmusic.data.preferences.SearchSource.ONLINE
             }
             userPreferencesRepository.setSearchSource(next)
             if (searchQuery.isNotBlank()) {
@@ -6176,12 +6176,31 @@ class PlayerViewModel @Inject constructor(
         }
         val filterCoverAndLofi = runCatching { userPreferencesRepository.filterCoverAndLofiFlow.first() }.getOrDefault(true)
         val filterKeywords = runCatching { userPreferencesRepository.filterKeywordsFlow.first() }.getOrDefault(ContentFilterUtils.DEFAULT_FILTER_KEYWORDS)
-        val songsToPlay = if (filterCoverAndLofi && songsToPlay.size > 1) {
+        val coverFilteredSongs = if (filterCoverAndLofi && songsToPlay.size > 1) {
             songsToPlay.filter { it.id == startSong.id || !ContentFilterUtils.isCoverOrLofi(it, filterKeywords) }
         } else {
             songsToPlay
         }
-        val effectiveStartSong = songsToPlay.firstOrNull { it.id == startSong.id } ?: songsToPlay.first()
+        val effectiveStartSongCandidate = coverFilteredSongs.firstOrNull { it.id == startSong.id } ?: coverFilteredSongs.first()
+        // On-device session: the user started a local file or a downloaded song (or Local Mode is
+        // on). Keep the queue on-device only — online-only entries have no audio here and would
+        // break the listening flow — and stop auto-queue from appending online radio songs.
+        val isLocalModeOn = runCatching { userPreferencesRepository.localModeEnabledFlow.first() }.getOrDefault(false)
+        val startsOnDevice = isLocalModeOn || effectiveStartSongCandidate.isLocal ||
+            com.unshoo.pixelmusic.utils.OfflineAudioResolver.hasOfflineAudio(context, effectiveStartSongCandidate)
+        val songsToPlay = if (startsOnDevice && coverFilteredSongs.size > 1) {
+            withContext(Dispatchers.IO) {
+                coverFilteredSongs.filter { s ->
+                    s.id == effectiveStartSongCandidate.id || s.isLocal ||
+                        com.unshoo.pixelmusic.utils.OfflineAudioResolver.hasOfflineAudio(context, s) ||
+                        (s.telegramFileId != null && !isLocalModeOn && connectivityStateHolder.isOnline.value)
+                }
+            }
+        } else {
+            coverFilteredSongs
+        }
+        com.unshoo.pixelmusic.data.remote.youtube.AutoQueueManager.offlineSessionActive = startsOnDevice
+        val effectiveStartSong = songsToPlay.firstOrNull { it.id == effectiveStartSongCandidate.id } ?: songsToPlay.first()
         val isOnline = connectivityStateHolder.isOnline.value
         if (!isOnline) {
             val hasOffline = com.unshoo.pixelmusic.utils.OfflineAudioResolver.hasOfflineAudio(context, effectiveStartSong) ||
@@ -8039,10 +8058,10 @@ class PlayerViewModel @Inject constructor(
         }
 
         val songFile = java.io.File(song.path)
-        val lrcFile = java.io.File(songFile.parentFile, "${songFile.nameWithoutExtension}.lrc")
+        val lrcFile = java.io.File(songFile.parentFile ?: java.io.File("/"), "${songFile.nameWithoutExtension}.lrc")
 
         // Android 11+ check: if file exists and we might not have permission
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R && lrcFile.exists() && !lrcFile.canWrite()) {
+        if (songFile.exists() && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R && lrcFile.exists() && !lrcFile.canWrite()) {
             val uri = com.unshoo.pixelmusic.utils.MediaStorePermissionHelper.getMediaStoreUri(context, lrcFile.absolutePath)
             if (uri != null) {
                 val intentSender = com.unshoo.pixelmusic.utils.MediaStorePermissionHelper.createWriteRequestIntentSender(context, listOf(uri))
@@ -8061,10 +8080,36 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val songFile = java.io.File(song.path)
-                val lrcFile = java.io.File(songFile.parentFile, "${songFile.nameWithoutExtension}.lrc")
                 val lrcContent = LyricsUtils.toLrcString(lyrics, preferSynced)
 
-                lrcFile.writeText(lrcContent, Charsets.UTF_8)
+                // 1) Next to the audio file (same name) when it is a real, writable local file.
+                val savedBeside = if (songFile.isFile) {
+                    runCatching {
+                        val lrcFile = java.io.File(songFile.parentFile, "${songFile.nameWithoutExtension}.lrc")
+                        lrcFile.writeText(lrcContent, Charsets.UTF_8)
+                        true
+                    }.getOrDefault(false)
+                } else {
+                    false
+                }
+                // 2) Streamed / cloud songs (no file) or scoped-storage refusal: save to
+                //    Download/PixelMusic/Lyrics through MediaStore, which needs no permission.
+                if (!savedBeside) {
+                    val safeName = "${song.title} - ${song.displayArtist}"
+                        .replace(Regex("[\\/:*?\"<>|]"), "_")
+                        .take(120)
+                    val values = android.content.ContentValues().apply {
+                        put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, "$safeName.lrc")
+                        put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream")
+                        put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, "Download/PixelMusic/Lyrics")
+                    }
+                    val resolver = context.contentResolver
+                    val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                        ?: throw java.io.IOException("MediaStore insert failed")
+                    resolver.openOutputStream(uri, "wt")?.use { out ->
+                        out.write(lrcContent.toByteArray(Charsets.UTF_8))
+                    } ?: throw java.io.IOException("Cannot open output for $uri")
+                }
                 _toastEvents.emit(context.getString(R.string.lyrics_saved_successfully))
                 
                 // If it was the current song, we might want to refresh the lyrics in state if it migrated from remote to local
