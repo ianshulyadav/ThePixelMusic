@@ -18,6 +18,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -55,43 +56,21 @@ class ListeningStatsTracker @Inject constructor(
     @Volatile private var telemetrySessionStartTimeMs: Long = 0L
     @Volatile private var isPlaybackStartReported = false
     @Volatile private var isWatchCompleted = false
-    private var scope: CoroutineScope? = null
     private val persistenceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var historyLoadJob: Job? = null
     private val _playbackHistory = MutableStateFlow<List<PlaybackStatsRepository.PlaybackHistoryEntry>>(emptyList())
     val playbackHistory: StateFlow<List<PlaybackStatsRepository.PlaybackHistoryEntry>> = _playbackHistory.asStateFlow()
 
-    /**
-     * Must be called to set the coroutine scope for async operations.
-     */
-    fun initialize(coroutineScope: CoroutineScope) {
-        val activeScope = scope
-        if (activeScope == null || activeScope.coroutineContext[Job]?.isActive != true) {
-            scope = coroutineScope
-        }
-        coroutineScope.launch(Dispatchers.IO) {
-            _playbackHistory.value = playbackStatsRepository.loadPlaybackHistory(
-                limit = MAX_INTERNAL_PLAYBACK_HISTORY_ITEMS
-            )
-            // Merge authenticated YouTube Music history on top of local history so
-            // Recently Played shows local songs + YT Music synced history together.
-            refreshMergedYoutubeHistory()
-        }
-    }
-
-    /**
-     * Pull FEmusic_history from YouTube Music (when logged in) and merge with local
-     * playback history. Local entries win on id collisions so offline plays stay accurate.
-     */
-    @Volatile private var lastMergedHistoryAtMs = 0L
-    @Volatile private var mergeInFlight = false
-
-    fun refreshMergedYoutubeHistory() {
-        val activeScope = scope ?: persistenceScope
-        activeScope.launch(Dispatchers.IO) {
+    @Synchronized
+    fun refreshHistory() {
+        if (historyLoadJob?.isActive == true) return
+        historyLoadJob = persistenceScope.launch {
             try {
                 _playbackHistory.value = playbackStatsRepository.loadPlaybackHistory(
                     limit = MAX_INTERNAL_PLAYBACK_HISTORY_ITEMS
                 )
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Timber.w(e, "Failed to load local playback history")
             }
@@ -617,15 +596,6 @@ class ListeningStatsTracker @Inject constructor(
     @Synchronized
     fun onPlaybackStopped() {
         finalizeCurrentSession()
-    }
-
-    @Synchronized
-    fun onCleared() {
-        finalizeCurrentSession(forceSynchronousPersistence = true)
-        // BUGFIX: Do NOT null `scope` here. ListeningStatsTracker is @Singleton and
-        // MusicService may still be playing (foreground service survives Activity/ViewModel
-        // lifecycle). Nulling scope breaks history recording for the rest of the session.
-        // The scope will be re-set when PlayerViewModel is recreated.
     }
 
     private fun persistPlayback(

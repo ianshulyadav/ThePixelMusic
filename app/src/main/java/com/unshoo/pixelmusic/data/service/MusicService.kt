@@ -103,7 +103,6 @@ import com.unshoo.pixelmusic.data.service.auto.CarLibraryTree
 import com.unshoo.pixelmusic.presentation.viewmodel.ColorSchemePair
 import com.unshoo.pixelmusic.utils.ArtworkTransportSanitizer
 import com.unshoo.pixelmusic.utils.MediaItemBuilder
-import com.unshoo.pixelmusic.di.AppScope
 import com.unshoo.pixelmusic.presentation.viewmodel.ListeningStatsTracker
 import com.unshoo.pixelmusic.data.remote.youtube.AutoQueueManager
 import com.unshoo.pixelmusic.data.remote.youtube.QueuePreloadManager
@@ -153,9 +152,6 @@ class MusicService : MediaLibraryService() {
     lateinit var replayGainManager: com.unshoo.pixelmusic.data.media.ReplayGainManager
     @Inject
     lateinit var listeningStatsTracker: ListeningStatsTracker
-    @Inject
-    @AppScope
-    lateinit var appScope: CoroutineScope
     @Inject
     lateinit var youtubeDatastoreRepository: YoutubeDatastoreRepository
     @Inject
@@ -529,7 +525,7 @@ class MusicService : MediaLibraryService() {
         // Initialize telemetry with direct Innertube mapping (no constructor parameters needed now)
         telemetryManager = com.unshoo.pixelmusic.data.remote.youtube.YouTubeTelemetryManager()
 
-        listeningStatsTracker.initialize(appScope)
+        listeningStatsTracker.refreshHistory()
         scrobbleManager = com.unshoo.pixelmusic.data.lastfm.ScrobbleManager(scope = serviceScope)
 
         // Clear stale in-memory stream caches on service startup/update to avoid long buffering on old/expired URLs
@@ -2565,6 +2561,7 @@ class MusicService : MediaLibraryService() {
 
     override fun onDestroy() {
         isServiceDestroyed = true
+        listeningStatsTracker.finalizeCurrentSession()
         PlaybackActivityTracker.setPlaybackActive(false)
         telemetryManager.destroy()
         playbackSnapshotPersistJob?.cancel()

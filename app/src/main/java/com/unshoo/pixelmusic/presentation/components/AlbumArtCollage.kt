@@ -8,8 +8,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -17,18 +15,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import coil.request.ImageRequest
 import com.unshoo.pixelmusic.R
 import com.unshoo.pixelmusic.data.model.Song
 import com.unshoo.pixelmusic.data.preferences.CollagePattern
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.toImmutableList
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 @Stable
 data class Config(val size: Dp, val width: Dp, val height: Dp, val align: Alignment, val rot: Float, val shape: Shape, val offsetX: Dp, val offsetY: Dp)
@@ -49,23 +44,9 @@ fun AlbumArtCollage(
     pattern: CollagePattern = CollagePattern.default,
     onSongClick: (Song) -> Unit,
 ) {
-    val context = LocalContext.current
+    val density = LocalDensity.current.density
     val songsToShow = remember(songs) {
         (songs.take(6) + List(6 - songs.size.coerceAtMost(6)) { null }).toImmutableList()
-    }
-
-    val requests = remember(songsToShow) {
-        songsToShow.map { song ->
-            song?.albumArtUriString?.let {
-                ImageRequest.Builder(context)
-                    .data(it)
-                    .dispatcher(Dispatchers.IO)
-                    .crossfade(true)
-                    //.placeholder(R.drawable.ic_music_placeholder)
-                    .error(R.drawable.ic_music_placeholder)
-                    .build()
-            }
-        }.toImmutableList()
     }
 
     Box(
@@ -81,16 +62,19 @@ fun AlbumArtCollage(
         }
 
         if (shapeConfigs.isNotEmpty()) {
-            val (topConfigs, bottomConfigs) = shapeConfigs.take(3) to shapeConfigs.drop(3)
+            val (topConfigs, bottomConfigs) = remember(shapeConfigs) {
+                shapeConfigs.take(3) to shapeConfigs.drop(3)
+            }
 
             Column(Modifier.fillMaxSize()) {
                 Box(Modifier.fillMaxWidth().height(boxMaxHeight * 0.6f)) {
                     topConfigs.forEachIndexed { idx, cfg ->
                         songsToShow.getOrNull(idx)?.let { song ->
                             SmartImage(
-                                model = requests[idx],
+                                model = song.albumArtUriString,
                                 contentDescription = null,
                                 contentScale = ContentScale.Crop,
+                                targetSize = smartImageTargetSizeFor(maxOf(cfg.width, cfg.height), density),
                                 modifier = Modifier
                                     .size(cfg.width, cfg.height)
                                     .align(cfg.align)
@@ -110,9 +94,10 @@ fun AlbumArtCollage(
                     bottomConfigs.forEachIndexed { j, cfg ->
                         songsToShow.getOrNull(j + 3)?.let { song ->
                             SmartImage(
-                                model = requests[j + 3],
+                                model = song.albumArtUriString,
                                 contentDescription = null,
                                 contentScale = ContentScale.Crop,
+                                targetSize = smartImageTargetSizeFor(maxOf(cfg.width, cfg.height), density),
                                 modifier = Modifier
                                     .size(cfg.width, cfg.height)
                                     .align(cfg.align)

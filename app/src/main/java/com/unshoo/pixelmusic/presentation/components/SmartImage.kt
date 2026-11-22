@@ -28,7 +28,6 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.Alignment
 import androidx.compose.material3.MaterialTheme
@@ -179,9 +178,7 @@ fun SmartImage(
         albumArtQualityWifi
     }
 
-    val density = LocalDensity.current.density
-    val clippedModifier = modifier.clip(shape)
-    val requestTargetSize = remember(targetSize, effectiveQuality, isThumbnail, density) {
+    val requestTargetSize = remember(targetSize, effectiveQuality, isThumbnail) {
         val effectiveTargetSize = if (isThumbnail && targetSize == DefaultSmartImageSize) {
             SmartImageListTargetSize
         } else {
@@ -205,6 +202,7 @@ fun SmartImage(
 
     // Handle direct models (Bitmap, Vector, etc) early to avoid ImageRequest overhead
     if (model == null || model is ImageVector || model is Painter || model is ImageBitmap || model is Bitmap) {
+        val clippedModifier = modifier.clip(shape)
         if (model == null) {
             if (placeholderResId != 0) {
                 Placeholder(
@@ -271,19 +269,20 @@ fun SmartImage(
     ) {
         val optimizedModel = smartImageOptimizedModel(model, requestTargetSize, isThumbnail, artRetryNonce)
 
-        val isInMemoryCache = if (useMemoryCache && memoryCacheKey != null) {
+        val shouldCrossfade = !isThumbnail && crossfadeDurationMillis > 0
+        val isInMemoryCache = if (shouldCrossfade && useMemoryCache && memoryCacheKey != null) {
             context.imageLoader.memoryCache?.get(memoryCacheKey) != null
         } else {
             false
         }
 
-        val effectiveCrossfade = if (isThumbnail || isInMemoryCache || crossfadeDurationMillis <= 0) {
+        val effectiveCrossfade = if (!shouldCrossfade || isInMemoryCache) {
             0
         } else {
             crossfadeDurationMillis
         }
 
-val isStableLocalArtwork = when (optimizedModel) {
+        val isStableLocalArtwork = when (optimizedModel) {
             is String -> LocalArtworkUri.isLocalArtworkUri(optimizedModel)
             is android.net.Uri -> LocalArtworkUri.isLocalArtworkUri(optimizedModel)
             else -> false
@@ -325,7 +324,7 @@ val isStableLocalArtwork = when (optimizedModel) {
     AsyncImage(
         model = request,
         contentDescription = contentDescription,
-        modifier = clippedModifier,
+        modifier = if (shape == RectangleShape) modifier else modifier.clip(shape),
         contentScale = contentScale,
         colorFilter = colorFilter,
         alpha = alpha,

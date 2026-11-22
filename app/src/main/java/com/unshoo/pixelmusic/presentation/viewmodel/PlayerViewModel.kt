@@ -77,6 +77,7 @@ import com.unshoo.pixelmusic.data.model.Lyrics
 import com.unshoo.pixelmusic.data.model.LyricsSourcePreference
 import com.unshoo.pixelmusic.data.model.SearchFilterType
 import com.unshoo.pixelmusic.data.model.Song
+import com.unshoo.pixelmusic.data.model.Playlist
 import com.unshoo.pixelmusic.data.model.SortOption
 import com.unshoo.pixelmusic.data.model.toLibraryTabIdOrNull
 import com.unshoo.pixelmusic.data.provider.SharedArtworkContentProvider
@@ -1343,7 +1344,7 @@ class PlayerViewModel @Inject constructor(
 
     init {
         // Initialize helper classes with our coroutine scope
-        listeningStatsTracker.initialize(viewModelScope)
+        listeningStatsTracker.refreshHistory()
         dailyMixStateHolder.initialize(viewModelScope)
         lyricsStateHolder.initialize(viewModelScope, lyricsLoadCallback, playbackStateHolder.stablePlayerState)
         playbackStateHolder.initialize(viewModelScope)
@@ -2503,7 +2504,7 @@ class PlayerViewModel @Inject constructor(
             scope = viewModelScope,
             toastEmitter = { msg -> _toastEvents.emit(msg) },
             mediaControllerProvider = { mediaController },
-            currentSongIdProvider = { stablePlayerState.map { it.currentSong?.id }.stateIn(viewModelScope, SharingStarted.Eagerly, null) },
+            currentSongIds = stablePlayerState.map { it.currentSong?.id }.distinctUntilChanged(),
             songTitleResolver = { songId -> libraryStateHolder.allSongsById.value[songId]?.title ?: "Unknown" }
         )
 
@@ -6465,7 +6466,7 @@ class PlayerViewModel @Inject constructor(
         // manager, which is driven by the real player rather than a UI-side click/transition.
         youtubePlaybackHistoryJob?.cancel()
         youtubePlaybackHistoryJob = viewModelScope.launch(Dispatchers.IO) {
-            runCatching { listeningStatsTracker.refreshMergedYoutubeHistory() }
+            listeningStatsTracker.refreshHistory()
         }
     }
 
@@ -7511,6 +7512,29 @@ class PlayerViewModel @Inject constructor(
         return musicRepository.getSongsByIdsOnce(songIds)
     }
 
+    fun playLibraryPlaylist(playlist: Playlist) {
+        cancelPendingFullQueuePlayback()
+        val requestToken = fullQueuePlaybackToken
+        fullQueuePlaybackJob = viewModelScope.launch {
+            val songs = try {
+                getSongs(playlist.songIds)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Timber.w(error, "Could not load playlist %s", playlist.id)
+                emptyList()
+            }
+            throwIfFullQueuePlaybackRequestIsStale(requestToken)
+            fullQueuePlaybackJob = null
+            val first = songs.firstOrNull()
+            if (first != null) {
+                playSongs(songs, first, playlist.name, playlistId = playlist.id)
+            } else {
+                _toastEvents.emit(context.getString(R.string.no_valid_songs))
+            }
+        }
+    }
+
     fun setCurrentLibraryTabId(tabId: LibraryTabId) {
         _currentLibraryTabId.value = tabId
     }
@@ -7766,7 +7790,6 @@ class PlayerViewModel @Inject constructor(
         castSongUiSyncJob?.cancel()
         stopProgressUpdates()
         playbackStateHolder.onCleared()
-        listeningStatsTracker.onCleared()
         dailyMixStateHolder.onCleared()
         lyricsStateHolder.onCleared()
         themeStateHolder.onCleared()

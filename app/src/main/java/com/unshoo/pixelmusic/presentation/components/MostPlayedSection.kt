@@ -190,7 +190,7 @@ fun MostPlayedSection(
                 contentPadding = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                itemsIndexed(items, key = { _, item -> item.key }) { index, item ->
+                itemsIndexed(items, key = { _, item -> item.key }, contentType = { _, item -> item.circular }) { index, item ->
                     // Cards act on what they show; only the arrow opens the listening history.
                     val cardClick: () -> Unit = when {
                         item.key.startsWith("s_") && onSongClick != null -> {

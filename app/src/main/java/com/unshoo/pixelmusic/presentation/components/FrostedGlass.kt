@@ -12,18 +12,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RenderEffect
-import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.drawscope.translate
-import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
-import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.runtime.getValue
@@ -110,9 +106,6 @@ class BackdropSource internal constructor(val layer: GraphicsLayer) {
 
 val LocalBackdropSource = staticCompositionLocalOf<BackdropSource?> { null }
 
-/** Height of the bottom strip captured for frosted chrome (nav bar + search button + margin). */
-private val BackdropCaptureHeight = 220.dp
-
 @Composable
 fun rememberBackdropSource(): BackdropSource {
     val layer = rememberGraphicsLayer()
@@ -121,26 +114,12 @@ fun rememberBackdropSource(): BackdropSource {
 
 /** Records this node's content into [source] while still drawing it normally. */
 fun Modifier.backdropSource(source: BackdropSource?, enabled: Boolean = true): Modifier {
-    if (source == null || !enabled) return this
-    return this
-        .onGloballyPositioned { source.positionInRoot = it.positionInRoot() }
-        .drawWithContent {
-            // Only the strip behind the bottom chrome is ever sampled, so record just that:
-            // everything above is clipped away and HWUI skips re-drawing it a second time.
-            // (Recording the whole screen every frame doubled the draw work while scrolling.)
-            val captureTop = (size.height - BackdropCaptureHeight.toPx()).coerceAtLeast(0f)
-            source.layer.record {
-                clipRect(top = captureTop) {
-                    this@drawWithContent.drawContent()
-                }
-            }
-            drawContent()
-        }
+    return if (enabled) fullBackdropSource(source) else this
 }
 
 /**
- * Records this node's whole content into [source] (no strip clipping). Used for the player
- * cover art, which only redraws when the artwork changes, so recording is effectively free.
+ * Draws the recorded content on screen and lets the glass sample the same display list.
+ * The glass bounds limit the offscreen blur to the area used by the consumer.
  */
 fun Modifier.fullBackdropSource(source: BackdropSource?): Modifier {
     if (source == null) return this
@@ -148,7 +127,7 @@ fun Modifier.fullBackdropSource(source: BackdropSource?): Modifier {
         .onGloballyPositioned { source.positionInRoot = it.positionInRoot() }
         .drawWithContent {
             source.layer.record { this@drawWithContent.drawContent() }
-            drawContent()
+            drawLayer(source.layer)
         }
 }
 
@@ -170,16 +149,17 @@ fun Modifier.frostedBackdrop(
     enabled: Boolean = true
 ): Modifier {
     if (!enabled) return this
+    if (!FrostedBlurSupported || source == null) {
+        return drawBehind { drawRect(tint.copy(alpha = maxOf(tint.alpha, 0.94f))) }
+    }
     val blurLayer = rememberGraphicsLayer()
     val holder = remember { CoordinatesHolder() }
     return this
         .onGloballyPositioned { holder.positionInRoot = it.positionInRoot() }
         .drawBehind {
-            val src = source
-            // Both reads are snapshot state: any move/re-attach of either side redraws the glass.
-            val srcPos = src?.positionInRoot
+            val srcPos = source.positionInRoot
             val ownPos = holder.positionInRoot
-            if (FrostedBlurSupported && src != null && srcPos != null && ownPos != null) {
+            if (srcPos != null && ownPos != null) {
                 // Where this node sits inside the recorded source content.
                 val offset: Offset = ownPos - srcPos
                 // Blur a quarter-resolution copy and scale it back up: a heavy frosted blur looks
@@ -201,11 +181,11 @@ fun Modifier.frostedBackdrop(
                             )
                         ).asComposeRenderEffect()
                     } else {
-                        BlurEffect(radiusPx, radiusPx, TileMode.Clamp)
+                        null
                     }
+                    blurLayer.renderEffect = holder.effect
+                    blurLayer.clip = true
                 }
-                blurLayer.renderEffect = holder.effect
-                blurLayer.clip = true
                 val smallSize = androidx.compose.ui.unit.IntSize(
                     kotlin.math.ceil(size.width / down).toInt().coerceAtLeast(1),
                     kotlin.math.ceil(size.height / down).toInt().coerceAtLeast(1)
@@ -213,7 +193,7 @@ fun Modifier.frostedBackdrop(
                 blurLayer.record(size = smallSize) {
                     scale(1f / down, 1f / down, pivot = Offset.Zero) {
                         translate(-offset.x, -offset.y) {
-                            drawLayer(src.layer)
+                            drawLayer(source.layer)
                         }
                     }
                 }

@@ -14,6 +14,7 @@ import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -180,44 +181,40 @@ class ThemeStateHolder @Inject constructor(
         targetFlow: MutableStateFlow<ColorSchemePair?>
     ) {
         if (uriString.isBlank()) return
+        val requestScope = scope ?: return
 
-        val shouldStartRequest = synchronized(pendingAlbumColorSchemeLock) {
+        val requestTargets = synchronized(pendingAlbumColorSchemeLock) {
             val existingTargets = pendingAlbumColorSchemeTargets[uriString]
             if (existingTargets != null) {
                 existingTargets.add(targetFlow)
-                false
-            } else {
-                pendingAlbumColorSchemeTargets[uriString] = mutableSetOf(targetFlow)
-                true
+                return
             }
+            mutableSetOf(targetFlow).also { pendingAlbumColorSchemeTargets[uriString] = it }
         }
 
-        if (!shouldStartRequest) return
-
-        val requestScope = scope
-        if (requestScope == null) {
-            synchronized(pendingAlbumColorSchemeLock) {
-                pendingAlbumColorSchemeTargets.remove(uriString)
-            }
-            return
-        }
-
+        var scheme: ColorSchemePair? = null
         requestScope.launch(Dispatchers.IO) {
-            var scheme: ColorSchemePair? = null
             try {
                 scheme = colorSchemeProcessor.getOrGenerateColorScheme(
                     albumArtUri = uriString,
                     paletteStyle = currentPaletteStyle,
                     colorAccuracyLevel = currentPaletteAccuracy
                 )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (_: Exception) {
                 // Ignore or log
-            } finally {
-                val targets = synchronized(pendingAlbumColorSchemeLock) {
-                    pendingAlbumColorSchemeTargets.remove(uriString)?.toList().orEmpty()
-                }
-                targets.forEach { it.value = scheme }
             }
+        }.invokeOnCompletion {
+            // Completion also runs when the scope is cancelled before the job starts.
+            val targets = synchronized(pendingAlbumColorSchemeLock) {
+                if (pendingAlbumColorSchemeTargets[uriString] === requestTargets) {
+                    pendingAlbumColorSchemeTargets.remove(uriString)
+                } else {
+                    null
+                }
+            }
+            targets?.forEach { it.value = scheme }
         }
     }
 

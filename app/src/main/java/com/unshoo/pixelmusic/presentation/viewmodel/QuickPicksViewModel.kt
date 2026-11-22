@@ -8,11 +8,17 @@ import com.unshoo.pixelmusic.data.remote.youtube.toNativeSong
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectIndexed
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -64,32 +70,28 @@ class QuickPicksViewModel @Inject constructor(
     val selectedCategory: StateFlow<String> = _selectedCategory.asStateFlow()
 
     private val prefs by lazy { context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }
+    private var loadJob: Job? = null
 
     init {
-        // Immediately populate from cache on Dispatchers.IO so UI thread is never blocked
-        viewModelScope.launch(Dispatchers.IO) {
-            loadFromCache()
-            loadQuickPicks(_selectedCategory.value, forceRefresh = isCacheExpired())
-        }
         viewModelScope.launch {
-            userPreferencesRepository.discoverFlow.collect { _ ->
-                if (_selectedCategory.value == "All") {
-                    loadQuickPicks("All", forceRefresh = isCacheExpired())
+            userPreferencesRepository.discoverFlow.distinctUntilChanged()
+                .collectIndexed { index, _ ->
+                    if (_selectedCategory.value == "All" && (index > 0 || loadJob == null)) {
+                        loadQuickPicks("All", forceRefresh = index > 0, restoreCache = index == 0)
+                    }
                 }
-            }
         }
     }
 
     fun setCategory(category: String) {
-        if (_selectedCategory.value == category && !_isLoading.value) return
+        if (_selectedCategory.value == category) return
+        _quickPicks.value = persistentListOf()
         _selectedCategory.value = category
-        loadQuickPicks(category)
+        loadQuickPicks(category, restoreCache = category == "All")
     }
 
-    fun refresh(force: Boolean = false) {
-        clearCache()
-        loadQuickPicks(_selectedCategory.value, forceRefresh = true)
-    }
+    fun refresh(force: Boolean = true): Job =
+        loadQuickPicks(_selectedCategory.value, forceRefresh = force)
 
     /**
      * Lifecycle-aware auto-refresh: silently reloads quickpicks in the background
@@ -98,8 +100,12 @@ class QuickPicksViewModel @Inject constructor(
      * was already empty.
      */
     fun refreshIfStale() {
-        if (isCacheExpired() && !_isLoading.value) {
-            loadQuickPicks(_selectedCategory.value, forceRefresh = true)
+        if (loadJob?.isActive != true) {
+            loadQuickPicks(
+                _selectedCategory.value,
+                restoreCache = _quickPicks.value.isEmpty(),
+                onlyIfStale = true
+            )
         }
     }
 
@@ -113,17 +119,9 @@ class QuickPicksViewModel @Inject constructor(
         return (System.currentTimeMillis() - timestamp) > CACHE_MAX_AGE_MS
     }
 
-    private fun clearCache() {
-        prefs.edit().clear().apply()
-        _quickPicks.value = persistentListOf()
-    }
-
     private suspend fun loadFromCache() = withContext(Dispatchers.IO) {
         try {
-            if (isCacheExpired()) {
-                clearCache()
-                return@withContext
-            }
+            if (isCacheExpired()) return@withContext
             val songsJson = prefs.getString(KEY_SONGS, null) ?: return@withContext
             val categoriesJson = prefs.getString(KEY_CATEGORIES, null)
 
@@ -132,6 +130,7 @@ class QuickPicksViewModel @Inject constructor(
             for (i in 0 until songsArray.length()) {
                 songs.add(songFromJson(songsArray.getJSONObject(i)))
             }
+            ensureActive()
             if (songs.isNotEmpty()) _quickPicks.value = songs.shuffled().toImmutableList()
 
             if (categoriesJson != null) {
@@ -140,6 +139,8 @@ class QuickPicksViewModel @Inject constructor(
                 for (i in 0 until catArray.length()) cats.add(catArray.getString(i))
                 if (cats.isNotEmpty()) _categories.value = cats.toImmutableList()
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Timber.tag("QuickPicks").w(e, "Failed to load cache")
         }
@@ -151,11 +152,14 @@ class QuickPicksViewModel @Inject constructor(
             songs.forEach { songsArray.put(songToJson(it)) }
             val catArray = JSONArray()
             categories.forEach { catArray.put(it) }
+            ensureActive()
             prefs.edit()
                 .putString(KEY_SONGS, songsArray.toString())
                 .putString(KEY_CATEGORIES, catArray.toString())
                 .putLong(KEY_CACHE_TIMESTAMP, System.currentTimeMillis())
                 .apply()
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Timber.tag("QuickPicks").w(e, "Failed to save cache")
         }
@@ -205,16 +209,21 @@ class QuickPicksViewModel @Inject constructor(
     // Main load entry point
     // ─────────────────────────────────────────────────────────────────────────
 
-    private fun loadQuickPicks(category: String, forceRefresh: Boolean = false) {
-        viewModelScope.launch {
-            val cacheExpired = isCacheExpired()
+    private fun loadQuickPicks(
+        category: String,
+        forceRefresh: Boolean = false,
+        restoreCache: Boolean = false,
+        onlyIfStale: Boolean = false
+    ): Job {
+        loadJob?.cancel()
+        val job = viewModelScope.launch {
+            if (restoreCache && category == "All") loadFromCache()
+            val cacheExpired = withContext(Dispatchers.IO) { isCacheExpired() }
+            if (onlyIfStale && !cacheExpired) return@launch
             val shouldRefresh = forceRefresh || cacheExpired
             if (category == "All" && !shouldRefresh && _quickPicks.value.isNotEmpty()) {
                 _isLoading.value = false
                 return@launch
-            }
-            if (cacheExpired) {
-                clearCache()
             }
             if (_quickPicks.value.isEmpty()) {
                 _isLoading.value = true
@@ -262,12 +271,16 @@ class QuickPicksViewModel @Inject constructor(
                 } else {
                     loadCategoryQuickPicks(category)
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Timber.tag("QuickPicks").e(e, "Error loading quick picks")
             } finally {
-                _isLoading.value = false
+                if (isActive) _isLoading.value = false
             }
         }
+        loadJob = job
+        return job
     }
 
     /**

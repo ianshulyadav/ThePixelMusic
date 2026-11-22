@@ -30,14 +30,20 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.LayoutBoundsHolder
+import androidx.compose.ui.layout.layoutBounds
+import androidx.compose.ui.layout.onVisibilityChanged
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -101,6 +107,7 @@ fun RecentlyPlayedSection(
         songRows.maxOfOrNull { it.contentWidth } ?: 0.dp
     }
     val sharedScrollState = rememberScrollState()
+    val pillViewport = remember { LayoutBoundsHolder() }
 
     val actualRecentlyPlayedRowsCount = songRows.count { it.pills.isNotEmpty() }
     val sectionHeight = if (actualRecentlyPlayedRowsCount > 0) {
@@ -149,6 +156,7 @@ fun RecentlyPlayedSection(
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(max = sectionHeight)
+                .layoutBounds(pillViewport)
                 .horizontalScroll(state = sharedScrollState)
         ) {
             Column(
@@ -178,6 +186,7 @@ fun RecentlyPlayedSection(
                                          item = cell.item,
                                          isCurrentSong = currentSongId == cell.item.song.id,
                                          themeStateHolder = themeStateHolder,
+                                         pillViewport = pillViewport,
                                          modifier = Modifier.width(cell.width),
                                          onClick = { onSongClick(cell.item.song) }
                                      )
@@ -248,13 +257,21 @@ private fun RecentlyPlayedPill(
     item: RecentlyPlayedSongUiModel,
     isCurrentSong: Boolean,
     themeStateHolder: ThemeStateHolder,
+    pillViewport: LayoutBoundsHolder,
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
     val isDark = LocalPixelMusicDarkTheme.current
-    val albumColorSchemeState by remember(item.song.albumArtUriString, themeStateHolder) {
-        themeStateHolder.getAlbumColorSchemeFlow(item.song.albumArtUriString.orEmpty())
+    val artworkUri = item.song.albumArtUriString.orEmpty()
+    val albumColorSchemeState by remember(artworkUri, themeStateHolder) {
+        themeStateHolder.getAlbumColorSchemeFlow(artworkUri, eager = false)
     }.collectAsStateWithLifecycle()
+    var hasBeenVisible by remember { mutableStateOf(false) }
+    if (hasBeenVisible && artworkUri.isNotBlank()) {
+        LaunchedEffect(artworkUri, themeStateHolder) {
+            themeStateHolder.ensureAlbumColorScheme(artworkUri)
+        }
+    }
 
     val albumColorScheme = remember(albumColorSchemeState, isDark) {
         albumColorSchemeState?.let { if (isDark) it.dark else it.light }
@@ -297,6 +314,9 @@ private fun RecentlyPlayedPill(
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         modifier = modifier
             .height(HomeRecentlyPlayedPillHeight)
+            .onVisibilityChanged(minDurationMs = 120, minFractionVisible = 0f, viewportBounds = pillViewport) { visible ->
+                if (visible) hasBeenVisible = true
+            }
             .clip(shape)
             .bounceClick(scaleDown = 0.96f) { onClick() }
     ) {
@@ -314,6 +334,7 @@ private fun RecentlyPlayedPill(
                 contentScale = ContentScale.Crop,
                 shape = CircleShape,
                 targetSize = SmartImageCompactListTargetSize,
+                isThumbnail = true,
                 modifier = Modifier.size(HomeRecentlyPlayedPillArtSize)
             )
             Column(
