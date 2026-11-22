@@ -3,7 +3,9 @@ package com.unshoo.pixelmusic.presentation.components.player
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -25,11 +27,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Bedtime
+import androidx.compose.material.icons.outlined.DarkMode
+import androidx.compose.material.icons.outlined.LibraryAdd
+import androidx.compose.material.icons.rounded.DarkMode
+import androidx.compose.material.icons.rounded.FastForward
+import androidx.compose.material.icons.rounded.FastRewind
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material3.CircularProgressIndicator
@@ -39,11 +44,14 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.graphicsLayer
@@ -54,6 +62,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImagePainter
 import com.unshoo.pixelmusic.R
 import com.unshoo.pixelmusic.data.model.Song
 import com.unshoo.pixelmusic.presentation.components.LocalMaterialTheme
@@ -65,9 +74,10 @@ import kotlin.math.sin
 
 /**
  * "Kinetic" Now Playing layout: header with the queue name, square cover art floating on a
- * slowly turning wavy blob, title/artists, the shared progress bar, a pill play button between
- * rounded skip buttons and a pill toolbar (queue, lyrics, like, add to playlist, sleep timer).
- * Everything is tinted by the album colour scheme ([LocalMaterialTheme]).
+ * scalloped "cookie" shape that turns while music plays, title/artists with a like button, the
+ * shared progress bar, a pill play button between rounded rewind/forward buttons and a pill
+ * toolbar (queue, lyrics, add to playlist, sleep timer). Everything is tinted by the album
+ * colour scheme ([LocalMaterialTheme]).
  *
  * Only the visible layout lives here; sheets, dialogs and player state are owned by
  * [ExpressiveFullPlayerContent], which renders this when the Kinetic style is selected.
@@ -100,86 +110,107 @@ internal fun KineticPlayerLayout(
     progressSection: @Composable () -> Unit,
     actions: KineticPlayerActions
 ) {
+    val scheme = LocalMaterialTheme.current
     val isPlaying = isPlayingProvider()
-    if (isLandscape) {
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-                .padding(horizontal = 20.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(24.dp)
-        ) {
-            KineticArtwork(
-                song = song,
-                isPlaying = isPlaying,
+    val isFavorite = isFavoriteProvider()
+    // Deep, album-tinted backdrop (the reference player's dark tinted surface).
+    val backdrop = remember(scheme.surfaceContainer, scheme.surface) {
+        Brush.verticalGradient(listOf(scheme.surfaceContainer, scheme.surface))
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(backdrop)
+    ) {
+        if (isLandscape) {
+            Row(
                 modifier = Modifier
-                    .fillMaxHeight()
-                    .aspectRatio(1f)
-            )
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(24.dp)
+            ) {
+                KineticArtwork(
+                    song = song,
+                    isPlaying = isPlaying,
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .aspectRatio(1f)
+                )
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                    verticalArrangement = Arrangement.SpaceBetween
+                ) {
+                    KineticHeader(queueName = queueName, actions = actions)
+                    KineticTitle(
+                        song = song,
+                        artistsText = artistsText,
+                        isFavorite = isFavorite,
+                        actions = actions,
+                        compact = true
+                    )
+                    progressSection()
+                    KineticTransport(
+                        isPlaying = isPlaying,
+                        isBufferingProvider = isBufferingProvider,
+                        actions = actions,
+                        height = 58.dp
+                    )
+                    KineticToolbar(
+                        isSleepTimerActive = isSleepTimerActive,
+                        actions = actions,
+                        height = 50.dp,
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    )
+                }
+            }
+        } else {
             Column(
                 modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight(),
-                verticalArrangement = Arrangement.SpaceBetween
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .padding(horizontal = 18.dp)
+                    .padding(bottom = 16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 KineticHeader(queueName = queueName, actions = actions)
-                KineticTitle(song = song, artistsText = artistsText, onArtistClick = actions.onArtistClick, compact = true)
+                // Takes the leftover height so short screens shrink the art, not the controls.
+                BoxWithConstraints(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    val side = min(maxWidth.value, maxHeight.value).dp
+                    KineticArtwork(song = song, isPlaying = isPlaying, modifier = Modifier.size(side))
+                }
+                Spacer(Modifier.height(10.dp))
+                KineticTitle(
+                    song = song,
+                    artistsText = artistsText,
+                    isFavorite = isFavorite,
+                    actions = actions,
+                    compact = false
+                )
+                Spacer(Modifier.height(12.dp))
                 progressSection()
+                Spacer(Modifier.height(14.dp))
                 KineticTransport(
                     isPlaying = isPlaying,
                     isBufferingProvider = isBufferingProvider,
                     actions = actions,
-                    height = 58.dp
+                    height = 76.dp
                 )
+                Spacer(Modifier.height(18.dp))
                 KineticToolbar(
-                    isFavorite = isFavoriteProvider(),
                     isSleepTimerActive = isSleepTimerActive,
                     actions = actions,
-                    height = 50.dp,
-                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                    height = 64.dp
                 )
             }
-        }
-    } else {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            KineticHeader(queueName = queueName, actions = actions)
-            Spacer(Modifier.height(8.dp))
-            // Takes the leftover height so short screens shrink the art, not the controls.
-            BoxWithConstraints(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-                contentAlignment = Alignment.Center
-            ) {
-                val side = min(maxWidth.value, maxHeight.value).dp
-                KineticArtwork(song = song, isPlaying = isPlaying, modifier = Modifier.size(side))
-            }
-            Spacer(Modifier.height(12.dp))
-            KineticTitle(song = song, artistsText = artistsText, onArtistClick = actions.onArtistClick, compact = false)
-            Spacer(Modifier.height(12.dp))
-            progressSection()
-            Spacer(Modifier.height(14.dp))
-            KineticTransport(
-                isPlaying = isPlaying,
-                isBufferingProvider = isBufferingProvider,
-                actions = actions,
-                height = 76.dp
-            )
-            Spacer(Modifier.height(18.dp))
-            KineticToolbar(
-                isFavorite = isFavoriteProvider(),
-                isSleepTimerActive = isSleepTimerActive,
-                actions = actions,
-                height = 60.dp
-            )
         }
     }
 }
@@ -196,7 +227,7 @@ private fun KineticHeader(queueName: String, actions: KineticPlayerActions) {
         KineticIconButton(
             painter = R.drawable.rounded_keyboard_arrow_down_24,
             contentDescription = "Collapse player",
-            tint = scheme.onSurface,
+            tint = scheme.primary,
             onClick = actions.onCollapse
         )
         Column(
@@ -205,16 +236,15 @@ private fun KineticHeader(queueName: String, actions: KineticPlayerActions) {
         ) {
             Text(
                 text = "Now Playing",
-                color = scheme.onSurfaceVariant,
-                fontSize = 14.sp,
+                color = scheme.primary.copy(alpha = 0.85f),
+                fontSize = 15.sp,
                 maxLines = 1
             )
             if (queueName.isNotBlank()) {
                 Text(
                     text = queueName,
                     color = scheme.primary,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
+                    fontSize = 15.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.clickable(onClick = actions.onShowQueue)
@@ -224,7 +254,7 @@ private fun KineticHeader(queueName: String, actions: KineticPlayerActions) {
         KineticIconButton(
             painter = R.drawable.rounded_more_vert_24,
             contentDescription = "More options",
-            tint = scheme.onSurface,
+            tint = scheme.primary,
             onClick = actions.onMore
         )
     }
@@ -248,29 +278,45 @@ private fun KineticIconButton(
             painter = painterResource(painter),
             contentDescription = contentDescription,
             tint = tint,
-            modifier = Modifier.size(26.dp)
+            modifier = Modifier.size(28.dp)
         )
     }
 }
 
-/** Cover art on a wavy blob that turns slowly while music plays. */
+/**
+ * Cover art on a scalloped "cookie" shape. The shape turns while music plays and eases to a
+ * stop when paused. Until the cover has loaded only the shape is shown (no placeholder box),
+ * then the art scales in on top of it.
+ */
 @Composable
 private fun KineticArtwork(song: Song, isPlaying: Boolean, modifier: Modifier = Modifier) {
     val scheme = LocalMaterialTheme.current
-    // A muted, slightly lighter tone of the album colour so the blob reads on any background.
-    val blobColor = remember(scheme.secondaryContainer, scheme.onSurface) {
-        androidx.compose.ui.graphics.lerp(scheme.secondaryContainer, scheme.onSurface, 0.16f)
-    }
+    val shapeColor = scheme.secondaryContainer
     val rotation = remember { Animatable(0f) }
     LaunchedEffect(isPlaying) {
-        while (isPlaying) {
-            val start = rotation.value % 360f
-            rotation.snapTo(start)
-            rotation.animateTo(start + 360f, tween(durationMillis = 40_000, easing = LinearEasing))
+        if (isPlaying) {
+            while (true) {
+                val start = rotation.value % 360f
+                rotation.snapTo(start)
+                rotation.animateTo(start + 360f, tween(durationMillis = 24_000, easing = LinearEasing))
+            }
+        } else {
+            // Coast to a stop instead of freezing mid-turn.
+            rotation.animateTo(
+                rotation.value + 8f,
+                spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessVeryLow)
+            )
         }
     }
-    val artScale by animateFloatAsState(
-        targetValue = if (isPlaying) 1f else 0.94f,
+    var artLoaded by remember(song.albumArtUriString) { mutableStateOf(false) }
+    var artFailed by remember(song.albumArtUriString) { mutableStateOf(song.albumArtUriString.isNullOrBlank()) }
+    val artReveal by animateFloatAsState(
+        targetValue = if (artLoaded) 1f else 0f,
+        animationSpec = spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessLow),
+        label = "kineticArtReveal"
+    )
+    val playScale by animateFloatAsState(
+        targetValue = if (isPlaying) 1f else 0.95f,
         animationSpec = tween(420),
         label = "kineticArtScale"
     )
@@ -280,34 +326,38 @@ private fun KineticArtwork(song: Song, isPlaying: Boolean, modifier: Modifier = 
                 .fillMaxSize()
                 .graphicsLayer { rotationZ = rotation.value }
         ) {
-            val center = Offset(size.width / 2f, size.height / 2f)
-            val base = min(size.width, size.height) / 2f * 0.96f
-            val waves = 7
-            val amplitude = base * 0.045f
-            val path = Path()
-            val steps = 180
-            for (i in 0..steps) {
-                val angle = (i.toFloat() / steps) * 2f * PI.toFloat()
-                val r = base - amplitude + amplitude * sin(waves * angle)
-                val x = center.x + r * cos(angle)
-                val y = center.y + r * sin(angle)
-                if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
-            }
-            path.close()
-            drawPath(path, blobColor)
+            drawPath(cookiePath(size.width, size.height), shapeColor)
+        }
+        if (artFailed) {
+            Icon(
+                painter = painterResource(R.drawable.ic_music_placeholder),
+                contentDescription = null,
+                tint = scheme.onSecondaryContainer.copy(alpha = 0.6f),
+                modifier = Modifier.fillMaxSize(0.3f)
+            )
         }
         SmartImage(
             model = song.albumArtUriString,
             contentDescription = song.title,
             shape = RoundedCornerShape(28.dp),
-            crossfadeDurationMillis = 200,
+            placeholderResId = 0,
+            errorResId = 0,
+            placeHolderBackgroundColor = Color.Transparent,
+            crossfadeDurationMillis = 0,
             targetSize = coil.size.Size(1024, 1024),
+            onState = { state ->
+                artLoaded = state is AsyncImagePainter.State.Success
+                artFailed = state is AsyncImagePainter.State.Error
+            },
             modifier = Modifier
-                .fillMaxSize(0.84f)
+                .fillMaxSize(0.82f)
                 .graphicsLayer {
-                    scaleX = artScale
-                    scaleY = artScale
-                    shadowElevation = 18.dp.toPx()
+                    val s = playScale * (0.86f + 0.14f * artReveal)
+                    scaleX = s
+                    scaleY = s
+                    alpha = artReveal
+                    // Shadow only once there is art, so nothing box-shaped shows while loading.
+                    shadowElevation = 18.dp.toPx() * artReveal
                     shape = RoundedCornerShape(28.dp)
                     clip = true
                 }
@@ -315,28 +365,95 @@ private fun KineticArtwork(song: Song, isPlaying: Boolean, modifier: Modifier = 
     }
 }
 
+/** Scalloped circle ("cookie"): [LOBES] rounded bumps around the edge. */
+private const val LOBES = 9
+
+private fun cookiePath(width: Float, height: Float): Path {
+    val center = Offset(width / 2f, height / 2f)
+    val outer = min(width, height) / 2f
+    val amplitude = outer * 0.055f
+    val base = outer - amplitude
+    val path = Path()
+    val steps = 360
+    for (i in 0..steps) {
+        val angle = (i.toFloat() / steps) * 2f * PI.toFloat()
+        // A cosine ripple around the circle gives evenly spaced rounded lobes (M3 "cookie").
+        val r = base + amplitude * cos(LOBES * angle)
+        val x = center.x + r * cos(angle)
+        val y = center.y + r * sin(angle)
+        if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+    }
+    path.close()
+    return path
+}
+
 @Composable
-private fun KineticTitle(song: Song, artistsText: String, onArtistClick: () -> Unit, compact: Boolean) {
+private fun KineticTitle(
+    song: Song,
+    artistsText: String,
+    isFavorite: Boolean,
+    actions: KineticPlayerActions,
+    compact: Boolean
+) {
     val scheme = LocalMaterialTheme.current
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text = song.title,
-            color = scheme.onSurface,
-            fontSize = if (compact) 24.sp else 30.sp,
-            lineHeight = if (compact) 28.sp else 34.sp,
-            fontWeight = FontWeight.Normal,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = song.title,
+                color = scheme.primary,
+                fontSize = if (compact) 24.sp else 30.sp,
+                lineHeight = if (compact) 28.sp else 34.sp,
+                fontWeight = FontWeight.Normal,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = artistsText,
+                color = scheme.primary.copy(alpha = 0.85f),
+                fontSize = if (compact) 15.sp else 17.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.clickable(onClick = actions.onArtistClick)
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        val likeContainer by animateColorAsState(
+            if (isFavorite) scheme.primary else scheme.secondaryContainer,
+            label = "kineticLikeBg"
         )
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = artistsText,
-            color = scheme.primary,
-            fontSize = if (compact) 15.sp else 17.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.clickable(onClick = onArtistClick)
+        val likeContent by animateColorAsState(
+            if (isFavorite) scheme.onPrimary else scheme.onSecondaryContainer,
+            label = "kineticLikeFg"
         )
+        val likeScale by animateFloatAsState(
+            targetValue = if (isFavorite) 1f else 0.94f,
+            animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+            label = "kineticLikeScale"
+        )
+        Surface(
+            onClick = actions.onFavoriteToggle,
+            shape = CircleShape,
+            color = likeContainer,
+            modifier = Modifier
+                .size(if (compact) 48.dp else 54.dp)
+                .graphicsLayer {
+                    scaleX = likeScale
+                    scaleY = likeScale
+                }
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                    contentDescription = if (isFavorite) "Unlike" else "Like",
+                    tint = likeContent,
+                    modifier = Modifier.size(26.dp)
+                )
+            }
+        }
     }
 }
 
@@ -362,10 +479,10 @@ private fun KineticTransport(
             modifier = Modifier.weight(0.8f)
         ) {
             Icon(
-                painter = painterResource(R.drawable.rounded_skip_previous_filled_24),
+                imageVector = Icons.Rounded.FastRewind,
                 contentDescription = "Previous",
-                tint = scheme.onSecondaryContainer,
-                modifier = Modifier.size(28.dp)
+                tint = scheme.primary,
+                modifier = Modifier.size(32.dp)
             )
         }
         KineticTransportButton(
@@ -398,10 +515,10 @@ private fun KineticTransport(
             modifier = Modifier.weight(0.8f)
         ) {
             Icon(
-                painter = painterResource(R.drawable.rounded_skip_next_filled_24),
+                imageVector = Icons.Rounded.FastForward,
                 contentDescription = "Next",
-                tint = scheme.onSecondaryContainer,
-                modifier = Modifier.size(28.dp)
+                tint = scheme.primary,
+                modifier = Modifier.size(32.dp)
             )
         }
     }
@@ -436,7 +553,6 @@ private fun KineticTransportButton(
 
 @Composable
 private fun KineticToolbar(
-    isFavorite: Boolean,
     isSleepTimerActive: Boolean,
     actions: KineticPlayerActions,
     height: Dp,
@@ -447,32 +563,19 @@ private fun KineticToolbar(
         color = scheme.primary,
         contentColor = scheme.onPrimary,
         shape = CircleShape,
-        modifier = modifier
-            .height(height)
-            .widthIn(max = 360.dp)
+        modifier = modifier.height(height)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 10.dp),
+            modifier = Modifier.padding(horizontal = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(2.dp)
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            KineticToolbarItem(painter = R.drawable.rounded_queue_music_24, description = "Queue", onClick = actions.onShowQueue)
+            KineticToolbarItem(painter = R.drawable.rounded_format_list_bulleted_24, description = "Queue", onClick = actions.onShowQueue)
             KineticToolbarItem(painter = R.drawable.rounded_lyrics_24, description = "Lyrics", onClick = actions.onLyrics)
-            val favTint by animateColorAsState(
-                if (isFavorite) scheme.onPrimary else scheme.onPrimary.copy(alpha = 0.9f),
-                label = "kineticFavTint"
-            )
+            KineticToolbarItem(vector = Icons.Outlined.LibraryAdd, description = "Add to playlist", onClick = actions.onAddToPlaylist)
             KineticToolbarItem(
-                vector = if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                description = if (isFavorite) "Unlike" else "Like",
-                tint = favTint,
-                onClick = actions.onFavoriteToggle
-            )
-            KineticToolbarItem(painter = R.drawable.rounded_playlist_add_24, description = "Add to playlist", onClick = actions.onAddToPlaylist)
-            KineticToolbarItem(
-                vector = Icons.Rounded.Bedtime,
+                vector = if (isSleepTimerActive) Icons.Rounded.DarkMode else Icons.Outlined.DarkMode,
                 description = if (isSleepTimerActive) "Sleep timer (on)" else "Sleep timer",
-                // A running timer shows as a filled chip behind the moon.
                 selected = isSleepTimerActive,
                 onClick = actions.onSleepTimer
             )
@@ -486,25 +589,23 @@ private fun KineticToolbarItem(
     onClick: () -> Unit,
     painter: Int? = null,
     vector: ImageVector? = null,
-    tint: Color = LocalMaterialTheme.current.onPrimary,
     selected: Boolean = false
 ) {
+    val tint = LocalMaterialTheme.current.onPrimary
     Box(
         modifier = Modifier
-            .size(width = 52.dp, height = 44.dp)
+            .size(width = 56.dp, height = 48.dp)
             .clip(CircleShape)
             .then(
-                if (selected) Modifier.background(LocalMaterialTheme.current.onPrimary.copy(alpha = 0.16f))
-                else Modifier
+                if (selected) Modifier.background(tint.copy(alpha = 0.16f)) else Modifier
             )
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
         if (vector != null) {
-            Icon(vector, contentDescription = description, tint = tint, modifier = Modifier.size(24.dp))
+            Icon(vector, contentDescription = description, tint = tint, modifier = Modifier.size(26.dp))
         } else if (painter != null) {
-            Icon(painterResource(painter), contentDescription = description, tint = tint, modifier = Modifier.size(24.dp))
+            Icon(painterResource(painter), contentDescription = description, tint = tint, modifier = Modifier.size(26.dp))
         }
     }
 }
-
