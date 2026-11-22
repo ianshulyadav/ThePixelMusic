@@ -1564,15 +1564,23 @@ class PlayerViewModel @Inject constructor(
                     }
                     if (nextSongs.isNotEmpty()) {
                         preCacheLyricsForSongs(nextSongs, sourcePref)
-                        nextSongs.forEach { song ->
-                            val artUri = song.albumArtUriString
-                            if (!artUri.isNullOrBlank()) {
-                                val req = ImageRequest.Builder(context)
-                                    .data(artUri)
-                                    .size(512, 512)
-                                    .build()
-                                context.imageLoader.enqueue(req)
-                            }
+                    }
+                    // Warm the player's cover for the next songs (and the previous one) with the
+                    // exact URL + cache key the player requests, so skipping shows the art at once.
+                    // The old prefetch fetched the raw URL at 512px, which never matched.
+                    val artNeighbours = buildList {
+                        addAll(nextSongs)
+                        if (qSize > 3) add(queue[(index + 3) % qSize])
+                        if (qSize > 1) add(queue[(index - 1 + qSize) % qSize])
+                    }.distinctBy { it.id }
+                    artNeighbours.forEach { song ->
+                        val artUri = com.unshoo.pixelmusic.utils.MediaItemBuilder.resolveArtworkUri(song.albumArtUriString, song.id, song.youtubeId)
+                        if (!artUri.isNullOrBlank()) {
+                            com.unshoo.pixelmusic.presentation.components.prefetchSmartImage(
+                                context,
+                                artUri,
+                                com.unshoo.pixelmusic.presentation.components.PlayerCoverTargetSize
+                            )
                         }
                     }
                 }

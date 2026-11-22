@@ -189,16 +189,30 @@ class ColorSchemeProcessor @Inject constructor(
             val cachePolicy = if (skipCache) CachePolicy.DISABLED else CachePolicy.ENABLED
             val diskCachePolicy = if (LocalArtworkUri.isLocalArtworkUri(uri)) CachePolicy.DISABLED else cachePolicy
             
-            val request = ImageRequest.Builder(context)
-                .data(uri)
+            // Load the same URL the player shows, so colours come from the already-downloaded
+            // cover (disk cache) instead of a separate fetch of the raw URL.
+            val playerSize = com.unshoo.pixelmusic.presentation.components.smartImageRequestSize(
+                com.unshoo.pixelmusic.presentation.components.PlayerCoverTargetSize
+            )
+            val resolved = com.unshoo.pixelmusic.utils.MediaItemBuilder.resolveArtworkUri(uri) ?: uri
+            fun build(nonce: Int) = ImageRequest.Builder(context)
+                .data(
+                    com.unshoo.pixelmusic.presentation.components.smartImageOptimizedModel(
+                        resolved, playerSize, isThumbnail = false, artRetryNonce = nonce
+                    ) ?: uri
+                )
                 .allowHardware(false) // Required for pixel access
                 .size(Size(128, 128)) // Small size for fast processing
                 .bitmapConfig(Bitmap.Config.ARGB_8888)
                 .memoryCachePolicy(cachePolicy)
                 .diskCachePolicy(diskCachePolicy)
                 .build()
-            
-            val drawable = context.imageLoader.execute(request).drawable ?: return null
+
+            // Second try = the player's own fallback (e.g. YouTube hqdefault when there is no
+            // 1280px frame for the video).
+            val drawable = context.imageLoader.execute(build(0)).drawable
+                ?: context.imageLoader.execute(build(1)).drawable
+                ?: return null
             
             val targetWidth = drawable.intrinsicWidth.coerceIn(1, 128)
             val targetHeight = drawable.intrinsicHeight.coerceIn(1, 128)

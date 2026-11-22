@@ -174,32 +174,14 @@ val SupportedYouTubeCountryCodes: Set<String> = setOf(
     "UG", "ZW", "BD", "NP", "LK"
 )
 
-fun getSafeDefaultContentCountry(): String {
-    val country = java.util.Locale.getDefault().country.trim().uppercase()
-    if (country.length == 2 && country in SupportedYouTubeCountryCodes) {
-        return country
-    }
-    val lang = java.util.Locale.getDefault().language.lowercase()
-    return when (lang) {
-        "es" -> "MX"
-        "hi" -> "IN"
-        "ja" -> "JP"
-        "ko" -> "KR"
-        "de" -> "DE"
-        "fr" -> "FR"
-        "it" -> "IT"
-        "pt" -> "BR"
-        "ru" -> "RU"
-        else -> "US"
-    }
-}
+/**
+ * Content country used until the user picks one in Settings > Content: United States.
+ * (Was a device-country guess; the US catalogue is the one YouTube Music serves everywhere.)
+ */
+fun getSafeDefaultContentCountry(): String = "US"
 
-fun getSafeDefaultContentLanguage(): String {
-    val loc = java.util.Locale.getDefault()
-    if (loc.country == "IN") return "en-IN"
-    val tag = loc.toLanguageTag().trim().replace('_', '-')
-    return if (tag.isNotBlank() && tag != "und") tag else "en"
-}
+/** Content language used until the user picks one in Settings > Content: English ("en" = en-US). */
+fun getSafeDefaultContentLanguage(): String = "en"
 
 
 @Singleton

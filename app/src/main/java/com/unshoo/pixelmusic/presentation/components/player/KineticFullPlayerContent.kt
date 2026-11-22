@@ -90,6 +90,11 @@ internal class KineticPlayerActions(
     val onFavoriteToggle: () -> Unit,
     val onAddToPlaylist: () -> Unit,
     val onSleepTimer: () -> Unit,
+    val onSongInfo: () -> Unit,
+    val onShuffleToggle: () -> Unit,
+    val onRepeatToggle: () -> Unit,
+    val isShuffleEnabledProvider: () -> Boolean,
+    val repeatModeProvider: () -> Int,
     val onArtistClick: () -> Unit,
     val onPlayPause: () -> Unit,
     val onNext: () -> Unit,
@@ -113,15 +118,9 @@ internal fun KineticPlayerLayout(
     val scheme = LocalMaterialTheme.current
     val isPlaying = isPlayingProvider()
     val isFavorite = isFavoriteProvider()
-    // Deep, album-tinted backdrop (the reference player's dark tinted surface).
-    val backdrop = remember(scheme.surfaceContainer, scheme.surface) {
-        Brush.verticalGradient(listOf(scheme.surfaceContainer, scheme.surface))
-    }
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(backdrop)
-    ) {
+    // No backdrop of its own: the player sheet's normal colour shows through, so the sheet edges
+    // (visible while it expands/collapses) and the player are one colour with no extra tint.
+    Box(modifier = Modifier.fillMaxSize()) {
         if (isLandscape) {
             Row(
                 modifier = Modifier
@@ -255,6 +254,7 @@ private fun KineticHeader(queueName: String, actions: KineticPlayerActions) {
             painter = R.drawable.rounded_more_vert_24,
             contentDescription = "More options",
             tint = scheme.primary,
+            // Opens the player's options sheet (play next, add to playlist, sleep timer, share).
             onClick = actions.onMore
         )
     }
@@ -308,18 +308,35 @@ private fun KineticArtwork(song: Song, isPlaying: Boolean, modifier: Modifier = 
             )
         }
     }
-    var artLoaded by remember(song.albumArtUriString) { mutableStateOf(false) }
-    var artFailed by remember(song.albumArtUriString) { mutableStateOf(song.albumArtUriString.isNullOrBlank()) }
-    val artReveal by animateFloatAsState(
-        targetValue = if (artLoaded) 1f else 0f,
-        animationSpec = spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessLow),
-        label = "kineticArtReveal"
-    )
+    // Same artwork model the mini player uses, so the two share one cached bitmap.
+    val currentArt = com.unshoo.pixelmusic.utils.MediaItemBuilder.resolveArtworkUri(song.albumArtUriString, song.id, song.youtubeId)
+    // Last cover that finished loading. On a song change it stays on screen until the new cover
+    // has loaded, then the new one cross-fades in over it. Before, the old art vanished at once
+    // and the empty shape showed for ~1s, which read as the player flashing/glitching.
+    var settledArt by remember { mutableStateOf<String?>(null) }
+    var artLoaded by remember(currentArt) { mutableStateOf(false) }
+    var artFailed by remember(currentArt) { mutableStateOf(currentArt.isNullOrBlank()) }
+    val firstReveal = settledArt == null
+    val fadeIn = remember(currentArt) { Animatable(if (currentArt != null && currentArt == settledArt) 1f else 0f) }
+    LaunchedEffect(currentArt, artLoaded, artFailed) {
+        when {
+            artLoaded -> {
+                fadeIn.animateTo(
+                    1f,
+                    if (firstReveal) spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessLow)
+                    else tween(durationMillis = 320, easing = LinearEasing)
+                )
+                settledArt = currentArt
+            }
+            artFailed -> settledArt = null
+        }
+    }
     val playScale by animateFloatAsState(
         targetValue = if (isPlaying) 1f else 0.95f,
         animationSpec = tween(420),
         label = "kineticArtScale"
     )
+    val artShape = RoundedCornerShape(28.dp)
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         Canvas(
             modifier = Modifier
@@ -328,7 +345,7 @@ private fun KineticArtwork(song: Song, isPlaying: Boolean, modifier: Modifier = 
         ) {
             drawPath(cookiePath(size.width, size.height), shapeColor)
         }
-        if (artFailed) {
+        if (artFailed && settledArt == null) {
             Icon(
                 painter = painterResource(R.drawable.ic_music_placeholder),
                 contentDescription = null,
@@ -336,15 +353,38 @@ private fun KineticArtwork(song: Song, isPlaying: Boolean, modifier: Modifier = 
                 modifier = Modifier.fillMaxSize(0.3f)
             )
         }
+        val outgoing = settledArt
+        if (outgoing != null && outgoing != currentArt) {
+            // Previous cover, held fully opaque underneath (it is already in the memory cache).
+            SmartImage(
+                model = outgoing,
+                contentDescription = null,
+                shape = artShape,
+                placeholderResId = 0,
+                errorResId = 0,
+                placeHolderBackgroundColor = Color.Transparent,
+                crossfadeDurationMillis = 0,
+                targetSize = com.unshoo.pixelmusic.presentation.components.PlayerCoverTargetSize,
+                modifier = Modifier
+                    .fillMaxSize(0.82f)
+                    .graphicsLayer {
+                        scaleX = playScale
+                        scaleY = playScale
+                        shadowElevation = 18.dp.toPx()
+                        shape = artShape
+                        clip = true
+                    }
+            )
+        }
         SmartImage(
-            model = song.albumArtUriString,
+            model = currentArt,
             contentDescription = song.title,
-            shape = RoundedCornerShape(28.dp),
+            shape = artShape,
             placeholderResId = 0,
             errorResId = 0,
             placeHolderBackgroundColor = Color.Transparent,
             crossfadeDurationMillis = 0,
-            targetSize = coil.size.Size(1024, 1024),
+            targetSize = com.unshoo.pixelmusic.presentation.components.PlayerCoverTargetSize,
             onState = { state ->
                 artLoaded = state is AsyncImagePainter.State.Success
                 artFailed = state is AsyncImagePainter.State.Error
@@ -352,13 +392,15 @@ private fun KineticArtwork(song: Song, isPlaying: Boolean, modifier: Modifier = 
             modifier = Modifier
                 .fillMaxSize(0.82f)
                 .graphicsLayer {
-                    val s = playScale * (0.86f + 0.14f * artReveal)
+                    val reveal = fadeIn.value
+                    // Only the very first cover scales in; later covers just cross-fade.
+                    val s = if (firstReveal) playScale * (0.86f + 0.14f * reveal) else playScale
                     scaleX = s
                     scaleY = s
-                    alpha = artReveal
+                    alpha = reveal
                     // Shadow only once there is art, so nothing box-shaped shows while loading.
-                    shadowElevation = 18.dp.toPx() * artReveal
-                    shape = RoundedCornerShape(28.dp)
+                    shadowElevation = if (outgoing != null && outgoing != currentArt) 0f else 18.dp.toPx() * reveal
+                    shape = artShape
                     clip = true
                 }
         )
@@ -570,15 +612,32 @@ private fun KineticToolbar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            KineticToolbarItem(painter = R.drawable.rounded_format_list_bulleted_24, description = "Queue", onClick = actions.onShowQueue)
-            KineticToolbarItem(painter = R.drawable.rounded_lyrics_24, description = "Lyrics", onClick = actions.onLyrics)
-            KineticToolbarItem(vector = Icons.Outlined.LibraryAdd, description = "Add to playlist", onClick = actions.onAddToPlaylist)
+            // Shuffle, repeat, lyrics, queue. Add to playlist and the sleep timer live in the
+            // header's three-dot menu.
+            val shuffleOn = actions.isShuffleEnabledProvider()
+            val repeatMode = actions.repeatModeProvider()
             KineticToolbarItem(
-                vector = if (isSleepTimerActive) Icons.Rounded.DarkMode else Icons.Outlined.DarkMode,
-                description = if (isSleepTimerActive) "Sleep timer (on)" else "Sleep timer",
-                selected = isSleepTimerActive,
-                onClick = actions.onSleepTimer
+                painter = R.drawable.rounded_shuffle_24,
+                description = if (shuffleOn) "Shuffle on" else "Shuffle off",
+                selected = shuffleOn,
+                onClick = actions.onShuffleToggle
             )
+            KineticToolbarItem(
+                painter = if (repeatMode == androidx.media3.common.Player.REPEAT_MODE_ONE) {
+                    R.drawable.rounded_repeat_one_24
+                } else {
+                    R.drawable.rounded_repeat_24
+                },
+                description = when (repeatMode) {
+                    androidx.media3.common.Player.REPEAT_MODE_ONE -> "Repeat one"
+                    androidx.media3.common.Player.REPEAT_MODE_ALL -> "Repeat all"
+                    else -> "Repeat off"
+                },
+                selected = repeatMode != androidx.media3.common.Player.REPEAT_MODE_OFF,
+                onClick = actions.onRepeatToggle
+            )
+            KineticToolbarItem(painter = R.drawable.rounded_lyrics_24, description = "Lyrics", onClick = actions.onLyrics)
+            KineticToolbarItem(painter = R.drawable.rounded_format_list_bulleted_24, description = "Queue", onClick = actions.onShowQueue)
         }
     }
 }
@@ -591,14 +650,20 @@ private fun KineticToolbarItem(
     vector: ImageVector? = null,
     selected: Boolean = false
 ) {
-    val tint = LocalMaterialTheme.current.onPrimary
+    val scheme = LocalMaterialTheme.current
+    // On: a solid pill in the toolbar's content colour with the icon in the toolbar colour
+    // (clear on/off contrast), animated so toggling feels smooth.
+    val container by animateColorAsState(
+        if (selected) scheme.onPrimary else Color.Transparent, label = "kineticItemBg"
+    )
+    val tint by animateColorAsState(
+        if (selected) scheme.primary else scheme.onPrimary, label = "kineticItemTint"
+    )
     Box(
         modifier = Modifier
-            .size(width = 56.dp, height = 48.dp)
+            .size(width = 56.dp, height = 40.dp)
             .clip(CircleShape)
-            .then(
-                if (selected) Modifier.background(tint.copy(alpha = 0.16f)) else Modifier
-            )
+            .background(container)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {

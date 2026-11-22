@@ -31,6 +31,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -162,22 +163,49 @@ class LibraryStateHolder @Inject constructor(
             Triple(sort, filter, localMode)
         }.distinctUntilChanged()
         .flatMapLatest { (sortOption, storageFilter, localMode) ->
-            musicRepository.getPaginatedFavoriteSongs(sortOption, storageFilter)
-                .map { pagingData ->
-                    if (localMode || storageFilter == StorageFilter.LOCAL) {
-                        pagingData.filter { song ->
-                            song.isLocal || com.unshoo.pixelmusic.utils.OfflineAudioResolver.hasOfflineAudio(context, song)
-                        }
-                    } else {
-                        pagingData
-                    }
-                }
+            if (localMode || storageFilter == StorageFilter.LOCAL) {
+                // The SQL "local" filter only accepts device files, so downloaded YouTube songs
+                // (tracked as files on disk, not in the songs table) were dropped before the
+                // offline check could keep them, and Liked was empty in Local Mode. Load every
+                // liked song and keep the ones that play offline instead.
+                offlineFavoritesFlow(sortOption).map { androidx.paging.PagingData.from(it) }
+            } else {
+                musicRepository.getPaginatedFavoriteSongs(sortOption, storageFilter)
+            }
         }.flowOn(Dispatchers.IO)
 
+    /** Liked songs that play without internet (device files + finished downloads). */
     @OptIn(ExperimentalCoroutinesApi::class)
-    val favoriteSongCountFlow: Flow<Int> = effectiveStorageFilter
+    private fun offlineFavoritesFlow(sortOption: SortOption): Flow<List<Song>> =
+        combine(
+            musicRepository.getFavoriteSongCountFlow(StorageFilter.ALL),
+            com.unshoo.pixelmusic.utils.OfflineAudioResolver.downloadedIds
+        ) { count, _ -> count }
+            .mapLatest {
+                musicRepository.getFavoriteSongsPage(
+                    limit = Int.MAX_VALUE,
+                    offset = 0,
+                    sortOption = sortOption,
+                    storageFilter = StorageFilter.ALL
+                ).filter { song ->
+                    song.isLocal || com.unshoo.pixelmusic.utils.OfflineAudioResolver.hasOfflineAudio(context, song)
+                }
+            }
+            .flowOn(Dispatchers.IO)
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val favoriteSongCountFlow: Flow<Int> =
+        combine(effectiveStorageFilter, userPreferencesRepository.localModeEnabledFlow) { filter, localMode ->
+            filter to localMode
+        }
         .distinctUntilChanged()
-        .flatMapLatest { filter -> musicRepository.getFavoriteSongCountFlow(filter) }
+        .flatMapLatest { (filter, localMode) ->
+            if (localMode || filter == StorageFilter.LOCAL) {
+                offlineFavoritesFlow(_currentFavoriteSortOption.value).map { it.size }
+            } else {
+                musicRepository.getFavoriteSongCountFlow(filter)
+            }
+        }
         .flowOn(Dispatchers.IO)
 
     @OptIn(ExperimentalCoroutinesApi::class)

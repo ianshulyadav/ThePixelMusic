@@ -46,8 +46,8 @@ enum class QuickPicksM3CarouselStyle {
     HERO,
 }
 
-/** Compact height, in line with the Recently Played shelf. */
-private val QuickPicksM3CarouselHeight = 168.dp
+/** Same height as the Home Recently Played shelf (3 pills x 58dp + 2 x 8dp gaps). */
+private val QuickPicksM3CarouselHeight = 190.dp
 private val QuickPicksM3ItemSpacing = 8.dp
 
 /**
@@ -90,6 +90,9 @@ fun QuickPicksM3Carousel(
             QuickPicksM3CarouselStyle.HERO -> HorizontalCenteredHeroCarousel(
                 state = state,
                 maxItemWidth = available * 0.68f,
+                // Side items were 40-56dp slivers; keep them wide enough to read as cards.
+                minSmallItemWidth = 56.dp,
+                maxSmallItemWidth = 72.dp,
                 itemSpacing = QuickPicksM3ItemSpacing,
                 contentPadding = contentPadding,
                 modifier = Modifier
@@ -127,8 +130,10 @@ private fun CarouselItemScope.QuickPicksM3Item(
         SmartImage(
             model = song.albumArtUriString,
             contentDescription = song.title,
-            targetSize = Size(512, 512),
-            isThumbnail = true,
+            // Full-size art: the large item is ~2/3 of the screen wide. This used to request a
+            // 128px thumbnail (YouTube mqdefault) and stretch it, which made the cards blurry.
+            targetSize = Size(1024, 1024),
+            isThumbnail = false,
             modifier = Modifier.fillMaxSize(),
         )
         // Title fades in as the item grows to its large size and out as it shrinks.

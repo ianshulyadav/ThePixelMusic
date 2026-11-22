@@ -159,7 +159,18 @@ fun AudioFormatInfoDialog(
         }
     }
 
-    val activeAudioOutput = remember(context) {
+    // Live: re-resolve whenever an output is plugged in or removed while the dialog is open.
+    var audioRouteVersion by androidx.compose.runtime.remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    androidx.compose.runtime.DisposableEffect(context) {
+        val am = context.getSystemService(AudioManager::class.java)
+        val callback = object : android.media.AudioDeviceCallback() {
+            override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) { audioRouteVersion++ }
+            override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>?) { audioRouteVersion++ }
+        }
+        am?.registerAudioDeviceCallback(callback, android.os.Handler(android.os.Looper.getMainLooper()))
+        onDispose { runCatching { am?.unregisterAudioDeviceCallback(callback) } }
+    }
+    val activeAudioOutput = remember(context, audioRouteVersion) {
         resolveActiveAudioDevice(context)
     }
 
@@ -633,30 +644,70 @@ private fun resolveActiveAudioDevice(context: Context): ActiveDeviceResolution {
     val audioManager = context.getSystemService(AudioManager::class.java)
         ?: return ActiveDeviceResolution("Default Output", "Default Output", "speaker", false)
 
+    // Android 13+: ask the audio policy where media is actually routed right now.
+    val routed: AudioDeviceInfo? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        runCatching {
+            val attrs = android.media.AudioAttributes.Builder()
+                .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
+                .build()
+            audioManager.getAudioDevicesForAttributes(attrs).firstOrNull()?.let { attr ->
+                audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).firstOrNull { dev ->
+                    dev.type == attr.type && (attr.address.isEmpty() || dev.address == attr.address)
+                }
+            }
+        }.getOrNull()
+    } else null
+
+    // Older Android (and fallback): the output Android routes media to is the most "external"
+    // one that is connected. Covers every wired/USB/Bluetooth/line type, not just the common ones,
+    // and also trusts the legacy wired/A2DP flags, which some OEM builds (e.g. MIUI) report even
+    // when the wired jack is not listed as a separate device.
+    @Suppress("DEPRECATION")
+    val legacyWired = runCatching { audioManager.isWiredHeadsetOn }.getOrDefault(false)
+    @Suppress("DEPRECATION")
+    val legacyA2dp = runCatching { audioManager.isBluetoothA2dpOn }.getOrDefault(false)
     val devices = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
-    val bestDevice = devices.maxByOrNull { device ->
+    val bestDevice = routed ?: devices.maxByOrNull { device ->
         when (device.type) {
-            AudioDeviceInfo.TYPE_USB_DEVICE, AudioDeviceInfo.TYPE_USB_HEADSET -> 4
-            AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_BLE_HEADSET -> 3
-            AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> 2
+            AudioDeviceInfo.TYPE_USB_DEVICE, AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_USB_ACCESSORY -> 6
+            AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+            AudioDeviceInfo.TYPE_LINE_ANALOG, AudioDeviceInfo.TYPE_LINE_DIGITAL, AudioDeviceInfo.TYPE_AUX_LINE -> 5
+            AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_BLE_HEADSET, AudioDeviceInfo.TYPE_BLE_SPEAKER,
+            AudioDeviceInfo.TYPE_HEARING_AID -> 4
+            AudioDeviceInfo.TYPE_HDMI, AudioDeviceInfo.TYPE_HDMI_ARC, AudioDeviceInfo.TYPE_DOCK -> 3
             AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> 1
             else -> 0
         }
-    } ?: return ActiveDeviceResolution("Default Audio Output", "Default Output", "speaker", false)
+    }
+
+    if (bestDevice == null || bestDevice.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) {
+        if (legacyWired) return ActiveDeviceResolution("Wired Headphones", "Wired Headphones", "wired", false)
+        if (legacyA2dp) return ActiveDeviceResolution("Bluetooth", "Bluetooth", "bluetooth", false)
+        if (bestDevice == null) return ActiveDeviceResolution("Default Audio Output", "Default Output", "speaker", false)
+    }
 
     val isUsb = bestDevice.type == AudioDeviceInfo.TYPE_USB_DEVICE || bestDevice.type == AudioDeviceInfo.TYPE_USB_HEADSET
     val typeLabel = when (bestDevice.type) {
-        AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_BLE_HEADSET -> "Bluetooth"
-        AudioDeviceInfo.TYPE_USB_DEVICE, AudioDeviceInfo.TYPE_USB_HEADSET -> "USB DAC / Audio"
+        AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_BLE_HEADSET, AudioDeviceInfo.TYPE_BLE_SPEAKER,
+        AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "Bluetooth"
+        AudioDeviceInfo.TYPE_HEARING_AID -> "Hearing Aid"
+        AudioDeviceInfo.TYPE_USB_DEVICE, AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_USB_ACCESSORY -> "USB DAC / Audio"
         AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> "Wired Headphones"
+        AudioDeviceInfo.TYPE_LINE_ANALOG, AudioDeviceInfo.TYPE_LINE_DIGITAL, AudioDeviceInfo.TYPE_AUX_LINE -> "Line Out"
+        AudioDeviceInfo.TYPE_HDMI, AudioDeviceInfo.TYPE_HDMI_ARC -> "HDMI"
+        AudioDeviceInfo.TYPE_DOCK -> "Dock"
         AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> "Phone Speaker"
+        AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> "Phone Earpiece"
         else -> "Audio Output"
     }
 
     val categoryTag = when (bestDevice.type) {
-        AudioDeviceInfo.TYPE_USB_DEVICE, AudioDeviceInfo.TYPE_USB_HEADSET -> "usb_dac"
-        AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_BLE_HEADSET -> "bluetooth"
-        AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> "wired"
+        AudioDeviceInfo.TYPE_USB_DEVICE, AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_USB_ACCESSORY -> "usb_dac"
+        AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_BLE_HEADSET, AudioDeviceInfo.TYPE_BLE_SPEAKER,
+        AudioDeviceInfo.TYPE_BLUETOOTH_SCO, AudioDeviceInfo.TYPE_HEARING_AID -> "bluetooth"
+        AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+        AudioDeviceInfo.TYPE_LINE_ANALOG, AudioDeviceInfo.TYPE_LINE_DIGITAL, AudioDeviceInfo.TYPE_AUX_LINE -> "wired"
         else -> "speaker"
     }
 

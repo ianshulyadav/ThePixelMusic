@@ -49,6 +49,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material.icons.rounded.SurroundSound
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -1080,6 +1081,9 @@ internal fun ExpressiveFullPlayerContent(
                 .graphicsLayer { alpha = if (showLyricsSheet) 0f else contentAlpha }
         ) {
             if (kineticStyle) {
+                // Observed state (not the plain providers), so the toolbar highlight updates on tap.
+                val kineticShuffle = androidx.compose.runtime.rememberUpdatedState(isShuffleEnabled)
+                val kineticRepeat = androidx.compose.runtime.rememberUpdatedState(repeatMode)
                 val sleepTimerDisplay by playerViewModel.activeTimerValueDisplay.collectAsStateWithLifecycle()
                 val endOfTrackTimerActive by playerViewModel.isEndOfTrackTimerActive.collectAsStateWithLifecycle()
                 val kineticActions = remember(playerViewModel, onCollapse, onShowQueueClicked, onFavoriteToggle, onPlayPause) {
@@ -1091,6 +1095,11 @@ internal fun ExpressiveFullPlayerContent(
                         onFavoriteToggle = onFavoriteToggle,
                         onAddToPlaylist = { showPlaylistBottomSheet = true },
                         onSleepTimer = { showSleepTimerSheet = true },
+                        onSongInfo = { showSongInfoBottomSheet = true },
+                        onShuffleToggle = onShuffleToggle,
+                        onRepeatToggle = onRepeatToggle,
+                        isShuffleEnabledProvider = { kineticShuffle.value },
+                        repeatModeProvider = { kineticRepeat.value },
                         onArtistClick = { onSongMetadataArtistClick() },
                         onPlayPause = onPlayPause,
                         onNext = { onNextWithOptimisticCarousel() },
@@ -1549,6 +1558,51 @@ internal fun ExpressiveFullPlayerContent(
                                             overflow = TextOverflow.Ellipsis,
                                             color = LocalMaterialTheme.current.onSurface
                                         )
+                                    }
+                                }
+
+                                // Kinetic layout: its toolbar has no sleep timer, so it lives here.
+                                if (kineticStyle) {
+                                    val sleepOn = playerViewModel.activeTimerValueDisplay.collectAsStateWithLifecycle().value != null ||
+                                        playerViewModel.isEndOfTrackTimerActive.collectAsStateWithLifecycle().value
+                                    Surface(
+                                        onClick = {
+                                            showSongInfoBottomSheet = false
+                                            showSleepTimerSheet = true
+                                        },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(88.dp),
+                                        shape = AbsoluteSmoothCornerShape(22.dp, 50),
+                                        color = if (sleepOn) LocalMaterialTheme.current.secondaryContainer
+                                            else LocalMaterialTheme.current.surfaceContainerLow
+                                    ) {
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .padding(horizontal = 4.dp, vertical = 6.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = androidx.compose.material.icons.Icons.Rounded.Timer,
+                                                contentDescription = null,
+                                                tint = LocalMaterialTheme.current.onSurface,
+                                                modifier = Modifier.size(24.dp)
+                                            )
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                text = if (sleepOn) "Sleep timer on" else "Sleep timer",
+                                                fontFamily = GoogleSansRounded,
+                                                fontWeight = FontWeight.SemiBold,
+                                                fontSize = 11.5.sp,
+                                                lineHeight = 13.5.sp,
+                                                textAlign = TextAlign.Center,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis,
+                                                color = LocalMaterialTheme.current.onSurface
+                                            )
+                                        }
                                     }
                                 }
 

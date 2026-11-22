@@ -601,6 +601,25 @@ fun getStaticColorScheme(palette: String, darkTheme: Boolean): androidx.compose.
     }
 }
 
+/**
+ * Like [getStaticColorScheme] but understands the "DYNAMIC" (wallpaper / Material You) palette.
+ * getStaticColorScheme has no entry for it and silently returned the green Sage palette, so any
+ * screen that used it (the player sheet's non-album-art fallback) turned green on a pink phone.
+ */
+fun getPaletteColorScheme(
+    context: android.content.Context,
+    palette: String,
+    darkTheme: Boolean,
+    forceDynamic: Boolean = false
+): androidx.compose.material3.ColorScheme {
+    if ((forceDynamic || palette == "DYNAMIC") && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        runCatching {
+            return if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        }
+    }
+    return getStaticColorScheme(palette, darkTheme)
+}
+
 @Composable
 fun PixelMusicTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),

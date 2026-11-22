@@ -127,7 +127,9 @@ internal fun MiniPlayerContentInternal(
                     model = albumArtModel,
                     contentDescription = "Carátula de ${song.title}",
                     shape = CircleShape,
-                    targetSize = Size(150, 150),
+                    // Same request as the full player's cover, so both share one download and
+                    // one cached bitmap instead of fetching a separate small thumbnail.
+                    targetSize = com.unshoo.pixelmusic.presentation.components.PlayerCoverTargetSize,
                     placeholderResId = R.drawable.ic_music_placeholder,
                     errorResId = R.drawable.ic_music_placeholder,
                     modifier = Modifier

@@ -193,9 +193,34 @@ class PlaybackStateHolder @Inject constructor(
         }
     }
     
+    // Manual skip guard. MediaController shows the next song immediately (masking), but a
+    // stale update from the service can briefly report the song we just left, so the player
+    // flicked new -> old -> new on every skip. For a short window, never switch BACK to it.
+    @Volatile private var skippedFromSongId: String? = null
+    @Volatile private var skipGuardUntilMs: Long = 0L
+
+    private fun markManualSkip() {
+        skippedFromSongId = _stablePlayerState.value.currentSong?.id
+        skipGuardUntilMs = SystemClock.uptimeMillis() + 2_000L
+    }
+
     fun updateStablePlayerState(update: (StablePlayerState) -> StablePlayerState) {
         _stablePlayerState.update { current ->
-            val updated = update(current)
+            val proposed = update(current)
+            val guardId = skippedFromSongId
+            val updated = if (
+                guardId != null &&
+                SystemClock.uptimeMillis() < skipGuardUntilMs &&
+                current.currentSong != null &&
+                current.currentSong.id != guardId &&
+                proposed.currentSong?.id == guardId
+            ) {
+                proposed.copy(
+                    currentSong = current.currentSong,
+                    currentMediaItemIndex = current.currentMediaItemIndex,
+                    totalDuration = current.totalDuration
+                )
+            } else proposed
             // Auto-populate index from MediaController if not explicitly set by the update
             if (updated.currentMediaItemIndex == -1) {
                 val controller = mediaController
@@ -241,6 +266,11 @@ class PlaybackStateHolder @Inject constructor(
     }
 
     fun syncCurrentPositionFromPlayer(mediaId: String?, reportedPositionMs: Long) {
+        val guardId = skippedFromSongId
+        if (guardId != null && SystemClock.uptimeMillis() < skipGuardUntilMs &&
+            mediaId != null && (mediaId == guardId || mediaId.removePrefix("song:") == guardId) &&
+            _stablePlayerState.value.currentSong?.id != guardId
+        ) return // stale position of the song we just skipped away from
         _currentPosition.value = resolveUiPosition(mediaId, reportedPositionMs)
     }
 
@@ -556,6 +586,7 @@ class PlaybackStateHolder @Inject constructor(
             controller.seekTo(0L)
             return
         }
+        markManualSkip()
 
         // Always navigate to the actual previously-played song from the history stack
         if (playHistoryStack.size >= 2) {
@@ -597,6 +628,7 @@ class PlaybackStateHolder @Inject constructor(
         if (castSession != null && castSession.remoteMediaClient != null) {
             castStateHolder.castPlayer?.next()
         } else {
+            markManualSkip()
             // FIX 4: Schedule crossfade on manual skip (next song), like BitChord/Mochy-Music.
             transitionController.onManualSkip()
             val controller = mediaController ?: return

@@ -94,11 +94,20 @@ class ThemeStateHolder @Inject constructor(
         }
     }
 
+    /**
+     * Art URI of the newest non-preload request. Several callers start extractions concurrently
+     * on a song change; a slow one for the PREVIOUS song used to finish last and overwrite the
+     * new song's colours (the player then kept the old/green scheme). Only the newest wins now.
+     */
+    @Volatile
+    private var latestRequestedArtUri: String? = null
+
     suspend fun extractAndGenerateColorScheme(albumArtUriAsUri: Uri?, currentSongUriString: String?, isPreload: Boolean = false) {
         Trace.beginSection("ThemeStateHolder.extractAndGenerateColorScheme")
         try {
             if (albumArtUriAsUri == null) {
                 if (!isPreload && currentSongUriString == null) {
+                    latestRequestedArtUri = null
                     _currentAlbumArtColorSchemePair.value = null
                     _currentAlbumArtUri.value = null
                 }
@@ -106,17 +115,33 @@ class ThemeStateHolder @Inject constructor(
             }
 
             val uriString = albumArtUriAsUri.toString()
+            if (!isPreload && currentSongUriString == uriString) {
+                latestRequestedArtUri = uriString
+            }
             if (!isPreload && _currentAlbumArtUri.value == uriString && _currentAlbumArtColorSchemePair.value != null) {
                 return
             }
             // Use the optimized ColorSchemeProcessor with LRU cache
-            val schemePair = colorSchemeProcessor.getOrGenerateColorScheme(
+            var schemePair = colorSchemeProcessor.getOrGenerateColorScheme(
                 albumArtUri = uriString,
                 paletteStyle = currentPaletteStyle,
                 colorAccuracyLevel = currentPaletteAccuracy
             )
+            if (schemePair == null && !isPreload) {
+                // The art often isn't downloadable yet at the instant the track changes. One
+                // retry (bypassing caches) instead of leaving the player on the fallback palette.
+                kotlinx.coroutines.delay(600L)
+                if (latestRequestedArtUri == uriString) {
+                    schemePair = colorSchemeProcessor.getOrGenerateColorScheme(
+                        albumArtUri = uriString,
+                        paletteStyle = currentPaletteStyle,
+                        colorAccuracyLevel = currentPaletteAccuracy,
+                        forceRefresh = true
+                    )
+                }
+            }
 
-            if (!isPreload && currentSongUriString == uriString) {
+            if (!isPreload && currentSongUriString == uriString && latestRequestedArtUri == uriString) {
                 _currentAlbumArtColorSchemePair.value = schemePair
                 _currentAlbumArtUri.value = uriString
             }

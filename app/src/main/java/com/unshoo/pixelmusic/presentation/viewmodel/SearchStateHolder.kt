@@ -121,7 +121,7 @@ class SearchStateHolder @Inject constructor(
                     val hideVideo = userPreferencesRepository.hideVideoFlow.first()
                     val key = cacheKey(query, currentFilter, source, pureYtMusic, hideVideo)
                     val cached = searchResultCache.get(key)
-                    if (cached != null) {
+                    if (cached != null && cached.isNotEmpty()) {
                         _searchResults.value = cached
                         _isSearching.value = false
                     } else {
@@ -186,7 +186,13 @@ class SearchStateHolder @Inject constructor(
 
                     try {
                         val results = withContext(Dispatchers.IO) {
-                            val remote = searchYouTube(query, currentFilter)
+                            var remote = searchYouTube(query, currentFilter)
+                            if (remote.isEmpty()) {
+                                // One retry: a dropped request or a cold visitor session often
+                                // answers empty the first time.
+                                kotlinx.coroutines.delay(400L)
+                                remote = searchYouTube(query, currentFilter)
+                            }
                             if (remote.isEmpty()) {
                                 val localFallback = musicRepository.searchAllOnce(query, currentFilter)
                                 val shouldFilterVideos = if (currentFilter == SearchFilterType.VIDEOS) false else (pureYtMusic || hideVideo)
@@ -203,7 +209,8 @@ class SearchStateHolder @Inject constructor(
                             val immutable = results.toImmutableList()
                             _searchResults.value = immutable
                             _isSearching.value = false
-                            searchResultCache.put(key, immutable)
+                            // Never cache "nothing": a failed search must not stick for this query.
+                            if (immutable.isNotEmpty()) searchResultCache.put(key, immutable)
 
                             scope?.launch(Dispatchers.IO) {
                                 try {
@@ -252,6 +259,12 @@ class SearchStateHolder @Inject constructor(
      * summary, and had no shared mapper).
      */
     private fun YTItem.toSearchResultItem(filterVideos: Boolean): SearchResultItem? =
+        // One odd item (missing ids/artists) must not throw away the whole result page.
+        runCatching { toSearchResultItemUnsafe(filterVideos) }
+            .onFailure { Timber.w(it, "Skipping unmappable search item ${this.id}") }
+            .getOrNull()
+
+    private fun YTItem.toSearchResultItemUnsafe(filterVideos: Boolean): SearchResultItem? =
         when (this) {
             is SongItem -> {
                 val nativeSong = toNativeSong()
@@ -326,7 +339,9 @@ class SearchStateHolder @Inject constructor(
 
         when (filter) {
             SearchFilterType.ALL -> {
-                val summaryResult = YouTube.searchSummary(query).getOrNull()
+                val summaryResult = YouTube.searchSummary(query)
+                    .onFailure { Timber.w(it, "searchSummary error for '$query'") }
+                    .getOrNull()
                 if (summaryResult != null && summaryResult.summaries.isNotEmpty()) {
                     val filteredSummary = if (shouldFilterVideos) summaryResult.filterVideo(true) else summaryResult
                     fun itemKey(item: SearchResultItem): String = when (item) {
@@ -346,7 +361,13 @@ class SearchStateHolder @Inject constructor(
                             }
                         }
                     }
-                } else {
+                }
+                // The summary can fail, come back in a layout the parser does not know, or hold
+                // only video shelves that "hide videos" removes. Any of those used to end in
+                // "No results" for songs YouTube Music clearly has, so fall back to the Songs
+                // search (and Videos when videos are allowed) whenever nothing came out of it.
+                if (items.isEmpty()) {
+                    if (summaryResult == null) Timber.w("searchSummary failed for '$query', falling back to Songs search")
                     val songsResult = YouTube.search(query, YouTube.SearchFilter.FILTER_SONG).getOrNull()
                     lastContinuationToken = songsResult?.continuation
                     songsResult?.items?.filterIsInstance<SongItem>()
@@ -354,6 +375,13 @@ class SearchStateHolder @Inject constructor(
                         ?.forEach { songItem ->
                             songItem.toSearchResultItem(shouldFilterVideos)?.let { items.add(it) }
                         }
+                }
+                if (items.isEmpty() && !shouldFilterVideos) {
+                    val videosResult = YouTube.search(query, YouTube.SearchFilter.FILTER_VIDEO).getOrNull()
+                    lastContinuationToken = videosResult?.continuation
+                    videosResult?.items?.forEach { ytItem ->
+                        ytItem.toSearchResultItem(false)?.let { items.add(it) }
+                    }
                 }
             }
             SearchFilterType.SONGS -> {

@@ -43,7 +43,14 @@ class CoilBitmapLoader(private val context: Context, private val scope: Coroutin
     override fun loadBitmap(uri: Uri): ListenableFuture<Bitmap> {
         val unwrapped = SharedArtworkContentProvider.unwrapRemoteUrl(uri.toString())
         val data: Any = if (unwrapped != null && (unwrapped.startsWith("http://") || unwrapped.startsWith("https://"))) {
-            unwrapped
+            // Ask for the very URL the in-app player and mini player load, so the lock screen /
+            // notification reuse that download from the disk cache instead of fetching again.
+            val playerSize = com.unshoo.pixelmusic.presentation.components.smartImageRequestSize(
+                com.unshoo.pixelmusic.presentation.components.PlayerCoverTargetSize
+            )
+            (com.unshoo.pixelmusic.presentation.components.smartImageOptimizedModel(
+                unwrapped, playerSize, isThumbnail = false
+            ) as? String) ?: unwrapped
         } else {
             uri
         }

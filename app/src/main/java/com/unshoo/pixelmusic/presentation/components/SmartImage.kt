@@ -96,6 +96,8 @@ val SmartImageIntermediateTargetSize = SmartImageIntermediateBucket
 val SmartImageExploreCardTargetSize = SmartImageExploreCardBucket
 val SmartImageCardTargetSize = SmartImageCardBucket
 val SmartImageLargeCardTargetSize = SmartImageHeroBucket
+/** Request size of the full player's cover; the queue prefetch warms exactly this size. */
+val PlayerCoverTargetSize = Size(1024, 1024)
 private val DefaultSmartImageSize = SmartImageExploreCardTargetSize
 
 /**
@@ -267,48 +269,7 @@ fun SmartImage(
         memoryCacheKey,
         isThumbnail
     ) {
-        val rawUnwrapped = when (model) {
-            is String -> MediaItemBuilder.unwrapArtworkUri(model) ?: model
-            is Uri -> MediaItemBuilder.unwrapArtworkUri(model.toString())?.let(Uri::parse) ?: model
-            else -> model
-        }
-        val optimizedModel = if (rawUnwrapped is String && (rawUnwrapped.contains("googleusercontent.com") || rawUnwrapped.contains("ggpht.com"))) {
-            val unwrappedStr = rawUnwrapped
-            val widthPx = (requestTargetSize.width as? coil.size.Dimension.Pixels)?.px ?: (if (isThumbnail) SmartImageBuckets.LIST_ROW_PX else SmartImageBuckets.CARD_PX)
-            val heightPx = (requestTargetSize.height as? coil.size.Dimension.Pixels)?.px ?: (if (isThumbnail) SmartImageBuckets.LIST_ROW_PX else SmartImageBuckets.CARD_PX)
-            val targetDim = maxOf(widthPx, heightPx)
-            val bucketDim = smartImageBucketForPx(targetDim, isThumbnail)
-            val sizeStr = if (bucketDim >= 1024) {
-                "=w1024-h1024-l90-rj"
-            } else {
-                "=w$bucketDim-h$bucketDim-c-rj"
-            }
-            if (SmartImageRegex.sizeParamRegex.containsMatchIn(unwrappedStr)) {
-                unwrappedStr.replace(SmartImageRegex.sizeParamRegex, sizeStr)
-            } else if (SmartImageRegex.sizeParamRegex2.containsMatchIn(unwrappedStr)) {
-                unwrappedStr.replace(SmartImageRegex.sizeParamRegex2, sizeStr.replace("=", "/"))
-            } else if (unwrappedStr.contains("=")) {
-                unwrappedStr.substringBeforeLast("=") + sizeStr
-            } else {
-                "$unwrappedStr$sizeStr"
-            }
-        } else if (rawUnwrapped is String && (rawUnwrapped.contains("i.ytimg.com") || rawUnwrapped.contains("img.youtube.com"))) {
-            val match = SmartImageRegex.youtubeViRegex.find(rawUnwrapped)
-            if (match != null) {
-                val videoId = match.groupValues[1]
-                if (isThumbnail) {
-                    "https://i.ytimg.com/vi/$videoId/mqdefault.jpg"
-                } else {
-                    "https://i.ytimg.com/vi/$videoId/hqdefault.jpg"
-                }
-            } else {
-                rawUnwrapped
-            }
-        } else if (rawUnwrapped is String && rawUnwrapped.startsWith("/")) {
-            java.io.File(rawUnwrapped)
-        } else {
-            rawUnwrapped
-        }
+        val optimizedModel = smartImageOptimizedModel(model, requestTargetSize, isThumbnail, artRetryNonce)
 
         val isInMemoryCache = if (useMemoryCache && memoryCacheKey != null) {
             context.imageLoader.memoryCache?.get(memoryCacheKey) != null
@@ -379,13 +340,132 @@ val isStableLocalArtwork = when (optimizedModel) {
             onState?.invoke(state)
             if (isRemoteModel && artRetryNonce < SmartImageRetryDelaysMs.size) {
                 val attempt = artRetryNonce
+                // A missing YouTube maxres frame is expected: fall back to hqdefault right away.
+                val missingMaxRes = request.data.toString().endsWith("maxresdefault.jpg")
                 retryScope.launch {
-                    kotlinx.coroutines.delay(SmartImageRetryDelaysMs[attempt])
+                    kotlinx.coroutines.delay(if (missingMaxRes) 0L else SmartImageRetryDelaysMs[attempt])
                     artRetryNonce = attempt + 1
                 }
             }
         }
     )
+}
+
+/**
+ * The exact data SmartImage loads for [model] at [requestTargetSize]: artwork wrappers unwrapped
+ * and Google/YouTube URLs rewritten to the bucket size. Shared with [prefetchSmartImage] so a
+ * prefetch downloads the same URL the UI will ask for (it used to fetch a different URL, so the
+ * player never got a cache hit and every skip waited on the network).
+ */
+internal fun smartImageOptimizedModel(
+    model: Any?,
+    requestTargetSize: Size,
+    isThumbnail: Boolean,
+    artRetryNonce: Int = 0
+): Any? {
+    val rawUnwrapped = when (model) {
+        is String -> MediaItemBuilder.unwrapArtworkUri(model) ?: model
+        is Uri -> MediaItemBuilder.unwrapArtworkUri(model.toString())?.let(Uri::parse) ?: model
+        else -> model
+    }
+    return if (rawUnwrapped is String && (rawUnwrapped.contains("googleusercontent.com") || rawUnwrapped.contains("ggpht.com"))) {
+        val unwrappedStr = rawUnwrapped
+        val widthPx = (requestTargetSize.width as? coil.size.Dimension.Pixels)?.px ?: (if (isThumbnail) SmartImageBuckets.LIST_ROW_PX else SmartImageBuckets.CARD_PX)
+        val heightPx = (requestTargetSize.height as? coil.size.Dimension.Pixels)?.px ?: (if (isThumbnail) SmartImageBuckets.LIST_ROW_PX else SmartImageBuckets.CARD_PX)
+        val targetDim = maxOf(widthPx, heightPx)
+        val bucketDim = smartImageBucketForPx(targetDim, isThumbnail)
+        val sizeStr = if (bucketDim >= 1024) {
+            "=w1024-h1024-l90-rj"
+        } else {
+            "=w$bucketDim-h$bucketDim-c-rj"
+        }
+        if (SmartImageRegex.sizeParamRegex.containsMatchIn(unwrappedStr)) {
+            unwrappedStr.replace(SmartImageRegex.sizeParamRegex, sizeStr)
+        } else if (SmartImageRegex.sizeParamRegex2.containsMatchIn(unwrappedStr)) {
+            unwrappedStr.replace(SmartImageRegex.sizeParamRegex2, sizeStr.replace("=", "/"))
+        } else if (unwrappedStr.contains("=")) {
+            unwrappedStr.substringBeforeLast("=") + sizeStr
+        } else {
+            "$unwrappedStr$sizeStr"
+        }
+    } else if (rawUnwrapped is String && (rawUnwrapped.contains("i.ytimg.com") || rawUnwrapped.contains("img.youtube.com"))) {
+        val match = SmartImageRegex.youtubeViRegex.find(rawUnwrapped)
+        if (match != null) {
+            val videoId = match.groupValues[1]
+            val requestedPx = maxOf(
+                (requestTargetSize.width as? coil.size.Dimension.Pixels)?.px ?: 0,
+                (requestTargetSize.height as? coil.size.Dimension.Pixels)?.px ?: 0
+            )
+            when {
+                isThumbnail -> "https://i.ytimg.com/vi/$videoId/mqdefault.jpg"
+                // Big cards: hqdefault is 480x360 with letterbox bars, so the cropped square
+                // is only ~270px and looks blurry. Try the 1280x720 frame first; not every
+                // video has one, so the error retry falls back to hqdefault.
+                requestedPx >= SmartImageBuckets.CARD_PX && artRetryNonce == 0 ->
+                    "https://i.ytimg.com/vi/$videoId/maxresdefault.jpg"
+                else -> "https://i.ytimg.com/vi/$videoId/hqdefault.jpg"
+            }
+        } else {
+            rawUnwrapped
+        }
+    } else if (rawUnwrapped is String && rawUnwrapped.startsWith("/")) {
+        java.io.File(rawUnwrapped)
+    } else {
+        rawUnwrapped
+    }
+}
+
+/** SmartImage's memory cache key for a String [model] at [requestTargetSize]. */
+internal fun smartImageMemoryCacheKey(model: Any?, requestTargetSize: Size, isThumbnail: Boolean): MemoryCache.Key? {
+    if (model !is String) return null
+    val w = (requestTargetSize.width as? coil.size.Dimension.Pixels)?.px ?: 0
+    val h = (requestTargetSize.height as? coil.size.Dimension.Pixels)?.px ?: 0
+    return if (isThumbnail) {
+        MemoryCache.Key("${model}_thumb_${w}x${h}")
+    } else if (w > 0 && h > 0) {
+        MemoryCache.Key("${model}_${w}x${h}")
+    } else {
+        MemoryCache.Key(model)
+    }
+}
+
+/** Same size SmartImage settles on for a non-thumbnail request of [targetSize]. */
+internal fun smartImageRequestSize(targetSize: Size): Size {
+    val quality = when {
+        SmartImageCache.performanceModeEnabled -> AlbumArtQuality.LOW
+        SmartImageCache.isMeteredNetwork -> SmartImageCache.albumArtQualityMobile
+        else -> SmartImageCache.albumArtQualityWifi
+    }
+    val baseSize = safeAlbumArtTargetSize(targetSize)
+    val limit = if (quality.maxSize > 0) quality.maxSize else MaxSafeAlbumArtDimensionPx
+    val w = (baseSize.width as? coil.size.Dimension.Pixels)?.px?.coerceIn(1, limit) ?: limit
+    val h = (baseSize.height as? coil.size.Dimension.Pixels)?.px?.coerceIn(1, limit) ?: limit
+    val bucket = smartImageBucketForPx(maxOf(w, h), false)
+    return Size(bucket, bucket)
+}
+
+/**
+ * Warms the memory + disk cache with exactly what `SmartImage(model, targetSize = targetSize)`
+ * will request, so showing it later is instant (used for the next songs in the queue).
+ */
+fun prefetchSmartImage(context: android.content.Context, model: String, targetSize: Size) {
+    val size = smartImageRequestSize(targetSize)
+    val data = smartImageOptimizedModel(model, size, isThumbnail = false) ?: return
+    val key = smartImageMemoryCacheKey(model, size, isThumbnail = false)
+    if (key != null && context.imageLoader.memoryCache?.get(key) != null) return
+    val isLocal = (data as? String)?.let { LocalArtworkUri.isLocalArtworkUri(it) } ?: false
+    val request = ImageRequest.Builder(context)
+        .data(data)
+        .size(size)
+        .allowHardware(true)
+        .apply {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) bitmapConfig(Bitmap.Config.HARDWARE)
+            if (key != null) memoryCacheKey(key)
+        }
+        .memoryCachePolicy(CachePolicy.ENABLED)
+        .diskCachePolicy(if (isLocal) CachePolicy.DISABLED else CachePolicy.ENABLED)
+        .build()
+    context.imageLoader.enqueue(request)
 }
 
 private val SmartImageRetryDelaysMs = longArrayOf(2_000L, 5_000L, 12_000L)

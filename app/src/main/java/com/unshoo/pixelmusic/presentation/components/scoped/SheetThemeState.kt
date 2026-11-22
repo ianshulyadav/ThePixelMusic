@@ -64,6 +64,7 @@ internal fun rememberSheetThemeState(
     systemColorScheme: ColorScheme,
     colorPalette: String = "SAGE"
 ): SheetThemeState {
+    val themeContext = androidx.compose.ui.platform.LocalContext.current
     val isAlbumArtTheme = remember(playerThemePreference) {
         playerThemePreference == ThemePreference.ALBUM_ART
     }
@@ -144,17 +145,27 @@ internal fun rememberSheetThemeState(
         preparingSongId != null && (currentSong == null || preparingSongId == currentSong.id)
     }
 
-    val systemColorSchemeForFull = remember(resolveIsDarkForFull, colorPalette, systemColorScheme) {
+    val systemColorSchemeForFull = remember(resolveIsDarkForFull, colorPalette, playerThemePreference, systemColorScheme) {
         try {
-            com.unshoo.pixelmusic.ui.theme.getStaticColorScheme(colorPalette, resolveIsDarkForFull)
+            com.unshoo.pixelmusic.ui.theme.getPaletteColorScheme(
+                context = themeContext,
+                palette = colorPalette,
+                darkTheme = resolveIsDarkForFull,
+                forceDynamic = playerThemePreference == ThemePreference.DYNAMIC
+            )
         } catch (e: Exception) {
             systemColorScheme
         }
     }
 
-    val systemColorSchemeForMini = remember(resolveIsDarkForMini, colorPalette, systemColorScheme) {
+    val systemColorSchemeForMini = remember(resolveIsDarkForMini, colorPalette, playerThemePreference, systemColorScheme) {
         try {
-            com.unshoo.pixelmusic.ui.theme.getStaticColorScheme(colorPalette, resolveIsDarkForMini)
+            com.unshoo.pixelmusic.ui.theme.getPaletteColorScheme(
+                context = themeContext,
+                palette = colorPalette,
+                darkTheme = resolveIsDarkForMini,
+                forceDynamic = playerThemePreference == ThemePreference.DYNAMIC
+            )
         } catch (e: Exception) {
             systemColorScheme
         }

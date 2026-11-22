@@ -135,7 +135,7 @@ fun QuickPicksSection(
     onSeeAllClick: (() -> Unit)? = null,
     currentSongId: String? = null,
     displayMode: QuickPicksDisplayMode = QuickPicksDisplayMode.LIST,
-    cardSize: Dp = 140.dp,
+    cardSize: Dp = 150.dp,
     onPlayNext: ((Song) -> Unit)? = null,
     onAddToQueue: ((Song) -> Unit)? = null,
     onDownload: ((Song) -> Unit)? = null,
