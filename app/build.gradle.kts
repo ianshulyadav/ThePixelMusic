@@ -194,6 +194,11 @@ android {
             initWith(getByName("release"))
             matchingFallbacks += listOf("release")
             isDebuggable = false
+            // Profiling build: sign with the debug key when the release keystore isn't present,
+            // so it can be installed on test devices.
+            if (!keystoreExists) {
+                signingConfig = signingConfigs.getByName("debug")
+            }
         }
     }
 

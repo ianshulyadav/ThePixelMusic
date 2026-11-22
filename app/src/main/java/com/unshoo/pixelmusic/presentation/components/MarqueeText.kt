@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
@@ -76,6 +77,17 @@ fun AutoScrollingText(
     gradientWidth: Dp = 24.dp,
     canScroll: Boolean = true
 ) {
+    // An endless marquee re-renders (through an offscreen layer) on every vsync for as
+    // long as it is on screen - e.g. the mini player title, even while paused. Low-end
+    // devices scroll a couple of times and then settle so the UI can go idle.
+    val context = LocalContext.current
+    val marqueeIterations = remember {
+        if (com.unshoo.pixelmusic.utils.DevicePerformanceUtils.isLowEndDevice(context)) {
+            LOW_END_MARQUEE_ITERATIONS
+        } else {
+            Int.MAX_VALUE
+        }
+    }
     Box(
         modifier = modifier
             .clipToBounds()
@@ -105,7 +117,7 @@ fun AutoScrollingText(
                 .then(
                     if (canScroll) {
                         Modifier.basicMarquee(
-                            iterations = Int.MAX_VALUE,
+                            iterations = marqueeIterations,
                             spacing = MarqueeSpacing(gradientWidth + 6.dp),
                             velocity = 25.dp,
                             initialDelayMillis = 2000
@@ -115,3 +127,5 @@ fun AutoScrollingText(
         )
     }
 }
+
+private const val LOW_END_MARQUEE_ITERATIONS = 2

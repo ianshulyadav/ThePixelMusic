@@ -53,6 +53,9 @@ object UiEffectPreferenceKeys {
 
     /** Now Playing layout: false = Classic (unified sheet player, default), true = Expressive. */
     val NOW_PLAYING_EXPRESSIVE_LAYOUT: Preferences.Key<Boolean> = booleanPreferencesKey("now_playing_expressive_layout")
+
+    /** Now Playing layout: true = Kinetic (wins over the Expressive flag). */
+    val NOW_PLAYING_KINETIC_LAYOUT: Preferences.Key<Boolean> = booleanPreferencesKey("now_playing_kinetic_layout")
 }
 
 @Composable

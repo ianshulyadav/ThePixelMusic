@@ -385,7 +385,12 @@ fun LibraryAlbumsTab(
                                         )
                                     ),
                                 state = gridState,
-                                columns = GridCells.Fixed(2),
+                                // Landscape: as many ~160dp columns as fit instead of two very wide ones.
+                                columns = if (com.unshoo.pixelmusic.presentation.components.LocalAppWindowLayout.current.isLandscape) {
+                                    GridCells.Adaptive(minSize = 160.dp)
+                                } else {
+                                    GridCells.Fixed(2)
+                                },
                                 contentPadding = PaddingValues(bottom = bottomBarHeight + MiniPlayerHeight + ListExtraBottomGap + 4.dp),
                                 verticalArrangement = Arrangement.spacedBy(8.dp),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)

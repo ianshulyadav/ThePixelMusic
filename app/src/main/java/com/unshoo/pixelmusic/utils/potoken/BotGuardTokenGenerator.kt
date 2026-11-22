@@ -469,16 +469,18 @@ object BotGuardTokenGenerator {
 
             scope.launch(exceptionHandler) {
                 try {
-                    val response = withContext(Dispatchers.IO) {
-                        call.execute()
-                    }
-                    response.use { resp ->
-                        if (resp.code != 200) {
-                            signalError(PoTokenException("BotGuard HTTP ${resp.code} from $url"))
-                        } else {
-                            val body = resp.body.string()
-                            onSuccess(body)
+                    // Read the body on IO as well: execute() only returns the headers, and
+                    // ResponseBody.string() blocks on the socket. Reading it on the main
+                    // thread caused 5 s input ANRs on slow connections / low-end devices.
+                    val (code, body) = withContext(Dispatchers.IO) {
+                        call.execute().use { resp ->
+                            resp.code to (if (resp.code == 200) resp.body.string() else null)
                         }
+                    }
+                    if (code != 200 || body == null) {
+                        signalError(PoTokenException("BotGuard HTTP $code from $url"))
+                    } else {
+                        onSuccess(body)
                     }
                 } catch (e: Throwable) {
                     if (e is kotlinx.coroutines.CancellationException) throw e

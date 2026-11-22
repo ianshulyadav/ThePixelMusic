@@ -44,6 +44,7 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -113,6 +114,9 @@ fun UnifiedPlayerSheetV2(
     sheetCollapsedTargetY: Float,
     containerHeight: Dp,
     collapsedStateHorizontalPadding: Dp = 12.dp,
+    /** Landscape: explicit start/end insets of the collapsed mini player (docks it bottom-end). */
+    collapsedStartPaddingOverride: Dp? = null,
+    collapsedEndPaddingOverride: Dp? = null,
     navController: NavHostController,
     hideMiniPlayer: Boolean = false,
     isNavBarHidden: Boolean = false
@@ -369,6 +373,8 @@ fun UnifiedPlayerSheetV2(
     val sheetVisualState = rememberSheetVisualState(
         showPlayerContentArea = showPlayerContentArea,
         collapsedStateHorizontalPadding = collapsedStateHorizontalPadding,
+        collapsedStartPaddingOverride = collapsedStartPaddingOverride,
+        collapsedEndPaddingOverride = collapsedEndPaddingOverride,
         predictiveBackCollapseProgress = predictiveBackCollapseProgress,
         predictiveBackSwipeEdge = predictiveBackSwipeEdge,
         currentSheetContentState = currentSheetContentState,
@@ -618,13 +624,22 @@ fun UnifiedPlayerSheetV2(
             (infrequentPlayerState.currentSong?.title ?: "")
     }
 
-    Surface(
+    // Portrait: the full-width sheet blocks touches below the mini player's top edge (the
+    // same as the transparent Surface it used to be). Landscape docks a narrow mini player at
+    // the bottom end, so touches beside it must reach the navigation rail and the screen.
+    val sheetBlocksTouchesOutsideCard = collapsedStartPaddingOverride == null && collapsedEndPaddingOverride == null
+    Box(
         modifier = Modifier
             .fillMaxWidth()
             .offset { IntOffset(0, visualSheetTranslationYProvider().roundToInt()) }
-            .height(containerHeight),
-        shadowElevation = 0.dp,
-        color = Color.Transparent
+            .height(containerHeight)
+            .then(
+                if (sheetBlocksTouchesOutsideCard) {
+                    Modifier.pointerInput(Unit) {}
+                } else {
+                    Modifier
+                }
+            )
     ) {
         Box(
             modifier = Modifier

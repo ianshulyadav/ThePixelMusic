@@ -292,17 +292,30 @@ object AppModule {
 
         val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
         val isLowRamDevice = activityManager?.isLowRamDevice == true
+        // Budget phones (<= 4 cores / ~2 GB RAM / 60 Hz) rarely set the OEM low_ram flag,
+        // so isLowRamDevice alone left them on the flagship image settings.
+        val isLowEndDevice = isLowRamDevice ||
+            com.unshoo.pixelmusic.utils.DevicePerformanceUtils.isLowEndDevice(context)
 
-        // Balanced RAM usage threshold: 15% heap memory cache on standard devices, 10% on low RAM devices.
-        // Paired with a 250MB local disk cache, this keeps fast image access without eating excessive JVM heap.
-        val cachePercent = if (isLowRamDevice) 0.10 else 0.15
+        // Coil sizes the memory cache as a percentage of the app's memoryClass (often 256 MB
+        // even on 2 GB phones), so 15% is ~38 MB of decoded artwork. Low-end devices keep a
+        // much smaller cache to leave room for the rest of the system.
+        val cachePercent = when {
+            isLowRamDevice -> 0.06
+            isLowEndDevice -> 0.08
+            else -> 0.15
+        }
 
         return ImageLoader.Builder(context)
             .okHttpClient(imageOkHttpClient)
-            .dispatcher(Dispatchers.IO.limitedParallelism(4))
+            // Fewer concurrent decodes on quad-core devices so artwork loading doesn't
+            // starve the UI and render threads while scrolling.
+            .dispatcher(Dispatchers.IO.limitedParallelism(if (isLowEndDevice) 2 else 4))
             .allowHardware(!isLowRamDevice)
             .allowRgb565(isLowRamDevice)
-            .crossfade(200)
+            // Crossfade draws both the placeholder and the image for 200 ms per cell;
+            // skip it on low-end devices where list scrolling is fill-rate bound.
+            .crossfade(if (isLowEndDevice) 0 else 200)
             .bitmapConfig(
                 if (isLowRamDevice) {
                     android.graphics.Bitmap.Config.RGB_565
@@ -320,7 +333,7 @@ object AppModule {
             .diskCache {
                 DiskCache.Builder()
                     .directory(context.cacheDir.resolve("image_cache"))
-                    .maxSizeBytes(if (isLowRamDevice) 100L * 1024 * 1024 else 250L * 1024 * 1024)
+                    .maxSizeBytes(if (isLowEndDevice) 100L * 1024 * 1024 else 250L * 1024 * 1024)
                     .build()
             }
             .respectCacheHeaders(false)

@@ -212,6 +212,16 @@ object DevicePerformanceUtils {
      */
     fun isLowEndDevice(context: Context?): Boolean {
         if (context == null) return false
+        cachedIsLowEnd?.let { return it }
+        return computeIsLowEndDevice(context).also { cachedIsLowEnd = it }
+    }
+
+    // Hardware tier never changes at runtime; cache it so hot paths
+    // (preference defaults, image loader, workers) skip the binder calls.
+    @Volatile
+    private var cachedIsLowEnd: Boolean? = null
+
+    private fun computeIsLowEndDevice(context: Context): Boolean {
         return try {
             val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
             if (activityManager?.isLowRamDevice == true) {

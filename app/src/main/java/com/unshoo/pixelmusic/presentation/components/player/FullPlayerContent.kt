@@ -21,6 +21,8 @@ import kotlinx.collections.immutable.ImmutableList
  * Now Playing entry point. Picks the layout chosen in Settings › Appearance › Now Playing layout:
  *  - Classic (default): the unified-sheet full player ([ClassicFullPlayerContent]).
  *  - Expressive: full-bleed cover with expressive controls ([ExpressiveFullPlayerContent]).
+ *  - Kinetic: art on a turning blob with pill controls ([KineticPlayerLayout]), hosted by
+ *    [ExpressiveFullPlayerContent] so it shares its sheets and dialogs.
  * Both share the exact same parameters so switching is instant and state-safe.
  */
 @androidx.annotation.OptIn(UnstableApi::class)
@@ -70,6 +72,11 @@ fun FullPlayerContent(
         key = UiEffectPreferenceKeys.NOW_PLAYING_EXPRESSIVE_LAYOUT,
         default = false
     )
+    val useKineticLayout by rememberBooleanPreference(
+        context = LocalContext.current,
+        key = UiEffectPreferenceKeys.NOW_PLAYING_KINETIC_LAYOUT,
+        default = false
+    )
 
     // Full screen mode: hide status + navigation bars while the full player is open.
     // BUGFIX: this lived only in the Expressive layout, so with the default (Classic) layout the
@@ -91,8 +98,9 @@ fun FullPlayerContent(
         }
     }
     com.unshoo.pixelmusic.presentation.components.FullscreenSystemBarsEffect(enabled = fullscreenActive)
-    if (useExpressiveLayout) {
+    if (useExpressiveLayout || useKineticLayout) {
         ExpressiveFullPlayerContent(
+            kineticStyle = useKineticLayout,
             currentSong = currentSong,
             currentPlaybackQueue = currentPlaybackQueue,
             currentQueueSourceName = currentQueueSourceName,

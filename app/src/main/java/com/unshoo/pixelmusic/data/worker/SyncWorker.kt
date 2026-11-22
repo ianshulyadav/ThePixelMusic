@@ -102,8 +102,10 @@ constructor(
 ) : CoroutineWorker(appContext, workerParams) {
 
     private val contentResolver: ContentResolver = appContext.contentResolver
+    // Use the broader low-end heuristic (RAM, cores, 60 Hz panel), not just the
+    // OEM low_ram flag, which most budget phones (e.g. 2 GB MediaTek devices) never set.
     private val isLowRamDevice: Boolean =
-        (appContext.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager)?.isLowRamDevice == true
+        com.unshoo.pixelmusic.utils.DevicePerformanceUtils.isLowEndDevice(appContext)
     private var minSongDurationMs: Int = 10000
     private var minTracksPerAlbum: Int = 1
 

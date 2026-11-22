@@ -997,6 +997,17 @@ class DualPlayerEngine @Inject constructor(
                 http = cause as? androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException
                 cause = cause.cause
             }
+            // Every attempt already ran the full resolver chain (cache, Saavn, all YouTube
+            // clients, up to LOAD_THREAD_RESOLVE_AWAIT_MS). Retrying that forever is what kept
+            // unplayable tracks "buffering" indefinitely; after one retry hand the error to the
+            // player so MusicService's bounded recovery can retry/skip/pause.
+            var unresolvedCause: Throwable? = loadErrorInfo.exception
+            while (unresolvedCause != null && unresolvedCause !is UnresolvableStreamException) {
+                unresolvedCause = unresolvedCause.cause
+            }
+            if (unresolvedCause != null) {
+                return if (loadErrorInfo.errorCount <= 1) 1_000L else C.TIME_UNSET
+            }
             if (http != null && http.responseCode in REFUSED_STREAM_CODES) {
                 markStreamUrlDead(http.dataSpec.uri.toString())
                 val originalSpec = loadErrorInfo.loadEventInfo.dataSpec
@@ -2094,7 +2105,7 @@ class DualPlayerEngine @Inject constructor(
                             e, "resolveDataSpec: cooperative resolve failed for %s", originalUri
                         )
                     }
-                    throw java.io.IOException(
+                    throw UnresolvableStreamException(
                         "Stream URL could not be resolved for $scheme://…"
                     )
                 }
@@ -3438,3 +3449,6 @@ class DualPlayerEngine @Inject constructor(
         isReleased = true
     }
 }
+
+/** No playable stream could be resolved for a source (as opposed to a transient network error). */
+internal class UnresolvableStreamException(message: String) : java.io.IOException(message)

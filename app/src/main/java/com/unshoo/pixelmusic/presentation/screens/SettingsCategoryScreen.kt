@@ -943,19 +943,31 @@ fun SettingsCategoryScreen(
                                     val expressiveLayout by com.unshoo.pixelmusic.presentation.components.rememberBooleanPreference(
                                         ctx, com.unshoo.pixelmusic.presentation.components.UiEffectPreferenceKeys.NOW_PLAYING_EXPRESSIVE_LAYOUT, false
                                     )
+                                    val kineticLayout by com.unshoo.pixelmusic.presentation.components.rememberBooleanPreference(
+                                        ctx, com.unshoo.pixelmusic.presentation.components.UiEffectPreferenceKeys.NOW_PLAYING_KINETIC_LAYOUT, false
+                                    )
                                     ThemeSelectorItem(
                                         label = stringResource(R.string.setcat_now_playing_layout_label),
                                         description = stringResource(R.string.setcat_now_playing_layout_desc),
                                         options = mapOf(
                                             "classic" to stringResource(R.string.setcat_now_playing_layout_classic),
-                                            "expressive" to stringResource(R.string.setcat_now_playing_layout_expressive)
+                                            "expressive" to stringResource(R.string.setcat_now_playing_layout_expressive),
+                                            "kinetic" to stringResource(R.string.setcat_now_playing_layout_kinetic)
                                         ),
-                                        selectedKey = if (expressiveLayout) "expressive" else "classic",
+                                        selectedKey = when {
+                                            kineticLayout -> "kinetic"
+                                            expressiveLayout -> "expressive"
+                                            else -> "classic"
+                                        },
                                         onSelectionChanged = { key ->
                                             prefScope.launch {
                                                 ctx.applicationContext.setBooleanPreference(
                                                     com.unshoo.pixelmusic.presentation.components.UiEffectPreferenceKeys.NOW_PLAYING_EXPRESSIVE_LAYOUT,
                                                     key == "expressive"
+                                                )
+                                                ctx.applicationContext.setBooleanPreference(
+                                                    com.unshoo.pixelmusic.presentation.components.UiEffectPreferenceKeys.NOW_PLAYING_KINETIC_LAYOUT,
+                                                    key == "kinetic"
                                                 )
                                             }
                                         },

@@ -53,6 +53,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.calculateStartPadding
+import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.CircularWavyProgressIndicator
 import androidx.compose.material3.ContainedLoadingIndicator
@@ -836,6 +844,9 @@ class MainActivity : ComponentActivity() {
             }
         }
         var isSearchBarActive by remember { mutableStateOf(false) }
+        // Landscape: the bottom bar becomes a navigation rail on the start edge.
+        val windowLayout = com.unshoo.pixelmusic.presentation.components.rememberAppWindowLayout()
+        val useNavigationRail = windowLayout.useNavigationRail
 
         // Positive whitelist. The nav bar is shown ONLY on the four root tabs;
         // everywhere else it is hidden. The previous version enumerated 28 hidden
@@ -849,11 +860,12 @@ class MainActivity : ComponentActivity() {
                 Screen.Library.route
             )
         }
-        val shouldHideNavigationBar by remember(currentRoute, isSearchBarActive) {
+        val shouldHideNavigationBar by remember(currentRoute, isSearchBarActive, useNavigationRail) {
             derivedStateOf {
                 when {
                     currentRoute == null -> false
-                    currentRoute == Screen.Search.route && isSearchBarActive -> true
+                    // The rail doesn't compete with the keyboard for height, so it stays.
+                    currentRoute == Screen.Search.route && isSearchBarActive && !useNavigationRail -> true
                     else -> currentRoute !in mainRoutesWithNavigationBar
                 }
             }
@@ -890,6 +902,9 @@ class MainActivity : ComponentActivity() {
         val systemNavBarInset = sanitizeNavigationBarBottomInset(
             WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
         )
+        val landscapeHorizontalInsets = WindowInsets.displayCutout
+            .union(WindowInsets.navigationBars)
+            .only(WindowInsetsSides.Horizontal)
 
         LaunchedEffect(hapticsEnabled, rootView) {
             rootView.isHapticFeedbackEnabled = hapticsEnabled
@@ -944,9 +959,12 @@ class MainActivity : ComponentActivity() {
         val visibleNavBarOccupiedHeight by remember(navBarOccupiedHeight, navBarVisibilityProgress) {
             derivedStateOf { navBarOccupiedHeight * navBarVisibilityProgress }
         }
-        val miniPlayerBottomMargin by remember(systemNavBarInset, visibleNavBarOccupiedHeight) {
+        val miniPlayerBottomMargin by remember(systemNavBarInset, visibleNavBarOccupiedHeight, useNavigationRail) {
             derivedStateOf {
-                if (visibleNavBarOccupiedHeight > systemNavBarInset) {
+                if (useNavigationRail) {
+                    // The rail lives on the side, so the mini player only clears the system bar.
+                    systemNavBarInset
+                } else if (visibleNavBarOccupiedHeight > systemNavBarInset) {
                     visibleNavBarOccupiedHeight
                 } else {
                     systemNavBarInset
@@ -1029,7 +1047,8 @@ class MainActivity : ComponentActivity() {
         CompositionLocalProvider(
             LocalAppHapticsConfig provides appHapticsConfig,
             LocalHapticFeedback provides scopedHapticFeedback,
-            com.unshoo.pixelmusic.presentation.components.LocalBackdropSource provides mainBackdropSource
+            com.unshoo.pixelmusic.presentation.components.LocalBackdropSource provides mainBackdropSource,
+            com.unshoo.pixelmusic.presentation.components.LocalAppWindowLayout provides windowLayout
         ) {
             AppSidebarDrawer(
                 drawerState = drawerState,
@@ -1053,7 +1072,7 @@ class MainActivity : ComponentActivity() {
                 Scaffold(
                 modifier = Modifier.fillMaxSize(),
                 bottomBar = {
-                    if (shouldRenderNavigationBar) {
+                    if (shouldRenderNavigationBar && !useNavigationRail) {
                         // BUGFIX (was: collected the full PlayerUiState
                         // data class to read one Boolean field):
                         // PlayerUiState is a 50-field data class. Even
@@ -1312,6 +1331,17 @@ class MainActivity : ComponentActivity() {
                                         Modifier.navGlassSource(mainBackdropSource, navBarFrostedBlur)
                                     }
                                 )
+                                .then(
+                                    // Landscape: keep screens clear of the camera cutout and a
+                                    // side-mounted 3-button bar. Portrait has no horizontal insets.
+                                    if (windowLayout.isLandscape) {
+                                        Modifier
+                                            .background(MaterialTheme.colorScheme.background)
+                                            .windowInsetsPadding(landscapeHorizontalInsets)
+                                    } else {
+                                        Modifier
+                                    }
+                                )
                         ) {
                             AppNavigation(
                                 playerViewModel = playerViewModel,
@@ -1322,8 +1352,30 @@ class MainActivity : ComponentActivity() {
                                 onOpenSidebar = { scope.launch { drawerState.open() } }
                             )
 
+                            if (useNavigationRail && shouldRenderNavigationBar) {
+                                val onRailSearchDoubleTap = remember(playerViewModel) {
+                                    { playerViewModel.onSearchNavIconDoubleTapped() }
+                                }
+                                com.unshoo.pixelmusic.presentation.components.AppNavigationRail(
+                                    navController = navController,
+                                    navItems = commonNavItems,
+                                    currentRoute = currentRoute,
+                                    onSearchIconDoubleTap = onRailSearchDoubleTap,
+                                    modifier = Modifier
+                                        .align(Alignment.CenterStart)
+                                        .windowInsetsPadding(
+                                            WindowInsets.systemBars.only(WindowInsetsSides.Vertical)
+                                        )
+                                        .graphicsLayer {
+                                            val hidden = 1f - navBarVisibilityProgress
+                                            translationX = -size.width * hidden
+                                            alpha = navBarVisibilityProgress
+                                        }
+                                )
+                            }
+
                             // Smoke overlay directly above scrolling content, fading up from navbar
-                            if (shouldRenderNavigationBar) {
+                            if (shouldRenderNavigationBar && !useNavigationRail) {
                                 // Floating pill sits above the content, so give it a taller,
                                 // softer edge-to-edge fade under and around it.
                                 val smokeHeight = remember(navBarOccupiedHeight, systemNavBarInset, navBarStyle) {
@@ -1392,14 +1444,35 @@ class MainActivity : ComponentActivity() {
                             )
                         }
 
+                        // Landscape: the mini player floats at the bottom end with a fixed width
+                        // instead of spanning the whole (very wide) window.
+                        val layoutDirection = androidx.compose.ui.platform.LocalLayoutDirection.current
+                        val safeStart = landscapeHorizontalInsets.asPaddingValues().calculateStartPadding(layoutDirection)
+                        val safeEnd = landscapeHorizontalInsets.asPaddingValues().calculateEndPadding(layoutDirection)
+                        val landscapeMiniPadding: Pair<androidx.compose.ui.unit.Dp, androidx.compose.ui.unit.Dp>? =
+                            if (useNavigationRail) {
+                                val endPad = safeEnd + 16.dp
+                                val available = this.maxWidth - safeStart -
+                                    com.unshoo.pixelmusic.presentation.components.NavigationRailWidth - endPad
+                                val miniWidth = minOf(
+                                    com.unshoo.pixelmusic.presentation.components.LandscapeMiniPlayerMaxWidth,
+                                    available
+                                ).coerceAtLeast(0.dp)
+                                (this.maxWidth - endPad - miniWidth) to endPad
+                            } else {
+                                null
+                            }
+
                         UnifiedPlayerSheetV2(
                             playerViewModel = playerViewModel,
                             sheetCollapsedTargetY = sheetCollapsedTargetY,
                             collapsedStateHorizontalPadding = horizontalPadding,
+                            collapsedStartPaddingOverride = landscapeMiniPadding?.first,
+                            collapsedEndPaddingOverride = landscapeMiniPadding?.second,
                             hideMiniPlayer = shouldHideMiniPlayer,
                             containerHeight = containerHeight,
                             navController = navController,
-                            isNavBarHidden = isNavBarEffectivelyHidden
+                            isNavBarHidden = isNavBarEffectivelyHidden || useNavigationRail
                         )
 
                         val dismissUndoBarSlice by remember {
@@ -1423,10 +1496,17 @@ class MainActivity : ComponentActivity() {
                             visible = dismissUndoBarSlice.isVisible,
                             enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
                             exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
-                            modifier = Modifier
-                                .align(Alignment.BottomCenter)
-                                .padding(bottom = innerPadding.calculateBottomPadding() + MiniPlayerBottomSpacer)
-                                .padding(horizontal = horizontalPadding)
+                            modifier = if (landscapeMiniPadding != null) {
+                                Modifier
+                                    .align(Alignment.BottomStart)
+                                    .padding(bottom = miniPlayerBottomMargin + MiniPlayerBottomSpacer)
+                                    .padding(start = landscapeMiniPadding.first, end = landscapeMiniPadding.second)
+                            } else {
+                                Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .padding(bottom = innerPadding.calculateBottomPadding() + MiniPlayerBottomSpacer)
+                                    .padding(horizontal = horizontalPadding)
+                            }
                         ) {
                             DismissUndoBar(
                                 modifier = Modifier

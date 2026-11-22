@@ -5,7 +5,12 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.Alignment
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -162,7 +167,24 @@ fun ScreenWrapper(
             }
             .background(MaterialTheme.colorScheme.background)
     ) {
-        content()
+        // Landscape: main tabs leave room for the navigation rail; settings-style screens
+        // become a centred readable column. The Box is always present (only its modifier
+        // changes) so rotating doesn't reset the screen's remembered state.
+        val windowLayout = LocalAppWindowLayout.current
+        val contentModifier = when {
+            windowLayout.useNavigationRail && isMainRootScreen ->
+                Modifier.fillMaxSize().padding(start = windowLayout.navigationRailInset)
+            windowLayout.isLandscape && isReadableWidthRoute(myRoute) ->
+                Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxHeight()
+                    .widthIn(max = LandscapeReadableContentWidth)
+                    .fillMaxWidth()
+            else -> Modifier.fillMaxSize()
+        }
+        Box(modifier = contentModifier) {
+            content()
+        }
 
         // Dim Layer Overlay
         // Always composed with alpha-driven visibility instead of a conditional node.
@@ -196,4 +218,29 @@ fun ScreenWrapper(
             )
         }
     }
+}
+
+/** Settings-style routes that read better as a centred column in landscape. */
+private val readableWidthRoutePrefixes = listOf(
+    "settings",
+    "palette_style_settings",
+    "experimental_settings",
+    "customize_home",
+    "blur_settings",
+    "about",
+    "licenses",
+    "artist_settings",
+    "delimiter_config",
+    "word_delimiter_config",
+    "filter_keywords_config",
+    "device_capabilities",
+    "smart_storage",
+    "cloud_downloads",
+    "nav_bar_corner_radius",
+)
+
+private fun isReadableWidthRoute(route: String?): Boolean {
+    if (route == null) return false
+    val base = route.substringBefore('/').substringBefore('?')
+    return readableWidthRoutePrefixes.any { base == it || base.startsWith(it + "_") }
 }

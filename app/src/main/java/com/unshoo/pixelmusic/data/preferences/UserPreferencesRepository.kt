@@ -568,7 +568,8 @@ constructor(
 
     val lyricsScreenBlurEnabledFlow: Flow<Boolean> =
         dataStore.data.map { preferences ->
-            preferences[PreferencesKeys.LYRICS_SCREEN_BLUR_ENABLED] ?: true
+            preferences[PreferencesKeys.LYRICS_SCREEN_BLUR_ENABLED]
+                ?: !com.unshoo.pixelmusic.utils.DevicePerformanceUtils.isLowEndDevice(context)
         }.distinctUntilChanged()
 
     suspend fun setLyricsScreenBlurEnabled(enabled: Boolean) {

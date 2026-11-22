@@ -492,6 +492,7 @@
     <string name="setcat_now_playing_layout_desc">Choose the full player layout style</string>
     <string name="setcat_now_playing_layout_classic">Default</string>
     <string name="setcat_now_playing_layout_expressive">Expressive</string>
+    <string name="setcat_now_playing_layout_kinetic">Kinetic</string>
     <string name="setcat_fullscreen_player_title">Full screen player</string>
     <string name="setcat_fullscreen_player_subtitle">Hide the status bar while the full player is open. Swipe down from the top to show it.</string>
     <string name="home_most_played_title">Most listened</string>

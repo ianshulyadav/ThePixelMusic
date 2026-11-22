@@ -185,11 +185,7 @@ fun BrowseDiscoverSection(
             modifier = Modifier.padding(start = 2.dp, bottom = 0.dp)
         )
 
-        // Row 1: New releases + Charts
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
+        val card0: @Composable (Modifier) -> Unit = { cardModifier ->
             BrowseDiscoverCard(
                 title = "New releases",
                 subtitle = "Fresh albums & singles",
@@ -198,9 +194,10 @@ fun BrowseDiscoverSection(
                 badgeIconColor = newReleasesBadgeIcon,
                 cardBgGradient = newReleasesGradient,
                 onClick = onNewReleasesClick,
-                modifier = Modifier.weight(1f)
+                modifier = cardModifier
             )
-
+        }
+        val card1: @Composable (Modifier) -> Unit = { cardModifier ->
             BrowseDiscoverCard(
                 title = "Charts",
                 subtitle = "Top trending tracks",
@@ -209,15 +206,10 @@ fun BrowseDiscoverSection(
                 badgeIconColor = chartsBadgeIcon,
                 cardBgGradient = chartsGradient,
                 onClick = onChartsClick,
-                modifier = Modifier.weight(1f)
+                modifier = cardModifier
             )
         }
-
-        // Row 2: Moods & genres + Podcasts
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
+        val card2: @Composable (Modifier) -> Unit = { cardModifier ->
             BrowseDiscoverCard(
                 title = "Moods & genres",
                 subtitle = "Vibes for every mood",
@@ -226,9 +218,10 @@ fun BrowseDiscoverSection(
                 badgeIconColor = moodsBadgeIcon,
                 cardBgGradient = moodsGradient,
                 onClick = onMoodsGenresClick,
-                modifier = Modifier.weight(1f)
+                modifier = cardModifier
             )
-
+        }
+        val card3: @Composable (Modifier) -> Unit = { cardModifier ->
             BrowseDiscoverCard(
                 title = "Podcasts",
                 subtitle = "Shows & episodes",
@@ -237,8 +230,39 @@ fun BrowseDiscoverSection(
                 badgeIconColor = podcastsBadgeIcon,
                 cardBgGradient = podcastsGradient,
                 onClick = onPodcastsClick,
-                modifier = Modifier.weight(1f)
+                modifier = cardModifier
             )
+        }
+
+        // Landscape has the width for all four cards in one row (and not the height for two).
+        if (com.unshoo.pixelmusic.presentation.components.LocalAppWindowLayout.current.isLandscape) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                card0(Modifier.weight(1f))
+                card1(Modifier.weight(1f))
+                card2(Modifier.weight(1f))
+                card3(Modifier.weight(1f))
+            }
+        } else {
+            // Row 1: New releases + Charts
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                card0(Modifier.weight(1f))
+                card1(Modifier.weight(1f))
+            }
+
+            // Row 2: Moods & genres + Podcasts
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                card2(Modifier.weight(1f))
+                card3(Modifier.weight(1f))
+            }
         }
     }
 }

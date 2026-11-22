@@ -271,7 +271,9 @@ internal fun ExpressiveFullPlayerContent(
     onShowCastClicked: () -> Unit,
     onShuffleToggle: () -> Unit,
     onRepeatToggle: () -> Unit,
-    onFavoriteToggle: () -> Unit
+    onFavoriteToggle: () -> Unit,
+    /** Render the Kinetic layout (see KineticFullPlayerContent.kt) with this player's sheets. */
+    kineticStyle: Boolean = false
 ) {
     var retainedSong by remember { mutableStateOf(currentSong) }
     LaunchedEffect(currentSong?.id) {
@@ -288,9 +290,11 @@ internal fun ExpressiveFullPlayerContent(
     var showArtistPicker by rememberSaveable { mutableStateOf(false) }
     var showAudioFormatInfoDialog by rememberSaveable { mutableStateOf(false) }
     var showPlayFromSourceSheet by rememberSaveable { mutableStateOf(false) }
+    var showSleepTimerSheet by rememberSaveable { mutableStateOf(false) }
 
     val isAnyModalOpen = showLyricsSheet || showSongInfoBottomSheet || showPlaylistBottomSheet ||
-        showShareSheet || showArtistPicker || showAudioFormatInfoDialog || showPlayFromSourceSheet
+        showShareSheet || showArtistPicker || showAudioFormatInfoDialog || showPlayFromSourceSheet ||
+        showSleepTimerSheet
 
     LaunchedEffect(isAnyModalOpen) {
         playerViewModel.updateFullPlayerModalOpen(isAnyModalOpen)
@@ -831,6 +835,8 @@ internal fun ExpressiveFullPlayerContent(
             }
         },
         topBar = {
+            // Kinetic draws its own header inside the layout.
+            if (!kineticStyle) {
             // MD3: TopAppBar 在竖屏时滑入，横屏时向上滑出淡出
             AnimatedVisibility(
                 visible = !isLandscape && !showLyricsSheet,
@@ -1057,6 +1063,7 @@ internal fun ExpressiveFullPlayerContent(
                     }
                 )
             }
+            } // !kineticStyle
         }
     ) { paddingValues ->
         // MD3: 方向变化时先 alpha=0 再淡入新布局，避免双布局同时测量导致错位
@@ -1072,7 +1079,38 @@ internal fun ExpressiveFullPlayerContent(
                 .fillMaxSize()
                 .graphicsLayer { alpha = if (showLyricsSheet) 0f else contentAlpha }
         ) {
-            if (isLandscape) {
+            if (kineticStyle) {
+                val sleepTimerDisplay by playerViewModel.activeTimerValueDisplay.collectAsStateWithLifecycle()
+                val endOfTrackTimerActive by playerViewModel.isEndOfTrackTimerActive.collectAsStateWithLifecycle()
+                val kineticActions = remember(playerViewModel, onCollapse, onShowQueueClicked, onFavoriteToggle, onPlayPause) {
+                    KineticPlayerActions(
+                        onCollapse = onCollapse,
+                        onMore = { showSongInfoBottomSheet = true },
+                        onShowQueue = onShowQueueClicked,
+                        onLyrics = { onLyricsClick() },
+                        onFavoriteToggle = onFavoriteToggle,
+                        onAddToPlaylist = { showPlaylistBottomSheet = true },
+                        onSleepTimer = { showSleepTimerSheet = true },
+                        onArtistClick = { onSongMetadataArtistClick() },
+                        onPlayPause = onPlayPause,
+                        onNext = { onNextWithOptimisticCarousel() },
+                        onPrevious = { onPreviousWithOptimisticCarousel() }
+                    )
+                }
+                KineticPlayerLayout(
+                    isLandscape = isLandscape,
+                    paddingValues = paddingValues,
+                    song = song,
+                    artistsText = song.displayArtist,
+                    queueName = currentQueueSourceName,
+                    isPlayingProvider = isPlayingProvider,
+                    isBufferingProvider = { playerState.isBuffering },
+                    isFavoriteProvider = isFavoriteProvider,
+                    isSleepTimerActive = sleepTimerDisplay != null || endOfTrackTimerActive,
+                    progressSection = playerProgressSection,
+                    actions = kineticActions
+                )
+            } else if (isLandscape) {
                 FullPlayerLandscapeContent(
                     paddingValues = paddingValues,
                     albumCoverSection = albumCoverSection,
@@ -1144,6 +1182,26 @@ internal fun ExpressiveFullPlayerContent(
             onShuffleToggle = onShuffleToggle,
             onRepeatToggle = onRepeatToggle,
             onFavoriteToggle = onFavoriteToggle
+        )
+    }
+
+    if (showSleepTimerSheet) {
+        val timerDisplay by playerViewModel.activeTimerValueDisplay.collectAsStateWithLifecycle()
+        val timerMinutes by playerViewModel.activeTimerDurationMinutes.collectAsStateWithLifecycle()
+        val timerPlayCount by playerViewModel.playCount.collectAsStateWithLifecycle()
+        val timerEndOfTrack by playerViewModel.isEndOfTrackTimerActive.collectAsStateWithLifecycle()
+        com.unshoo.pixelmusic.presentation.components.TimerOptionsBottomSheet(
+            onPlayCounter = playerViewModel::playCounted,
+            activeTimerValueDisplay = timerDisplay,
+            activeTimerDurationMinutes = timerMinutes,
+            playCount = timerPlayCount,
+            isEndOfTrackTimerActive = timerEndOfTrack,
+            onDismiss = { showSleepTimerSheet = false },
+            onCancelCountedPlay = playerViewModel::cancelCountedPlay,
+            onSetPredefinedTimer = { minutes -> playerViewModel.setSleepTimer(minutes) },
+            onSetEndOfTrackTimer = { enable -> playerViewModel.setEndOfTrackTimer(enable) },
+            onOpenCustomTimePicker = {},
+            onCancelTimer = { playerViewModel.cancelSleepTimer() }
         )
     }
 

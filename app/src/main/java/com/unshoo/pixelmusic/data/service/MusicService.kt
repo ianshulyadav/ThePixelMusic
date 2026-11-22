@@ -246,6 +246,8 @@ class MusicService : MediaLibraryService() {
     private var temporaryForegroundStartedInOnCreate = false
 
     companion object {
+        private val YOUTUBE_VIDEO_ID_REGEX = Regex("^[A-Za-z0-9_-]{11}$")
+        private val HASHED_YOUTUBE_URI_REGEX = Regex("^youtube://-[0-9]{12,}$")
         /** Session extra: mediaId of the incoming track while a crossfade is audible. */
         const val SESSION_EXTRA_TRANSITION_DISPLAY_MEDIA_ID = "com.unshoo.pixelmusic.TRANSITION_DISPLAY_MEDIA_ID"
         private const val TAG = "MusicService_PixelMusic"
@@ -2887,7 +2889,7 @@ class MusicService : MediaLibraryService() {
             return
         }
 
-        val restoredItems = snapshot.items.mapNotNull(::buildMediaItemFromSnapshot)
+        val restoredItems = repairHashedYoutubeUris(snapshot.items).mapNotNull(::buildMediaItemFromSnapshot)
         if (restoredItems.isEmpty()) {
             return
         }
@@ -2968,6 +2970,38 @@ class MusicService : MediaLibraryService() {
 
     }
 
+    /**
+     * Queues saved by older builds can hold `youtube://-15…` (a hashed song id where the video id
+     * belongs). Look the real video id up in the library so those tracks play again; entries that
+     * can't be repaired are left as they are and fail fast in the resolver instead of buffering.
+     */
+    private suspend fun repairHashedYoutubeUris(
+        items: List<PlaybackQueueItemSnapshot>
+    ): List<PlaybackQueueItemSnapshot> {
+        if (items.none { isHashedYoutubeUri(it.uri) }) return items
+        return withContext(Dispatchers.IO) {
+            items.map { item ->
+                if (!isHashedYoutubeUri(item.uri)) return@map item
+                val song = runCatching { musicRepository.getSong(item.mediaId).first() }.getOrNull()
+                val videoId = song?.youtubeId?.takeIf { YOUTUBE_VIDEO_ID_REGEX.matches(it) }
+                    ?: song?.contentUriString
+                        ?.takeIf { it.startsWith("youtube://") }
+                        ?.removePrefix("youtube://")
+                        ?.takeIf { YOUTUBE_VIDEO_ID_REGEX.matches(it) }
+                if (videoId != null) {
+                    Timber.tag(TAG).i("Repaired hashed queue uri for %s -> %s", item.mediaId, videoId)
+                    item.copy(uri = "youtube://$videoId")
+                } else {
+                    item
+                }
+            }
+        }
+    }
+
+    // Real video ids may start with '-' too ("-KwYW3nnrTw"); hashed song ids are '-' + digits only.
+    private fun isHashedYoutubeUri(uri: String): Boolean =
+        HASHED_YOUTUBE_URI_REGEX.matches(uri)
+
     private fun buildMediaItemFromSnapshot(snapshotItem: PlaybackQueueItemSnapshot): MediaItem? {
         if (snapshotItem.mediaId.isBlank()) {
             return null
@@ -2975,7 +3009,9 @@ class MusicService : MediaLibraryService() {
         val uriStr = when {
             snapshotItem.mediaId.startsWith("youtube_") -> "youtube://${snapshotItem.mediaId.removePrefix("youtube_")}"
             snapshotItem.mediaId.length == 11 && !snapshotItem.mediaId.startsWith("external:") -> "youtube://${snapshotItem.mediaId}"
-            snapshotItem.mediaId.startsWith("-15") -> "youtube://${snapshotItem.mediaId}"
+            // "-15…" media ids are a one-way hash of the video id (YOUTUBE_SONG_ID_OFFSET), never a
+            // video id themselves. Turning them into youtube://-15… (as this used to) discarded the
+            // real youtube:// uri saved right next to them and left the track unplayable forever.
             snapshotItem.uri.startsWith("youtube://") -> snapshotItem.uri
             snapshotItem.uri.isNotBlank() && !snapshotItem.uri.startsWith("http") -> snapshotItem.uri
             snapshotItem.mediaId.isNotBlank() && (

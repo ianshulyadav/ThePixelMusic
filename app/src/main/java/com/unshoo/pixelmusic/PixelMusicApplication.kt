@@ -279,11 +279,16 @@ class PixelMusicApplication : Application(), ImageLoaderFactory, Configuration.P
             // Stage 4 (T+5000ms): Legacy cache migration and BotGuard warmup
             kotlinx.coroutines.delay(2000L)
 
-            awaitMainThreadIdle()
-            try {
-                BotGuardTokenGenerator.preWarm("warmup_session")
-            } catch (e: Throwable) {
-                Timber.w(e, "BotGuard pre-warm deferred task failed")
+            // The BotGuard engine is a hidden WebView (~50 MB plus a Chromium GPU/IO thread
+            // set). On low-end devices don't pay for it at launch: mintToken() creates the
+            // engine lazily the first time a YouTube stream actually needs a PoToken.
+            if (!com.unshoo.pixelmusic.utils.DevicePerformanceUtils.isLowEndDevice(this@PixelMusicApplication)) {
+                awaitMainThreadIdle()
+                try {
+                    BotGuardTokenGenerator.preWarm("warmup_session")
+                } catch (e: Throwable) {
+                    Timber.w(e, "BotGuard pre-warm deferred task failed")
+                }
             }
 
             AlbumArtUtils.migrateLegacyCacheLocation(this@PixelMusicApplication)

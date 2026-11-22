@@ -461,7 +461,7 @@ fun PlaylistDetailScreen(
 
             val statusBarHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
             val minTopBarHeight = 64.dp + statusBarHeight
-            val maxTopBarHeight = 300.dp
+            val maxTopBarHeight = com.unshoo.pixelmusic.presentation.components.rememberDetailHeaderMaxHeight(300.dp)
 
             val minTopBarHeightPx = with(density) { minTopBarHeight.toPx() }
             val maxTopBarHeightPx = with(density) { maxTopBarHeight.toPx() }

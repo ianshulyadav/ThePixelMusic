@@ -1773,11 +1773,17 @@ private fun FullPlayerAlbumCoverSection(
             .fillMaxWidth()
             .padding(vertical = 8.dp)
     ) {
-        val carouselHeight = when (carouselStyle) {
+        val widthBasedHeight = when (carouselStyle) {
             CarouselStyle.NO_PEEK -> maxWidth
             CarouselStyle.ONE_PEEK -> maxWidth * 0.8f
             CarouselStyle.TWO_PEEK -> maxWidth * 0.6f
             else -> maxWidth * 0.8f
+        }
+        // Never taller than the space the parent gives us (short screens).
+        val carouselHeight = if (constraints.hasBoundedHeight) {
+            widthBasedHeight.coerceAtMost(maxHeight)
+        } else {
+            widthBasedHeight
         }
 
         DelayedContent(
@@ -2140,7 +2146,10 @@ private fun FullPlayerPortraitContent(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.SpaceAround
     ) {
-        albumCoverSection(Modifier)
+        // weight(fill = false): the cover is measured last and may only use the height left
+        // after the metadata, progress and controls. On short screens (e.g. 720dp tall) a
+        // full-width square cover otherwise pushed the shuffle/repeat/lyrics row off-screen.
+        albumCoverSection(Modifier.weight(1f, fill = false))
 
         Column(
             modifier = Modifier.fillMaxWidth(),

@@ -792,6 +792,80 @@ fun LibraryScreen(
 
     val headerContainerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
 
+    // Landscape puts the tabs next to the title (one header row instead of two) so the
+    // list keeps most of the ~360dp window height.
+    val isLandscapeHeader = com.unshoo.pixelmusic.presentation.components.LocalAppWindowLayout.current.isLandscape
+    val libraryTabRow: @Composable (Modifier) -> Unit = { tabRowModifier ->
+                val showTabIndicator = false
+                PrimaryScrollableTabRow(
+                    modifier = tabRowModifier,
+                    selectedTabIndex = currentTabIndex,
+                    containerColor = Color.Transparent,
+                    edgePadding = 12.dp,
+                    indicator = {
+                        if (showTabIndicator) {
+                            TabRowDefaults.PrimaryIndicator(
+                                modifier = Modifier.tabIndicatorOffset(selectedTabIndex = currentTabIndex),
+                                height = 3.dp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    },
+                    divider = {}
+                ) {
+                    tabTitles.forEachIndexed { index, rawId ->
+                        val tabId = rawId.toLibraryTabIdOrNull() ?: LibraryTabId.SONGS
+                        TabAnimation(
+                            index = index,
+                            title = tabId.storageKey,
+                            selectedIndex = currentTabIndex,
+                            onClick = {
+                                scope.launch {
+                                    val targetPage = targetPageForTabIndex(
+                                        currentPage = pagerState.currentPage,
+                                        targetTabIndex = index,
+                                        tabCount = tabTitles.size,
+                                        compactMode = isCompactNavigation
+                                    )
+                                    if (pagerState.currentPage != targetPage) {
+                                        val diff = targetPage - pagerState.currentPage
+                                        if (kotlin.math.abs(diff) > 1) {
+                                            pagerState.scrollToPage(if (diff > 0) targetPage - 1 else targetPage + 1)
+                                        }
+                                        pagerState.animateScrollToPage(
+                                            page = targetPage,
+                                            animationSpec = tween(
+                                                durationMillis = 320,
+                                                easing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                        ) {
+                            Text(
+                                text = stringResource(tabId.titleRes),
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = if (currentTabIndex == index) FontWeight.Bold else FontWeight.Medium
+                            )
+                        }
+                    }
+                    TabAnimation(
+                        index = -1,
+                        title = stringResource(R.string.presentation_batch_d_edit_library_tabs_cd),
+                        selectedIndex = currentTabIndex,
+                        onClick = { showReorderTabsSheet = true }
+                    ) {
+                        Icon(
+                            Icons.Default.Edit,
+                            contentDescription = stringResource(R.string.presentation_batch_d_reorder_tabs_cd),
+                            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f)
+                        )
+                    }
+                }
+    }
+
+
     Scaffold(
         modifier = Modifier.background(brush = gradientBrush),
         topBar = {
@@ -823,18 +897,29 @@ fun LibraryScreen(
                                     else -> 38.sp
                                 }
                             }
-                            Text(
-                                modifier = Modifier.padding(start = 8.dp),
-                                text = libraryTitle,
-                                fontFamily = GoogleSansRounded,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = MaterialTheme.colorScheme.primary,
-                                fontSize = titleFontSize,
-                                letterSpacing = 0.5.sp,
-                                maxLines = 1,
-                                softWrap = false,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                            val libraryTitleText: @Composable () -> Unit = {
+                                Text(
+                                    modifier = Modifier.padding(start = 8.dp),
+                                    text = libraryTitle,
+                                    fontFamily = GoogleSansRounded,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontSize = if (isLandscapeHeader) 28.sp else titleFontSize,
+                                    letterSpacing = 0.5.sp,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            if (isLandscapeHeader) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    libraryTitleText()
+                                    Spacer(Modifier.width(8.dp))
+                                    libraryTabRow(Modifier.weight(1f))
+                                }
+                            } else {
+                                libraryTitleText()
+                            }
                         }
                     },
                     actions = {
@@ -889,72 +974,7 @@ fun LibraryScreen(
                     )
                 )
                 if (!isCompactNavigation) {
-                    val showTabIndicator = false
-                    PrimaryScrollableTabRow(
-                        selectedTabIndex = currentTabIndex,
-                        containerColor = Color.Transparent,
-                        edgePadding = 12.dp,
-                        indicator = {
-                            if (showTabIndicator) {
-                                TabRowDefaults.PrimaryIndicator(
-                                    modifier = Modifier.tabIndicatorOffset(selectedTabIndex = currentTabIndex),
-                                    height = 3.dp,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                        },
-                        divider = {}
-                    ) {
-                        tabTitles.forEachIndexed { index, rawId ->
-                            val tabId = rawId.toLibraryTabIdOrNull() ?: LibraryTabId.SONGS
-                            TabAnimation(
-                                index = index,
-                                title = tabId.storageKey,
-                                selectedIndex = currentTabIndex,
-                                onClick = {
-                                    scope.launch {
-                                        val targetPage = targetPageForTabIndex(
-                                            currentPage = pagerState.currentPage,
-                                            targetTabIndex = index,
-                                            tabCount = tabTitles.size,
-                                            compactMode = isCompactNavigation
-                                        )
-                                        if (pagerState.currentPage != targetPage) {
-                                            val diff = targetPage - pagerState.currentPage
-                                            if (kotlin.math.abs(diff) > 1) {
-                                                pagerState.scrollToPage(if (diff > 0) targetPage - 1 else targetPage + 1)
-                                            }
-                                            pagerState.animateScrollToPage(
-                                                page = targetPage,
-                                                animationSpec = tween(
-                                                    durationMillis = 320,
-                                                    easing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
-                                                )
-                                            )
-                                        }
-                                    }
-                                }
-                            ) {
-                                Text(
-                                    text = stringResource(tabId.titleRes),
-                                    style = MaterialTheme.typography.labelLarge,
-                                    fontWeight = if (currentTabIndex == index) FontWeight.Bold else FontWeight.Medium
-                                )
-                            }
-                        }
-                        TabAnimation(
-                            index = -1,
-                            title = stringResource(R.string.presentation_batch_d_edit_library_tabs_cd),
-                            selectedIndex = currentTabIndex,
-                            onClick = { showReorderTabsSheet = true }
-                        ) {
-                            Icon(
-                                Icons.Default.Edit,
-                                contentDescription = stringResource(R.string.presentation_batch_d_reorder_tabs_cd),
-                                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f)
-                            )
-                        }
-                    }
+                    if (!isLandscapeHeader) libraryTabRow(Modifier)
                 } else {
                     CompactLibraryPagerIndicator(
                         currentIndex = currentTabIndex,
