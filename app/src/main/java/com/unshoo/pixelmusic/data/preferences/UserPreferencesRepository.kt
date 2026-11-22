@@ -110,7 +110,11 @@ enum class QuickPicks {
 }
 
 enum class QuickPicksDisplayMode {
-    CARD, CARD_CLASSIC, LIST, UNCONTAINED, CARD_FROSTED, CARD_ALBUM_TINT
+    CARD, CARD_CLASSIC, LIST, UNCONTAINED,
+    /** Material 3 multi-browse carousel (large + medium + small). */
+    M3_MULTI_BROWSE,
+    /** Material 3 centered hero carousel (small + large + small). */
+    M3_HERO
 }
 
 enum class SearchSource {
@@ -2669,7 +2673,13 @@ constructor(
         dataStore.data.map { preferences ->
             val stored = preferences[PreferencesKeys.QUICK_PICKS_DISPLAY_MODE]
             try {
-                if (stored != null) QuickPicksDisplayMode.valueOf(stored) else QuickPicksDisplayMode.UNCONTAINED
+                when (stored) {
+                    null -> QuickPicksDisplayMode.UNCONTAINED
+                    // Removed frosted / album-colour carousels map onto the M3 carousels.
+                    "CARD_FROSTED" -> QuickPicksDisplayMode.M3_MULTI_BROWSE
+                    "CARD_ALBUM_TINT" -> QuickPicksDisplayMode.M3_HERO
+                    else -> QuickPicksDisplayMode.valueOf(stored)
+                }
             } catch (e: Exception) {
                 QuickPicksDisplayMode.UNCONTAINED
             }

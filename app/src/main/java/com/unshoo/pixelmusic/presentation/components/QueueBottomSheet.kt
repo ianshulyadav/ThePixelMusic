@@ -154,6 +154,8 @@ import com.unshoo.pixelmusic.data.model.Song
 import com.unshoo.pixelmusic.presentation.components.AutoScrollingText
 import com.unshoo.pixelmusic.presentation.components.SmartImage
 import com.unshoo.pixelmusic.presentation.components.subcomps.PlayingEqIcon
+import com.unshoo.pixelmusic.presentation.components.subcomps.ArtworkDownloadedBadge
+import com.unshoo.pixelmusic.presentation.components.subcomps.rememberIsDownloaded
 import com.unshoo.pixelmusic.presentation.components.player.AnimatedPlaybackControls
 import com.unshoo.pixelmusic.presentation.viewmodel.PlayerUiState
 import com.unshoo.pixelmusic.presentation.viewmodel.PlayerViewModel
@@ -2057,16 +2059,21 @@ fun QueuePlaylistSongItem(
 
                     val albumArtModel = com.unshoo.pixelmusic.utils.MediaItemBuilder.resolveArtworkUri(song.albumArtUriString, song.id, song.youtubeId)
 
-                    SmartImage(
-                        model = albumArtModel,
-                        shape = albumShape,
-                        contentDescription = stringResource(R.string.cd_album_art_for_title, song.title),
-                        modifier = Modifier
-                            .size(42.dp)
-                            .clip(albumShape),
-                        contentScale = ContentScale.Crop,
-                        targetSize = SmartImageCompactListTargetSize
-                    )
+                    Box(modifier = Modifier.size(42.dp)) {
+                        SmartImage(
+                            model = albumArtModel,
+                            shape = albumShape,
+                            contentDescription = stringResource(R.string.cd_album_art_for_title, song.title),
+                            modifier = Modifier
+                                .size(42.dp)
+                                .clip(albumShape),
+                            contentScale = ContentScale.Crop,
+                            targetSize = SmartImageCompactListTargetSize
+                        )
+                        if (rememberIsDownloaded(song)) {
+                            ArtworkDownloadedBadge(ringColor = backgroundColor, size = 14.dp)
+                        }
+                    }
 
                     Spacer(Modifier.width(16.dp))
 

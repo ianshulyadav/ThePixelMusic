@@ -11,6 +11,7 @@ import com.unshoo.pixelmusic.data.preferences.dataStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -73,10 +74,44 @@ object DownloadHelper {
         }
     }
 
+    /** 128 KB copy buffer: ~16x fewer read/write syscalls than the 8 KB default. */
+    private const val IO_BUFFER = 128 * 1024
+
+    /** Files smaller than this download over a single connection (splitting costs more than it saves). */
+    private const val MIN_SPLIT_BYTES = 3L * 1024 * 1024
+
+    /**
+     * CPU/disk-heavy post-processing (container remux, tag writing) runs one file at a time on a
+     * background-priority thread, so a playlist download never has several of them hammering
+     * the CPU in parallel (the main cause of the phone heating up while downloading).
+     */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private val postProcessDispatcher = Dispatchers.IO.limitedParallelism(1)
+
+    suspend fun <T> withLowPriorityPostProcessing(block: () -> T): T = withContext(postProcessDispatcher) {
+        val tid = android.os.Process.myTid()
+        val previous = runCatching { android.os.Process.getThreadPriority(tid) }
+            .getOrDefault(android.os.Process.THREAD_PRIORITY_DEFAULT)
+        runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND) }
+        try {
+            block()
+        } finally {
+            runCatching { android.os.Process.setThreadPriority(previous) }
+        }
+    }
+
+    /**
+     * @param connections parallel HTTP range requests for one file. Kept low (4) by default;
+     *   playlist downloads pass 2 because several songs already download side by side.
+     * @param onFileReady called with the finished local file BEFORE it is copied to the user's
+     *   download folder, so tags/artwork are written once on fast app storage instead of
+     *   rewriting the file again through the Storage Access Framework afterwards.
+     */
     suspend fun downloadAudio(
         context: Context,
         song: Song,
-        connections: Int = 8
+        connections: Int = 4,
+        onFileReady: (suspend (File) -> Unit)? = null,
     ): String? = withContext(Dispatchers.IO) {
 
         val userPreferencesRepository = try {
@@ -231,6 +266,10 @@ object DownloadHelper {
                     if (!tempFile.exists() || tempFile.length() <= 0) {
                         throw IOException("Assembled manifest file is zero bytes")
                     }
+                    if (onFileReady != null) {
+                        runCatching { onFileReady(tempFile) }
+                            .onFailure { if (it is CancellationException) throw it }
+                    }
                     if (customPath.isNotBlank()) {
                         val documentDir = DocumentFile.fromTreeUri(context, Uri.parse(customPath))
                         val outputUri = documentDir?.let { writeToDocumentTree(context, it, segDynamicName, tempFile) }
@@ -294,59 +333,7 @@ object DownloadHelper {
                     }
                 } catch (_: Exception) {}
 
-                val numConnections = connections.coerceIn(1, 16)
-                if (totalLength > 0 && numConnections > 1) {
-                    val partFiles = (0 until numConnections).map { i -> File(audioDir, "${song.youtubeId}.part$i") }
-                    fun cleanupPartFiles() {
-                        partFiles.forEach { runCatching { it.delete() } }
-                    }
-
-                    try {
-                        val chunkSize = totalLength / numConnections
-                        (0 until numConnections).map { i ->
-                            async {
-                                val start = i * chunkSize
-                                val end = if (i == numConnections - 1) totalLength - 1 else (start + chunkSize - 1)
-                                val partFile = partFiles[i]
-
-                                val req = Request.Builder()
-                                    .url(url)
-                                    .header("User-Agent", userAgent)
-                                    .apply {
-                                        addonHeaders.forEach { (k, v) -> header(k, v) }
-                                        if (isSaavn) {
-                                            header("Accept-Language", "en-IN,en;q=0.9")
-                                            header("Cookie", "explicit_content=1")
-                                        }
-                                    }
-                                    .header("Range", "bytes=$start-$end")
-                                    .header("Accept", "*/*")
-                                    .build()
-
-                                client.newCall(req).execute().use { response ->
-                                    if (!response.isSuccessful && response.code != 206) {
-                                        throw IOException("Failed chunk $i (HTTP ${response.code})")
-                                    }
-                                    response.body.byteStream().use { input ->
-                                        FileOutputStream(partFile).use { output ->
-                                            input.copyTo(output)
-                                        }
-                                    }
-                                }
-                            }
-                        }.awaitAll()
-
-                        FileOutputStream(tempFile).use { out ->
-                            partFiles.forEach { part ->
-                                part.inputStream().use { it.copyTo(out) }
-                            }
-                        }
-                        cleanupPartFiles()
-                    } catch (e: Exception) {
-                        cleanupPartFiles()
-                        throw e
-                    }
-                } else {
+                fun singleStreamDownload() {
                     // Single stream download with Range header
                     val req = Request.Builder()
                         .url(url)
@@ -369,10 +356,79 @@ object DownloadHelper {
 
                         response.body.byteStream().use { input ->
                             FileOutputStream(tempFile).use { output ->
-                                input.copyTo(output)
+                                input.copyTo(output, IO_BUFFER)
                             }
                         }
                     }
+                }
+
+                val numConnections = connections.coerceIn(1, 8)
+                if (totalLength >= MIN_SPLIT_BYTES && numConnections > 1) {
+                    // Each range is written straight to its offset in the one output file: no
+                    // per-chunk part files and no second pass concatenating them (halves disk I/O).
+                    try {
+                        java.io.RandomAccessFile(tempFile, "rw").use { raf -> raf.setLength(totalLength) }
+                        val chunkSize = totalLength / numConnections
+                        // coroutineScope: a failed chunk throws here instead of cancelling the whole download job.
+                        kotlinx.coroutines.coroutineScope {
+                        (0 until numConnections).map { i ->
+                            async {
+                                val start = i * chunkSize
+                                val end = if (i == numConnections - 1) totalLength - 1 else (start + chunkSize - 1)
+
+                                val req = Request.Builder()
+                                    .url(url)
+                                    .header("User-Agent", userAgent)
+                                    .apply {
+                                        addonHeaders.forEach { (k, v) -> header(k, v) }
+                                        if (isSaavn) {
+                                            header("Accept-Language", "en-IN,en;q=0.9")
+                                            header("Cookie", "explicit_content=1")
+                                        }
+                                    }
+                                    .header("Range", "bytes=$start-$end")
+                                    .header("Accept", "*/*")
+                                    .build()
+
+                                client.newCall(req).execute().use { response ->
+                                    if (response.code != 206) {
+                                        throw IOException("Failed chunk $i (HTTP ${response.code})")
+                                    }
+                                    val expected = end - start + 1
+                                    var written = 0L
+                                    java.io.RandomAccessFile(tempFile, "rw").use { raf ->
+                                        val channel = raf.channel
+                                        val buf = ByteArray(IO_BUFFER)
+                                        response.body.byteStream().use { input ->
+                                            while (true) {
+                                                ensureActive()
+                                                val n = input.read(buf)
+                                                if (n < 0) break
+                                                val bb = java.nio.ByteBuffer.wrap(buf, 0, n)
+                                                while (bb.hasRemaining()) {
+                                                    written += channel.write(bb, start + written)
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if (written != expected) {
+                                        throw IOException("Chunk $i incomplete ($written/$expected bytes)")
+                                    }
+                                }
+                            }
+                        }.awaitAll()
+                        }
+                    } catch (e: CancellationException) {
+                        cleanupTempFile()
+                        throw e
+                    } catch (e: Exception) {
+                        // Server refused ranges (HTTP 200) or a chunk broke: one plain stream instead.
+                        PixelMusicHelper.printd("Parallel download failed for ${song.youtubeId} (${e.message}); using a single stream")
+                        cleanupTempFile()
+                        singleStreamDownload()
+                    }
+                } else {
+                    singleStreamDownload()
                 }
 
                 if (!tempFile.exists() || tempFile.length() <= 0) {
@@ -390,7 +446,7 @@ object DownloadHelper {
                 // folder scans. Rewrap the Opus stream into Ogg (no re-encode, no quality loss).
                 if (finalExt == "webm") {
                     val oggTemp = File(audioDir, "${song.youtubeId}.remux.tmp")
-                    if (AudioContainerRemuxer.remuxWebmToOgg(tempFile, oggTemp)) {
+                    if (withLowPriorityPostProcessing { AudioContainerRemuxer.remuxWebmToOgg(tempFile, oggTemp) }) {
                         cleanupTempFile()
                         if (!oggTemp.renameTo(tempFile)) {
                             oggTemp.copyTo(tempFile, overwrite = true)
@@ -402,6 +458,12 @@ object DownloadHelper {
                 }
                 val finalFileName = "$safeTitle - $safeArtist.$finalExt"
                 val finalOutputFile = File(audioDir, "${song.youtubeId}.$finalExt")
+
+                // Tag the file while it is still on app storage (one cheap local rewrite).
+                if (onFileReady != null) {
+                    runCatching { onFileReady(tempFile) }
+                        .onFailure { if (it is CancellationException) throw it }
+                }
 
                 // Copy to custom path if set
                 if (customPath.isNotBlank()) {
@@ -470,7 +532,7 @@ object DownloadHelper {
         try {
             val out = context.contentResolver.openOutputStream(partial.uri, "wt")
                 ?: throw IOException("Cannot open ${partial.uri}")
-            out.use { stream -> source.inputStream().use { it.copyTo(stream) } }
+            out.use { stream -> source.inputStream().use { it.copyTo(stream, IO_BUFFER) } }
             if (partial.length() != source.length()) {
                 throw IOException("Incomplete copy (${partial.length()}/${source.length()} bytes)")
             }

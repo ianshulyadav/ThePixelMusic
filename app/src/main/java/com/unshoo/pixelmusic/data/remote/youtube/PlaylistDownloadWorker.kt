@@ -67,7 +67,7 @@ class PlaylistDownloadWorker(
 
             val processedSongs = AtomicInteger(0)
             val succeededSongs = AtomicInteger(0)
-            val semaphore = Semaphore(Constants.Downloads.MAX_CONCURRENT_DOWNLOADS)
+            val semaphore = Semaphore(PLAYLIST_CONCURRENT_SONGS)
 
             try {
                 PixelMusicNotificationManager.showPlaylistDownloadProgress(
@@ -117,19 +117,32 @@ class PlaylistDownloadWorker(
                                 )
 
                                 val isExistingLocal = localMatching != null
-                                val audioPath = if (localMatching != null) {
-                                    Timber.i("Song '${song.title}' already exists in local storage at ${localMatching.filePath}. Skipping network download.")
-                                    localMatching.filePath
-                                } else {
-                                    DownloadHelper.downloadAudio(appContext, song)
-                                }
-
                                 val thumbnailPath =
                                     DownloadHelper.downloadImage(
                                         appContext,
                                         fullSong?.thumbnailHref ?: song.thumbnailHref,
                                         song.youtubeId
                                     )
+                                val tagAlbum = (fullSong?.album ?: song.album)?.takeIf { it.isNotBlank() } ?: "YouTube Music"
+                                var taggedDuringDownload = false
+                                val audioPath = if (localMatching != null) {
+                                    Timber.i("Song '${song.title}' already exists in local storage at ${localMatching.filePath}. Skipping network download.")
+                                    localMatching.filePath
+                                } else {
+                                    // 2 connections per song: songs already download side by side,
+                                    // so more sockets only add radio/CPU load (heat), not speed.
+                                    DownloadHelper.downloadAudio(
+                                        appContext,
+                                        song,
+                                        connections = PLAYLIST_CONNECTIONS_PER_SONG,
+                                        onFileReady = { file ->
+                                            DownloadHelper.withLowPriorityPostProcessing {
+                                                embedAudioMetadata(file.absolutePath, song.title, song.artist, tagAlbum, thumbnailPath)
+                                            }
+                                            taggedDuringDownload = true
+                                        }
+                                    )
+                                }
 
                                 val updatedSong = song.copy(
                                     thumbnailPath = thumbnailPath?.path ?: localMatching?.albumArtUriString,
@@ -142,7 +155,7 @@ class PlaylistDownloadWorker(
 
                                 val isMatchedToLocal = isExistingLocal || (audioPath != null && localSongs.any { it.filePath == audioPath })
 
-                                if (audioPath != null && !isMatchedToLocal) {
+                                if (audioPath != null && !isMatchedToLocal && !taggedDuringDownload) {
                                     embedAudioMetadata(
                                         audioPath = audioPath,
                                         title = updatedSong.title,
@@ -410,5 +423,9 @@ class PlaylistDownloadWorker(
         const val PLAYLIST_KEY = "playlist"
         const val PROGRESS_CURRENT = "progress_current"
         const val PROGRESS_TOTAL = "progress_total"
+
+        /** Songs downloading at once (was 5 x 8 connections = 40 sockets; now 3 x 2 = 6). */
+        private const val PLAYLIST_CONCURRENT_SONGS = 3
+        private const val PLAYLIST_CONNECTIONS_PER_SONG = 2
     }
 }

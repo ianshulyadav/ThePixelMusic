@@ -351,12 +351,8 @@ fun EnhancedSongListItem(
                             modifier = Modifier.fillMaxSize()
                         )
 
-                        if (!showSelectionDecoration && song.isDownloadedOnlineSong) {
-                            DownloadedBadge(
-                                modifier = Modifier
-                                    .align(Alignment.BottomEnd)
-                                    .padding(2.dp)
-                            )
+                        if (!showSelectionDecoration && rememberIsDownloaded(song)) {
+                            ArtworkDownloadedBadge(ringColor = containerColor)
                         }
 
                         // Selection check overlay on album art

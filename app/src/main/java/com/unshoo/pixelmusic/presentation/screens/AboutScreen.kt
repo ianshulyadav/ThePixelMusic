@@ -704,7 +704,10 @@ private fun SocialLinksColumn() {
 
 @Composable
 fun DonateOptionsDialog(
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    title: String = "Support Development",
+    upiNote: String = "Support PixelMusic",
+    upiAmountInr: Int? = null,
 ) {
     val context = LocalContext.current
     val dialogShape = AbsoluteSmoothCornerShape(28.dp, 60)
@@ -713,7 +716,9 @@ fun DonateOptionsDialog(
 
     if (showUpiDetailsDialog) {
         UpiPaymentDialog(
-            onDismiss = { showUpiDetailsDialog = false }
+            onDismiss = { showUpiDetailsDialog = false },
+            note = upiNote,
+            amountInr = upiAmountInr,
         )
     }
 
@@ -741,7 +746,7 @@ fun DonateOptionsDialog(
                     }
                 }
                 Text(
-                    text = "Support Development",
+                    text = title,
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold
                 )
@@ -884,7 +889,9 @@ fun DonateOptionsDialog(
 
 @Composable
 private fun UpiPaymentDialog(
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    note: String = "Support PixelMusic",
+    amountInr: Int? = null,
 ) {
     val context = LocalContext.current
     val upiId = "anshulyadavv@fam"
@@ -893,8 +900,9 @@ private fun UpiPaymentDialog(
     val cardShape = AbsoluteSmoothCornerShape(18.dp, 60)
 
     val encodedName = Uri.encode(payeeName)
-    val encodedNote = Uri.encode("Support PixelMusic")
-    val upiUriString = "upi://pay?pa=$upiId&pn=$encodedName&cu=INR&tn=$encodedNote"
+    val encodedNote = Uri.encode(note)
+    val amountParam = amountInr?.takeIf { it > 0 }?.let { "&am=$it.00" }.orEmpty()
+    val upiUriString = "upi://pay?pa=$upiId&pn=$encodedName&cu=INR&tn=$encodedNote$amountParam"
     val qrEncoded = Uri.encode(upiUriString)
     val qrApiUrl = "https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=$qrEncoded&margin=6"
 
@@ -940,6 +948,21 @@ private fun UpiPaymentDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center
                 )
+
+                amountInr?.takeIf { it > 0 }?.let { amount ->
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                    ) {
+                        Text(
+                            text = "₹$amount · $note",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                        )
+                    }
+                }
 
                 // MD3 Expressive Surface for QR Code
                 Surface(

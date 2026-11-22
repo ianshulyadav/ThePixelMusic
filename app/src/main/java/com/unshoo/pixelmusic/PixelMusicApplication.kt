@@ -165,6 +165,8 @@ class PixelMusicApplication : Application(), ImageLoaderFactory, Configuration.P
 
     override fun onCreate() {
         super.onCreate()
+        // Background index of every downloaded song (app folder + custom download folder).
+        com.unshoo.pixelmusic.utils.OfflineAudioResolver.init(this)
 
         if (BuildConfig.BUILD_TYPE != "benchmark") {
             CrashHandler.install(this)

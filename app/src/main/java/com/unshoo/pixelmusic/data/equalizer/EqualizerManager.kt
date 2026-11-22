@@ -161,6 +161,10 @@ class EqualizerManager @Inject constructor() {
                 return
             }
             
+            // Apply the user's bands immediately: the retries below can take >1 s, and the
+            // new session used to play flat (EQ "gone") for that whole time.
+            applyBandLevels(_bandLevels.value)
+
             // Retry loop for effects that might fail initially
             val maxRetries = 3
             var retryCount = 0
@@ -229,6 +233,67 @@ class EqualizerManager @Inject constructor() {
             Timber.tag(TAG).e(e, "Failed to initialize audio effects")
             release()
         }
+    }
+
+    // ---- Crossfade companion ------------------------------------------------------------
+    // Audio effects belong to ONE audio session. During a crossfade the incoming song plays on
+    // the standby player's own session, so it used to fade in with no EQ for the whole
+    // transition and only got the EQ at the swap. A companion set of effects mirrors the
+    // current settings onto the incoming session while both players are audible; at the swap
+    // the primary attaches to that same session (sharing the engine), then the companion goes.
+    private var companionSessionId: Int = 0
+    private var companionEqualizer: Equalizer? = null
+    private var companionBassBoost: BassBoost? = null
+    private var companionLoudness: android.media.audiofx.LoudnessEnhancer? = null
+
+    fun attachCompanionSession(audioSessionId: Int) {
+        if (effectsDisabledForProcess || !hasAnyEnabledEffects) return
+        if (audioSessionId == 0 || audioSessionId == currentAudioSessionId) return
+        if (audioSessionId == companionSessionId && companionEqualizer != null) return
+        releaseCompanion()
+        val primary = equalizer
+        try {
+            if (_isEnabled.value && primary != null) {
+                companionEqualizer = Equalizer(0, audioSessionId).apply {
+                    val bands = minOf(numberOfBands, primary.numberOfBands)
+                    for (b in 0 until bands) {
+                        runCatching { setBandLevel(b.toShort(), primary.getBandLevel(b.toShort())) }
+                    }
+                    enabled = true
+                }
+            }
+            if (_bassBoostEnabled.value) {
+                companionBassBoost = runCatching {
+                    BassBoost(0, audioSessionId).apply {
+                        if (strengthSupported) setStrength(_bassBoostStrength.value.coerceIn(0, 1000).toShort())
+                        enabled = true
+                    }
+                }.getOrNull()
+            }
+            if (_loudnessEnhancerEnabled.value) {
+                companionLoudness = runCatching {
+                    android.media.audiofx.LoudnessEnhancer(audioSessionId).apply {
+                        setTargetGain(_loudnessEnhancerStrength.value.coerceIn(0, MAX_LOUDNESS_GAIN_MB))
+                        enabled = true
+                    }
+                }.getOrNull()
+            }
+            companionSessionId = audioSessionId
+            Timber.tag(TAG).d("Companion effects attached to incoming session %d", audioSessionId)
+        } catch (e: Exception) {
+            Timber.tag(TAG).w(e, "Companion effects failed for session %d", audioSessionId)
+            releaseCompanion()
+        }
+    }
+
+    fun releaseCompanion() {
+        companionEqualizer?.runCatching { release() }
+        companionBassBoost?.runCatching { release() }
+        companionLoudness?.runCatching { release() }
+        companionEqualizer = null
+        companionBassBoost = null
+        companionLoudness = null
+        companionSessionId = 0
     }
 
     suspend fun attachToAudioSessionIfNeeded(audioSessionId: Int) {

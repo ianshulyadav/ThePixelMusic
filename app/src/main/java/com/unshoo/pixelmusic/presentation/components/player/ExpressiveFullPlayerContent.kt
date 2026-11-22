@@ -1872,7 +1872,8 @@ private fun FullPlayerAlbumCoverSection(
                         scaleX = albumArtScale
                         scaleY = albumArtScale
                     },
-                albumArtQuality = albumArtQuality
+                albumArtQuality = albumArtQuality,
+                playbackStartedProvider = isPlayingProvider
             )
         }
     }

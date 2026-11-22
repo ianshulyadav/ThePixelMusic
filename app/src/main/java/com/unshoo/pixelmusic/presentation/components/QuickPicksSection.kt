@@ -219,11 +219,11 @@ fun QuickPicksSection(
             }
         }
         
-        if (displayMode == QuickPicksDisplayMode.CARD_FROSTED || displayMode == QuickPicksDisplayMode.CARD_ALBUM_TINT) {
+        if (displayMode == QuickPicksDisplayMode.M3_MULTI_BROWSE || displayMode == QuickPicksDisplayMode.M3_HERO) {
             val limitSongs = remember(songs) { songs.take(20) }
-            QuickPicksMaterialCarousel(
+            QuickPicksM3Carousel(
                 songs = limitSongs,
-                look = if (displayMode == QuickPicksDisplayMode.CARD_FROSTED) QuickPicksCarouselLook.FROSTED else QuickPicksCarouselLook.ALBUM_TINT,
+                style = if (displayMode == QuickPicksDisplayMode.M3_MULTI_BROWSE) QuickPicksM3CarouselStyle.MULTI_BROWSE else QuickPicksM3CarouselStyle.HERO,
                 activePlayingSongId = activePlayingSongId,
                 onSongClick = onSongClick,
                 onPlayNext = handlePlayNext,

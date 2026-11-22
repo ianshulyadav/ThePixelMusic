@@ -27,6 +27,7 @@ import com.unshoo.pixelmusic.data.model.youtube.PlaylistInfo
 import com.unshoo.pixelmusic.data.remote.youtube.toYoutubeSong
 import com.unshoo.pixelmusic.data.remote.youtube.YouTubeItemFilter
 import com.unshoo.pixelmusic.data.repository.YouTubeLibraryPersistenceManager
+import kotlinx.coroutines.launch
 import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -57,6 +58,37 @@ class YouTubeLibrarySyncManager @Inject constructor(
         // 50 pages × ~25 items/page ≈ 1250 items — covers virtually all libraries.
         private const val MAX_CONTINUATION_PAGES = 50
     }
+
+    /** Outlives screens: a sync started from the sign-in screen must not die when it closes. */
+    private val appScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
+
+    /**
+     * First sync right after signing in. BUGFIX (fresh install: no playlists after login): it ran
+     * in the sign-in screen's viewModelScope, which is cancelled as soon as that screen closes,
+     * so the playlist import was killed part-way. The first library request can also land before
+     * the account identity (dataSyncId) is settled and come back empty; retry the playlists then.
+     */
+    fun syncAfterLogin() {
+        appScope.launch {
+            syncNow(force = true)
+            for (attempt in 1..3) {
+                val count = runCatching { appDatabaseCountPlaylists() }.getOrDefault(0)
+                if (count > 0) break
+                delay(attempt * 3_000L)
+                try {
+                    syncLikedPlaylists(forceFull = true)
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    Timber.w(e, "YouTubeLibrarySyncManager: post-login playlist retry %d failed", attempt)
+                }
+            }
+        }
+    }
+
+    private suspend fun appDatabaseCountPlaylists(): Int =
+        com.unshoo.pixelmusic.data.database.youtube.AppDatabase.getInstance(context)
+            .playlistRepository().getAll()
+            .count { !it.info.id.startsWith("LM") && it.info.id != com.unshoo.pixelmusic.data.remote.youtube.Constants.Downloads.DOWNLOADED_PLAYLIST_ID }
 
     private val syncMutex = Mutex()
     @Volatile private var lastSuccessfulSyncAtMs: Long = 0L

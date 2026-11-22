@@ -24,6 +24,7 @@ import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -111,7 +112,9 @@ fun HomeGradientTopBar(
     onTelegramClick: () -> Unit,
     onMenuClick: () -> Unit = {},
     isScrolled: Boolean = false,
-    floatingHeaderEnabled: Boolean = false
+    floatingHeaderEnabled: Boolean = false,
+    onAnnouncementsClick: () -> Unit = {},
+    hasUnreadAnnouncements: Boolean = false,
 ) {
     val baseContainerColor = MaterialTheme.colorScheme.primaryContainer
     val surfaceColor = MaterialTheme.colorScheme.surface
@@ -200,6 +203,24 @@ fun HomeGradientTopBar(
                             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                             contentColor = MaterialTheme.colorScheme.onSurface
                         ),
+                        onClick = onAnnouncementsClick,
+                        modifier = Modifier.size(44.dp),
+                        shape = CircleShape
+                    ) {
+                        AnnouncementsIcon(hasUnread = hasUnreadAnnouncements, size = 20.dp)
+                    }
+                }
+
+                Surface(
+                    shape = CircleShape,
+                    color = Color.Transparent,
+                    shadowElevation = pillElevation
+                ) {
+                    FilledIconButton(
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            contentColor = MaterialTheme.colorScheme.onSurface
+                        ),
                         onClick = onNavigationIconClick,
                         modifier = Modifier.size(44.dp),
                         shape = CircleShape
@@ -275,6 +296,16 @@ fun HomeGradientTopBar(
                                 containerColor = MaterialTheme.colorScheme.primaryContainer,
                                 contentColor = MaterialTheme.colorScheme.onPrimaryContainer
                             ),
+                            onClick = onAnnouncementsClick
+                        ) {
+                            AnnouncementsIcon(hasUnread = hasUnreadAnnouncements, size = 24.dp)
+                        }
+                        Spacer(modifier = Modifier.size(6.dp))
+                        FilledIconButton(
+                            colors = IconButtonDefaults.filledIconButtonColors(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                            ),
                             onClick = onNavigationIconClick
                         ) {
                             Icon(
@@ -292,3 +323,25 @@ fun HomeGradientTopBar(
     }
 }
 
+
+/** Bookmark icon for the announcements inbox, with a small dot when something is unread. */
+@Composable
+private fun AnnouncementsIcon(hasUnread: Boolean, size: androidx.compose.ui.unit.Dp) {
+    androidx.compose.material3.BadgedBox(
+        badge = {
+            if (hasUnread) {
+                androidx.compose.material3.Badge(
+                    containerColor = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.Bookmark,
+            contentDescription = stringResource(
+                if (hasUnread) R.string.announcements_cd_unread else R.string.announcements_cd_open
+            ),
+            modifier = Modifier.size(size)
+        )
+    }
+}

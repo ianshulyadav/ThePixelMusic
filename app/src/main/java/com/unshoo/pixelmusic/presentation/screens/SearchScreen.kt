@@ -291,6 +291,8 @@ fun SearchScreen(
     val favoriteSongIds by playerViewModel.favoriteSongIds.collectAsStateWithLifecycle()
     val selectedSongForInfo by playerViewModel.selectedSongForInfo.collectAsStateWithLifecycle()
     val searchSource by playerViewModel.searchSource.collectAsStateWithLifecycle()
+    // Local mode searches only on-device + downloaded songs, so the source toggle is hidden.
+    val isLocalModeSearch by playerViewModel.localModeEnabled.collectAsStateWithLifecycle()
     var showSongInfoBottomSheet by remember { mutableStateOf(false) }
 
     val browseListState = rememberLazyListState()
@@ -310,7 +312,7 @@ fun SearchScreen(
     }
 
     // Search debouncing is centralized in SearchStateHolder.
-    LaunchedEffect(searchQuery, currentFilter, searchSource) {
+    LaunchedEffect(searchQuery, currentFilter, searchSource, isLocalModeSearch) {
         playerViewModel.performSearch(searchQuery)
     }
 
@@ -747,7 +749,7 @@ fun SearchScreen(
                                     contentAlignment = Alignment.CenterStart
                                 ) {
                                     if (searchQuery.isEmpty()) {
-                                        val placeholderText = when (searchSource) {
+                                        val placeholderText = if (isLocalModeSearch) "Search downloads & device songs..." else when (searchSource) {
                                             com.unshoo.pixelmusic.data.preferences.SearchSource.LOCAL -> "Search Local Library..."
                                             com.unshoo.pixelmusic.data.preferences.SearchSource.JIOSAAVN -> "Search JioSaavn..."
                                             else -> "Search for any tracks, albums, lyrics..."
@@ -789,8 +791,8 @@ fun SearchScreen(
                                     )
                                 }
 
-                                // Search Source Toggle Button
-                                IconButton(
+                                // Search Source Toggle Button (not in local mode: search is always local there)
+                                if (!isLocalModeSearch) IconButton(
                                     onClick = { playerViewModel.toggleSearchSource() },
                                     modifier = Modifier.size(36.dp)
                                 ) {

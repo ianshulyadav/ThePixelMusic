@@ -132,7 +132,7 @@ class QuickPicksViewModel @Inject constructor(
             for (i in 0 until songsArray.length()) {
                 songs.add(songFromJson(songsArray.getJSONObject(i)))
             }
-            if (songs.isNotEmpty()) _quickPicks.value = songs.toImmutableList()
+            if (songs.isNotEmpty()) _quickPicks.value = songs.shuffled().toImmutableList()
 
             if (categoriesJson != null) {
                 val catArray = JSONArray(categoriesJson)
@@ -227,8 +227,9 @@ class QuickPicksViewModel @Inject constructor(
                             _quickPicks.value = persistentListOf()
                         }
                         QuickPicks.QUICK_PICKS -> {
-                            // Try enhanced 5-bucket algorithm first
-                            val songs = loadEnhancedQuickPicks()
+                            // YT Music's own "Quick picks" shelf, in random order; the 5-bucket
+                            // mix is only a fallback (signed out / shelf missing).
+                            val songs = loadYtMusicHomeQuickPicks().ifEmpty { applyContentFilters(loadEnhancedQuickPicks()) }
                             if (songs.isNotEmpty()) {
                                 _quickPicks.value = songs.toImmutableList()
                                 saveToCache(songs, _categories.value)
@@ -267,6 +268,51 @@ class QuickPicksViewModel @Inject constructor(
                 _isLoading.value = false
             }
         }
+    }
+
+    /**
+     * Songs of the "Quick picks" shelf on the YouTube Music home page, shuffled, with the user's
+     * content rules applied: no videos when Pure YT Music / Hide videos is on, nothing matching
+     * the blocked keywords (or covers/lo-fi when that filter is on), nothing disliked.
+     */
+    private suspend fun loadYtMusicHomeQuickPicks(): List<Song> = withContext(Dispatchers.IO) {
+        try {
+            val homePage = YouTube.home().getOrNull() ?: return@withContext emptyList()
+            homePage.chips?.map { it.title }?.let { chipTitles ->
+                _categories.value = (listOf("All", "Local") + chipTitles).distinct().toImmutableList()
+            }
+            val shelf = homePage.sections.firstOrNull { it.title.contains("quick pick", ignoreCase = true) }
+                ?: homePage.sections.firstOrNull { it.title.contains("quick", ignoreCase = true) }
+                ?: return@withContext emptyList()
+            val hideVideos = userPreferencesRepository.pureYtMusicOnlyFlow.first() ||
+                userPreferencesRepository.hideVideoFlow.first()
+            // filterVideo drops YouTube music videos by their item type, which titles alone miss.
+            val songs = shelf.items.filterIsInstance<SongItem>().filterVideo(hideVideos).map { it.toNativeSong() }
+            applyContentFilters(songs).shuffled()
+        } catch (e: Exception) {
+            Timber.tag("QuickPicks").w(e, "YT Music home quick picks fetch failed")
+            emptyList()
+        }
+    }
+
+    /** Hide-videos, blocked keywords, cover/lo-fi filter, dislikes and "not interested". */
+    private suspend fun applyContentFilters(songs: List<Song>): List<Song> {
+        if (songs.isEmpty()) return songs
+        val hideVideos = runCatching {
+            userPreferencesRepository.pureYtMusicOnlyFlow.first() || userPreferencesRepository.hideVideoFlow.first()
+        }.getOrDefault(false)
+        val keywords = runCatching { userPreferencesRepository.filterKeywordsFlow.first() }.getOrDefault(emptyList())
+        val filterCoverAndLofi = runCatching { userPreferencesRepository.filterCoverAndLofiFlow.first() }.getOrDefault(false)
+        val disliked = runCatching { musicRepository.getDislikedYoutubeIds() }.getOrDefault(emptySet())
+        val notInterested = runCatching { userPreferencesRepository.notInterestedSongIdsFlow.first() }.getOrDefault(emptySet())
+        return songs.filter { song ->
+            val yId = song.youtubeId ?: song.id.removePrefix("youtube_").takeIf { it != song.id }
+            !(hideVideos && com.unshoo.pixelmusic.utils.ContentFilterUtils.isVideoSong(song)) &&
+                !com.unshoo.pixelmusic.utils.ContentFilterUtils.matchesFilterKeywords(song, keywords) &&
+                !(filterCoverAndLofi && com.unshoo.pixelmusic.utils.ContentFilterUtils.isCoverOrLofi(song, keywords)) &&
+                (yId == null || (yId !in disliked && yId !in notInterested)) &&
+                song.id !in notInterested
+        }.distinctBy { it.youtubeId ?: it.id }
     }
 
     // ─────────────────────────────────────────────────────────────────────────

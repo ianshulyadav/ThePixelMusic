@@ -52,7 +52,7 @@ class AuthViewModel @Inject constructor(
             if (loggedIn && hasCookie && !_uiState.value.isLoggedIn) {
                 _uiState.update { it.copy(isLoggedIn = true) }
                 _eventsChannel.emit(ScreenEvent.Out.LoginCompleted)
-                launch(kotlinx.coroutines.Dispatchers.IO) { youTubeLibrarySyncManager.syncNow(force = true) }
+                youTubeLibrarySyncManager.syncAfterLogin()
                 // Immediately pull YT Music listening history so Recently Played shows
                 // local songs + authenticated YT history after login.
                 listeningStatsTracker.refreshMergedYoutubeHistory()

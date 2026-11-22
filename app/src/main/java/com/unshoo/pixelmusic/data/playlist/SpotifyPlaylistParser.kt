@@ -134,14 +134,21 @@ object SpotifyPlaylistParser {
                 }
             }
 
-            // Check if there are more tracks and we have an anonymous session token to paginate
-            val totalCount = entity.optJSONObject("trackList")?.optInt("total") ?: tracks.size
-            val accessToken = state.optJSONObject("settings")
-                ?.optJSONObject("session")
-                ?.optString("accessToken")
-
-            if (tracks.size < totalCount && !accessToken.isNullOrBlank()) {
-                fetchRemainingTracks(playlistId, accessToken, tracks.size, tracks)
+            // BUGFIX (imports stopped at 100 songs): the embed page only ever carries the first
+            // 100 tracks, and "trackList" is a JSON *array*, so reading a "total" from it as an
+            // object always gave tracks.size and pagination never ran. The embed has no total,
+            // so whenever it is full (>= 100) page the Web API with an anonymous token.
+            if (tracks.size >= EMBED_TRACK_CAP) {
+                val accessToken = state.optJSONObject("settings")
+                    ?.optJSONObject("session")
+                    ?.optString("accessToken")
+                    ?.takeIf { it.isNotBlank() }
+                    ?: fetchAnonymousToken()
+                if (!accessToken.isNullOrBlank()) {
+                    fetchRemainingTracks(playlistId, accessToken, tracks.size, tracks)
+                } else {
+                    Timber.w("SpotifyPlaylistParser: no access token; only the first %d tracks are available", tracks.size)
+                }
             }
 
             Result.success(
@@ -158,6 +165,20 @@ object SpotifyPlaylistParser {
         }
     }
 
+    private const val EMBED_TRACK_CAP = 100
+
+    /** Anonymous web-player token (fallback when the embed page carries none). */
+    private fun fetchAnonymousToken(): String? = runCatching {
+        val req = Request.Builder()
+            .url("https://open.spotify.com/get_access_token?reason=transport&productType=embed")
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+            .build()
+        httpClient.newCall(req).execute().use { res ->
+            if (!res.isSuccessful) return@use null
+            JSONObject(res.body?.string().orEmpty()).optString("accessToken").takeIf { it.isNotBlank() }
+        }
+    }.getOrNull()
+
     private fun fetchRemainingTracks(
         playlistId: String,
         accessToken: String,
@@ -167,6 +188,7 @@ object SpotifyPlaylistParser {
         var offset = startOffset
         val limit = 100
         var hasMore = true
+        var rateLimitRetries = 0
 
         while (hasMore) {
             try {
@@ -178,7 +200,20 @@ object SpotifyPlaylistParser {
                     .build()
 
                 val apiRes = httpClient.newCall(apiReq).execute()
-                if (!apiRes.isSuccessful) break
+                if (apiRes.code == 429 && rateLimitRetries < 4) {
+                    // Rate limited: wait as told (or back off) and retry the same page.
+                    val waitSec = apiRes.header("Retry-After")?.toLongOrNull() ?: (2L shl rateLimitRetries)
+                    apiRes.close()
+                    rateLimitRetries++
+                    Thread.sleep(waitSec.coerceIn(1L, 30L) * 1000L)
+                    continue
+                }
+                if (!apiRes.isSuccessful) {
+                    Timber.w("SpotifyPlaylistParser: page at offset %d failed (HTTP %d)", offset, apiRes.code)
+                    apiRes.close()
+                    break
+                }
+                rateLimitRetries = 0
 
                 val bodyStr = apiRes.body?.string().orEmpty()
                 val json = JSONObject(bodyStr)
@@ -186,6 +221,7 @@ object SpotifyPlaylistParser {
 
                 for (i in 0 until items.length()) {
                     val item = items.optJSONObject(i) ?: continue
+                    // Local files / removed tracks come back as null "track": skip, keep paging.
                     val track = item.optJSONObject("track") ?: continue
                     val trackTitle = track.optString("name").trim()
                     if (trackTitle.isBlank()) continue
@@ -219,9 +255,9 @@ object SpotifyPlaylistParser {
                     )
                 }
 
-                val total = json.optInt("total", outTracks.size)
+                val total = json.optInt("total", Int.MAX_VALUE)
                 offset += items.length()
-                hasMore = items.length() == limit && offset < total
+                hasMore = items.length() > 0 && json.optString("next").let { it.isNotBlank() && it != "null" } && offset < total
             } catch (e: Exception) {
                 Timber.w(e, "SpotifyPlaylistParser: Error fetching page at offset $offset")
                 break

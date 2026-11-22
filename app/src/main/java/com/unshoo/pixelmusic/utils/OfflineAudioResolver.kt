@@ -6,6 +6,17 @@ import com.unshoo.pixelmusic.data.model.Song
 import com.unshoo.pixelmusic.data.remote.youtube.Constants
 import com.unshoo.pixelmusic.data.remote.youtube.PixelMusicHelper
 import com.unshoo.pixelmusic.data.telegram.TelegramRepository
+import androidx.documentfile.provider.DocumentFile
+import com.unshoo.pixelmusic.data.database.youtube.AppDatabase
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.File
 import java.util.Locale
 
@@ -21,29 +32,85 @@ object OfflineAudioResolver {
     private var lastCacheScanTime: Long = 0L
     private const val CACHE_TTL_MS = 8_000L
 
+    /**
+     * Downloads saved OUTSIDE the app's private audio folder (custom SAF download folder,
+     * Download/PixelMusic, ...), keyed by YouTube id -> file path or content:// URI.
+     * Filled from the downloads table in the background by [refreshIndex].
+     */
+    @Volatile
+    private var externalDownloads: Map<String, String> = emptyMap()
+
+    @Volatile
+    private var appContext: Context? = null
+    private val indexScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val indexMutex = Mutex()
+
+    private val _downloadedIds = MutableStateFlow<Set<String>>(emptySet())
+
+    /** YouTube ids that have a finished download anywhere (app folder or custom folder). */
+    val downloadedIds: StateFlow<Set<String>> = _downloadedIds.asStateFlow()
+
+    private val VALID_EXTENSIONS = setOf("flac", "webm", "m4a", "opus", "mp3", "ogg", "aac", "wav")
+
+    /** Call once at app start so badges and offline playback know about every download. */
+    fun init(context: Context) {
+        appContext = context.applicationContext
+        refreshAsync()
+    }
+
     fun invalidateCache() {
         downloadedFilesCache = null
         lastCacheScanTime = 0L
+        refreshAsync()
     }
 
-    private fun getDownloadedFilesMap(context: Context): Map<String, File> {
-        val now = System.currentTimeMillis()
-        val cached = downloadedFilesCache
-        if (cached != null && (now - lastCacheScanTime < CACHE_TTL_MS)) {
-            return cached
+    private fun refreshAsync() {
+        val ctx = appContext ?: return
+        indexScope.launch { refreshIndex(ctx) }
+    }
+
+    /** Rebuilds both the app-folder map and the external-download index. */
+    suspend fun refreshIndex(context: Context) = indexMutex.withLock {
+        appContext = context.applicationContext
+        val internal = scanInternalDownloads(context)
+        downloadedFilesCache = internal
+        lastCacheScanTime = System.currentTimeMillis()
+        val external = HashMap<String, String>()
+        val saved = runCatching {
+            AppDatabase.getInstance(context).songRepository().getDownloadedSongs()
+        }.getOrDefault(emptyList())
+        for (song in saved) {
+            val id = song.youtubeId
+            val path = song.audioFilePath
+            if (id.isBlank() || path.isNullOrBlank() || internal.containsKey(id)) continue
+            if (isReadableAudio(context, path)) external[id] = path
         }
+        externalDownloads = external
+        _downloadedIds.value = internal.keys + external.keys
+    }
+
+    private fun isReadableAudio(context: Context, path: String): Boolean = runCatching {
+        if (path.startsWith("content://")) {
+            val doc = DocumentFile.fromSingleUri(context, Uri.parse(path))
+            doc != null && doc.exists() && doc.length() > 0L
+        } else {
+            val f = File(path.removePrefix("file://"))
+            f.isFile && f.length() > 0L
+        }
+    }.getOrDefault(false)
+
+    private fun scanInternalDownloads(context: Context): Map<String, File> {
         val candidateDirs = listOf(
             PixelMusicHelper.getDownloadDirectory(context, Constants.Downloads.AUDIO_FILES_FOLDER),
             File(context.filesDir, "audio_files")
         )
-        val validExtensions = setOf("flac", "webm", "m4a", "opus", "mp3", "ogg", "aac", "wav")
         val map = HashMap<String, File>()
         for (dir in candidateDirs) {
             if (dir.exists() && dir.isDirectory) {
                 dir.listFiles()?.forEach { file ->
                     if (file.isFile && file.length() > 0L) {
                         val ext = file.extension.lowercase(Locale.ROOT)
-                        if (ext in validExtensions) {
+                        if (ext in VALID_EXTENSIONS) {
                             val id = file.nameWithoutExtension
                             if (!map.containsKey(id)) {
                                 map[id] = file
@@ -53,9 +120,50 @@ object OfflineAudioResolver {
                 }
             }
         }
+        return map
+    }
+
+    private fun getDownloadedFilesMap(context: Context): Map<String, File> {
+        if (appContext == null) init(context)
+        val now = System.currentTimeMillis()
+        val cached = downloadedFilesCache
+        if (cached != null && (now - lastCacheScanTime < CACHE_TTL_MS)) {
+            return cached
+        }
+        val map = scanInternalDownloads(context)
         downloadedFilesCache = map
         lastCacheScanTime = now
+        val merged = map.keys + externalDownloads.keys
+        if (merged != _downloadedIds.value) _downloadedIds.value = merged
         return map
+    }
+
+    private fun youtubeIdOf(song: Song): String? =
+        song.youtubeId ?: if (song.id.startsWith("youtube_")) song.id.removePrefix("youtube_") else null
+
+    /**
+     * Playable URI of a finished download for [youtubeId] (app folder or custom download
+     * folder), or null. Uses the in-memory index, rescanning the app folder at most every 8s.
+     */
+    fun getDownloadedAudioUri(context: Context, youtubeId: String): Uri? {
+        if (youtubeId.isBlank()) return null
+        getDownloadedFilesMap(context)[youtubeId]?.let { return Uri.fromFile(it) }
+        return externalUriFor(youtubeId)
+    }
+
+    /** Same as [getDownloadedAudioUri] but never touches the disk (safe on the main thread). */
+    fun peekDownloadedAudioUri(youtubeId: String): Uri? {
+        if (youtubeId.isBlank()) return null
+        downloadedFilesCache?.get(youtubeId)?.let { return Uri.fromFile(it) }
+        return externalUriFor(youtubeId)
+    }
+
+    private fun externalUriFor(youtubeId: String): Uri? {
+        val path = externalDownloads[youtubeId] ?: return null
+        return when {
+            path.startsWith("content://") || path.startsWith("file://") -> Uri.parse(path)
+            else -> Uri.fromFile(File(path))
+        }
     }
 
     /**
@@ -81,6 +189,10 @@ object OfflineAudioResolver {
                 if (file.exists() && file.isFile && file.length() > 0L) return true
             }
         }
+        if (song.path.startsWith("content://")) {
+            // Download saved into the user's custom (SAF) download folder.
+            return true
+        }
         if (song.contentUriString.startsWith("content://")) {
             // For local media store items, content:// is verified local storage.
             // Avoid calling synchronous contentResolver.openAssetFileDescriptor()
@@ -89,9 +201,9 @@ object OfflineAudioResolver {
         }
 
         // 3. Downloaded YouTube audio check (O(1) fast memory lookup)
-        val ytId = song.youtubeId ?: if (song.id.startsWith("youtube_")) song.id.removePrefix("youtube_") else null
+        val ytId = youtubeIdOf(song)
         if (ytId != null) {
-            return getDownloadedFilesMap(context).containsKey(ytId)
+            return getDownloadedFilesMap(context).containsKey(ytId) || externalDownloads.containsKey(ytId)
         }
 
         return false

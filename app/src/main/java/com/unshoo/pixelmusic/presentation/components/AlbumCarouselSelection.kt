@@ -49,7 +49,9 @@ fun AlbumCarouselSection(
     modifier: Modifier = Modifier,
     carouselStyle: String = CarouselStyle.NO_PEEK,
     itemSpacing: Dp = 8.dp,
-    albumArtQuality: AlbumArtQuality = AlbumArtQuality.ORIGINAL
+    albumArtQuality: AlbumArtQuality = AlbumArtQuality.ORIGINAL,
+    /** True once the current song is audibly playing; full-resolution art waits for it. */
+    playbackStartedProvider: () -> Boolean = { true },
 ) {
     if (queue.isEmpty()) return
 
@@ -192,11 +194,31 @@ fun AlbumCarouselSection(
                             onClick = { onAlbumClick(song) }
                         )
                 ) { // Enforce 1:1 aspect ratio for the item itself
+                    // Songs saved without a cover URL (common for YouTube rows) fall back to the
+                    // video thumbnail / local embedded art instead of the blank placeholder.
+                    val artModel = remember(song.id, song.albumArtUriString, song.youtubeId) {
+                        com.unshoo.pixelmusic.utils.MediaItemBuilder.resolveArtworkUri(
+                            song.albumArtUriString, song.id, song.youtubeId
+                        ) ?: song.albumArtUriString
+                    }
+                    // Low-quality cover first; the focused song's full-resolution cover is only
+                    // fetched once playback has started (or after a short grace period), so it
+                    // never competes with the audio stream for bandwidth at song start.
+                    var highQualityUnlocked by remember(song.id) { mutableStateOf(!isFocusedItem) }
+                    if (isFocusedItem && !highQualityUnlocked) {
+                        LaunchedEffect(song.id) {
+                            kotlinx.coroutines.withTimeoutOrNull(HIGH_QUALITY_ART_GRACE_MS) {
+                                snapshotFlow { playbackStartedProvider() }.first { it }
+                            }
+                            highQualityUnlocked = true
+                        }
+                    }
                     OptimizedAlbumArt(
-                        uri = song.albumArtUriString,
+                        uri = artModel,
                         title = song.title,
                         modifier = Modifier.fillMaxSize(),
                         targetSize = targetSize,
+                        loadHighQuality = highQualityUnlocked,
                         placeholderModel = if (song.albumArtUriString?.startsWith("telegram_art") == true) {
                              "${song.albumArtUriString}?quality=thumb"
                         } else null
@@ -234,3 +256,5 @@ private fun resolveCurrentQueueIndex(
         ?: 0
 }
 
+/** How long the focused cover stays low-quality when playback has not started yet. */
+private const val HIGH_QUALITY_ART_GRACE_MS = 4_000L

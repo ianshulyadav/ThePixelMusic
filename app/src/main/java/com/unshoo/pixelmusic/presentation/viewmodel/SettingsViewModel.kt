@@ -1203,6 +1203,14 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    /** Merged setting: prefer matching phone files and Telegram copies over streaming. */
+    fun setUseExistingCopies(enabled: Boolean) {
+        viewModelScope.launch {
+            userPreferencesRepository.setUseDeviceLibraryMatches(enabled)
+            userPreferencesRepository.setPreferTelegramAlternative(enabled)
+        }
+    }
+
     fun setUseDeviceLibraryMatches(enabled: Boolean) {
         viewModelScope.launch { userPreferencesRepository.setUseDeviceLibraryMatches(enabled) }
     }
@@ -1311,9 +1319,23 @@ fun setBeta05CleanInstallDisclaimerDismissed(dismissed: Boolean) {
         fileExplorerStateHolder.openExplorerRoot()
     }
 
+    /** Custom download folder (SAF tree URI), or "" for the default app folder. */
+    val customDownloadPath: StateFlow<String> = datastoreRepository.customDownloadPath
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
+
     fun setCustomDownloadPath(path: String) {
         viewModelScope.launch {
             datastoreRepository.saveCustomDownloadPath(path)
+        }
+    }
+
+    /**
+     * Back to the default download folder. The old folder's read permission is kept on purpose:
+     * songs already downloaded there still play from it and still count as downloaded.
+     */
+    fun resetDownloadPathToDefault() {
+        viewModelScope.launch {
+            datastoreRepository.saveCustomDownloadPath("")
         }
     }
 

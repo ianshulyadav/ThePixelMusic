@@ -104,6 +104,11 @@ class DualPlayerEngine @Inject constructor(
     private companion object {
         private const val LOSSLESS_STALL_FALLBACK_TIMEOUT_MS = 4_000L
         private const val DUCK_FACTOR = 0.2f
+        /** Manual skip: short fade-out so a tap never feels laggy (Mochy caps it at 1.5 s). */
+        private const val SKIP_FADE_OUT_MS = 450L
+        private const val SKIP_FADE_IN_MS = 700L
+        private const val SKIP_FADE_FRAME_MS = 16L
+        private const val SKIP_FADE_START_WAIT_MS = 6_000L
         private const val DEAD_URL_TTL_MS = 6 * 60 * 60 * 1000L
         private const val FORCED_REFRESH_MIN_INTERVAL_MS = 15_000L
         private val REFUSED_STREAM_CODES = setOf(401, 403, 404, 410)
@@ -228,6 +233,10 @@ class DualPlayerEngine @Inject constructor(
     @Volatile private var pinnedAudioSessionId: Int = C.AUDIO_SESSION_ID_UNSET
     private val _activeAudioSessionId = MutableStateFlow(0)
     val activeAudioSessionId: StateFlow<Int> = _activeAudioSessionId.asStateFlow()
+
+    /** Audio session of the incoming player while a crossfade runs; 0 otherwise. */
+    private val _standbyAudioSessionId = MutableStateFlow(0)
+    val standbyAudioSessionId: StateFlow<Int> = _standbyAudioSessionId.asStateFlow()
     private var pendingTransitionTarget: TransitionTarget? = null
 
     private val _activeDecoderInfo = MutableStateFlow<ActiveDecoderInfo?>(null)
@@ -615,6 +624,13 @@ class DualPlayerEngine @Inject constructor(
 
     // Reusable listener for standby / preloading player errors (Fix 3)
     private val standbyPlayerListener = object : Player.Listener {
+        override fun onAudioSessionIdChanged(audioSessionId: Int) {
+            // The incoming player's AudioTrack opens when it starts playing in the fade.
+            if (transitionRunning && audioSessionId != 0 && audioSessionId != C.AUDIO_SESSION_ID_UNSET) {
+                _standbyAudioSessionId.value = audioSessionId
+            }
+        }
+
         override fun onPlayerError(error: PlaybackException) {
             if (!::playerB.isInitialized) return
             val currentStandbyItem = playerB.currentMediaItem ?: return
@@ -743,6 +759,112 @@ class DualPlayerEngine @Inject constructor(
         get() = playerA
 
     fun isTransitionRunning(): Boolean = transitionRunning
+
+    // ---- Manual skip fade (modelled on Mochy Music's TransportTransitions) ----------------
+    // A tapped next/previous no longer hard-cuts: the playing song fades out quickly, the
+    // switch happens once it is silent, and the new song swells in only once it is really
+    // audible (a slow start used to come in at full volume with no fade at all). A second tap
+    // while a fade runs acts at once. One player, volume only: no second decoder, no overlap.
+    private var skipFadeJob: Job? = null
+    private var skipFadeToken = 0
+    @Volatile private var skipFadeActive = false
+    /** Volume the song should rest at (ReplayGain / user level) while a skip fade owns the volume. */
+    @Volatile private var skipFadeRestVolume = 1f
+    /** A skip whose fade-out was interrupted before its song change ran. */
+    private var pendingSkipChange: (() -> Unit)? = null
+
+    /** True while a manual-skip fade is driving the master volume. */
+    fun isSkipFadeActive(): Boolean = skipFadeActive
+
+    /** Volume writers (ReplayGain) call this instead of setting the volume during a skip fade. */
+    fun updateSkipFadeRestVolume(volume: Float) {
+        skipFadeRestVolume = volume.coerceIn(0.01f, 1f)
+    }
+
+    private fun skipFadeTargetVolume(): Float =
+        if (isDucked) (skipFadeRestVolume * DUCK_FACTOR).coerceIn(0.01f, 1f) else skipFadeRestVolume
+
+    /**
+     * Runs [change] (a seek to another song) wrapped in a fade-out / fade-in. Falls back to
+     * running it at once when nothing is audibly playing or a crossfade owns the players.
+     */
+    fun fadedSkip(change: () -> Unit) {
+        if (isReleased || !::playerA.isInitialized) {
+            change()
+            return
+        }
+        val player = playerA
+        val wasFading = skipFadeActive
+        if (!wasFading && (!player.playWhenReady || !player.isPlaying || transitionRunning)) {
+            change()
+            return
+        }
+        val token = ++skipFadeToken
+        skipFadeJob?.cancel()
+        // A second tap means "now": run the first skip's change if its fade had not got there.
+        val interrupted = pendingSkipChange
+        pendingSkipChange = change
+        if (!wasFading) {
+            skipFadeRestVolume = player.volume.takeIf { it > 0.01f }?.let { v ->
+                if (isDucked) (v / DUCK_FACTOR).coerceIn(0.01f, 1f) else v
+            } ?: 1f
+        }
+        skipFadeActive = true
+        skipFadeJob = scope.launch {
+            try {
+                if (!wasFading) {
+                    runSkipVolumeFade(player, from = 1f, to = 0f, lengthMs = SKIP_FADE_OUT_MS)
+                }
+                player.volume = 0f
+                interrupted?.invoke()
+                pendingSkipChange = null
+                val oldId = player.currentMediaItem?.mediaId
+                val oldIndex = player.currentMediaItemIndex
+                change()
+                awaitSkipTargetAudible(player, oldId, oldIndex)
+                runSkipVolumeFade(player, from = 0f, to = 1f, lengthMs = SKIP_FADE_IN_MS)
+            } finally {
+                if (skipFadeToken == token) {
+                    // Finished, or stopped by something other than another tap: hand the volume back.
+                    pendingSkipChange?.let { leftover ->
+                        pendingSkipChange = null
+                        runCatching { leftover() }
+                    }
+                    skipFadeActive = false
+                    if (!transitionRunning && !isReleased) {
+                        runCatching { player.volume = skipFadeTargetVolume() }
+                    }
+                }
+            }
+        }
+    }
+
+    private suspend fun runSkipVolumeFade(player: ExoPlayer, from: Float, to: Float, lengthMs: Long) {
+        val start = System.nanoTime()
+        while (true) {
+            if (transitionRunning) return
+            val p = ((System.nanoTime() - start) / 1_000_000f / lengthMs).coerceIn(0f, 1f)
+            val eased = p * p * (3f - 2f * p) // smoothstep, as Mochy
+            val level = from + (to - from) * eased
+            player.volume = (skipFadeTargetVolume() * level).coerceIn(0f, 1f)
+            if (p >= 1f) return
+            delay(SKIP_FADE_FRAME_MS)
+        }
+    }
+
+    /** Waits (silent) until the new song is actually playing, at most [SKIP_FADE_START_WAIT_MS]. */
+    private suspend fun awaitSkipTargetAudible(player: ExoPlayer, oldId: String?, oldIndex: Int) {
+        var waited = 0L
+        while (waited < SKIP_FADE_START_WAIT_MS) {
+            val moved = player.currentMediaItemIndex != oldIndex ||
+                player.currentMediaItem?.mediaId != oldId ||
+                player.currentPosition < 1_000L
+            if (player.isPlaying && moved) return
+            if (!player.playWhenReady) return
+            delay(SKIP_FADE_FRAME_MS)
+            waited += SKIP_FADE_FRAME_MS
+        }
+    }
 
     /** True when the standby player holds [expectedMediaId] fully buffered and ready to fade in. */
     fun isPreparedNextReady(expectedMediaId: String?): Boolean {
@@ -914,7 +1036,12 @@ class DualPlayerEngine @Inject constructor(
     fun getCachedResolvedUri(uri: Uri): Uri? {
         val uriString = uri.toString()
         localFilePathCache[uriString]?.let { localPath ->
+            if (localPath.startsWith("content://")) return Uri.parse(localPath)
             if (java.io.File(localPath).exists()) return Uri.fromFile(java.io.File(localPath))
+        }
+        if (uriString.startsWith("youtube://")) {
+            com.unshoo.pixelmusic.utils.OfflineAudioResolver
+                .peekDownloadedAudioUri(uriString.removePrefix("youtube://"))?.let { return it }
         }
         val cached = resolvedUriCache.get(uriString) ?: activePlaybackResolvedUris[uriString]
         return if (cached != null && isResolvedUriFresh(uriString, cached)) cached else null
@@ -944,6 +1071,15 @@ class DualPlayerEngine @Inject constructor(
         val scheme = uri.scheme
         val uriString = uri.toString()
         val originalUriString = mediaItem.mediaMetadata.extras?.getString("com.unshoo.pixelmusic.external.CONTENT_URI") ?: uriString
+        // A queued item that was resolved to a stream before the song finished downloading.
+        if (scheme == "http" || scheme == "https") {
+            youtubeIdOf(mediaItem)?.let { id ->
+                withContext(Dispatchers.IO) { resolveLocalDiskFile("youtube://$id") }?.let { diskUri ->
+                    StreamChoice.forget(id)
+                    return mediaItem.buildUpon().setUri(diskUri).setMimeType(null).build()
+                }
+            }
+        }
         if (scheme == "http" || scheme == "https") {
             if (isResolvedUriFresh(originalUriString, uri)) {
                 return mediaItem
@@ -1186,6 +1322,11 @@ class DualPlayerEngine @Inject constructor(
         // 2. Check YouTube downloads folder directly on disk
         if (uriString.startsWith("youtube://")) {
             val videoId = uriString.removePrefix("youtube://")
+            // Downloads index: app folder AND the user's custom (SAF) download folder.
+            com.unshoo.pixelmusic.utils.OfflineAudioResolver.getDownloadedAudioUri(context, videoId)?.let { indexed ->
+                localFilePathCache.put(uriString, indexed.toString().takeIf { indexed.scheme == "content" } ?: indexed.path.orEmpty())
+                return indexed
+            }
             if (videoId.isNotBlank()) {
                 val candidateDirs = listOf(
                     PixelMusicHelper.getDownloadDirectory(context, Constants.Downloads.AUDIO_FILES_FOLDER),
@@ -1770,6 +1911,15 @@ class DualPlayerEngine @Inject constructor(
                     else -> null
                 }
 
+                // 0. Downloaded songs never touch the network: a finished download (app folder
+                // or custom download folder) wins over a pinned/cached stream and over lossless.
+                if (scheme == "youtube" || uriString.startsWith("youtube://")) {
+                    resolveLocalDiskFile(uriString)?.let { diskUri ->
+                        if (cleanId != null) StreamChoice.forget(cleanId)
+                        return dataSpec.buildUpon().setUri(diskUri).setKey(null).build()
+                    }
+                }
+
                 // 1. Session Stream Pinning: Check StreamChoice first (BitChord parity)
                 // Ensures continuation reads, seeking, and cache fill never switch to a different format/codec mid-song.
                 if (cleanId != null) {
@@ -1850,8 +2000,7 @@ class DualPlayerEngine @Inject constructor(
                 if (scheme == "telegram" || scheme == "gdrive" || scheme == "youtube") {
                     val originalUri = uriString
                     val diskUri = resolveLocalDiskFile(originalUri)
-                    val servesLossless = diskUri?.path?.endsWith(".flac", true) == true
-                    if (diskUri != null && (scheme != "youtube" || servesLossless || !LosslessStreamResolver.isEnabledBlocking(context) || !connectivityStateHolder.isOnline.value)) {
+                    if (diskUri != null) {
                         return dataSpec.buildUpon()
                             .setUri(diskUri)
                             .build()
@@ -2396,6 +2545,16 @@ class DualPlayerEngine @Inject constructor(
 
     suspend fun resolveCloudUri(uri: Uri): Uri = withContext(Dispatchers.IO) {
         val uriString = uri.toString()
+
+        // Downloaded since the stream URL was cached? Play the file, drop the stale stream.
+        if (uri.scheme == "youtube") {
+            resolveLocalDiskFile(uriString)?.let { diskUri ->
+                // Not cached: if the download is deleted later we must fall back to streaming.
+                activePlaybackResolvedUris.remove(uriString)
+                resolvedUriCache.remove(uriString)
+                return@withContext diskUri
+            }
+        }
         
         // Return active playback locked URI to prevent ExoPlayer from stuttering or re-loading due to mid-stream URL changes.
         // YouTube googlevideo URLs expire; after a long pause using a stale locked URL causes endless buffering.
@@ -2560,13 +2719,11 @@ class DualPlayerEngine @Inject constructor(
         val youtubeId = uriString.removePrefix("youtube://")
         try {
             val localDiskUri = resolveLocalDiskFile(uriString)
-            val isFlacDiskFile = localDiskUri?.path?.endsWith(".flac", true) == true
-            val isLosslessEnabled = LosslessStreamResolver.isEnabled(context)
-            if (localDiskUri != null &&
-                (isFlacDiskFile || !isLosslessEnabled || !connectivityStateHolder.isOnline.value)
-            ) {
+            // A downloaded copy always plays from disk (no data use), whatever the lossless setting.
+            if (localDiskUri != null) {
                 return@withContext localDiskUri
             }
+            val isLosslessEnabled = LosslessStreamResolver.isEnabled(context)
 
             val matchingItem = queueSnapshot.firstOrNull {
                 it.mediaId == youtubeId ||
@@ -2632,6 +2789,11 @@ class DualPlayerEngine @Inject constructor(
                     if (resolvedPath.contains("monochrome.st/track/")) {
                         LosslessStreamResolver.markUriFresh(resolvedPath)
                     }
+                    Uri.parse(resolvedPath)
+                }
+                resolvedPath.startsWith("content://") -> {
+                    // Download saved in the custom (SAF) folder: was wrapped as a bogus file:// URI.
+                    localFilePathCache.put(uriString, resolvedPath)
                     Uri.parse(resolvedPath)
                 }
                 !resolvedPath.startsWith("http") -> {
@@ -2841,6 +3003,7 @@ class DualPlayerEngine @Inject constructor(
         }
         transitionJob?.cancel()
         transitionRunning = false
+        _standbyAudioSessionId.value = 0
         pendingTransitionTarget = null
         resetPreparedWindowState()
         if (::playerB.isInitialized) {
@@ -2863,6 +3026,10 @@ class DualPlayerEngine @Inject constructor(
     fun performTransition(settings: TransitionSettings) {
         transitionJob?.cancel()
         transitionRunning = true
+        if (::playerB.isInitialized && !playerBReleased) {
+            val sid = playerB.audioSessionId
+            if (sid != 0 && sid != C.AUDIO_SESSION_ID_UNSET) _standbyAudioSessionId.value = sid
+        }
         transitionJob = scope.launch {
             try {
                 performOverlapTransition(settings)
@@ -2881,6 +3048,7 @@ class DualPlayerEngine @Inject constructor(
                 }
             } finally {
                 transitionRunning = false
+                _standbyAudioSessionId.value = 0
                 pendingTransitionTarget = null
                 onTransitionFinishedListeners.forEach { it() }
             }

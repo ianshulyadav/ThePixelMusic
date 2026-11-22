@@ -82,12 +82,14 @@ fun PlayFromSourceSheet(
     var unifiedOrder by remember { mutableStateOf<List<String>>(emptyList()) }
     var sourceSettings by remember { mutableStateOf<SourceSettings?>(null) }
     var pinnedSourceId by remember { mutableStateOf<String?>(null) }
+    var configuredPooled by remember { mutableStateOf<Set<AudioSourceType>>(emptySet()) }
 
     LaunchedEffect(videoId, installedAddons) {
         withContext(Dispatchers.IO) {
             AddonManager.ensureLoadedBlocking(context)
             unifiedOrder = AddonManager.readUnifiedOrder(context)
             sourceSettings = LosslessStreamResolver.readSettings(context)
+            configuredPooled = LosslessStreamResolver.configuredPooledSources(context)
             pinnedSourceId = if (videoId.isNotBlank()) {
                 LosslessStreamResolver.getUnifiedSongSourceOverride(context, videoId)
             } else {
@@ -100,7 +102,7 @@ fun PlayFromSourceSheet(
         if (videoId.isNotBlank()) LosslessStreamResolver.resultFor(videoId) else null
     }
 
-    val options = remember(unifiedOrder, installedAddons, activeLossless, activeSourceName, sourceSettings) {
+    val options = remember(unifiedOrder, installedAddons, activeLossless, activeSourceName, sourceSettings, configuredPooled) {
         val s = sourceSettings
         val addonMap = installedAddons.associateBy { it.id }
         val orderIds = if (unifiedOrder.isNotEmpty()) {
@@ -156,9 +158,10 @@ fun PlayFromSourceSheet(
                         AudioSourceType.YOUTUBE -> true
                         AudioSourceType.MONOCHROME -> (s?.losslessMasterEnabled ?: true) && (s?.monochromeEnabled ?: true)
                         AudioSourceType.APPLE -> (s?.losslessMasterEnabled ?: true) && (s?.appleEnabled ?: true)
-                        AudioSourceType.TIDAL -> (s?.losslessMasterEnabled ?: true) && (s?.tidalEnabled ?: false)
-                        AudioSourceType.QOBUZ -> (s?.losslessMasterEnabled ?: true) && (s?.qobuzEnabled ?: false)
-                        AudioSourceType.DEEZER -> (s?.losslessMasterEnabled ?: true) && (s?.deezerEnabled ?: false)
+                        // Pooled sources only when Lossless settings would show them too.
+                        AudioSourceType.TIDAL -> (s?.losslessMasterEnabled ?: true) && (s?.tidalEnabled ?: false) && AudioSourceType.TIDAL in configuredPooled
+                        AudioSourceType.QOBUZ -> (s?.losslessMasterEnabled ?: true) && (s?.qobuzEnabled ?: false) && AudioSourceType.QOBUZ in configuredPooled
+                        AudioSourceType.DEEZER -> (s?.losslessMasterEnabled ?: true) && (s?.deezerEnabled ?: false) && AudioSourceType.DEEZER in configuredPooled
                         AudioSourceType.JIOSAAVN -> s?.saavnEnabled ?: false
                         else -> false
                     }

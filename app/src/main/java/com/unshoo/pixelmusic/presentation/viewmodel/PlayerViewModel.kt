@@ -1728,7 +1728,24 @@ class PlayerViewModel @Inject constructor(
     private val _isMediaControllerReady = MutableStateFlow(false)
     val isMediaControllerReady: StateFlow<Boolean> = _isMediaControllerReady.asStateFlow()
     // SessionToken injected via constructor
+    /** Incoming track announced by the service while an automatic crossfade is audible. */
+    @Volatile private var transitionDisplayMediaId: String? = null
+
     private val mediaControllerListener = object : MediaController.Listener {
+        override fun onExtrasChanged(controller: MediaController, extras: Bundle) {
+            val incomingId = extras.getString(
+                com.unshoo.pixelmusic.data.service.MusicService.SESSION_EXTRA_TRANSITION_DISPLAY_MEDIA_ID
+            )
+            runOnMainImmediate {
+                transitionDisplayMediaId = incomingId
+                if (incomingId == null) return@runOnMainImmediate
+                val song = resolveSongFromMediaItem(MediaItem.Builder().setMediaId(incomingId).build())
+                    ?: return@runOnMainImmediate
+                // Show the song you can hear for the whole fade, not the outgoing one.
+                playbackStateHolder.updateStablePlayerState { it.copy(currentSong = song) }
+            }
+        }
+
         override fun onCustomCommand(
             controller: MediaController,
             command: SessionCommand,
@@ -2852,7 +2869,17 @@ class PlayerViewModel @Inject constructor(
     private fun syncCurrentPlayerState(playerCtrl: MediaController) {
         val mediaItem = playerCtrl.currentMediaItem
         if (mediaItem != null) {
-            val song = resolveSongFromMediaItem(mediaItem)
+            val displayOverride = transitionDisplayMediaId
+            if (displayOverride != null && displayOverride == mediaItem.mediaId) {
+                transitionDisplayMediaId = null // the swap caught up
+            }
+            // While a crossfade is audible the controller still reports the outgoing item;
+            // keep showing the incoming song instead of flashing the old cover back.
+            val song = if (transitionDisplayMediaId != null) {
+                playbackStateHolder.stablePlayerState.value.currentSong ?: resolveSongFromMediaItem(mediaItem)
+            } else {
+                resolveSongFromMediaItem(mediaItem)
+            }
             val readyPosition = playerCtrl.currentPosition.coerceAtLeast(0L)
             val songDurationHint = song?.duration?.coerceAtLeast(0L) ?: 0L
             val resolvedDuration = playbackStateHolder.resolveDurationForPlaybackState(
@@ -7454,6 +7481,22 @@ class PlayerViewModel @Inject constructor(
 
     fun searchSongs(query: String): Flow<List<Song>> {
         return musicRepository.searchSongs(query)
+    }
+
+    /** Artist detail route id for an artist name from listening stats, or null if not in the library. */
+    suspend fun resolveArtistIdByName(name: String): Long? =
+        runCatching { musicRepository.getArtistIdByName(name) }.getOrNull()
+
+    /** Album detail route id for an album name from listening stats (library id, else YT browse id). */
+    fun resolveAlbumRouteIdByName(name: String): String? {
+        val match = libraryStateHolder.allSongsById.value.values.firstOrNull {
+            it.album.equals(name, ignoreCase = true)
+        } ?: return null
+        return when {
+            match.albumId > 0L -> match.albumId.toString()
+            !match.albumBrowseId.isNullOrBlank() -> match.albumBrowseId
+            else -> null
+        }
     }
 
     suspend fun getSongs(songIds: List<String>) : List<Song>{

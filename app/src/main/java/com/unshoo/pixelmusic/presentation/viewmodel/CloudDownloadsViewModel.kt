@@ -256,10 +256,38 @@ class CloudDownloadsViewModel @Inject constructor(
             // 4. Process local YouTube / Playlist downloads
             for (ySong in localSongs) {
                 val path = ySong.audioFilePath
+                // Downloads saved into a custom (SAF) folder are content:// documents.
+                if (path != null && path.startsWith("content://")) {
+                    val doc = runCatching {
+                        androidx.documentfile.provider.DocumentFile.fromSingleUri(context, android.net.Uri.parse(path))
+                    }.getOrNull()
+                    val docSize = runCatching { doc?.takeIf { it.exists() }?.length() ?: 0L }.getOrDefault(0L)
+                    if (doc != null && docSize > 0L) {
+                        val song = resolveSongFromLocal(ySong, path, runCatching { doc.lastModified() }.getOrDefault(0L), null)
+                        completedItems.add(
+                            CloudDownloadedSongItem(
+                                song = song,
+                                download = OfflineDownload(
+                                    downloadId = ySong.youtubeId,
+                                    sourceUri = "youtube://${ySong.youtubeId}",
+                                    status = OfflineDownloadStatus.COMPLETE,
+                                    bytesDownloaded = docSize,
+                                    totalBytes = docSize,
+                                    localPath = path,
+                                    errorMessage = null,
+                                    title = song.title,
+                                    provider = "youtube"
+                                ),
+                                fileSizeBytes = docSize
+                            )
+                        )
+                    }
+                    continue
+                }
                 val file = path?.let(::File)
                 if (file != null && file.isFile && file.length() > 0L) {
                     val fileSize = file.length()
-                    val song = resolveSongFromLocal(ySong, file)
+                    val song = resolveSongFromLocal(ySong, file.absolutePath, file.lastModified(), file.parentFile)
                     completedItems.add(
                         CloudDownloadedSongItem(
                             song = song,
@@ -445,9 +473,11 @@ class CloudDownloadsViewModel @Inject constructor(
 
     private suspend fun resolveSongFromLocal(
         ySong: com.unshoo.pixelmusic.data.model.youtube.Song,
-        file: File
+        filePath: String,
+        lastModified: Long,
+        parentDir: File?
     ): Song {
-        val songFromPath = musicDao.getSongByPath(file.absolutePath)?.toSong()
+        val songFromPath = musicDao.getSongByPath(filePath)?.toSong()
         if (songFromPath != null) return songFromPath
 
         val unifiedId = YouTubeIdUtils.toUnifiedYoutubeSongId(ySong.youtubeId)
@@ -460,7 +490,7 @@ class CloudDownloadsViewModel @Inject constructor(
         val albumId = YouTubeIdUtils.toUnifiedYoutubeAlbumId(albumName)
         val durationMs = parseDurationMillis(ySong.duration)
         val artworkPath = ySong.thumbnailPath?.takeIf { File(it).exists() }
-            ?: file.parentFile?.resolve("${ySong.youtubeId}.jpg")?.takeIf { it.exists() }?.absolutePath
+            ?: parentDir?.resolve("${ySong.youtubeId}.jpg")?.takeIf { it.exists() }?.absolutePath
             ?: ySong.thumbnailHref
 
         return Song(
@@ -478,7 +508,7 @@ class CloudDownloadsViewModel @Inject constructor(
             album = albumName,
             albumId = albumId,
             albumArtist = null,
-            path = file.absolutePath,
+            path = filePath,
             contentUriString = "youtube://${ySong.youtubeId}",
             albumArtUriString = artworkPath,
             duration = durationMs,
@@ -488,8 +518,8 @@ class CloudDownloadsViewModel @Inject constructor(
             trackNumber = 0,
             discNumber = null,
             year = 0,
-            dateAdded = ySong.downloadTimestamp.takeIf { it > 0 } ?: file.lastModified(),
-            dateModified = file.lastModified(),
+            dateAdded = ySong.downloadTimestamp.takeIf { it > 0 } ?: lastModified,
+            dateModified = lastModified,
             mimeType = "audio/webm",
             bitrate = null,
             sampleRate = null,

@@ -49,6 +49,8 @@ import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.WavingHand
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -444,8 +446,8 @@ private fun HomeOptionsTab(
                 OptionLabel(stringResource(R.string.settings_quick_picks_mode_title))
                 ChipRow(
                     options = listOf(
-                        com.unshoo.pixelmusic.data.preferences.QuickPicksDisplayMode.CARD_FROSTED to stringResource(R.string.settings_quick_picks_mode_frosted),
-                        com.unshoo.pixelmusic.data.preferences.QuickPicksDisplayMode.CARD_ALBUM_TINT to stringResource(R.string.settings_quick_picks_mode_album_tint),
+                        com.unshoo.pixelmusic.data.preferences.QuickPicksDisplayMode.M3_MULTI_BROWSE to stringResource(R.string.settings_quick_picks_mode_multi_browse),
+                        com.unshoo.pixelmusic.data.preferences.QuickPicksDisplayMode.M3_HERO to stringResource(R.string.settings_quick_picks_mode_hero),
                         com.unshoo.pixelmusic.data.preferences.QuickPicksDisplayMode.CARD to stringResource(R.string.settings_quick_picks_mode_square),
                         com.unshoo.pixelmusic.data.preferences.QuickPicksDisplayMode.CARD_CLASSIC to stringResource(R.string.settings_quick_picks_mode_classic),
                         com.unshoo.pixelmusic.data.preferences.QuickPicksDisplayMode.UNCONTAINED to stringResource(R.string.settings_quick_picks_mode_uncontained),
@@ -644,33 +646,66 @@ private fun OptionsCard(
     }
 }
 
+/**
+ * Single-choice selector as a Material 3 Expressive *connected button group*: options sit in
+ * joined rows (outer corners round, inner corners tight) and the selected one morphs to a
+ * fully rounded, filled shape with a check mark. Long labels get two per row, short labels three.
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun <T> ChipRow(options: List<Pair<T, String>>, selected: T, onSelect: (T) -> Unit) {
-    androidx.compose.foundation.layout.FlowRow(
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-        options.forEach { (value, label) ->
-            val isSelected = value == selected
-            val bg by animateColorAsState(
-                if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest,
-                label = "chipBg"
-            )
-            val fg by animateColorAsState(
-                if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-                label = "chipFg"
-            )
-            Text(
-                text = label,
-                color = fg,
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(50))
-                    .background(bg)
-                    .clickable { onSelect(value) }
-                    .padding(horizontal = 16.dp, vertical = 10.dp)
-            )
+    val perRow = if (options.all { it.second.length <= 11 }) 3 else 2
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        options.chunked(perRow).forEach { rowOptions ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(androidx.compose.material3.ButtonGroupDefaults.ConnectedSpaceBetween)
+            ) {
+                rowOptions.forEachIndexed { index, (value, label) ->
+                    val isSelected = value == selected
+                    val shapes = when {
+                        rowOptions.size == 1 -> androidx.compose.material3.ToggleButtonDefaults.shapes()
+                        index == 0 -> androidx.compose.material3.ButtonGroupDefaults.connectedLeadingButtonShapes()
+                        index == rowOptions.lastIndex -> androidx.compose.material3.ButtonGroupDefaults.connectedTrailingButtonShapes()
+                        else -> androidx.compose.material3.ButtonGroupDefaults.connectedMiddleButtonShapes()
+                    }
+                    androidx.compose.material3.ToggleButton(
+                        checked = isSelected,
+                        onCheckedChange = { onSelect(value) },
+                        shapes = shapes,
+                        colors = androidx.compose.material3.ToggleButtonDefaults.toggleButtonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                            contentColor = MaterialTheme.colorScheme.onSurface,
+                            checkedContainerColor = MaterialTheme.colorScheme.primary,
+                            checkedContentColor = MaterialTheme.colorScheme.onPrimary,
+                        ),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 12.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .semantics { role = androidx.compose.ui.semantics.Role.RadioButton }
+                    ) {
+                        androidx.compose.animation.AnimatedVisibility(visible = isSelected) {
+                            Row {
+                                Icon(
+                                    imageVector = androidx.compose.material.icons.Icons.Rounded.Check,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(Modifier.width(6.dp))
+                            }
+                        }
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                // Keep a lone last option the same width as the others.
+                repeat(perRow - rowOptions.size) { Spacer(Modifier.weight(1f)) }
+            }
         }
     }
 }

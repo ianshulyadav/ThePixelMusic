@@ -97,6 +97,8 @@ import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.Cake
+import androidx.compose.material.icons.rounded.Campaign
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.Delete
@@ -262,6 +264,27 @@ fun SettingsCategoryScreen(
     var showClearLyricsDialog by remember(categoryId) { mutableStateOf(false) }
     var showRebuildDatabaseWarning by remember(categoryId) { mutableStateOf(false) }
     var showRegenerateDailyMixDialog by remember(categoryId) { mutableStateOf(false) }
+    var showBirthdaySurprisePreview by remember(categoryId) { mutableStateOf(false) }
+    if (showBirthdaySurprisePreview) {
+        com.unshoo.pixelmusic.presentation.components.BirthdaySurpriseDialog(
+            onDismiss = { showBirthdaySurprisePreview = false },
+        )
+    }
+    var showAnnouncementPreview by remember(categoryId) { mutableStateOf(false) }
+    if (showAnnouncementPreview) {
+        com.unshoo.pixelmusic.presentation.components.AppAnnouncementDialog(
+            announcement = com.unshoo.pixelmusic.data.github.AppAnnouncement(
+                id = "preview",
+                title = stringResource(R.string.setcat_announcement_preview_sample_title),
+                message = stringResource(R.string.setcat_announcement_preview_sample_message),
+                buttonLabel = stringResource(R.string.setcat_announcement_preview_sample_button),
+                buttonUrl = "https://www.pixelmusic.me",
+                until = null,
+                publishedAt = System.currentTimeMillis() - 2 * 60 * 60 * 1000L,
+            ),
+            onDismiss = { showAnnouncementPreview = false },
+        )
+    }
     var showRegenerateStatsDialog by remember(categoryId) { mutableStateOf(false) }
     var showProxyDialog by remember(categoryId) { mutableStateOf(false) }
     var editProxyEnabled by remember(categoryId, showProxyDialog) { mutableStateOf(uiState.proxyEnabled) }
@@ -619,11 +642,36 @@ fun SettingsCategoryScreen(
                                     trailingIcon = { Icon(Icons.Rounded.ChevronRight, stringResource(R.string.cd_open), tint = MaterialTheme.colorScheme.onSurfaceVariant) },
                                     onClick = { navController.navigateSafely(Screen.ArtistSettings.route) }
                                 )
+                                val customDownloadPath by settingsViewModel.customDownloadPath.collectAsStateWithLifecycle()
+                                val downloadDirLabel = remember(customDownloadPath) {
+                                    customDownloadPath.takeIf { it.isNotBlank() }?.let { raw ->
+                                        runCatching {
+                                            android.provider.DocumentsContract.getTreeDocumentId(android.net.Uri.parse(raw))
+                                                .replace("primary:", "Internal storage/")
+                                        }.getOrNull() ?: raw
+                                    }
+                                }
                                 SettingsItem(
                                     title = stringResource(R.string.settings_download_directory_title),
-                                    subtitle = stringResource(R.string.settings_download_directory_desc),
+                                    subtitle = downloadDirLabel ?: stringResource(R.string.settings_download_directory_default),
                                     leadingIcon = { Icon(Icons.Outlined.Folder, null, tint = MaterialTheme.colorScheme.secondary) },
-                                    trailingIcon = { Icon(Icons.Rounded.ChevronRight, stringResource(R.string.cd_open), tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                                    trailingIcon = {
+                                        if (customDownloadPath.isNotBlank()) {
+                                            val resetDoneMsg = stringResource(R.string.settings_download_directory_reset_done)
+                                            IconButton(onClick = {
+                                                settingsViewModel.resetDownloadPathToDefault()
+                                                Toast.makeText(context, resetDoneMsg, Toast.LENGTH_SHORT).show()
+                                            }) {
+                                                Icon(
+                                                    Icons.Rounded.Restore,
+                                                    contentDescription = stringResource(R.string.settings_download_directory_reset),
+                                                    tint = MaterialTheme.colorScheme.primary
+                                                )
+                                            }
+                                        } else {
+                                            Icon(Icons.Rounded.ChevronRight, stringResource(R.string.cd_open), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    },
                                     onClick = { downloadDirPickerLauncher.launch(null) }
                                 )
                                 ThemeSelectorItem(
@@ -1133,8 +1181,9 @@ fun SettingsCategoryScreen(
                                 SwitchSettingItem(
                                     title = stringResource(R.string.settings_use_device_library_matches_title),
                                     subtitle = stringResource(R.string.settings_use_device_library_matches_desc),
-                                    checked = uiState.useDeviceLibraryMatches,
-                                    onCheckedChange = { settingsViewModel.setUseDeviceLibraryMatches(it) },
+                                    // One switch for "play a copy you already have": phone files and Telegram.
+                                    checked = uiState.useDeviceLibraryMatches || uiState.preferTelegramAlternative,
+                                    onCheckedChange = { settingsViewModel.setUseExistingCopies(it) },
                                     leadingIcon = { Icon(Icons.Rounded.MusicNote, null, tint = MaterialTheme.colorScheme.secondary) }
                                 )
                             }
@@ -1295,13 +1344,6 @@ fun SettingsCategoryScreen(
                                     checked = uiState.deduplicateQueueEntries,
                                     onCheckedChange = { settingsViewModel.setDeduplicateQueueEntries(it) },
                                     leadingIcon = { Icon(painterResource(R.drawable.rounded_filter_list_24), null, tint = MaterialTheme.colorScheme.secondary) }
-                                )
-                                SwitchSettingItem(
-                                    title = stringResource(R.string.setcat_prefer_telegram_alternative_title),
-                                    subtitle = stringResource(R.string.setcat_prefer_telegram_alternative_desc),
-                                    checked = uiState.preferTelegramAlternative,
-                                    onCheckedChange = { settingsViewModel.setPreferTelegramAlternative(it) },
-                                    leadingIcon = { Icon(painterResource(R.drawable.rounded_all_inclusive_24), null, tint = MaterialTheme.colorScheme.secondary) }
                                 )
                                 SwitchSettingItem(
                                     title = stringResource(R.string.setcat_preload_queue_enabled_title),
@@ -1793,6 +1835,26 @@ fun SettingsCategoryScreen(
                                     leadingIcon = { Icon(Icons.Rounded.Science, null, tint = MaterialTheme.colorScheme.tertiary) },
                                     onClick = {
                                         settingsViewModel.resetSetupFlow()
+                                    }
+                                )
+                                SettingsItem(
+                                    title = stringResource(R.string.setcat_birthday_preview_title),
+                                    subtitle = stringResource(R.string.setcat_birthday_preview_subtitle),
+                                    leadingIcon = { Icon(Icons.Rounded.Cake, null, tint = MaterialTheme.colorScheme.tertiary) },
+                                    onClick = { showBirthdaySurprisePreview = true }
+                                )
+                                SettingsItem(
+                                    title = stringResource(R.string.setcat_announcement_preview_title),
+                                    subtitle = stringResource(R.string.setcat_announcement_preview_subtitle),
+                                    leadingIcon = { Icon(Icons.Rounded.Campaign, null, tint = MaterialTheme.colorScheme.primary) },
+                                    onClick = { showAnnouncementPreview = true }
+                                )
+                                SettingsItem(
+                                    title = stringResource(R.string.setcat_announcement_check_title),
+                                    subtitle = stringResource(R.string.setcat_announcement_check_subtitle),
+                                    leadingIcon = { Icon(Icons.Rounded.Campaign, null, tint = MaterialTheme.colorScheme.tertiary) },
+                                    onClick = {
+                                        com.unshoo.pixelmusic.data.announcement.AnnouncementCheckWorker.runNowForTesting(context)
                                     }
                                 )
                             }

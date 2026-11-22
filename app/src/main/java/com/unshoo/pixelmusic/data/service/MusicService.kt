@@ -80,6 +80,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -245,6 +246,8 @@ class MusicService : MediaLibraryService() {
     private var temporaryForegroundStartedInOnCreate = false
 
     companion object {
+        /** Session extra: mediaId of the incoming track while a crossfade is audible. */
+        const val SESSION_EXTRA_TRANSITION_DISPLAY_MEDIA_ID = "com.unshoo.pixelmusic.TRANSITION_DISPLAY_MEDIA_ID"
         private const val TAG = "MusicService_PixelMusic"
         /** Only auto-resume when the service comes back soon after the kill (sticky restart). */
         private const val RESUME_AFTER_KILL_WINDOW_MS = 3 * 60 * 1000L
@@ -352,9 +355,18 @@ class MusicService : MediaLibraryService() {
 
     private val transitionDisplayPlayerListener: (Player) -> Unit = { displayPlayer ->
         prepareReplayGainForTransitionPlayer(displayPlayer)
+        // The session player stays on the OUTGOING track until the swap at the end of the fade,
+        // so the app kept re-reading the old item (old cover flashing back over the new one).
+        // Announce the now-audible incoming track so the UI can show it for the whole fade.
+        displayPlayer.currentMediaItem?.mediaId?.let { incomingId ->
+            mediaSession?.setSessionExtras(
+                Bundle().apply { putString(SESSION_EXTRA_TRANSITION_DISPLAY_MEDIA_ID, incomingId) }
+            )
+        }
     }
 
     private val transitionFinishedListener: () -> Unit = {
+        mediaSession?.setSessionExtras(Bundle.EMPTY)
         onTransitionFinished()
     }
 
@@ -633,6 +645,20 @@ class MusicService : MediaLibraryService() {
             val sessionId = engine.getAudioSessionId()
             if (sessionId != 0) {
                 equalizerManager.attachToAudioSessionIfNeeded(sessionId)
+            }
+
+            // Crossfade: mirror the effects onto the incoming player's session while both play.
+            launch {
+                engine.standbyAudioSessionId.collectLatest { standbySessionId ->
+                    if (standbySessionId != 0) {
+                        equalizerManager.attachCompanionSession(standbySessionId)
+                    } else {
+                        // Transition over: the primary re-attaches to the new master session
+                        // (with its own retries); keep the companion until that has happened.
+                        kotlinx.coroutines.delay(3_000L)
+                        equalizerManager.releaseCompanion()
+                    }
+                }
             }
 
             // Re-attach equalizer whenever the active audio session changes (e.g. crossfade)
@@ -1162,7 +1188,11 @@ class MusicService : MediaLibraryService() {
             say = { message -> CastMirror.say(message) }
         ).also { castPlayback = it }
         val sessionPlayer = CastSessionPlayer(engine.masterPlayer, playback)
-            .also { castSessionPlayer = it }
+            .also {
+                castSessionPlayer = it
+                // Manual next/previous/queue taps fade out and back in (Mochy-style) instead of hard-cutting.
+                it.skipTransition = { change -> engine.fadedSkip(change) }
+            }
 
         mediaSession = MediaLibrarySession.Builder(this, sessionPlayer, callback)
             .setSessionActivity(getOpenAppPendingIntent())
@@ -2346,6 +2376,11 @@ class MusicService : MediaLibraryService() {
         }
         val clampedVolume = safeVolume.coerceIn(0.01f, 1f)
         expectedReplayGainVolume = clampedVolume
+        if (player === engine.masterPlayer && engine.isSkipFadeActive()) {
+            // A skip fade owns the volume right now; it ends at this level instead.
+            engine.updateSkipFadeRestVolume(clampedVolume)
+            return
+        }
         player.volume = clampedVolume
     }
 
@@ -2413,6 +2448,7 @@ class MusicService : MediaLibraryService() {
         }
         val previous = castSessionPlayer
         val wrapper = CastSessionPlayer(localPlayer, playback)
+        wrapper.skipTransition = { change -> engine.fadedSkip(change) }
         castSessionPlayer = wrapper
         publishMediaSessionPlayer(wrapper, logMessage)
         if (previous !== wrapper) previous?.release()

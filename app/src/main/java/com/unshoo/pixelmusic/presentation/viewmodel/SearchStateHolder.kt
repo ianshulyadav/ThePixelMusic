@@ -151,7 +151,17 @@ class SearchStateHolder @Inject constructor(
                     }
                     if (source == SearchSource.LOCAL) {
                         try {
-                            val results = musicRepository.searchAllOnce(query, currentFilter)
+                            val libraryResults = musicRepository.searchAllOnce(query, currentFilter)
+                            // Local mode: only what plays without internet (device files + downloads).
+                            val results = if (isLocalMode) {
+                                withContext(Dispatchers.IO) {
+                                    libraryResults.filter { item ->
+                                        item !is SearchResultItem.SongItem ||
+                                            item.song.isLocal ||
+                                            com.unshoo.pixelmusic.utils.OfflineAudioResolver.hasOfflineAudio(appContext, item.song)
+                                    }
+                                }
+                            } else libraryResults
                             val shouldFilterVideos = if (currentFilter == SearchFilterType.VIDEOS) false else (pureYtMusic || hideVideo)
                             val finalResults = if (shouldFilterVideos) {
                                 results.filterNot { it is SearchResultItem.SongItem && ContentFilterUtils.isVideoSong(it.song) }

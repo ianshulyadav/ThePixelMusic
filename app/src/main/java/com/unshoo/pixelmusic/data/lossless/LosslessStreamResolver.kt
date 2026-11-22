@@ -596,6 +596,22 @@ object LosslessStreamResolver {
         val appleQuality: AppleMusicQuality,
     )
 
+    /**
+     * Pooled sources (Tidal / Qobuz / Deezer) the user can actually use: a source pool key is set
+     * (or built in), or they signed in to that service. Mirrors what Lossless settings shows, so a
+     * stale "enabled" flag never surfaces a source the settings screen hides.
+     */
+    suspend fun configuredPooledSources(context: Context): Set<AudioSourceType> {
+        val p = prefs(context)
+        val poolKey = !p[com.unshoo.pixelmusic.data.lossless.constants.PoolApiKeyKey].isNullOrBlank() ||
+            com.unshoo.pixelmusic.BuildConfig.SOURCE_PROVIDER_KEY.isNotBlank()
+        return buildSet {
+            if (poolKey || !p[com.unshoo.pixelmusic.data.lossless.constants.TidalAccessTokenKey].isNullOrBlank()) add(AudioSourceType.TIDAL)
+            if (poolKey || !p[com.unshoo.pixelmusic.data.lossless.constants.QobuzTokensKey].isNullOrBlank()) add(AudioSourceType.QOBUZ)
+            if (poolKey || !p[com.unshoo.pixelmusic.data.lossless.constants.DeezerArlKey].isNullOrBlank()) add(AudioSourceType.DEEZER)
+        }
+    }
+
     suspend fun readSettings(context: Context): SourceSettings {
         val addons = AddonManager.ensureLoadedBlocking(context)
         val p = prefs(context)

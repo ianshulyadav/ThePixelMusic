@@ -30,8 +30,8 @@
     <string name="settings_quick_picks_mode_classic">Classic Carousel</string>
     <string name="settings_quick_picks_mode_list">List Grid</string>
     <string name="settings_quick_picks_mode_uncontained">Uncontained Carousel</string>
-    <string name="settings_quick_picks_mode_frosted">Material Frosted Carousel</string>
-    <string name="settings_quick_picks_mode_album_tint">Material Album Color Carousel</string>
+    <string name="settings_quick_picks_mode_multi_browse">Multi-browse Carousel</string>
+    <string name="settings_quick_picks_mode_hero">Hero Carousel</string>
     <string name="settings_category_appearance_title">Appearance</string>
     <string name="settings_category_appearance_subtitle">Themes, layout, and visual styles</string>
     <string name="settings_category_playback_title">Playback</string>
@@ -532,8 +532,8 @@
     <string name="settings_search_clear">Clear search</string>
     <string name="settings_search_no_results">No matching settings</string>
     <string name="settings_device_library_section">Songs on this phone</string>
-    <string name="settings_use_device_library_matches_title">Use matching songs from phone storage</string>
-    <string name="settings_use_device_library_matches_desc">Play and \"download\" online songs from a file already on your phone when the title and artist match. Off: always use the app\'s own saved or streamed song.</string>
+    <string name="settings_use_device_library_matches_title">Use songs you already have</string>
+    <string name="settings_use_device_library_matches_desc">When an online song matches a file on your phone or a Telegram copy (same title and artist), play that copy first and fall back to streaming. Off: always use the app\'s own saved or streamed song.</string>
     <string name="customize_home_greeting">Greeting</string>
     <string name="customize_home_greeting_show">Show greeting</string>
     <string name="customize_home_greeting_show_desc">Display a greeting at the top of Home.</string>

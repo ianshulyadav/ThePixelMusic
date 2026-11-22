@@ -77,14 +77,7 @@ fun RowScope.CustomNavigationBarItem(
         label = "textColor"
     )
 
-    val iconScale by animateFloatAsState(
-        targetValue = if (selected) 1.1f else 1f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessMedium
-        ),
-        label = "iconScale"
-    )
+    val iconScale = rememberNavIconBounceScale(selected)
 
     val showLabel = label != null && (alwaysShowLabel || selected)
     val indicatorWidth = 64.dp
@@ -119,28 +112,14 @@ fun RowScope.CustomNavigationBarItem(
             modifier = Modifier
                 .size(indicatorWidth, indicatorHeight)
         ) {
-            androidx.compose.animation.AnimatedVisibility(
-                visible = selected,
-                enter = fadeIn(animationSpec = tween(100)) +
-                        scaleIn(
-                            animationSpec = spring(
-                                dampingRatio = Spring.DampingRatioMediumBouncy,
-                                stiffness = Spring.StiffnessLow
-                            ),
-                        ),
-                exit = fadeOut(animationSpec = tween(100)) +
-                        scaleOut(animationSpec = tween(100, easing = EaseInQuart))
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = indicatorPadding)
-                        .background(
-                            color = indicatorColor,
-                            shape = indicatorShape
-                        )
-                )
-            }
+            NavSelectionCapsule(
+                selected = selected,
+                color = indicatorColor,
+                shape = indicatorShape,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = indicatorPadding)
+            )
 
             Box(
                 contentAlignment = Alignment.Center,
@@ -188,5 +167,46 @@ fun RowScope.CustomNavigationBarItem(
     }
 }
 
-private val EaseOutQuart = CubicBezierEasing(0.25f, 1f, 0.5f, 1f)
 private val EaseInQuart = CubicBezierEasing(0.5f, 0f, 0.75f, 0f)
+
+/**
+ * The selected-tab capsule shared by every navigation bar style (default, full and the
+ * expressive pill): fades in while springing up from 0 with a medium bounce, and quickly
+ * scales/fades out when deselected. Size it with [modifier].
+ */
+@Composable
+fun NavSelectionCapsule(
+    selected: Boolean,
+    color: Color,
+    shape: androidx.compose.ui.graphics.Shape,
+    modifier: Modifier = Modifier,
+) {
+    androidx.compose.animation.AnimatedVisibility(
+        visible = selected,
+        enter = fadeIn(animationSpec = tween(100)) +
+                scaleIn(
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                        stiffness = Spring.StiffnessLow
+                    ),
+                ),
+        exit = fadeOut(animationSpec = tween(100)) +
+                scaleOut(animationSpec = tween(100, easing = EaseInQuart))
+    ) {
+        Box(modifier = modifier.background(color = color, shape = shape))
+    }
+}
+
+/** Icon "pop" on selection shared by every navigation bar style. */
+@Composable
+fun rememberNavIconBounceScale(selected: Boolean): Float {
+    val scale by animateFloatAsState(
+        targetValue = if (selected) 1.1f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "navIconBounce"
+    )
+    return scale
+}

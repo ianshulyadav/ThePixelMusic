@@ -1281,6 +1281,21 @@ fun SyncedLyricsList(
                     layoutInfo = snapperLayoutInfo,
                     targetIndex = currentLineIndex
                 )
+                // Line heights settle over the first frames (text wraps, the active line grows,
+                // romanization rows measure late). Re-snap while hidden until the position holds
+                // for two frames, so the list is revealed already in place instead of drifting.
+                var stableFrames = 0
+                var frames = 0
+                while (stableFrames < 2 && frames < 20) {
+                    androidx.compose.runtime.withFrameNanos { }
+                    frames++
+                    if (snapperLayoutInfo.distanceToIndexSnap(currentLineIndex) == 0) {
+                        stableFrames++
+                    } else {
+                        stableFrames = 0
+                        snapToSnapIndex(listState, snapperLayoutInfo, currentLineIndex)
+                    }
+                }
                 hasAlignedInitialLine = true
                 lastAutoScrolledLineIndex = currentLineIndex
                 return@LaunchedEffect
@@ -1311,6 +1326,14 @@ fun SyncedLyricsList(
                     )
                 }
                 lastAutoScrolledLineIndex = currentLineIndex
+                return@LaunchedEffect
+            }
+
+            // Same line, but the viewport or line sizes changed (sheet still expanding, window
+            // resize): hold the line in place frame-by-frame. Animating here restarted a slow
+            // tween on every layout pass and made the line visibly chase its position.
+            if (currentLineIndex == lastAutoScrolledLineIndex) {
+                snapToSnapIndex(listState, snapperLayoutInfo, currentLineIndex)
                 return@LaunchedEffect
             }
 

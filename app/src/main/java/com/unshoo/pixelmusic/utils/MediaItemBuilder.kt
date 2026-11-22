@@ -120,6 +120,7 @@ object MediaItemBuilder {
                 buildMediaMetadataForSong(
                     song = song,
                     exposedArtworkUri = externalControllerArtworkUri(context, song.albumArtUriString)
+                        ?: externalControllerArtworkUri(context, resolveArtworkUri(null, song.id, song.youtubeId))
                 )
             )
             .build()
@@ -356,7 +357,10 @@ object MediaItemBuilder {
 
     private fun buildMediaMetadataForSong(
         song: Song,
+        // No stored cover (common for streamed YouTube rows) left the notification/lock screen
+        // blank: fall back to the video thumbnail or local embedded art.
         exposedArtworkUri: Uri? = artworkUri(song.albumArtUriString)
+            ?: artworkUri(resolveArtworkUri(null, song.id, song.youtubeId))
     ): MediaMetadata {
         val metadataBuilder = MediaMetadata.Builder()
             .setTitle(song.title)

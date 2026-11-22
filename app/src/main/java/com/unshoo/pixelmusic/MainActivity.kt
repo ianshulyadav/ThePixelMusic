@@ -228,6 +228,8 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var appUpdateScheduler: com.unshoo.pixelmusic.data.worker.AppUpdateScheduler
     @Inject
+    lateinit var announcementsRepository: com.unshoo.pixelmusic.data.announcement.AnnouncementsRepository
+    @Inject
     lateinit var appUpdateDownloadManager: com.unshoo.pixelmusic.data.update.AppUpdateDownloadManager
 
     private val _pendingUpdateRelease =
@@ -351,6 +353,7 @@ class MainActivity : ComponentActivity() {
                     showCrashReportDialog = true
                 }
                 if (!isBenchmarkMode) {
+                    com.unshoo.pixelmusic.data.announcement.AnnouncementCheckWorker.schedule(this@MainActivity)
                     appUpdateScheduler.schedulePeriodicCheck()
                     appUpdateScheduler.checkOnStartupIfNeeded(lifecycleScope)
                 }
@@ -507,6 +510,10 @@ class MainActivity : ComponentActivity() {
         if (intent == null) return
 
         when {
+            // Notification tap for a new announcement: open the announcements inbox.
+            intent.action == com.unshoo.pixelmusic.data.announcement.AnnouncementNotifier.ACTION_OPEN_ANNOUNCEMENTS -> {
+                announcementsRepository.openInbox()
+            }
             // Handle notification tap to show update dialog
             intent.action == com.unshoo.pixelmusic.data.notification.AppUpdateNotificationManager.ACTION_SHOW_UPDATE_DIALOG -> {
                 val tagName = intent.getStringExtra(com.unshoo.pixelmusic.data.notification.AppUpdateNotificationManager.EXTRA_UPDATE_TAG) ?: ""
@@ -972,6 +979,39 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        // December 14th birthday surprise — shown once per year once the app is ready.
+        val birthdaySurpriseViewModel: com.unshoo.pixelmusic.presentation.viewmodel.BirthdaySurpriseViewModel =
+            androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel()
+        var showBirthdaySurprise by rememberSaveable { mutableStateOf(false) }
+        LaunchedEffect(birthdaySurpriseViewModel) {
+            // Debug builds only: `adb shell am start ... --es birthday_test_date 2026-12-14`
+            // simulates app launch on that date without touching the device clock.
+            val testDate = if (BuildConfig.DEBUG) {
+                intent?.getStringExtra("birthday_test_date")
+                    ?.let { runCatching { java.time.LocalDate.parse(it) }.getOrNull() }
+            } else null
+            val today = testDate ?: java.time.LocalDate.now()
+            com.unshoo.pixelmusic.utils.AppReadinessSignal.awaitReady()
+            // Mode, date and announcements come from the website admin page; fetch the
+            // latest once per app start (the saved copy is only an offline fallback).
+            birthdaySurpriseViewModel.refreshSiteConfig()
+            if (birthdaySurpriseViewModel.consumeScheduledShow(today, ignoreShownToday = testDate != null)) {
+                showBirthdaySurprise = true
+            }
+            // Announcement published from the website admin page; shown once per user,
+            // after the birthday popup if both are due.
+            birthdaySurpriseViewModel.consumeAnnouncement(today)
+        }
+        val pendingAnnouncement by birthdaySurpriseViewModel.pendingAnnouncement.collectAsStateWithLifecycle()
+        val announcementsInboxOpen by birthdaySurpriseViewModel.inboxOpen.collectAsStateWithLifecycle()
+        val birthdaySiteConfig by birthdaySurpriseViewModel.siteConfig.collectAsStateWithLifecycle()
+        val announcementsReadAt by birthdaySurpriseViewModel.announcementsReadAt.collectAsStateWithLifecycle()
+        // Read position when the What's new page opened, so items stay marked "New" while it's open.
+        val inboxReadAtSnapshot = remember(announcementsInboxOpen) { announcementsReadAt }
+        LaunchedEffect(announcementsInboxOpen) {
+            if (announcementsInboxOpen) birthdaySurpriseViewModel.refreshInbox()
+        }
+
         LaunchedEffect(userPreferencesRepository) {
             com.unshoo.pixelmusic.utils.AppReadinessSignal.awaitReady()
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -1407,6 +1447,29 @@ class MainActivity : ComponentActivity() {
                                     showPlayStoreAnnouncement = false
                                     openExternalUrl(url)
                                 }
+                            )
+                        }
+
+                        if (showBirthdaySurprise && !showPlayStoreAnnouncement) {
+                            com.unshoo.pixelmusic.presentation.components.BirthdaySurpriseDialog(
+                                onDismiss = { showBirthdaySurprise = false },
+                                viewModel = birthdaySurpriseViewModel,
+                            )
+                        }
+
+                        if (announcementsInboxOpen) {
+                            com.unshoo.pixelmusic.presentation.components.AnnouncementsInboxSheet(
+                                announcements = birthdaySiteConfig.announcements,
+                                readAt = inboxReadAtSnapshot,
+                                onDismiss = { birthdaySurpriseViewModel.closeInbox() },
+                            )
+                        }
+
+                        val announcementToShow = pendingAnnouncement
+                        if (announcementToShow != null && !showBirthdaySurprise && !showPlayStoreAnnouncement && !announcementsInboxOpen) {
+                            com.unshoo.pixelmusic.presentation.components.AppAnnouncementDialog(
+                                announcement = announcementToShow,
+                                onDismiss = { birthdaySurpriseViewModel.dismissAnnouncement() },
                             )
                         }
                     }

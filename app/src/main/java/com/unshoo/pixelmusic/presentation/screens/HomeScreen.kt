@@ -164,9 +164,11 @@ fun HomeScreen(
     quickPicksViewModel: QuickPicksViewModel = hiltViewModel(),
     favoriteArtistReleasesViewModel: FavoriteArtistReleasesViewModel = hiltViewModel(),
     accountsViewModel: AccountsViewModel = hiltViewModel(),
+    announcementsViewModel: com.unshoo.pixelmusic.presentation.viewmodel.BirthdaySurpriseViewModel = hiltViewModel(),
     exploreViewModel: ExploreViewModel = hiltViewModel(),
     onOpenSidebar: () -> Unit
 ) {
+    val hasUnreadAnnouncements by announcementsViewModel.hasUnreadAnnouncements.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
 
@@ -379,6 +381,7 @@ fun HomeScreen(
         homeMixPreviewSongs.take(20).toImmutableList()
     }
     val mostPlayedArtistImages by statsViewModel.artistImages.collectAsStateWithLifecycle()
+    val mostListenedScope = rememberCoroutineScope()
     val quickPicksRaw by quickPicksViewModel.quickPicks.collectAsStateWithLifecycle()
     val quickPicks by produceState(
         initialValue = if (isEffectivelyOnline) quickPicksRaw else emptyList(),
@@ -484,7 +487,9 @@ fun HomeScreen(
                         },
                         isScrolled = isScrolledPastThreshold.value,
                         // Home always uses the floating pill header (logo pill + separate circle buttons).
-                        floatingHeaderEnabled = true
+                        floatingHeaderEnabled = true,
+                        onAnnouncementsClick = { announcementsViewModel.openInbox() },
+                        hasUnreadAnnouncements = hasUnreadAnnouncements
                     )
                 }
             }
@@ -811,6 +816,32 @@ fun HomeScreen(
                                                         artistImages = mostPlayedArtistImages,
                                                         initialTab = homeLayout.mostListenedKind.ordinal,
                                                         rangeLabel = mostListenedRangeLabel,
+                                                        onSongClick = { songId, topIds ->
+                                                            mostListenedScope.launch {
+                                                                val ordered = playerViewModel.getSongs(topIds)
+                                                                    .sortedBy { song -> topIds.indexOf(song.id).let { if (it < 0) Int.MAX_VALUE else it } }
+                                                                val target = ordered.firstOrNull { it.id == songId }
+                                                                if (target != null) {
+                                                                    playerViewModel.showAndPlaySong(target, ordered, "Most listened")
+                                                                } else {
+                                                                    navController.navigateSafely(Screen.Stats.route)
+                                                                }
+                                                            }
+                                                        },
+                                                        onAlbumClick = { album ->
+                                                            val routeId = playerViewModel.resolveAlbumRouteIdByName(album)
+                                                            navController.navigateSafely(
+                                                                if (routeId != null) Screen.AlbumDetail.createRoute(routeId) else Screen.Stats.route
+                                                            )
+                                                        },
+                                                        onArtistClick = { artist ->
+                                                            mostListenedScope.launch {
+                                                                val artistId = playerViewModel.resolveArtistIdByName(artist)
+                                                                navController.navigateSafely(
+                                                                    if (artistId != null) Screen.ArtistDetail.createRoute(artistId) else Screen.Stats.route
+                                                                )
+                                                            }
+                                                        },
                                                         modifier = Modifier.padding(vertical = 8.dp)
                                                     )
                                                 }

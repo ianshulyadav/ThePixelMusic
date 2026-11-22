@@ -71,7 +71,13 @@ fun MostPlayedSection(
     modifier: Modifier = Modifier,
     artistImages: Map<String, String> = emptyMap(),
     initialTab: Int = 0,
-    rangeLabel: String? = null
+    rangeLabel: String? = null,
+    /** Tap on a song card: play it (with the other top songs queued). */
+    onSongClick: ((songId: String, topSongIds: List<String>) -> Unit)? = null,
+    /** Tap on an album card: open that album. */
+    onAlbumClick: ((album: String) -> Unit)? = null,
+    /** Tap on an artist card: open that artist. */
+    onArtistClick: ((artist: String) -> Unit)? = null,
 ) {
     var tab by rememberSaveable(initialTab) { mutableIntStateOf(initialTab.coerceIn(0, 2)) }
 
@@ -185,7 +191,20 @@ fun MostPlayedSection(
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 itemsIndexed(items, key = { _, item -> item.key }) { index, item ->
-                    MostPlayedCard(rank = index + 1, item = item, onClick = onSeeAllClick)
+                    // Cards act on what they show; only the arrow opens the listening history.
+                    val cardClick: () -> Unit = when {
+                        item.key.startsWith("s_") && onSongClick != null -> {
+                            { onSongClick(item.key.removePrefix("s_"), songs.map { it.key.removePrefix("s_") }) }
+                        }
+                        item.key.startsWith("a_") && onAlbumClick != null -> {
+                            { onAlbumClick(item.key.removePrefix("a_")) }
+                        }
+                        item.key.startsWith("r_") && onArtistClick != null -> {
+                            { onArtistClick(item.key.removePrefix("r_")) }
+                        }
+                        else -> onSeeAllClick
+                    }
+                    MostPlayedCard(rank = index + 1, item = item, onClick = cardClick)
                 }
             }
         }

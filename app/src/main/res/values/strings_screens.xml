@@ -270,6 +270,9 @@
     <string name="toast_playing_next">Playing next</string>
     <string name="error_share_song_format">Could not share song: %1$s</string>
     <string name="settings_download_directory_title">Download Directory</string>
+    <string name="settings_download_directory_default">Default (app storage)</string>
+    <string name="settings_download_directory_reset">Reset to default download directory</string>
+    <string name="settings_download_directory_reset_done">Downloads will be saved to the default folder</string>
     <string name="settings_download_directory_desc">Configure storage location for downloaded songs</string>
     <string name="settings_download_audio_quality_title">Download Audio Quality</string>
     <string name="settings_download_audio_quality_desc">Quality for downloaded songs</string>

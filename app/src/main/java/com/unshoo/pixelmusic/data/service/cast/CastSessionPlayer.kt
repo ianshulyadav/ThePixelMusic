@@ -31,6 +31,17 @@ class CastSessionPlayer(
 ) : ForwardingPlayer(player), CastSink {
 
     /**
+     * Wraps a manual song change (next / previous / queue tap) in a short fade on the phone's
+     * player. Null, or while casting, the change happens at once.
+     */
+    var skipTransition: ((change: () -> Unit) -> Unit)? = null
+
+    private inline fun skipWithFade(crossinline change: () -> Unit) {
+        val fade = skipTransition
+        if (fade == null || cast.active) change() else fade { change() }
+    }
+
+    /**
      * Listeners registered through this wrapper, kept so the receiver's changes
      * can be announced to them. The phone's own player never announces them — it
      * is paused, and as far as it knows nothing is happening.
@@ -190,6 +201,10 @@ class CastSessionPlayer(
         }
         // Moving to another row is a queue move: the phone's player owns the
         // queue, and [CastPlayback] loads whatever becomes current.
+        if (mediaItemIndex != wrappedPlayer.currentMediaItemIndex) {
+            skipWithFade { super.seekTo(mediaItemIndex, positionMs) }
+            return
+        }
         super.seekTo(mediaItemIndex, positionMs)
     }
 
@@ -212,11 +227,11 @@ class CastSessionPlayer(
     }
 
     override fun seekToNext() {
-        super.seekToNext()
+        skipWithFade { super.seekToNext() }
     }
 
     override fun seekToNextMediaItem() {
-        super.seekToNextMediaItem()
+        skipWithFade { super.seekToNextMediaItem() }
     }
 
     override fun seekToPrevious() {
@@ -224,7 +239,12 @@ class CastSessionPlayer(
             castPrevious()
             return
         }
-        super.seekToPrevious()
+        // Past the first seconds "previous" restarts the song: a plain seek, no fade.
+        if (wrappedPlayer.currentPosition > wrappedPlayer.maxSeekToPreviousPosition || !wrappedPlayer.hasPreviousMediaItem()) {
+            super.seekToPrevious()
+            return
+        }
+        skipWithFade { super.seekToPrevious() }
     }
 
     override fun seekToPreviousMediaItem() {
@@ -232,7 +252,7 @@ class CastSessionPlayer(
             castPrevious()
             return
         }
-        super.seekToPreviousMediaItem()
+        skipWithFade { super.seekToPreviousMediaItem() }
     }
 
     /** Back, on a receiver: restart past the first seconds, else the previous track. */

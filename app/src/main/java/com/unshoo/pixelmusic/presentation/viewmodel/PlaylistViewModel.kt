@@ -978,11 +978,14 @@ class PlaylistViewModel @Inject constructor(
     fun importFromYouTubeUrl(url: String, onComplete: (Result<String>) -> Unit) {
         viewModelScope.launch {
             try {
-                val cleanId = when {
-                    url.contains("list=") -> url.substringAfter("list=").substringBefore("&")
-                    url.contains("playlist?list=") -> url.substringAfter("playlist?list=").substringBefore("&")
-                    else -> url.trim().removePrefix("VL")
-                }
+                // Accepts music.youtube.com / youtube.com / youtu.be playlist links (with ?si=...
+                // share params), ".../browse/VL<ID>" links and bare IDs.
+                val trimmedUrl = url.trim()
+                val cleanId = (Regex("""[?&]list=([A-Za-z0-9_-]+)""").find(trimmedUrl)?.groupValues?.get(1)
+                    ?: Regex("""/browse/(?:VL)?([A-Za-z0-9_-]+)""").find(trimmedUrl)?.groupValues?.get(1)
+                    ?: trimmedUrl.takeIf { Regex("""^[A-Za-z0-9_-]{10,}$""").matches(it) })
+                    ?.removePrefix("VL")
+                    .orEmpty()
 
                 if (cleanId.isBlank()) {
                     onComplete(Result.failure(IllegalArgumentException("Invalid YouTube playlist URL or ID")))
@@ -994,11 +997,21 @@ class PlaylistViewModel @Inject constructor(
                 }
 
                 if (ytResult.isFailure) {
-                    onComplete(Result.failure(ytResult.exceptionOrNull() ?: Exception("Failed to fetch YouTube playlist")))
+                    val cause = ytResult.exceptionOrNull()
+                    val message = if (cause?.message == "PLAYLIST_PRIVATE") {
+                        "This playlist is private. Make it public or unlisted and try again."
+                    } else {
+                        "Couldn't load that YouTube Music playlist"
+                    }
+                    onComplete(Result.failure(Exception(message, cause)))
                     return@launch
                 }
 
                 val page = ytResult.getOrThrow()
+                if (page.songs.isEmpty() && page.songsContinuation == null && page.continuation == null) {
+                    onComplete(Result.failure(Exception("That playlist has no playable songs")))
+                    return@launch
+                }
                 val ytPlaylist = page.playlist
                 val initialSongs = page.songs.toMutableList()
                 var continuation = page.songsContinuation ?: page.continuation
@@ -1030,7 +1043,7 @@ class PlaylistViewModel @Inject constructor(
                         val allSongsList = nativeInitial.toMutableList()
                         var currentContinuation: String? = continuation
                         var pages = 0
-                        while (currentContinuation != null && pages < 25) {
+                        while (currentContinuation != null && pages < 100) {
                             val contResult = YouTube.playlistContinuation(currentContinuation)
                             if (contResult.isSuccess) {
                                 val contPage = contResult.getOrThrow()

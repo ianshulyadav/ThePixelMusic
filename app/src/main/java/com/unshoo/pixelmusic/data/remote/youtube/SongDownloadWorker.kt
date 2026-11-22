@@ -118,19 +118,27 @@ class SongDownloadWorker(
                 )
 
                 val isExistingLocal = localMatching != null
-                val audioPath = if (localMatching != null) {
-                    Timber.i("Song '${song.title}' already exists in local storage at ${localMatching.filePath}. Skipping network download.")
-                    localMatching.filePath
-                } else {
-                    DownloadHelper.downloadAudio(appContext, song)
-                }
-
+                // Artwork first (small), so tags can be written on the local file before it is
+                // published to the download folder, instead of a second rewrite afterwards.
                 val thumbnailPath =
                     DownloadHelper.downloadImage(
                         appContext,
                         fullSong?.thumbnailHref ?: song.thumbnailHref,
                         song.youtubeId
                     )
+                val tagAlbum = (fullSong?.album ?: song.album)?.takeIf { it.isNotBlank() } ?: "YouTube Music"
+                var taggedDuringDownload = false
+                val audioPath = if (localMatching != null) {
+                    Timber.i("Song '${song.title}' already exists in local storage at ${localMatching.filePath}. Skipping network download.")
+                    localMatching.filePath
+                } else {
+                    DownloadHelper.downloadAudio(appContext, song, onFileReady = { file ->
+                        DownloadHelper.withLowPriorityPostProcessing {
+                            embedAudioMetadata(file.absolutePath, song.title, song.artist, tagAlbum, thumbnailPath)
+                        }
+                        taggedDuringDownload = true
+                    })
+                }
 
                 val updatedSong = song.copy(
                     thumbnailPath = thumbnailPath?.path ?: localMatching?.albumArtUriString,
@@ -142,7 +150,7 @@ class SongDownloadWorker(
 
                 val isMatchedToLocal = isExistingLocal || (audioPath != null && localSongs.any { it.filePath == audioPath })
 
-                if (audioPath != null && !isMatchedToLocal) {
+                if (audioPath != null && !isMatchedToLocal && !taggedDuringDownload) {
                     embedAudioMetadata(
                         audioPath = audioPath,
                         title = updatedSong.title,

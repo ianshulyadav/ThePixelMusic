@@ -61,13 +61,16 @@ class CoilBitmapLoader(private val context: Context, private val scope: Coroutin
         scope.launch {
             var lastError: Throwable? = null
             val attempts = if (isRemote) RETRY_DELAYS_MS.size else 1
+            // YouTube only has "maxresdefault" for some videos: step down through smaller
+            // thumbnails instead of retrying a URL that will always 404.
+            val candidates = (data as? String)?.let(::youtubeThumbnailFallbacks) ?: listOf(data)
             for (attempt in 0 until attempts) {
                 if (future.isCancelled) return@launch
                 val wait = RETRY_DELAYS_MS[attempt]
                 if (wait > 0) delay(wait)
-                try {
+                for (candidate in candidates) try {
                     val request = ImageRequest.Builder(context)
-                        .data(data)
+                        .data(candidate)
                         .size(MAX_NOTIFICATION_ARTWORK_SIZE_PX, MAX_NOTIFICATION_ARTWORK_SIZE_PX)
                         .precision(Precision.INEXACT)
                         .allowHardware(false) // Bitmap must not be hardware for MediaSession
@@ -101,6 +104,13 @@ class CoilBitmapLoader(private val context: Context, private val scope: Coroutin
             future.setException(lastError ?: IllegalStateException("Artwork load failed: $data"))
         }
         return future
+    }
+
+    private fun youtubeThumbnailFallbacks(url: String): List<String> {
+        val match = Regex("""i\.ytimg\.com/vi(?:_webp)?/([^/]+)/(maxresdefault|sddefault|hq720)""").find(url)
+            ?: return listOf(url)
+        val id = match.groupValues[1]
+        return listOf(url, "https://i.ytimg.com/vi/$id/hqdefault.jpg", "https://i.ytimg.com/vi/$id/mqdefault.jpg")
     }
 
     override fun supportsMimeType(mimeType: String): Boolean {

@@ -52,7 +52,8 @@ internal object AudioContainerRemuxer {
             } else {
                 256 * 1024
             }
-            val buffer = ByteBuffer.allocate(maxInput)
+            // Direct buffer: MediaExtractor fills it natively without an extra JNI copy per packet.
+            val buffer = ByteBuffer.allocateDirect(maxInput)
             val info = MediaCodec.BufferInfo()
             while (true) {
                 buffer.clear()

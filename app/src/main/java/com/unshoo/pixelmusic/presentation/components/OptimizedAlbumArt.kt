@@ -47,9 +47,60 @@ fun OptimizedAlbumArt(
     title: String,
     modifier: Modifier = Modifier,
     targetSize: Size = SafeOriginalAlbumArtSize,
-    placeholderModel: Any? = null
+    placeholderModel: Any? = null,
+    /** False keeps showing the low-quality preview; flip to true to swap in full resolution. */
+    loadHighQuality: Boolean = true,
 ) {
     val context = LocalContext.current
+    // Progressive remote art: a small preview (fast, usually already cached from lists) is drawn
+    // first and the full-resolution cover fades in over it once loaded. If the full-size image
+    // does not exist (e.g. YouTube "maxresdefault" 404s), the preview simply stays.
+    val lowQualityUrl = remember(uri) {
+        (uri as? String)
+            ?.takeIf { it.startsWith("http") }
+            ?.let { com.unshoo.pixelmusic.data.remote.youtube.upgradeThumbnailUrlToQuality(it, com.unshoo.pixelmusic.data.preferences.AlbumArtQuality.LOW) }
+            ?.takeIf { it != uri }
+    }
+    if (lowQualityUrl != null) {
+        Box(modifier = modifier) {
+            AsyncImage(
+                model = remember(lowQualityUrl) {
+                    ImageRequest.Builder(context)
+                        .data(lowQualityUrl)
+                        .size(Size(256, 256))
+                        .memoryCacheKey("${lowQualityUrl}_256x256")
+                        .build()
+                },
+                contentDescription = "Album art of $title",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+                placeholder = painterResource(R.drawable.ic_music_placeholder),
+                error = painterResource(R.drawable.ic_music_placeholder)
+            )
+            if (loadHighQuality) {
+                val highSize = remember(targetSize) {
+                    val safe = safeAlbumArtTargetSize(targetSize)
+                    val w = (safe.width as? Dimension.Pixels)?.px?.coerceAtMost(MaxSafeAlbumArtDimensionPx)
+                    val h = (safe.height as? Dimension.Pixels)?.px?.coerceAtMost(MaxSafeAlbumArtDimensionPx)
+                    if (w != null && h != null) Size(w, h) else safe
+                }
+                AsyncImage(
+                    model = remember(uri, highSize) {
+                        ImageRequest.Builder(context)
+                            .data(uri)
+                            .size(highSize)
+                            .crossfade(300)
+                            .apply { albumArtMemoryCacheKey(uri, highSize)?.let { memoryCacheKey(it) } }
+                            .build()
+                    },
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                )
+            }
+        }
+        return
+    }
     // `density` is deliberately no longer read here: targetSize is already in pixels.
     val requestTargetSize = remember(targetSize) {
         val safeSize = safeAlbumArtTargetSize(targetSize)

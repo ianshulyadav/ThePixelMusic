@@ -135,29 +135,6 @@ class TransitionController @Inject constructor(
         }
     }
 
-    /**
-     * Manual "next": when crossfade is on and the next track is already buffered on the standby
-     * player, blend into it with a short fade instead of a hard cut. Returns false (caller does
-     * a normal seek) when that is not possible right now.
-     */
-    fun tryManualCrossfadeToNext(): Boolean {
-        ensureSettingsCache()
-        if (!crossfadeEnabledCached) return false
-        val settings = globalSettingsCached ?: return false
-        if (settings.mode == TransitionMode.NONE || settings.durationMs <= 0) return false
-        if (engine.isTransitionRunning()) return false
-        val player = engine.masterPlayer
-        if (!player.isPlaying) return false
-        val current = player.currentMediaItem ?: return false
-        val target = engine.getNextTransitionTarget(current, player.repeatMode) ?: return false
-        if (!engine.isPreparedNextReady(target.mediaItem.mediaId)) return false
-        transitionSchedulerJob?.cancel()
-        Timber.tag("TransitionDebug").d("Manual skip: crossfading into prepared %s", target.mediaItem.mediaId)
-        engine.setPauseAtEndOfMediaItems(shouldPause = true)
-        engine.performTransition(settings.copy(durationMs = settings.durationMs.coerceIn(400, MANUAL_SKIP_MAX_FADE_MS)))
-        return true
-    }
-
     /** FIX 4: Called on manual skip (previous/next song) to schedule crossfade. */
     fun onManualSkip() {
         val currentItem = engine.masterPlayer.currentMediaItem
@@ -366,6 +343,5 @@ class TransitionController @Inject constructor(
     }
 
     private companion object {
-        const val MANUAL_SKIP_MAX_FADE_MS = 1_500
     }
 }
