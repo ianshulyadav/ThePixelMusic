@@ -52,6 +52,7 @@ import com.unshoo.pixelmusic.data.telegram.TelegramRepository
 import com.unshoo.pixelmusic.utils.envelope
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -350,7 +351,11 @@ class DualPlayerEngine @Inject constructor(
                     // BUGFIX: when already ducked, playerA.volume is the 20% ducked level. Capturing it
                     // made GAIN restore the ducked level permanently (quiet playback after a
                     // notification followed by a call). Capture the pre-duck level instead.
-                    prePauseVolumeA = if (isDucked) preDuckVolumeA else playerA.volume
+                    prePauseVolumeA = when {
+                        skipFadeActive -> skipFadeRestVolume
+                        isDucked -> preDuckVolumeA
+                        else -> playerA.volume
+                    }
                     playerA.playWhenReady = false
                 }
                 if (::playerB.isInitialized) {
@@ -365,8 +370,10 @@ class DualPlayerEngine @Inject constructor(
                 if (!isDucked) {
                     isDucked = true
                     if (::playerA.isInitialized) {
-                        preDuckVolumeA = playerA.volume
-                        playerA.volume = (playerA.volume * DUCK_FACTOR).coerceIn(0.01f, 1f)
+                        preDuckVolumeA = if (skipFadeActive) skipFadeRestVolume else playerA.volume
+                        if (!skipFadeActive) {
+                            playerA.volume = (preDuckVolumeA * DUCK_FACTOR).coerceIn(0.01f, 1f)
+                        }
                     }
                     if (transitionRunning && ::playerB.isInitialized) {
                         preDuckVolumeB = playerB.volume
@@ -380,7 +387,7 @@ class DualPlayerEngine @Inject constructor(
                 // applying it to playerA after a duck/pause applied the wrong track's gain.
                 if (isDucked) {
                     isDucked = false
-                    if (::playerA.isInitialized) playerA.volume = preDuckVolumeA
+                    if (::playerA.isInitialized && !skipFadeActive) playerA.volume = preDuckVolumeA
                     if (transitionRunning && ::playerB.isInitialized) playerB.volume = preDuckVolumeB
                 }
                 if (isFocusLossPause) {
@@ -388,7 +395,7 @@ class DualPlayerEngine @Inject constructor(
                     val restoredA = prePauseVolumeA
                     val restoredB = prePauseVolumeB
                     if (::playerA.isInitialized) {
-                        playerA.volume = restoredA
+                        if (!skipFadeActive) playerA.volume = restoredA
                         if (playerA.playbackState == Player.STATE_IDLE || playerA.playbackState == Player.STATE_ENDED) {
                             playerA.prepare()
                         }
@@ -776,6 +783,8 @@ class DualPlayerEngine @Inject constructor(
     /** True while a manual-skip fade is driving the master volume. */
     fun isSkipFadeActive(): Boolean = skipFadeActive
 
+    fun isVolumeDucked(): Boolean = isDucked
+
     /** Volume writers (ReplayGain) call this instead of setting the volume during a skip fade. */
     fun updateSkipFadeRestVolume(volume: Float) {
         skipFadeRestVolume = volume.coerceIn(0.01f, 1f)
@@ -810,7 +819,8 @@ class DualPlayerEngine @Inject constructor(
             } ?: 1f
         }
         skipFadeActive = true
-        skipFadeJob = scope.launch {
+        // Consume an interrupted command before another tap can cancel this job.
+        skipFadeJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
             try {
                 if (!wasFading) {
                     runSkipVolumeFade(player, from = 1f, to = 0f, lengthMs = SKIP_FADE_OUT_MS)
@@ -830,13 +840,21 @@ class DualPlayerEngine @Inject constructor(
                         pendingSkipChange = null
                         runCatching { leftover() }
                     }
-                    skipFadeActive = false
-                    if (!transitionRunning && !isReleased) {
+                    if (!isReleased && player === playerA) {
+                        if (isDucked) preDuckVolumeA = skipFadeRestVolume
                         runCatching { player.volume = skipFadeTargetVolume() }
                     }
+                    skipFadeActive = false
                 }
             }
         }
+    }
+
+    private fun cancelSkipFade() {
+        skipFadeToken++
+        pendingSkipChange = null
+        skipFadeActive = false
+        skipFadeJob?.cancel()
     }
 
     private suspend fun runSkipVolumeFade(player: ExoPlayer, from: Float, to: Float, lengthMs: Long) {
@@ -1791,10 +1809,16 @@ class DualPlayerEngine @Inject constructor(
         val mediaItems = (0 until playerA.mediaItemCount).map { playerA.getMediaItemAt(it) }
         val repeatMode = playerA.repeatMode
         val shuffleMode = playerA.shuffleModeEnabled
-        val volume = playerA.volume
+        val volume = if (skipFadeActive) {
+            if (isDucked) preDuckVolumeA = skipFadeRestVolume
+            skipFadeTargetVolume()
+        } else {
+            playerA.volume
+        }
         val pauseAtEnd = playerA.pauseAtEndOfMediaItems
         val playbackParameters: PlaybackParameters = playerA.playbackParameters
 
+        cancelSkipFade()
         playerA.removeListener(masterPlayerListener)
         playerA.removeAnalyticsListener(masterPlayerListener)
         playerA.removeAudioOffloadListener(masterAudioOffloadListener)
@@ -3294,6 +3318,7 @@ class DualPlayerEngine @Inject constructor(
     private var transitionOutgoingRestVolume: Float? = null
 
     private fun restoreMasterRestVolume(player: ExoPlayer) {
+        if (skipFadeActive && player === playerA) return
         val rest = transitionOutgoingRestVolume
         transitionOutgoingRestVolume = null
         val base = when {
@@ -3427,6 +3452,7 @@ class DualPlayerEngine @Inject constructor(
     }
 
     fun release() {
+        cancelSkipFade()
         transitionJob?.cancel()
         preResolutionJob?.cancel()
         cancelAudioOffloadFallback()

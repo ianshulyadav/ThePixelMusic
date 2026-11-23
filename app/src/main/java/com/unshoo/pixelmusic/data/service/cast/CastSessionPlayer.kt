@@ -6,6 +6,7 @@ import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import com.unshoo.pixelmusic.data.service.player.PlaybackNavigationHistory
 import java.util.concurrent.CopyOnWriteArraySet
 
 /**
@@ -25,9 +26,11 @@ import java.util.concurrent.CopyOnWriteArraySet
  * local player stays the owner of the queue.
  */
 @androidx.annotation.OptIn(UnstableApi::class)
-class CastSessionPlayer(
+internal class CastSessionPlayer(
     player: Player,
     private val cast: CastPlayback,
+    private val navigationHistory: PlaybackNavigationHistory,
+    private val isSkipFadeActive: () -> Boolean,
 ) : ForwardingPlayer(player), CastSink {
 
     /**
@@ -52,13 +55,17 @@ class CastSessionPlayer(
     private var reportedPlaybackState = Player.STATE_IDLE
     private var reportedIsPlaying = false
 
-    /** Tells [cast] that the phone's queue moved, so the receiver's window can follow. */
+    /** Tracks local queue changes and keeps the cast receiver's window in sync. */
     private val queueWatcher = object : Player.Listener {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            navigationHistory.recordCurrent(wrappedPlayer)
             cast.onLocalTransition(mediaItem, reason)
         }
 
         override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
+            if (reason == Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED) {
+                navigationHistory.onPlaylistChanged(wrappedPlayer)
+            }
             cast.onLocalQueueChanged()
         }
 
@@ -73,6 +80,7 @@ class CastSessionPlayer(
 
     init {
         cast.sink = this
+        navigationHistory.bind(wrappedPlayer)
         wrappedPlayer.addListener(queueWatcher)
     }
 
@@ -84,6 +92,7 @@ class CastSessionPlayer(
 
         /** A hardware key press, as a share of the receiver's range. */
         const val VOLUME_STEP = 0.05f
+        const val PREVIOUS_RESTART_POSITION_MS = 3_000L
     }
 
     override fun release() {
@@ -239,12 +248,18 @@ class CastSessionPlayer(
             castPrevious()
             return
         }
-        // Past the first seconds "previous" restarts the song: a plain seek, no fade.
-        if (wrappedPlayer.currentPosition > wrappedPlayer.maxSeekToPreviousPosition || !wrappedPlayer.hasPreviousMediaItem()) {
-            super.seekToPrevious()
+        val isSkipPending = isSkipFadeActive()
+        if (!isSkipPending && wrappedPlayer.currentPosition > PREVIOUS_RESTART_POSITION_MS) {
+            super.seekTo(0L)
             return
         }
-        skipWithFade { super.seekToPrevious() }
+        skipWithFade {
+            if (isSkipPending && wrappedPlayer.currentPosition > PREVIOUS_RESTART_POSITION_MS) {
+                super.seekTo(0L)
+            } else {
+                seekPreviousTrack(restartIfMissing = true)
+            }
+        }
     }
 
     override fun seekToPreviousMediaItem() {
@@ -252,7 +267,16 @@ class CastSessionPlayer(
             castPrevious()
             return
         }
-        skipWithFade { super.seekToPreviousMediaItem() }
+        skipWithFade { seekPreviousTrack(restartIfMissing = false) }
+    }
+
+    private fun seekPreviousTrack(restartIfMissing: Boolean) {
+        val previousIndex = navigationHistory.takePreviousIndex(wrappedPlayer)
+        when {
+            previousIndex != C.INDEX_UNSET -> super.seekTo(previousIndex, 0L)
+            wrappedPlayer.hasPreviousMediaItem() -> super.seekToPreviousMediaItem()
+            restartIfMissing -> super.seekTo(0L)
+        }
     }
 
     /** Back, on a receiver: restart past the first seconds, else the previous track. */

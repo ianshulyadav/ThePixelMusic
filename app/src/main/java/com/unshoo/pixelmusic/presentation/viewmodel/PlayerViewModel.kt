@@ -7513,13 +7513,7 @@ class PlayerViewModel @Inject constructor(
     }
 
     fun previousSong() {
-        val command = {
-            // Pass the in-memory queue media IDs so PlaybackStateHolder can resolve the
-            // previous-song index without issuing N Binder IPC calls to the MediaController.
-            val queueMediaIds = _playerUiState.value.currentPlaybackQueue.map { it.id }
-            playbackStateHolder.previousSong(queueMediaIds.ifEmpty { null })
-        }
-        runWhenMediaControllerReady(command)
+        runWhenMediaControllerReady { playbackStateHolder.previousSong() }
     }
 
     private fun startProgressUpdates() {

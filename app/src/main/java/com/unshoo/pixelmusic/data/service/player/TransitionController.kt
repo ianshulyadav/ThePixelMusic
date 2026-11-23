@@ -135,14 +135,6 @@ class TransitionController @Inject constructor(
         }
     }
 
-    /** FIX 4: Called on manual skip (previous/next song) to schedule crossfade. */
-    fun onManualSkip() {
-        val currentItem = engine.masterPlayer.currentMediaItem
-        if (currentItem != null) {
-            scheduleTransitionFor(currentItem)
-        }
-    }
-
     private fun scheduleTransitionFor(currentMediaItem: MediaItem) {
         // Cancel any existing job first and reset pauseAtEnd so a stale `true`
         // from the previous job doesn't cause an unexpected pause.
@@ -261,21 +253,6 @@ class TransitionController @Inject constructor(
                     settings.mode, transitionPoint, duration, effectiveDuration
                 )
 
-                if (transitionPoint <= player.currentPosition) {
-                    val remaining = (duration - player.currentPosition).coerceAtLeast(0L)
-                    if (remaining > 500L) {
-                        val adjustedDuration = remaining.coerceAtMost(effectiveDuration)
-                        Timber.tag("TransitionDebug").w("Already past transition point! Triggering immediately.")
-                        engine.setPauseAtEndOfMediaItems(shouldPause = true)
-                        engine.performTransition(settings.copy(durationMs = adjustedDuration.toInt()))
-                    } else {
-                        Timber.tag("TransitionDebug").w("Too close to end (%d ms left). Skipping to avoid glitch.", remaining)
-                        engine.cancelNext()
-                        engine.setPauseAtEndOfMediaItems(shouldPause = false)
-                    }
-                    return@collectLatest
-                }
-
                 // Wait loop with adaptive sleep. 250ms near-end cadence still lands the crossfade
                 // within ±125ms of the target — imperceptible for a multi-second overlap, and 5×
                 // fewer wakeups in the last second of every track.
@@ -308,6 +285,8 @@ class TransitionController @Inject constructor(
                     delay(sleep)
                 }
 
+                // Manual fades and overlap fades both drive the master volume.
+                while (engine.isSkipFadeActive()) delay(50)
                 // Final check to ensure the job wasn't cancelled while waiting.
                 if (isActive) {
                     val remaining = (duration - player.currentPosition).coerceAtLeast(0L)

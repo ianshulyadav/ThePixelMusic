@@ -8,7 +8,6 @@ import androidx.media3.common.Player
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import com.unshoo.pixelmusic.data.service.player.DualPlayerEngine
-import com.unshoo.pixelmusic.data.service.player.TransitionController
 import com.unshoo.pixelmusic.data.preferences.UserPreferencesRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -44,7 +43,6 @@ class PlaybackStateHolder @Inject constructor(
     private val userPreferencesRepository: UserPreferencesRepository,
     private val castStateHolder: CastStateHolder,
     private val queueStateHolder: QueueStateHolder,
-    private val transitionController: TransitionController,
     @param:ApplicationContext private val appContext: Context,
     @AppScope private val appScope: CoroutineScope
 ) {
@@ -110,12 +108,6 @@ class PlaybackStateHolder @Inject constructor(
     private val powerManager: PowerManager by lazy(LazyThreadSafetyMode.NONE) {
         appContext.getSystemService(Context.POWER_SERVICE) as PowerManager
     }
-    // BUG 4 FIX: Play-history stack for reliable Previous navigation.
-    // Each entry is the mediaId of a song that actually started playing (not just
-    // queued). Capped at 200 entries so it never grows unbounded.
-    private val playHistoryStack = ArrayDeque<String>(200)
-    private val PLAY_HISTORY_MAX = 200
-
     private fun clearColdStartSnapshot() {
         coldStartSnapshotMediaId = null
         coldStartSnapshotToken = null
@@ -280,16 +272,6 @@ class PlaybackStateHolder @Inject constructor(
 
     fun onPlaybackOccurrenceTransition(mediaId: String?) {
         activatePlaybackOccurrence(mediaId, forceNewOccurrence = true)
-        // Record in play history for Previous navigation.
-        // Avoid adding duplicates for the same song back-to-back (e.g. from repeated
-        // MediaItemTransition events for the same item during buffering).
-        val safeId = mediaId?.takeIf { it.isNotBlank() } ?: return
-        if (playHistoryStack.lastOrNull() != safeId) {
-            if (playHistoryStack.size >= PLAY_HISTORY_MAX) {
-                playHistoryStack.removeFirst()
-            }
-            playHistoryStack.addLast(safeId)
-        }
     }
 
     fun rememberPausedPositionOverride(mediaId: String?, positionMs: Long) {
@@ -565,62 +547,21 @@ class PlaybackStateHolder @Inject constructor(
         }
     }
 
-    /**
-     * @param currentQueueMediaIds Optional snapshot of the current playback queue as a list of
-     *   media IDs (in queue order). When provided, the previous-song lookup is resolved in memory
-     *   rather than by scanning the MediaController timeline via N Binder IPC calls — which would
-     *   block the main thread on large queues and cause a visible UI freeze.
-     */
-    fun previousSong(currentQueueMediaIds: List<String>? = null) {
+    fun previousSong() {
         val castSession = castStateHolder.castSession.value
         if (castSession != null && castSession.remoteMediaClient != null) {
             castStateHolder.castPlayer?.previous()
             return
         }
-        // FIX 4: Schedule crossfade on manual skip (previous song), like BitChord/Mochy-Music.
-        transitionController.onManualSkip()
         val controller = mediaController ?: return
-
-        // If the song has been playing for more than 3 seconds, rewind to the beginning
-        if (controller.currentPosition > 3000L) {
-            controller.seekTo(0L)
-            return
-        }
-        markManualSkip()
-
-        // Always navigate to the actual previously-played song from the history stack
-        if (playHistoryStack.size >= 2) {
-            playHistoryStack.removeLast()
-            val targetMediaId = playHistoryStack.lastOrNull()
-            if (targetMediaId != null) {
-                // Find matching media item directly in controller timeline to avoid index desync
-                val timeline = controller.currentTimeline
-                val targetIndex = if (!timeline.isEmpty) {
-                    val window = androidx.media3.common.Timeline.Window()
-                    (0 until timeline.windowCount).firstOrNull { i ->
-                        timeline.getWindow(i, window).mediaItem.mediaId == targetMediaId
-                    }
-                } else {
-                    (0 until controller.mediaItemCount).firstOrNull {
-                        controller.getMediaItemAt(it).mediaId == targetMediaId
-                    }
-                } ?: (if (currentQueueMediaIds != null) {
-                    val idx = currentQueueMediaIds.indexOf(targetMediaId)
-                    if (idx >= 0 && idx < controller.mediaItemCount) idx else null
-                } else null)
-                if (targetIndex != null) {
-                    controller.seekTo(targetIndex, 0L)
-                    return
-                }
-            }
-        }
-        // Fallback when history is too short or target not found in queue
-        val prevIndex = controller.currentMediaItemIndex - 1
-        if (prevIndex >= 0) {
-            controller.seekTo(prevIndex, 0L)
-        } else {
-            controller.seekTo(0L)
-        }
+        // A deliberate move back may revisit the track protected by the forward-skip guard.
+        skippedFromSongId = null
+        controller.sendCustomCommand(
+            androidx.media3.session.SessionCommand(
+                MusicNotificationProvider.CUSTOM_COMMAND_SKIP_PREVIOUS, android.os.Bundle.EMPTY
+            ),
+            android.os.Bundle.EMPTY
+        )
     }
 
     fun nextSong() {
@@ -629,8 +570,6 @@ class PlaybackStateHolder @Inject constructor(
             castStateHolder.castPlayer?.next()
         } else {
             markManualSkip()
-            // FIX 4: Schedule crossfade on manual skip (next song), like BitChord/Mochy-Music.
-            transitionController.onManualSkip()
             val controller = mediaController ?: return
             if (controller.hasNextMediaItem()) {
                 controller.seekToNextMediaItem()

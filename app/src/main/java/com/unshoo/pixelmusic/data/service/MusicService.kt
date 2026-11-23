@@ -62,6 +62,7 @@ import com.unshoo.pixelmusic.data.preferences.ThemePreferencesRepository
 import com.unshoo.pixelmusic.data.preferences.UserPreferencesRepository
 import com.unshoo.pixelmusic.data.repository.MusicRepository
 import com.unshoo.pixelmusic.data.service.player.DualPlayerEngine
+import com.unshoo.pixelmusic.data.service.player.PlaybackNavigationHistory
 import com.unshoo.pixelmusic.data.service.player.TransitionController
 import com.unshoo.pixelmusic.ui.glancewidget.ControlWidget4x2
 import com.unshoo.pixelmusic.ui.glancewidget.PixelMusicGlanceWidget
@@ -231,6 +232,7 @@ class MusicService : MediaLibraryService() {
      */
     private var castPlayback: CastPlayback? = null
     private var castSessionPlayer: CastSessionPlayer? = null
+    private val playbackNavigationHistory = PlaybackNavigationHistory()
     private var playbackSnapshotPersistJob: Job? = null
     private var telemetryJob: Job? = null
     private var telemetryWatchdogJob: Job? = null
@@ -1203,12 +1205,12 @@ class MusicService : MediaLibraryService() {
             resolve = { item -> castStreamFor(item) },
             say = { message -> CastMirror.say(message) }
         ).also { castPlayback = it }
-        val sessionPlayer = CastSessionPlayer(engine.masterPlayer, playback)
-            .also {
-                castSessionPlayer = it
-                // Manual next/previous/queue taps fade out and back in (Mochy-style) instead of hard-cutting.
-                it.skipTransition = { change -> engine.fadedSkip(change) }
-            }
+        val sessionPlayer = CastSessionPlayer(
+            engine.masterPlayer, playback, playbackNavigationHistory, engine::isSkipFadeActive
+        ).also {
+            castSessionPlayer = it
+            it.skipTransition = engine::fadedSkip
+        }
 
         mediaSession = MediaLibrarySession.Builder(this, sessionPlayer, callback)
             .setSessionActivity(getOpenAppPendingIntent())
@@ -1788,7 +1790,8 @@ class MusicService : MediaLibraryService() {
 
     private val playerListener = object : Player.Listener {
         override fun onVolumeChanged(volume: Float) {
-            if (engine.isTransitionRunning()) return
+            // Fade frames are output levels, not changes to the user's volume.
+            if (engine.isTransitionRunning() || engine.isSkipFadeActive() || engine.isVolumeDucked()) return
             val expectedVolume = expectedReplayGainVolume
             if (expectedVolume != null && abs(expectedVolume - volume) < 0.001f) {
                 expectedReplayGainVolume = null
@@ -1822,8 +1825,10 @@ class MusicService : MediaLibraryService() {
             // Re-apply the last known RG volume immediately when resuming playback.
             // After a pause, ExoPlayer may reset the audio track volume internally,
             // causing a brief full-volume spike before the IO coroutine finishes.
-            if (isPlaying && !engine.isTransitionRunning()) {
-                lastAppliedReplayGainVolume?.let { setPlayerVolume(player, it) }
+            if (isPlaying && replayGainEnabled && !engine.isTransitionRunning() &&
+                player.currentMediaItem?.mediaId == lastReplayGainMediaId
+            ) {
+                lastAppliedReplayGainVolume?.let { setPlayerVolume(engine.masterPlayer, it) }
             }
             // Push state immediately so the watch can foreground PixelMusic before
             // system media surfaces take over.
@@ -2289,6 +2294,8 @@ class MusicService : MediaLibraryService() {
 
         if (!replayGainEnabled) {
             pendingReplayGainVolume = null
+            lastAppliedReplayGainVolume = null
+            lastReplayGainMediaId = null
             if (!engine.isTransitionRunning()) {
                 setPlayerVolume(engine.masterPlayer, userSelectedVolume)
             }
@@ -2393,12 +2400,12 @@ class MusicService : MediaLibraryService() {
             volume.coerceIn(0.01f, 1f)
         }
         val clampedVolume = safeVolume.coerceIn(0.01f, 1f)
-        expectedReplayGainVolume = clampedVolume
         if (player === engine.masterPlayer && engine.isSkipFadeActive()) {
             // A skip fade owns the volume right now; it ends at this level instead.
             engine.updateSkipFadeRestVolume(clampedVolume)
             return
         }
+        expectedReplayGainVolume = clampedVolume
         player.volume = clampedVolume
     }
 
@@ -2465,8 +2472,10 @@ class MusicService : MediaLibraryService() {
             return
         }
         val previous = castSessionPlayer
-        val wrapper = CastSessionPlayer(localPlayer, playback)
-        wrapper.skipTransition = { change -> engine.fadedSkip(change) }
+        val wrapper = CastSessionPlayer(
+            localPlayer, playback, playbackNavigationHistory, engine::isSkipFadeActive
+        )
+        wrapper.skipTransition = engine::fadedSkip
         castSessionPlayer = wrapper
         publishMediaSessionPlayer(wrapper, logMessage)
         if (previous !== wrapper) previous?.release()
