@@ -6,8 +6,11 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -40,6 +43,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
@@ -56,6 +60,7 @@ private val RailPillWidth = 68.dp
 private val RailItemHeight = 60.dp
 private val RailSearchButtonSize = 60.dp
 private val RailSearchShape = RoundedCornerShape(20.dp)
+private val CompactRailItemHeight = 48.dp
 
 /**
  * Landscape replacement for the bottom navigation bar: a vertical floating pill with the
@@ -92,105 +97,114 @@ fun AppNavigationRail(
         )
     }
 
-    Column(
-        modifier = modifier
-            .fillMaxHeight()
-            .width(NavigationRailWidth)
-            .padding(vertical = 12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+    BoxWithConstraints(
+        modifier = modifier.fillMaxHeight().width(NavigationRailWidth),
+        contentAlignment = Alignment.Center,
     ) {
-        Surface(
-            modifier = Modifier.width(RailPillWidth),
-            color = pillColor,
-            shape = RoundedCornerShape(RailPillWidth / 2),
-            shadowElevation = 6.dp
+        val fullRailHeight = (RailItemHeight + 2.dp) * mainItems.size + 36.dp +
+            if (searchItem != null) RailSearchButtonSize + 14.dp else 0.dp
+        val compact = maxHeight < fullRailHeight
+        Column(
+            modifier = Modifier
+                .verticalScroll(rememberScrollState())
+                .padding(vertical = if (compact) 4.dp else 12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
         ) {
-            Column(
-                modifier = Modifier.padding(vertical = 6.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(2.dp)
+            Surface(
+                modifier = Modifier.width(RailPillWidth),
+                color = pillColor,
+                shape = RoundedCornerShape(RailPillWidth / 2),
+                shadowElevation = 6.dp
             ) {
-                mainItems.forEach { item ->
-                    RailItem(
-                        item = item,
-                        selected = currentRoute == item.screen.route,
-                        enabled = navigationEnabled,
-                        onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            if (latestCurrentRoute != item.screen.route) {
-                                navController.navigateToTopLevelSafely(item.screen.route)
+                Column(
+                    modifier = Modifier.padding(vertical = if (compact) 2.dp else 6.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(if (compact) 0.dp else 2.dp)
+                ) {
+                    mainItems.forEach { item ->
+                        RailItem(
+                            item = item,
+                            selected = currentRoute == item.screen.route,
+                            enabled = navigationEnabled,
+                            height = if (compact) CompactRailItemHeight else RailItemHeight,
+                            showLabel = !compact,
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                if (latestCurrentRoute != item.screen.route) {
+                                    navController.navigateToTopLevelSafely(item.screen.route)
+                                }
                             }
-                        }
-                    )
+                        )
+                    }
                 }
             }
-        }
 
-        if (searchItem != null) {
-            Spacer(Modifier.height(14.dp))
-            val selected = currentRoute == searchItem.screen.route
-            val interaction = remember { MutableInteractionSource() }
-            val pressed by interaction.collectIsPressedAsState()
-            val motion = MaterialTheme.motionScheme
-            val scale by animateFloatAsState(
-                targetValue = when {
-                    pressed -> 0.92f
-                    selected -> 1.03f
-                    else -> 1f
-                },
-                animationSpec = motion.fastSpatialSpec(),
-                label = "rail_search_scale"
-            )
-            val container by animateColorAsState(
-                if (selected) scheme.secondaryContainer else scheme.primary,
-                animationSpec = motion.defaultEffectsSpec(),
-                label = "rail_search_bg"
-            )
-            val content by animateColorAsState(
-                if (selected) scheme.onSecondaryContainer else scheme.onPrimary,
-                animationSpec = motion.defaultEffectsSpec(),
-                label = "rail_search_fg"
-            )
-            Surface(
-                onClick = {
-                    if (!navigationEnabled) return@Surface
-                    val now = SystemClock.elapsedRealtime()
-                    val isDoubleTap = now - lastSearchTap <= 350L
-                    lastSearchTap = now
-                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    if (latestCurrentRoute != searchItem.screen.route) {
-                        navController.navigateToTopLevelSafely(searchItem.screen.route)
-                        if (isDoubleTap) {
-                            lastSearchTap = 0L
-                            scope.launch {
-                                delay(160L)
-                                latestOnSearchDoubleTap()
-                            }
-                        }
-                    } else if (isDoubleTap) {
-                        lastSearchTap = 0L
-                        latestOnSearchDoubleTap()
-                    }
-                },
-                modifier = Modifier
-                    .size(RailSearchButtonSize)
-                    .graphicsLayer {
-                        scaleX = scale
-                        scaleY = scale
+            if (searchItem != null) {
+                Spacer(Modifier.height(if (compact) 6.dp else 14.dp))
+                val selected = currentRoute == searchItem.screen.route
+                val interaction = remember { MutableInteractionSource() }
+                val pressed by interaction.collectIsPressedAsState()
+                val motion = MaterialTheme.motionScheme
+                val scale by animateFloatAsState(
+                    targetValue = when {
+                        pressed -> 0.92f
+                        selected -> 1.03f
+                        else -> 1f
                     },
-                shape = RailSearchShape,
-                color = container,
-                contentColor = content,
-                shadowElevation = 6.dp,
-                interactionSource = interaction
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        painter = painterResource(searchItem.iconResId),
-                        contentDescription = searchItem.label,
-                        modifier = Modifier.size(26.dp)
-                    )
+                    animationSpec = motion.fastSpatialSpec(),
+                    label = "rail_search_scale"
+                )
+                val container by animateColorAsState(
+                    if (selected) scheme.secondaryContainer else scheme.primary,
+                    animationSpec = motion.defaultEffectsSpec(),
+                    label = "rail_search_bg"
+                )
+                val content by animateColorAsState(
+                    if (selected) scheme.onSecondaryContainer else scheme.onPrimary,
+                    animationSpec = motion.defaultEffectsSpec(),
+                    label = "rail_search_fg"
+                )
+                Surface(
+                    onClick = {
+                        if (!navigationEnabled) return@Surface
+                        val now = SystemClock.elapsedRealtime()
+                        val isDoubleTap = now - lastSearchTap <= 350L
+                        lastSearchTap = now
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        if (latestCurrentRoute != searchItem.screen.route) {
+                            navController.navigateToTopLevelSafely(searchItem.screen.route)
+                            if (isDoubleTap) {
+                                lastSearchTap = 0L
+                                scope.launch {
+                                    delay(160L)
+                                    latestOnSearchDoubleTap()
+                                }
+                            }
+                        } else if (isDoubleTap) {
+                            lastSearchTap = 0L
+                            latestOnSearchDoubleTap()
+                        }
+                    },
+                    modifier = Modifier
+                        .size(if (compact) CompactRailItemHeight else RailSearchButtonSize)
+                        .graphicsLayer {
+                            scaleX = scale
+                            scaleY = scale
+                        },
+                    shape = RailSearchShape,
+                    color = container,
+                    contentColor = content,
+                    shadowElevation = 6.dp,
+                    interactionSource = interaction
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            painter = painterResource(searchItem.iconResId),
+                            contentDescription = searchItem.label,
+                            modifier = Modifier.size(26.dp)
+                        )
+                    }
                 }
             }
         }
@@ -203,6 +217,8 @@ private fun RailItem(
     item: BottomNavItem,
     selected: Boolean,
     enabled: Boolean,
+    height: Dp,
+    showLabel: Boolean,
     onClick: () -> Unit
 ) {
     val scheme = MaterialTheme.colorScheme
@@ -226,7 +242,7 @@ private fun RailItem(
     Column(
         modifier = Modifier
             .width(RailPillWidth)
-            .height(RailItemHeight)
+            .height(height)
             .clip(CircleShape)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
@@ -258,19 +274,21 @@ private fun RailItem(
                     }
             )
         }
-        Spacer(Modifier.height(3.dp))
-        Text(
-            text = item.label,
-            color = labelColor,
-            fontSize = 11.sp,
-            lineHeight = 12.sp,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 4.dp),
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-        )
+        if (showLabel) {
+            Spacer(Modifier.height(3.dp))
+            Text(
+                text = item.label,
+                color = labelColor,
+                fontSize = 11.sp,
+                lineHeight = 12.sp,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+        }
     }
 }

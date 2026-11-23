@@ -52,20 +52,21 @@ fun PermissionIconCollage(
             .padding(padding)
     ) {
         val boxMaxHeight = maxHeight
+        val spread = minOf(maxWidth, 380.dp)
         val iconNrColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
         val iconNrSdColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
         val iconHighlightColor = MaterialTheme.colorScheme.primary
         val iconTrdColor = MaterialTheme.colorScheme.tertiary
         val iconSndColor = MaterialTheme.colorScheme.secondary
 
-        val min = minOf(200.dp, height)
-        val iconConfigs = remember(min, boxMaxHeight, iconSndColor, iconNrColor, iconHighlightColor, iconNrSdColor, iconTrdColor) {
+        val min = minOf(200.dp, maxWidth, maxHeight)
+        val iconConfigs = remember(min, spread, boxMaxHeight, iconSndColor, iconNrColor, iconHighlightColor, iconNrSdColor, iconTrdColor) {
             listOf(
                 IconConfig(size = min * 0.8f, color = iconSndColor, align = Alignment.Center, rot = -15f, shape = RoundedCornerShape(20.dp), offsetX = 0.dp, offsetY = 0.dp),
-                IconConfig(size = min * 0.4f, color = iconNrColor, align = Alignment.TopStart, rot = 15f, shape = CircleShape, offsetX = (300.dp * 0.05f), offsetY = (boxMaxHeight * 0.05f)),
-                IconConfig(size = min * 0.4f, color = iconHighlightColor, align = Alignment.BottomEnd, rot = 5f, shape = CircleShape, offsetX = -(300.dp * 0.05f), offsetY = -(boxMaxHeight * 0.05f)),
-                IconConfig(size = min * 0.5f, color = iconNrSdColor, align = Alignment.TopEnd, rot = -20f, shape = RoundedCornerShape(20.dp), offsetX = -(300.dp * 0.1f), offsetY = (boxMaxHeight * 0.1f)),
-                IconConfig(size = min * 0.35f, color = iconTrdColor, align = Alignment.BottomStart, rot = 10f, shape = RoundedStarShape(sides = 8, curve = 0.1), offsetX = (300.dp * 0.1f), offsetY = -(boxMaxHeight * 0.1f))
+                IconConfig(size = min * 0.4f, color = iconNrColor, align = Alignment.TopStart, rot = 15f, shape = CircleShape, offsetX = (spread * 0.05f), offsetY = (boxMaxHeight * 0.05f)),
+                IconConfig(size = min * 0.4f, color = iconHighlightColor, align = Alignment.BottomEnd, rot = 5f, shape = CircleShape, offsetX = -(spread * 0.05f), offsetY = -(boxMaxHeight * 0.05f)),
+                IconConfig(size = min * 0.5f, color = iconNrSdColor, align = Alignment.TopEnd, rot = -20f, shape = RoundedCornerShape(20.dp), offsetX = -(spread * 0.1f), offsetY = (boxMaxHeight * 0.1f)),
+                IconConfig(size = min * 0.35f, color = iconTrdColor, align = Alignment.BottomStart, rot = 10f, shape = RoundedStarShape(sides = 8, curve = 0.1), offsetX = (spread * 0.1f), offsetY = -(boxMaxHeight * 0.1f))
             )
         }
 

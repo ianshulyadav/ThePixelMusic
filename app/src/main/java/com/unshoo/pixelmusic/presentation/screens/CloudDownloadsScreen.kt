@@ -14,6 +14,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -23,6 +24,7 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -58,7 +60,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -82,9 +83,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import com.unshoo.pixelmusic.ui.theme.PixelMusicStatusBarStyle
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -722,68 +726,61 @@ private fun StorageSummaryCard(
                 }
             }
 
-            // Play all and Shuffle all buttons strictly on one line
             if (uiState.completedDownloads.isNotEmpty()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Button(
-                        onClick = onPlayAll,
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(48.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primary,
-                            contentColor = MaterialTheme.colorScheme.onPrimary
+                BoxWithConstraints(Modifier.fillMaxWidth()) {
+                    val actionButtons: @Composable (Modifier) -> Unit = { buttonModifier ->
+                        DownloadPlaybackButton(
+                            label = stringResource(R.string.cloud_download_play_all),
+                            icon = Icons.Rounded.PlayArrow,
+                            onClick = onPlayAll,
+                            primary = true,
+                            modifier = buttonModifier,
                         )
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.PlayArrow,
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = stringResource(R.string.cloud_download_play_all),
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            softWrap = false,
-                            overflow = TextOverflow.Ellipsis
+                        DownloadPlaybackButton(
+                            label = stringResource(R.string.cloud_download_shuffle_all),
+                            icon = Icons.Rounded.Shuffle,
+                            onClick = onShuffleAll,
+                            primary = false,
+                            modifier = buttonModifier,
                         )
                     }
-
-                    FilledTonalButton(
-                        onClick = onShuffleAll,
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(48.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-                        colors = ButtonDefaults.filledTonalButtonColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                            contentColor = MaterialTheme.colorScheme.onSurface
-                        )
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Shuffle,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = stringResource(R.string.cloud_download_shuffle_all),
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            softWrap = false,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                    if (maxWidth < 292.dp || LocalDensity.current.fontScale > 1.25f) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            actionButtons(Modifier.fillMaxWidth())
+                        }
+                    } else {
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            actionButtons(Modifier.weight(1f))
+                        }
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun DownloadPlaybackButton(
+    label: String,
+    icon: ImageVector,
+    onClick: () -> Unit,
+    primary: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val colors = MaterialTheme.colorScheme
+    Button(
+        onClick = onClick,
+        modifier = modifier.heightIn(min = 48.dp),
+        shape = RoundedCornerShape(16.dp),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = if (primary) colors.primary else colors.surfaceContainerHighest,
+            contentColor = if (primary) colors.onPrimary else colors.onSurface,
+        ),
+    ) {
+        Icon(imageVector = icon, contentDescription = null, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(label, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
     }
 }
 

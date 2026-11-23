@@ -167,14 +167,13 @@ fun ScreenWrapper(
             }
             .background(MaterialTheme.colorScheme.background)
     ) {
-        // Landscape: main tabs leave room for the navigation rail; settings-style screens
-        // become a centred readable column. The Box is always present (only its modifier
+        // Main tabs leave room for the navigation rail. Wide windows center single-column screens. The Box is always present (only its modifier
         // changes) so rotating doesn't reset the screen's remembered state.
         val windowLayout = LocalAppWindowLayout.current
         val contentModifier = when {
             windowLayout.useNavigationRail && isMainRootScreen ->
                 Modifier.fillMaxSize().padding(start = windowLayout.navigationRailInset)
-            windowLayout.isLandscape && isReadableWidthRoute(myRoute) ->
+            windowLayout.windowWidth > LandscapeReadableContentWidth && isReadableWidthRoute(myRoute) ->
                 Modifier
                     .align(Alignment.TopCenter)
                     .fillMaxHeight()

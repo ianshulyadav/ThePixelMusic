@@ -44,11 +44,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -56,10 +58,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
@@ -100,7 +105,7 @@ import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.MediumExtendedFloatingActionButton
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -128,7 +133,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.LineBreak
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
@@ -289,6 +296,7 @@ fun SetupScreen(
         }
     }
     Scaffold(
+        contentWindowInsets = WindowInsets.safeDrawing,
         bottomBar = {
             SetupBottomBar(
                 pagerState = pagerState,
@@ -316,144 +324,150 @@ fun SetupScreen(
             )
         }
     ) { paddingValues ->
-        HorizontalPager(
-            state = pagerState,
-            // Keep setup progression deterministic; free swiping was allowing users
-            // to jump across optional pages after the first permission dialog.
-            userScrollEnabled = false,
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-        ) { pageIndex ->
-            val page = pages[pageIndex]
-
-            Box(
+        Box(
+            modifier = Modifier.fillMaxSize().padding(paddingValues),
+            contentAlignment = Alignment.TopCenter
+        ) {
+            HorizontalPager(
+                state = pagerState,
+                // Keep setup progression deterministic; free swiping was allowing users
+                // to jump across optional pages after the first permission dialog.
+                userScrollEnabled = false,
                 modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        val pageOffset = ((pagerState.currentPage - pageIndex) + pagerState.currentPageOffsetFraction).absoluteValue
-                        alpha = (1f - pageOffset).coerceIn(0f, 1f)
-                        translationX = size.width * pageOffset
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                when (page) {
-                    SetupPage.Welcome -> WelcomePage()
-                    SetupPage.MediaPermission -> MediaPermissionPage(
-                        uiState = uiState,
-                        onPermissionStateUpdated = { setupViewModel.checkPermissions(context) }
-                    )
-                    SetupPage.BackupRestore -> BackupRestorePage(
-                        uiState = uiState,
-                        onImportClicked = { backupPickerLauncher.launch("*/*") },
-                        onSkip = {
-                            setupViewModel.clearRestorePlan()
-                            selectedBackupUri = null
-                            navigateToPage(pagerState.currentPage + 1)
-                        }
-                    )
-                    SetupPage.DirectorySelection -> DirectorySelectionPage(
-                        uiState = uiState,
-                        currentPath = currentPath,
-                        directoryChildren = directoryChildren,
-                        availableStorages = availableStorages,
-                        selectedStorageIndex = selectedStorageIndex,
-                        isExplorerPriming = isExplorerPriming,
-                        isExplorerReady = isExplorerReady,
-                        isCurrentDirectoryResolved = isCurrentDirectoryResolved,
-                        isAtRoot = setupViewModel.isAtRoot(),
-                        explorerRoot = setupViewModel.explorerRoot(),
-                        onOpenExplorer = setupViewModel::openExplorer,
-                        onNavigateTo = setupViewModel::loadDirectory,
-                        onNavigateUp = setupViewModel::navigateUp,
-                        onRefresh = setupViewModel::refreshCurrentDirectory,
-                        onPrimeExplorer = setupViewModel::primeExplorer,
-                        onSkip = {
-                            navigateToPage(pagerState.currentPage + 1)
+                    .widthIn(max = SetupContentMaxWidth)
+                    .fillMaxWidth()
+                    .fillMaxHeight()
+            ) { pageIndex ->
+                val page = pages[pageIndex]
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            val pageOffset = ((pagerState.currentPage - pageIndex) + pagerState.currentPageOffsetFraction).absoluteValue
+                            alpha = (1f - pageOffset).coerceIn(0f, 1f)
+                            translationX = size.width * pageOffset
                         },
-                        onToggleAllowed = setupViewModel::toggleDirectoryAllowed,
-                        onSelectionFinished = setupViewModel::applyPendingDirectoryRuleChanges,
-                        onStorageSelected = setupViewModel::selectStorage
-                    )
-                    SetupPage.NotificationsPermission -> NotificationsPermissionPage(
-                        uiState = uiState,
-                        onPermissionStateUpdated = { setupViewModel.checkPermissions(context) }
-                    )
-                    SetupPage.AlarmsPermission -> AlarmsPermissionPage(
-                        uiState = uiState,
-                        onSkip = {
-                            navigateToPage(pagerState.currentPage + 1)
-                        }
-                    )
-                    SetupPage.BatteryOptimization -> BatteryOptimizationPage(
-                        onSkip = {
-                            navigateToPage(pagerState.currentPage + 1)
-                        }
-                    )
-                    SetupPage.ThemeSelection -> ThemeSelectionPage(
-                        uiState = uiState,
-                        onModeSelected = setupViewModel::setAppThemeMode,
-                        onPitchBlackToggle = setupViewModel::setPitchBlackEnabled
-                    )
-                    SetupPage.Finish -> FinishPage()
-                    SetupPage.LibraryLayout -> LibraryLayoutPage(
-                        uiState = uiState,
-                        onModeSelected = setupViewModel::setLibraryNavigationMode,
-                        onSkip = {
-                            navigateToPage(pagerState.currentPage + 1)
-                        }
-                    )
-                    SetupPage.NavBarLayout -> NavBarLayoutPage(
-                        uiState = uiState,
-                        onModeSelected = setupViewModel::setNavBarStyle,
-                        onCustomizeRadius = { showCornerRadiusOverlay = true },
-                        onSkip = {
-                            navigateToPage(pagerState.currentPage + 1)
-                        }
-                    )
+                    contentAlignment = Alignment.Center
+                ) {
+                    when (page) {
+                        SetupPage.Welcome -> WelcomePage()
+                        SetupPage.MediaPermission -> MediaPermissionPage(
+                            uiState = uiState,
+                            onPermissionStateUpdated = { setupViewModel.checkPermissions(context) }
+                        )
+                        SetupPage.BackupRestore -> BackupRestorePage(
+                            uiState = uiState,
+                            onImportClicked = { backupPickerLauncher.launch("*/*") },
+                            onSkip = {
+                                setupViewModel.clearRestorePlan()
+                                selectedBackupUri = null
+                                navigateToPage(pagerState.currentPage + 1)
+                            }
+                        )
+                        SetupPage.DirectorySelection -> DirectorySelectionPage(
+                            uiState = uiState,
+                            currentPath = currentPath,
+                            directoryChildren = directoryChildren,
+                            availableStorages = availableStorages,
+                            selectedStorageIndex = selectedStorageIndex,
+                            isExplorerPriming = isExplorerPriming,
+                            isExplorerReady = isExplorerReady,
+                            isCurrentDirectoryResolved = isCurrentDirectoryResolved,
+                            isAtRoot = setupViewModel.isAtRoot(),
+                            explorerRoot = setupViewModel.explorerRoot(),
+                            onOpenExplorer = setupViewModel::openExplorer,
+                            onNavigateTo = setupViewModel::loadDirectory,
+                            onNavigateUp = setupViewModel::navigateUp,
+                            onRefresh = setupViewModel::refreshCurrentDirectory,
+                            onPrimeExplorer = setupViewModel::primeExplorer,
+                            onSkip = {
+                                navigateToPage(pagerState.currentPage + 1)
+                            },
+                            onToggleAllowed = setupViewModel::toggleDirectoryAllowed,
+                            onSelectionFinished = setupViewModel::applyPendingDirectoryRuleChanges,
+                            onStorageSelected = setupViewModel::selectStorage
+                        )
+                        SetupPage.NotificationsPermission -> NotificationsPermissionPage(
+                            uiState = uiState,
+                            onPermissionStateUpdated = { setupViewModel.checkPermissions(context) }
+                        )
+                        SetupPage.AlarmsPermission -> AlarmsPermissionPage(
+                            uiState = uiState,
+                            onSkip = {
+                                navigateToPage(pagerState.currentPage + 1)
+                            }
+                        )
+                        SetupPage.BatteryOptimization -> BatteryOptimizationPage(
+                            onSkip = {
+                                navigateToPage(pagerState.currentPage + 1)
+                            }
+                        )
+                        SetupPage.ThemeSelection -> ThemeSelectionPage(
+                            uiState = uiState,
+                            onModeSelected = setupViewModel::setAppThemeMode,
+                            onPitchBlackToggle = setupViewModel::setPitchBlackEnabled
+                        )
+                        SetupPage.Finish -> FinishPage()
+                        SetupPage.LibraryLayout -> LibraryLayoutPage(
+                            uiState = uiState,
+                            onModeSelected = setupViewModel::setLibraryNavigationMode,
+                            onSkip = {
+                                navigateToPage(pagerState.currentPage + 1)
+                            }
+                        )
+                        SetupPage.NavBarLayout -> NavBarLayoutPage(
+                            uiState = uiState,
+                            onModeSelected = setupViewModel::setNavBarStyle,
+                            onCustomizeRadius = { showCornerRadiusOverlay = true },
+                            onSkip = {
+                                navigateToPage(pagerState.currentPage + 1)
+                            }
+                        )
+                    }
                 }
             }
         }
-    }
 
-    val restorePlan = uiState.restorePlan
-    if (restorePlan != null && selectedBackupUri != null) {
-        BackupModuleSelectionDialog(
-            plan = restorePlan,
-            inProgress = uiState.isRestoringBackup,
-            onDismiss = {
-                setupViewModel.clearRestorePlan()
-                selectedBackupUri = null
-            },
-            onBack = {
-                setupViewModel.clearRestorePlan()
-                selectedBackupUri = null
-            },
-            onSelectionChanged = setupViewModel::updateRestorePlanSelection,
-            onConfirm = {
-                val uri = selectedBackupUri ?: return@BackupModuleSelectionDialog
-                selectedBackupUri = null
-                setupViewModel.restoreFromPlan(uri)
-            }
-        )
-    }
-
-    // Overlay for Corner Radius Customization
-    AnimatedVisibility(
-        visible = showCornerRadiusOverlay,
-        enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-        exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
-    ) {
-        BackHandler {
-            showCornerRadiusOverlay = false
+        val restorePlan = uiState.restorePlan
+        if (restorePlan != null && selectedBackupUri != null) {
+            BackupModuleSelectionDialog(
+                plan = restorePlan,
+                inProgress = uiState.isRestoringBackup,
+                onDismiss = {
+                    setupViewModel.clearRestorePlan()
+                    selectedBackupUri = null
+                },
+                onBack = {
+                    setupViewModel.clearRestorePlan()
+                    selectedBackupUri = null
+                },
+                onSelectionChanged = setupViewModel::updateRestorePlanSelection,
+                onConfirm = {
+                    val uri = selectedBackupUri ?: return@BackupModuleSelectionDialog
+                    selectedBackupUri = null
+                    setupViewModel.restoreFromPlan(uri)
+                }
+            )
         }
-        NavBarCornerRadiusContent(
-            initialRadius = uiState.navBarCornerRadius.toFloat(),
-            onRadiusChange = { setupViewModel.setNavBarCornerRadius(it) },
-            onDone = { showCornerRadiusOverlay = false },
-            onBack = { showCornerRadiusOverlay = false },
-            isFullWidth = uiState.navBarStyle == "full_width"
-        )
+
+        // Overlay for Corner Radius Customization
+        AnimatedVisibility(
+            visible = showCornerRadiusOverlay,
+            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+        ) {
+            BackHandler {
+                showCornerRadiusOverlay = false
+            }
+            NavBarCornerRadiusContent(
+                initialRadius = uiState.navBarCornerRadius.toFloat(),
+                onRadiusChange = { setupViewModel.setNavBarCornerRadius(it) },
+                onDone = { showCornerRadiusOverlay = false },
+                onBack = { showCornerRadiusOverlay = false },
+                isFullWidth = uiState.navBarStyle == "full_width"
+            )
+        }
     }
 }
 
@@ -651,110 +665,107 @@ private fun isIgnoringBatteryOptimizationsNow(context: Context): Boolean {
     return powerManager.isIgnoringBatteryOptimizations(context.packageName)
 }
 
+private val SetupContentMaxWidth = 600.dp
+
 @Composable
-fun WelcomePage() {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.SpaceBetween,
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-    ) {
+private fun SetupPageColumn(
+    padding: PaddingValues,
+    arrangement: Arrangement.Vertical = Arrangement.Top,
+    content: @Composable ColumnScope.(availableWidth: Dp, availableHeight: Dp) -> Unit,
+) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val availableWidth = maxWidth
+        val availableHeight = maxHeight
         Column(
             modifier = Modifier
-                .padding(horizontal = 8.dp)
-                .padding(top = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .heightIn(min = availableHeight)
+                .padding(padding),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = arrangement,
+        ) {
+            content(availableWidth, availableHeight)
+        }
+    }
+}
+
+@Composable
+fun WelcomePage() {
+    SetupPageColumn(
+        padding = PaddingValues(horizontal = 24.dp, vertical = 16.dp),
+        arrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
+    ) { width, height ->
+        val shortPage = height < 300.dp
+        val headingSize = (width.value * 0.0875f).coerceIn(20f, if (shortPage) 27f else 36f).sp
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Text(
-                text = stringResource(R.string.setup_welcome_prefix),
+                text = stringResource(R.string.setup_welcome_prefix).trimEnd(),
                 style = ExpTitleTypography.displayLarge.copy(
-                    fontSize = 42.sp,
-                    lineHeight = 1.1.em
+                    fontSize = headingSize,
+                    lineHeight = 1.15.em,
+                    lineBreak = LineBreak.Paragraph,
                 ),
             )
             Text(
                 text = stringResource(R.string.app_name),
                 style = MaterialTheme.typography.displayLarge.copy(
                     fontFamily = GoogleSansRounded,
-                    fontSize = 46.sp,
+                    fontSize = headingSize * 1.25f,
                     color = MaterialTheme.colorScheme.primary,
-                    lineHeight = 1.1.em
+                    lineHeight = 1.1.em,
+                    lineBreak = LineBreak.Paragraph,
                 ),
             )
         }
-        Spacer(modifier = Modifier.height(10.dp))
         Surface(
             shape = CircleShape,
             color = MaterialTheme.colorScheme.surface,
             contentColor = MaterialTheme.colorScheme.onSurface,
             tonalElevation = 2.dp,
-            shadowElevation = 0.dp
         ) {
             Text(
                 text = "v${com.unshoo.pixelmusic.BuildConfig.VERSION_NAME}",
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
             )
         }
-        Spacer(modifier = Modifier.height(16.dp))
-        // Placeholder for vector art
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(240.dp)
-                //.background(color = Color.Red)
-                .clip(RoundedCornerShape(20.dp))
-        ){
-            MaterialYouVectorDrawable(
-                modifier = Modifier.fillMaxSize(),
-                drawableResId = R.drawable.welcome_art
-            )
-            SineWaveLine(
-                modifier = Modifier
-                .fillMaxWidth()
-                .align(Alignment.BottomCenter)
-                .height(32.dp)
-                .padding(horizontal = 8.dp)
-                .padding(bottom = 4.dp),
-                animate = true,
-                color = MaterialTheme.colorScheme.surface,
-                alpha = 0.95f,
-                strokeWidth = 16.dp,
-                amplitude = 4.dp,
-                waves = 7.6f,
-                phase = 0f
-            )
+        if (!shortPage) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .align(Alignment.BottomCenter)
-                    .height(22.dp)
-                    .background(color = MaterialTheme.colorScheme.surface)
-                    .padding(horizontal = 8.dp)
-                    .padding(bottom = 4.dp)
-            ){
-
+                    .height((height * 0.42f).coerceIn(96.dp, 240.dp))
+                    .clip(RoundedCornerShape(20.dp)),
+            ) {
+                MaterialYouVectorDrawable(
+                    modifier = Modifier.fillMaxSize(),
+                    drawableResId = R.drawable.welcome_art,
+                )
+                SineWaveLine(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .align(Alignment.BottomCenter)
+                        .height(24.dp)
+                        .padding(horizontal = 8.dp),
+                    animate = false,
+                    color = MaterialTheme.colorScheme.primary,
+                    alpha = 0.95f,
+                    strokeWidth = 4.dp,
+                    amplitude = 4.dp,
+                    waves = 7.6f,
+                    phase = 0f,
+                )
             }
-            SineWaveLine(
-                modifier = Modifier
-                .fillMaxWidth()
-                .align(Alignment.BottomCenter)
-                .height(32.dp)
-                .padding(horizontal = 8.dp)
-                .padding(bottom = 4.dp),
-                animate = true,
-                color = MaterialTheme.colorScheme.primary, //Container.copy(alpha = 0.9f),
-                alpha = 0.95f,
-                strokeWidth = 4.dp,
-                amplitude = 4.dp,
-                waves = 7.6f,
-                phase = 0f
-            )
         }
-        Spacer(modifier = Modifier.height(16.dp))
-        Text(text = stringResource(R.string.setup_intro_body), style = MaterialTheme.typography.bodyLarge)
+        Text(
+            text = stringResource(R.string.setup_intro_body),
+            style = MaterialTheme.typography.bodyLarge,
+            textAlign = TextAlign.Center,
+        )
     }
 }
 
@@ -1003,13 +1014,10 @@ fun ThemeSelectionPage(
         )
     )
 
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.SpaceBetween,
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(20.dp)
-    ) {
+    SetupPageColumn(
+        padding = PaddingValues(20.dp),
+        arrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
+    ) { _, _ ->
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Spacer(modifier = Modifier.height(8.dp))
             Text(
@@ -1222,13 +1230,10 @@ fun LibraryLayoutPage(
 ) {
     val isCompact = uiState.libraryNavigationMode == "compact_pill"
 
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.SpaceBetween,
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp)
-    ) {
+    SetupPageColumn(
+        padding = PaddingValues(24.dp),
+        arrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
+    ) { _, _ ->
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             //modifier = Modifier.padding(top = 24.dp)
@@ -1561,17 +1566,14 @@ fun FinishPage() {
         R.drawable.rounded_explosion_24
     )
 
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-    ) {
+    SetupPageColumn(
+        padding = PaddingValues(16.dp),
+        arrangement = Arrangement.Center,
+    ) { _, height ->
         Text(text = stringResource(R.string.setup_all_set_title), style = MaterialTheme.typography.headlineLarge)
         Spacer(modifier = Modifier.height(16.dp))
         PermissionIconCollage(
-            modifier = Modifier.height(230.dp),
+            height = (height * 0.43f).coerceIn(96.dp, 230.dp),
             icons = finishIcons
         )
         Spacer(modifier = Modifier.height(16.dp))
@@ -1590,13 +1592,10 @@ fun PermissionPageLayout(
     onGrantClicked: () -> Unit,
     content: @Composable () -> Unit = {}
 ) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.SpaceBetween,
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp)
-    ) {
+    SetupPageColumn(
+        padding = PaddingValues(24.dp),
+        arrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
+    ) { _, height ->
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
              Spacer(modifier = Modifier.height(16.dp))
             Text(
@@ -1616,15 +1615,10 @@ fun PermissionPageLayout(
             )
         }
 
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-            contentAlignment = Alignment.Center
-        ) {
+        if (height >= 280.dp) {
             PermissionIconCollage(
-                modifier = Modifier.height(220.dp),
-                icons = icons
+                height = (height * 0.38f).coerceIn(96.dp, 220.dp),
+                icons = icons,
             )
         }
 
@@ -2082,6 +2076,9 @@ fun SetupBottomBar(
     isNextButtonEnabled: Boolean,
     isFinishButtonEnabled: Boolean
 ) {
+    val window = com.unshoo.pixelmusic.presentation.components.rememberAppWindowLayout()
+    val compactFooter = window.isCompactHeight || window.windowWidth < 320.dp
+
     // --- Animaciones para el Morphing y Rotación ---
     val morphAnimationSpec = tween<Float>(durationMillis = 600, easing = FastOutSlowInEasing)
     // Animación más lenta y sutil para la rotación
@@ -2129,15 +2126,16 @@ fun SetupBottomBar(
             smoothnessAsPercentTR = 60
         )
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 14.dp)
+        Box(
+            modifier = Modifier.fillMaxWidth()
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)),
+            contentAlignment = Alignment.Center,
         ) {
             Row(
                 modifier = Modifier
+                    .widthIn(max = SetupContentMaxWidth)
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 12.dp),
+                    .padding(horizontal = 12.dp, vertical = if (compactFooter) 4.dp else 12.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -2190,7 +2188,7 @@ fun SetupBottomBar(
                 }
 
                 // 4. Aplica la forma y rotación animadas al botón
-                MediumExtendedFloatingActionButton(
+                FloatingActionButton(
                     onClick = if (isLastPage) onFinishClicked else onNextClicked,
                     shape = AbsoluteSmoothCornerShape(
                         cornerRadiusTL = animatedTopStart.toInt().dp,
@@ -2206,8 +2204,8 @@ fun SetupBottomBar(
                     containerColor = containerColor,
                     contentColor = contentColor,
                     modifier = Modifier
+                        .size(if (compactFooter) 56.dp else 80.dp)
                         .rotate(animatedRotation)
-                        .padding(end = 0.dp)
                 ) {
                     // 5. Aplica una contra-rotación al contenido del botón (el icono)
                     AnimatedContent(
