@@ -15,11 +15,12 @@ import com.unshoo.pixelmusic.data.EotStateHolder
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import timber.log.Timber
 import java.util.concurrent.TimeUnit
@@ -67,7 +68,7 @@ class SleepTimerStateHolder @Inject constructor(
     private var scope: CoroutineScope? = null
     private var toastEmitter: (suspend (String) -> Unit)? = null
     private var mediaControllerProvider: (() -> MediaController?)? = null
-    private var currentSongIds: Flow<String?>? = null
+    private var currentSongIdProvider: (() -> StateFlow<String?>)? = null
     private var songTitleResolver: ((String?) -> String)? = null
 
     private fun sleepTimerPendingIntent(): PendingIntent {
@@ -91,13 +92,13 @@ class SleepTimerStateHolder @Inject constructor(
         scope: CoroutineScope,
         toastEmitter: suspend (String) -> Unit,
         mediaControllerProvider: () -> MediaController?,
-        currentSongIds: Flow<String?>,
+        currentSongIdProvider: () -> StateFlow<String?>,
         songTitleResolver: (String?) -> String
     ) {
         this.scope = scope
         this.toastEmitter = { msg -> scope.launch { toastEmitter(msg) } }
         this.mediaControllerProvider = mediaControllerProvider
-        this.currentSongIds = currentSongIds
+        this.currentSongIdProvider = currentSongIdProvider
         this.songTitleResolver = songTitleResolver
     }
 
@@ -214,8 +215,8 @@ class SleepTimerStateHolder @Inject constructor(
             // Monitor for song changes
             eotSongMonitorJob?.cancel()
             eotSongMonitorJob = scope.launch {
-                currentSongIds
-                    ?.filterNotNull()
+                currentSongIdProvider?.invoke()
+                    ?.filterNotNull() // skip initial null emission from stateIn initialValue
                     ?.collect { newSongId ->
                         if (_isEndOfTrackTimerActive.value &&
                             (EotStateHolder.eotTargetSongId.value != null) &&
@@ -294,12 +295,10 @@ class SleepTimerStateHolder @Inject constructor(
     fun onCleared() {
         sleepTimerJob?.cancel()
         eotSongMonitorJob?.cancel()
-        sleepTimerJob = null
-        eotSongMonitorJob = null
         scope = null
         toastEmitter = null
         mediaControllerProvider = null
-        currentSongIds = null
+        currentSongIdProvider = null
         songTitleResolver = null
     }
 

@@ -167,9 +167,11 @@ import com.unshoo.pixelmusic.data.feed.RecentTrackArtistRef
 import com.unshoo.pixelmusic.data.feed.YouTubeMusicTrack
 import com.unshoo.pixelmusic.data.feed.YouTubePlaylistSummary
 import com.unshoo.pixelmusic.data.feed.toSong
+import com.unshoo.pixelmusic.data.model.Playlist
 import com.unshoo.pixelmusic.data.model.Song
 import com.unshoo.pixelmusic.presentation.components.MiniPlayerHeight
 import com.unshoo.pixelmusic.presentation.components.PlayingWaveBars
+import com.unshoo.pixelmusic.presentation.components.PlaylistCover
 import com.unshoo.pixelmusic.presentation.components.PlaylistBottomSheet
 import com.unshoo.pixelmusic.presentation.components.QuickPicksSection
 import com.unshoo.pixelmusic.presentation.components.SmartImage
@@ -197,6 +199,7 @@ import com.unshoo.pixelmusic.presentation.viewmodel.PlaylistViewModel
 import com.unshoo.pixelmusic.presentation.viewmodel.QuickPicksViewModel
 import com.unshoo.pixelmusic.ui.theme.GoogleSansRounded
 import com.unshoo.pixelmusic.ui.theme.ShapeCache
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import racra.compose.smooth_corner_rect_library.AbsoluteSmoothCornerShape
 import unshoo.ianshulyadav.pixelmusic.innertube.models.AlbumItem
@@ -319,14 +322,11 @@ fun ExploreScreen(
 
     val density = androidx.compose.ui.platform.LocalDensity.current
     val scrollThresholdPx = remember(density) { with(density) { 16.dp.toPx() } }
-    val isScrolled by remember(listState, scrollThresholdPx) {
+    val isScrolled by remember {
         derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > scrollThresholdPx }
     }
 
-    val hasCurrentSong by remember {
-        derivedStateOf { currentSongId != null }
-    }
-    val bottomPadding = if (hasCurrentSong) MiniPlayerHeight + 16.dp else 16.dp
+    val bottomPadding = if (currentSongId != null) MiniPlayerHeight + 16.dp else 16.dp
 
     val currentSections = remember(exploreUiState.activeMoodChip, exploreUiState.explorePageSections, exploreUiState.homePageSections) {
         if (exploreUiState.activeMoodChip != null) {
@@ -338,13 +338,13 @@ fun ExploreScreen(
     val shouldLoadMore by remember(listState) {
         derivedStateOf {
             val layoutInfo = listState.layoutInfo
-            val lastVisibleIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index
-            lastVisibleIndex != null && lastVisibleIndex >= (layoutInfo.totalItemsCount - 2).coerceAtLeast(0)
+            val totalItems = layoutInfo.totalItemsCount
+            val lastVisibleIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            totalItems > 0 && lastVisibleIndex >= (totalItems - 2).coerceAtLeast(0)
         }
     }
-    val continuation = exploreUiState.homePageContinuation
-    LaunchedEffect(shouldLoadMore, isLocalSelected, continuation) {
-        if (shouldLoadMore && !isLocalSelected && continuation != null && !exploreUiState.isContinuationLoading) {
+    LaunchedEffect(shouldLoadMore, isLocalSelected) {
+        if (!isLocalSelected && shouldLoadMore && exploreUiState.homePageContinuation != null && !exploreUiState.isContinuationLoading) {
             exploreViewModel.loadMore()
         }
     }
@@ -360,26 +360,21 @@ fun ExploreScreen(
     val isAdvancedExplore = exploreUiState.isAdvancedExploreEnabled
 
     // Artists for you: Pre-computed online artists -> Local topArtists / library artists strictly when offline
-    val artistsForYou = remember(
-        isEffectivelyOnline, exploreUiState.preparedArtistsForYou, feedData.topArtists,
-        exploreUiState.localTopArtists, localArtists
-    ) {
-        if (isEffectivelyOnline) {
-            exploreUiState.preparedArtistsForYou.ifEmpty { feedData.topArtists }
-        } else {
-            if (exploreUiState.localTopArtists.isNotEmpty()) {
-                exploreUiState.localTopArtists
-            } else if (localArtists.isNotEmpty()) {
-                localArtists.sortedByDescending { it.songCount }.take(10).map { artist ->
-                    FeedArtist(
-                        name = artist.name,
-                        browseId = null,
-                        artworkUrl = artist.customImageUri ?: artist.imageUrl
-                    )
-                }
-            } else {
-                emptyList()
+    val artistsForYou = if (isEffectivelyOnline) {
+        exploreUiState.preparedArtistsForYou.ifEmpty { feedData.topArtists }
+    } else {
+        if (exploreUiState.localTopArtists.isNotEmpty()) {
+            exploreUiState.localTopArtists
+        } else if (localArtists.isNotEmpty()) {
+            localArtists.sortedByDescending { it.songCount }.take(10).map { artist ->
+                FeedArtist(
+                    name = artist.name,
+                    browseId = null,
+                    artworkUrl = artist.customImageUri ?: artist.imageUrl
+                )
             }
+        } else {
+            emptyList()
         }
     }
 
@@ -417,56 +412,43 @@ fun ExploreScreen(
     }
 
     // Jump back in: Remote jumpBackIn when online -> Local rotatory history strictly when offline
-    val jumpBackInTracks = remember(
-        isEffectivelyOnline, feedData.jumpBackIn, exploreUiState.localHighlyRotatoryTracks,
-        recentlyAddedToDisplay, chartVideoIds, pureYtMusicOnly
-    ) {
-        if (isEffectivelyOnline) {
-            feedData.jumpBackIn.filter { it.url !in chartVideoIds && it.name !in chartVideoIds }
-        } else {
-            if (exploreUiState.localHighlyRotatoryTracks.isNotEmpty()) {
-                exploreUiState.localHighlyRotatoryTracks.filter { it.url !in chartVideoIds && it.name !in chartVideoIds }
-            } else if (recentlyAddedToDisplay.isNotEmpty()) {
-                recentlyAddedToDisplay.take(15).map { song ->
-                    RecentTrack(
-                        name = song.title,
-                        artist = RecentTrackArtistRef(name = song.displayArtist),
-                        album = RecentTrackArtistRef(name = song.album),
-                        image = song.albumArtUriString?.let { listOf(com.unshoo.pixelmusic.data.feed.ImageDto(it, "extralarge")) }.orEmpty(),
-                        url = song.id
-                    )
-                }
-            } else emptyList()
-        }.let { tracks ->
-            if (pureYtMusicOnly) {
-                tracks.filterNot { ContentFilterUtils.isVideoTitle(it.name) }
-            } else {
-                tracks
+    val jumpBackInTracks = if (isEffectivelyOnline) {
+        feedData.jumpBackIn.filter { it.url !in chartVideoIds && it.name !in chartVideoIds }
+    } else {
+        if (exploreUiState.localHighlyRotatoryTracks.isNotEmpty()) {
+            exploreUiState.localHighlyRotatoryTracks.filter { it.url !in chartVideoIds && it.name !in chartVideoIds }
+        } else if (recentlyAddedToDisplay.isNotEmpty()) {
+            recentlyAddedToDisplay.take(15).map { song ->
+                RecentTrack(
+                    name = song.title,
+                    artist = RecentTrackArtistRef(name = song.displayArtist),
+                    album = RecentTrackArtistRef(name = song.album),
+                    image = song.albumArtUriString?.let { listOf(com.unshoo.pixelmusic.data.feed.ImageDto(it, "extralarge")) }.orEmpty(),
+                    url = song.id
+                )
             }
+        } else emptyList()
+    }.let { tracks ->
+        if (pureYtMusicOnly) {
+            tracks.filterNot { ContentFilterUtils.isVideoTitle(it.name) }
+        } else {
+            tracks
         }
     }
 
-    val spotlight = remember(
-        exploreUiState.preparedSpotlight, feedData.spotlight, artistsForYou, quickPicks
-    ) {
-        exploreUiState.preparedSpotlight ?: feedData.spotlight ?: artistsForYou.firstOrNull()?.let { artist ->
-            val trackTitle = quickPicks.firstOrNull { it.artist.contains(artist.name, ignoreCase = true) }?.title
-            FeedSpotlight(
-                artistName = artist.name,
-                artworkUrl = artist.artworkUrl,
-                browseId = artist.browseId,
-                description = "Spotlight Artist",
-                topTrackTitle = trackTitle
-            )
-        }
+    val spotlight = exploreUiState.preparedSpotlight ?: feedData.spotlight ?: artistsForYou.firstOrNull()?.let { artist ->
+        val trackTitle = quickPicks.firstOrNull { it.artist.contains(artist.name, ignoreCase = true) }?.title
+        FeedSpotlight(
+            artistName = artist.name,
+            artworkUrl = artist.artworkUrl,
+            browseId = artist.browseId,
+            description = "Spotlight Artist",
+            topTrackTitle = trackTitle
+        )
     }
 
-    val newReleases = remember(
-        exploreUiState.preparedNewReleases, feedData.newReleases, blockedReleaseIds
-    ) {
-        (exploreUiState.preparedNewReleases.ifEmpty { feedData.newReleases }).let { rawList ->
-            if (blockedReleaseIds.isEmpty()) rawList else rawList.filter { it.id !in blockedReleaseIds }
-        }
+    val newReleases = (exploreUiState.preparedNewReleases.ifEmpty { feedData.newReleases }).let { rawList ->
+        if (blockedReleaseIds.isEmpty()) rawList else rawList.filter { it.id !in blockedReleaseIds }
     }
 
     val albumsForYou = remember(exploreUiState.preparedAlbumsForYou, localAlbums, isLocalMode, isEffectivelyOnline) {
@@ -484,36 +466,32 @@ fun ExploreScreen(
         }
     }
 
-    val mixesToDisplay = remember(feedData.mixes, quickPicks) {
-        feedData.mixes.ifEmpty {
-            quickPicks.take(6).map { song ->
-                FeedMix(
-                    title = "${song.artist} Mix",
-                    seed = com.unshoo.pixelmusic.data.feed.YouTubeMusicTrack(
-                        videoId = song.youtubeId ?: if (song.id.startsWith("youtube_")) song.id.removePrefix("youtube_") else song.id,
-                        title = song.title,
-                        artist = song.artist,
-                        artworkUrl = song.albumArtUriString
-                    )
+    val mixesToDisplay = feedData.mixes.ifEmpty {
+        quickPicks.take(6).map { song ->
+            FeedMix(
+                title = "${song.artist} Mix",
+                seed = com.unshoo.pixelmusic.data.feed.YouTubeMusicTrack(
+                    videoId = song.youtubeId ?: if (song.id.startsWith("youtube_")) song.id.removePrefix("youtube_") else song.id,
+                    title = song.title,
+                    artist = song.artist,
+                    artworkUrl = song.albumArtUriString
                 )
-            }.filter { it.seed.videoId.isNotBlank() }
-        }.distinctBy { it.seed.videoId }
-    }
+            )
+        }.filter { it.seed.videoId.isNotBlank() }
+    }.distinctBy { it.seed.videoId }
 
-    val heavyToDisplay = remember(feedData.heavyRotation, quickPicks) {
-        feedData.heavyRotation.ifEmpty {
-            if (quickPicks.size > 8) {
-                quickPicks.drop(8).take(10).map { song ->
-                    com.unshoo.pixelmusic.data.feed.GeneratedTrack(
-                        name = song.title,
-                        artist = song.artist,
-                        artworkUrl = song.albumArtUriString,
-                        url = "https://www.youtube.com/watch?v=${song.youtubeId ?: song.id.removePrefix("youtube_")}",
-                        album = song.album
-                    )
-                }
-            } else emptyList()
-        }
+    val heavyToDisplay = feedData.heavyRotation.ifEmpty {
+        if (quickPicks.size > 8) {
+            quickPicks.drop(8).take(10).map { song ->
+                com.unshoo.pixelmusic.data.feed.GeneratedTrack(
+                    name = song.title,
+                    artist = song.artist,
+                    artworkUrl = song.albumArtUriString,
+                    url = "https://www.youtube.com/watch?v=${song.youtubeId ?: song.id.removePrefix("youtube_")}",
+                    album = song.album
+                )
+            }
+        } else emptyList()
     }
 
     val otherHomeSections = remember(
@@ -545,15 +523,11 @@ fun ExploreScreen(
             onRefresh = {
                 scope.launch {
                     isManualRefreshing = true
-                    try {
-                        unshoo.ianshulyadav.pixelmusic.innertube.YouTube.invalidateHomeCache()
-                        val exploreJob = exploreViewModel.refreshOnEntry(force = true)
-                        val quickPicksJob = quickPicksViewModel.refresh(force = true)
-                        exploreJob?.join()
-                        quickPicksJob.join()
-                    } finally {
-                        isManualRefreshing = false
-                    }
+                    unshoo.ianshulyadav.pixelmusic.innertube.YouTube.invalidateHomeCache()
+                    val exploreJob = launch { exploreViewModel.refreshOnEntry(force = true) }
+                    val quickPicksJob = launch { quickPicksViewModel.refresh(force = true) }
+                    joinAll(exploreJob, quickPicksJob)
+                    isManualRefreshing = false
                 }
             },
             state = pullRefreshState,
@@ -724,7 +698,6 @@ fun ExploreScreen(
                                     },
                                     currentSongId = currentSongId,
                                     displayMode = quickPicksDisplayMode,
-                                    isFeedScrolling = { listState.isScrollInProgress },
                                     cardSize = 140.dp
                                 )
                             }
@@ -845,10 +818,9 @@ fun ExploreScreen(
                                     modifier = Modifier.padding(top = 10.dp)
                                 ) {
                                     items(exploreUiState.libraryPlaylists, key = { p -> "lib_${p.id}" }, contentType = { "playlist_card" }) { playlist ->
-                                        ExploreLibraryPlaylistCard(
+                                        LibraryPlaylistCard(
                                             playlist = playlist,
                                             playerViewModel = playerViewModel,
-                                            onPlayClick = { playerViewModel.playLibraryPlaylist(playlist) },
                                             onClick = {
                                                 navController.navigateSafely(Screen.PlaylistDetail.createRoute(playlist.id))
                                             }
@@ -871,7 +843,6 @@ fun ExploreScreen(
                                     },
                                     currentSongId = currentSongId,
                                     displayMode = quickPicksDisplayMode,
-                                    isFeedScrolling = { listState.isScrollInProgress },
                                     cardSize = 140.dp
                                 )
                             }
@@ -946,7 +917,6 @@ fun ExploreScreen(
                                     },
                                     currentSongId = currentSongId,
                                     displayMode = quickPicksDisplayMode,
-                                    isFeedScrolling = { listState.isScrollInProgress },
                                     cardSize = 140.dp
                                 )
                             }
@@ -1299,10 +1269,9 @@ fun ExploreScreen(
                                     modifier = Modifier.padding(top = 10.dp)
                                 ) {
                                     items(libraryPlaylists, key = { p -> "lib_${p.id}" }, contentType = { "playlist_card" }) { playlist ->
-                                        ExploreLibraryPlaylistCard(
+                                        LibraryPlaylistCard(
                                             playlist = playlist,
                                             playerViewModel = playerViewModel,
-                                            onPlayClick = { playerViewModel.playLibraryPlaylist(playlist) },
                                             onClick = {
                                                 navController.navigateSafely(Screen.PlaylistDetail.createRoute(playlist.id))
                                             }
@@ -2178,6 +2147,7 @@ private fun FeedTrackCard(
                         model = artworkUrl,
                         contentDescription = title,
                         contentScale = ContentScale.Crop,
+                        shape = cardShape,
                         targetSize = SmartImageExploreCardTargetSize,
                         placeholderResId = 0,
                         errorResId = 0,
@@ -2299,6 +2269,7 @@ private fun FeedPlaylistCard(
                             model = artworkUrl,
                             contentDescription = title,
                             contentScale = ContentScale.Crop,
+                            shape = cardShape,
                             targetSize = SmartImageExploreCardTargetSize,
                             placeholderResId = 0,
                             errorResId = 0,
@@ -2417,6 +2388,7 @@ private fun ShelfArtistCard(
                         model = artist.artworkUrl,
                         contentDescription = artist.name,
                         contentScale = ContentScale.Crop,
+                        shape = artistAvatarShape,
                         targetSize = SmartImageExploreCardTargetSize,
                         placeholderResId = 0,
                         errorResId = 0,
@@ -2543,6 +2515,7 @@ private fun RecentTrackCard(
                             model = track.artworkUrl,
                             contentDescription = track.name,
                             contentScale = ContentScale.Crop,
+                            shape = cardShape,
                             targetSize = SmartImageExploreCardTargetSize,
                             placeholderResId = 0,
                             errorResId = 0,
@@ -3098,6 +3071,162 @@ fun AnimatedSparklesIconButton(
     }
 }
 
+@Composable
+fun LibraryPlaylistCard(
+    playlist: Playlist,
+    playerViewModel: PlayerViewModel,
+    onClick: () -> Unit
+) {
+    val previewSongIds = remember(playlist.songIds) {
+        playlist.songIds.take(4)
+    }
+    var playlistSongs by remember(previewSongIds) {
+        mutableStateOf<List<Song>?>(if (previewSongIds.isEmpty()) emptyList() else null)
+    }
+    LaunchedEffect(previewSongIds) {
+        if (previewSongIds.isNotEmpty()) {
+            playlistSongs = playerViewModel.getSongs(previewSongIds)
+        }
+    }
+
+    val dominantColor = playlist.coverColorArgb?.let { Color(it) } ?: MaterialTheme.colorScheme.secondaryContainer
+    val cardBgColor = MaterialTheme.colorScheme.surfaceContainerHigh
+    val isDarkTheme = isSystemInDarkTheme()
+    val blendedBgColor = remember(dominantColor, cardBgColor, isDarkTheme) {
+        val blendFraction = if (isDarkTheme) 0.18f else 0.35f
+        androidx.compose.ui.graphics.lerp(cardBgColor, dominantColor, blendFraction)
+    }
+
+    val cardShape = ShapeCache.smooth20
+    val thumbShape = ShapeCache.smooth14
+
+    Card(
+        modifier = Modifier
+            .width(260.dp)
+            .height(120.dp)
+            .bounceClick(scaleDown = 0.96f) { onClick() },
+        shape = cardShape,
+        colors = CardDefaults.cardColors(containerColor = blendedBgColor),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.horizontalGradient(
+                            colors = listOf(
+                                dominantColor.copy(alpha = 0.22f),
+                                Color.Transparent
+                            )
+                        )
+                    )
+            )
+
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(96.dp)
+                        .clip(thumbShape)
+                ) {
+                    PlaylistCover(
+                        playlist = playlist,
+                        playlistSongs = playlistSongs ?: emptyList(),
+                        modifier = Modifier.fillMaxSize(),
+                        size = 96.dp
+                    )
+
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(4.dp)
+                            .size(28.dp)
+                            .background(
+                                color = MaterialTheme.colorScheme.primary,
+                                shape = CircleShape
+                            )
+                            .clickable {
+                                playlistSongs?.let { songs ->
+                                    if (songs.isNotEmpty()) {
+                                        playerViewModel.playSongs(songs, songs.first(), playlist.name)
+                                    }
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.PlayArrow,
+                            contentDescription = "Play",
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(12.dp))
+
+                Column(
+                    modifier = Modifier.fillMaxHeight(),
+                    verticalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text(
+                            text = playlist.name,
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.SemiBold,
+                                letterSpacing = (-0.2).sp
+                            ),
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+
+                        val countText = if (playlist.displaySongCount != null) {
+                            "${playlist.displaySongCount} songs"
+                        } else {
+                            "${playlist.songIds.size} songs"
+                        }
+                        Text(
+                            text = countText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                        )
+                    }
+
+                    val sourceLabel = if (playlist.source == "YOUTUBE") "YouTube" else "Library"
+                    val badgeBg = if (playlist.source == "YOUTUBE") {
+                        MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.6f)
+                    } else {
+                        MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f)
+                    }
+                    val badgeText = if (playlist.source == "YOUTUBE") {
+                        MaterialTheme.colorScheme.onTertiaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSecondaryContainer
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .background(badgeBg, shape = RoundedCornerShape(8.dp))
+                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = sourceLabel,
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                            color = badgeText
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 private fun isBentoSection(title: String, itemSize: Int): Boolean {
     val t = title.lowercase()
     return itemSize >= 4 && (
@@ -3212,7 +3341,8 @@ private fun LibrarySwipeableCarousel(
             state = pagerState,
             modifier = Modifier.fillMaxWidth(),
             contentPadding = PaddingValues(horizontal = 20.dp, vertical = 4.dp),
-            pageSpacing = 12.dp
+            pageSpacing = 12.dp,
+            beyondViewportPageCount = 1
         ) { page ->
             val item = items[page]
             val isItemPlaying = remember(item, currentSongId, isPlaying) {

@@ -1328,11 +1328,7 @@ class MainActivity : ComponentActivity() {
                                 // Feed the frosted nav bar with the screen content behind it.
                                 .then(
                                     with(com.unshoo.pixelmusic.presentation.components.PixelGlass) {
-                                        Modifier.navGlassSource(
-                                            mainBackdropSource,
-                                            navBarFrostedBlur && !useNavigationRail && shouldRenderNavigationBar &&
-                                                com.unshoo.pixelmusic.presentation.components.FrostedBlurSupported
-                                        )
+                                        Modifier.navGlassSource(mainBackdropSource, navBarFrostedBlur)
                                     }
                                 )
                                 .then(
@@ -1398,7 +1394,20 @@ class MainActivity : ComponentActivity() {
                             }
                         }
 
+                        // BUGFIX (recompose storm — read .value off a StateFlow):
+                        // `derivedStateOf { someFlow.value > x }` is a known
+                        // Compose anti-pattern — it reads the latest value at
+                        // composition time but doesn't subscribe to the StateFlow,
+                        // so the derived state never re-evaluates on its own.
+                        // The fallback here was that the *outer* composition
+                        // would re-evaluate (because `playerUiState` changes
+                        // frequently), and then re-derive the value. That works
+                        // but means every player state tick re-evaluates the
+                        // entire content lambda. Use the StateFlow as a
+                        // `State<Float>` directly with `collectAsStateWithLifecycle`.
                         val isMiniPlayerDismissingForOverlay by playerViewModel.isMiniPlayerDismissing.collectAsStateWithLifecycle()
+                        val expansionFractionForOverlay =
+                            playerViewModel.playerContentExpansionFraction.value
                         val isUndoBarVisibleForOverlay by remember {
                             playerViewModel.playerUiState
                                 .map { it.showDismissUndoBar }

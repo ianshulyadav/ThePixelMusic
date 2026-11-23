@@ -194,13 +194,13 @@ fun HomeScreen(
     val isEffectivelyOnline = isOnline && !isLocalMode
     val settingsUiState by settingsViewModel.uiState.collectAsStateWithLifecycle()
     val accountsUiState by accountsViewModel.uiState.collectAsStateWithLifecycle()
-    val discoverYoutubeSongs = if (isEffectivelyOnline) {
-        val preparedSongs by remember(exploreViewModel) {
-            exploreViewModel.uiState.map { it.preparedDiscoverSongs }.distinctUntilChanged()
-        }.collectAsStateWithLifecycle(initialValue = exploreViewModel.uiState.value.preparedDiscoverSongs)
-        preparedSongs
-    } else {
-        emptyList()
+    val exploreUiState by exploreViewModel.uiState.collectAsStateWithLifecycle()
+    val discoverYoutubeSongs = remember(exploreUiState.preparedDiscoverSongs, isEffectivelyOnline) {
+        if (!isEffectivelyOnline) {
+            emptyList()
+        } else {
+            exploreUiState.preparedDiscoverSongs
+        }
     }
     val dailyMixSongsRaw by playerViewModel.dailyMixSongs.collectAsStateWithLifecycle()
     val dailyMixSongs by produceState(
@@ -260,15 +260,10 @@ fun HomeScreen(
     val usesFallbackHomeMix = remember(curatedYourMixSongs, dailyMixSongs) {
         curatedYourMixSongs.isEmpty() && dailyMixSongs.isEmpty()
     }
-    val allLibrarySongs = if (isEffectivelyOnline) {
-        persistentListOf()
-    } else {
-        val localLibrarySongs by playerViewModel.allSongsFlow.collectAsStateWithLifecycle()
-        localLibrarySongs
-    }
+    val allLibrarySongs by playerViewModel.allSongsFlow.collectAsStateWithLifecycle()
     val yourMixSongs by produceState(
         initialValue = if (isEffectivelyOnline) dailyMixSongs else persistentListOf(),
-        dailyMixSongs, curatedYourMixSongs, homeMixPreviewSongs, isEffectivelyOnline, allLibrarySongs, context
+        dailyMixSongs, curatedYourMixSongs, isEffectivelyOnline, allLibrarySongs.size
     ) {
         val baseList = when {
             dailyMixSongs.isNotEmpty() -> dailyMixSongs
@@ -334,11 +329,12 @@ fun HomeScreen(
 
     val yourMixSong: String = stringResource(R.string.home_todays_mix_subtitle)
 
-    val currentSongId by remember(playerViewModel.stablePlayerState) {
+    // 2) Observar sólo el currentSong (o null) para saber si mostrar padding
+    val currentSong by remember(playerViewModel.stablePlayerState) {
         playerViewModel.stablePlayerState
-            .map { it.currentSong?.id }
+            .map { it.currentSong }
             .distinctUntilChanged()
-    }.collectAsStateWithLifecycle(initialValue = playerViewModel.stablePlayerState.value.currentSong?.id)
+    }.collectAsStateWithLifecycle(initialValue = null)
 
     // 3) Observe shuffle state for sync
     val isShuffleEnabled by remember(playerViewModel.stablePlayerState) {
@@ -347,10 +343,8 @@ fun HomeScreen(
             .distinctUntilChanged()
     }.collectAsStateWithLifecycle(initialValue = false)
 
-    val hasCurrentSong by remember {
-        derivedStateOf { currentSongId != null }
-    }
-    val bottomPadding = if (hasCurrentSong) MiniPlayerHeight else 0.dp
+    // Padding inferior si hay canción en reproducción
+    val bottomPadding = if (currentSong != null) MiniPlayerHeight else 0.dp
 
     var showOptionsBottomSheet by remember { mutableStateOf(false) }
     var showChangelogBottomSheet by remember { mutableStateOf(false) }
@@ -416,7 +410,7 @@ fun HomeScreen(
     val listState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
     val density = LocalDensity.current
     val scrollThresholdPx = remember(density) { with(density) { 180.dp.toPx() } } // Adopted from PixelMusic: higher threshold = header flip-flops less
-    val isScrolledPastThreshold = remember(listState, scrollThresholdPx) {
+    val isScrolledPastThreshold = remember(scrollThresholdPx) {
         derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > scrollThresholdPx }
     }
 
@@ -531,6 +525,7 @@ fun HomeScreen(
                 }
             ) {
                 val isInitialFetchFinished by com.unshoo.pixelmusic.utils.AppReadinessSignal.isInitialFetchFinished.collectAsStateWithLifecycle()
+                val isQuickPicksLoading by quickPicksViewModel.isLoading.collectAsStateWithLifecycle()
 
                 LaunchedEffect(isEffectivelyOnline, isQuickPicksLoading, isDailyMixUpdating) {
                     if (!isEffectivelyOnline) {
@@ -629,9 +624,8 @@ fun HomeScreen(
                                                     onSeeAllClick = {
                                                         navController.navigateSafely(Screen.QuickPicksAll.route)
                                                     },
-                                                    currentSongId = currentSongId,
-                                                    displayMode = quickPicksDisplayMode,
-                                                    isFeedScrolling = { listState.isScrollInProgress }
+                                                    currentSongId = currentSong?.id,
+                                                    displayMode = quickPicksDisplayMode
                                                 )
                                             }
                                         }
@@ -759,7 +753,7 @@ fun HomeScreen(
                                                         navController.navigateSafely(Screen.RecentlyPlayed.route)
                                                     },
                                                     themeStateHolder = playerViewModel.themeStateHolder,
-                                                    currentSongId = currentSongId,
+                                                    currentSongId = currentSong?.id,
                                                     contentPadding = PaddingValues(start = 8.dp, end = 24.dp)
                                                 )
                                             }
@@ -773,7 +767,7 @@ fun HomeScreen(
                                             ) {
                                                 com.unshoo.pixelmusic.presentation.components.RecentlyAddedSection(
                                                     songs = recentlyAddedSongs,
-                                                    currentSongId = currentSongId,
+                                                    currentSongId = currentSong?.id,
                                                     onSongClick = { song ->
                                                         playerViewModel.playSongs(
                                                             songsToPlay = recentlyAddedSongs,

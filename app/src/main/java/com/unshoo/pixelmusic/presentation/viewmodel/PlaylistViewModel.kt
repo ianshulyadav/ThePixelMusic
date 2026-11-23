@@ -325,8 +325,12 @@ class PlaylistViewModel @Inject constructor(
                         
                         if (cacheFile.exists()) {
                             try {
-                                val cache = ExploreFeedCache.read(cacheFile)
-                                val sections = cache?.sections.orEmpty().filter { section ->
+                                val json = cacheFile.readText()
+                                val gson = com.google.gson.GsonBuilder()
+                                    .registerTypeAdapter(unshoo.ianshulyadav.pixelmusic.innertube.models.YTItem::class.java, PlaylistYTItemTypeAdapter())
+                                    .create()
+                                val cache = gson.fromJson(json, ExploreCacheModel::class.java)
+                                val sections = cache.sections.filter { section ->
                                     val title = section.title.lowercase()
                                     val isSug = title.contains("mix") || title.contains("listen again") || 
                                                 title.contains("favorites") || title.contains("suggest") || 
@@ -2777,5 +2781,26 @@ class PlaylistViewModel @Inject constructor(
             }
         } catch (_: Exception) {}
         return seconds * 1000
+    }
+}
+
+private class PlaylistYTItemTypeAdapter : com.google.gson.JsonSerializer<unshoo.ianshulyadav.pixelmusic.innertube.models.YTItem>, com.google.gson.JsonDeserializer<unshoo.ianshulyadav.pixelmusic.innertube.models.YTItem> {
+    override fun serialize(src: unshoo.ianshulyadav.pixelmusic.innertube.models.YTItem, typeOfSrc: java.lang.reflect.Type, context: com.google.gson.JsonSerializationContext): com.google.gson.JsonElement {
+        val obj = context.serialize(src).asJsonObject
+        obj.addProperty("type", src::class.java.simpleName)
+        return obj
+    }
+
+    override fun deserialize(json: com.google.gson.JsonElement, typeOfT: java.lang.reflect.Type, context: com.google.gson.JsonDeserializationContext): unshoo.ianshulyadav.pixelmusic.innertube.models.YTItem {
+        val obj = json.asJsonObject
+        val type = obj.get("type").asString
+        val clazz = when (type) {
+            "SongItem" -> unshoo.ianshulyadav.pixelmusic.innertube.models.SongItem::class.java
+            "AlbumItem" -> unshoo.ianshulyadav.pixelmusic.innertube.models.AlbumItem::class.java
+            "PlaylistItem" -> unshoo.ianshulyadav.pixelmusic.innertube.models.PlaylistItem::class.java
+            "ArtistItem" -> unshoo.ianshulyadav.pixelmusic.innertube.models.ArtistItem::class.java
+            else -> throw com.google.gson.JsonParseException("Unknown type: $type")
+        }
+        return context.deserialize(obj, clazz)
     }
 }

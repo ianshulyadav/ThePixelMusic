@@ -72,13 +72,11 @@ import com.unshoo.pixelmusic.presentation.viewmodel.SongInfoBottomSheetViewModel
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -92,9 +90,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.onVisibilityChanged
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import com.unshoo.pixelmusic.R
@@ -114,7 +110,7 @@ import com.unshoo.pixelmusic.ui.theme.GoogleSansRounded
 import kotlin.math.absoluteValue
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
-import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import androidx.compose.runtime.snapshotFlow
 import com.unshoo.pixelmusic.presentation.components.SmartImageCompactListTargetSize
@@ -128,6 +124,8 @@ private const val QuickPicksLimit = 48
 private val QuickPicksPillArtSize = 36.dp
 private val QuickPicksWidthSteps = listOf(148.dp, 166.dp, 184.dp, 202.dp, 220.dp)
 
+private data class QuickPicksPillCell(val song: Song, val width: Dp)
+private data class QuickPicksPillRow(val pills: List<QuickPicksPillCell>, val contentWidth: Dp)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -143,8 +141,7 @@ fun QuickPicksSection(
     onDownload: ((Song) -> Unit)? = null,
     playerViewModel: PlayerViewModel = hiltViewModel(),
     songInfoViewModel: SongInfoBottomSheetViewModel = hiltViewModel(),
-    modifier: Modifier = Modifier,
-    isFeedScrolling: () -> Boolean = { false }
+    modifier: Modifier = Modifier
 ) {
     if (songs.isEmpty()) return
     val context = LocalContext.current
@@ -174,6 +171,16 @@ fun QuickPicksSection(
         }
         Toast.makeText(context, "Download started", Toast.LENGTH_SHORT).show()
     }
+
+    val visible = remember(songs) {
+        val count = (songs.size / 3) * 3
+        songs.take(count.coerceAtMost(QuickPicksLimit))
+    }
+    val columns = remember(visible) { buildQuickPickColumns(visible) }
+    val actualRowsCount = if (visible.isNotEmpty()) QuickPicksPillsPerColumn else 0
+    val sectionHeight = if (actualRowsCount > 0) {
+        QuickPicksPillHeight * actualRowsCount + QuickPicksPillSpacing * (actualRowsCount - 1)
+    } else 0.dp
 
     Column(
         modifier = modifier.fillMaxWidth(),
@@ -276,35 +283,31 @@ fun QuickPicksSection(
                 }
             }
 
-            val parentScrolling by rememberUpdatedState(isFeedScrolling)
-            var isCarouselVisible by remember { mutableStateOf(false) }
-            LaunchedEffect(lazyListState, limitSongs.size, isReducedMotion) {
-                if (limitSongs.size < 2) return@LaunchedEffect
-                snapshotFlow { isCarouselVisible && !parentScrolling() }.collectLatest { canAutoAdvance ->
-                    if (!canAutoAdvance) return@collectLatest
-                    while (isActive) {
-                        snapshotFlow { lazyListState.isScrollInProgress }.first { !it }
-                        delay(2500)
-                        if (lazyListState.isScrollInProgress) continue
+            // Same snapshotFlow-based fix as CARD mode above
+            LaunchedEffect(limitSongs) {
+                if (limitSongs.isEmpty()) return@LaunchedEffect
+                while (isActive) {
+                    snapshotFlow { lazyListState.isScrollInProgress }
+                        .filter { !it }
+                        .first()
+                    delay(2500)
+                    if (isActive && !lazyListState.isScrollInProgress) {
                         val nextIndex = (lazyListState.firstVisibleItemIndex + 1) % limitSongs.size
-                        // A horizontal gesture can cancel this scroll without stopping auto-advance.
-                        launch {
-                            if (isReducedMotion) lazyListState.scrollToItem(nextIndex)
-                            else lazyListState.animateScrollToItem(nextIndex)
-                        }.join()
+                        if (isReducedMotion) {
+                            lazyListState.scrollToItem(nextIndex)
+                        } else {
+                            lazyListState.animateScrollToItem(nextIndex)
+                        }
                     }
                 }
             }
 
             val cardShape = remember { RoundedCornerShape(20.dp) }
-            val artSize = smartImageTargetSizeFor(cardSize, LocalDensity.current.density)
             LazyRow(
                 state = lazyListState,
                 contentPadding = PaddingValues(start = 16.dp, end = 60.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .onVisibilityChanged(minFractionVisible = 0.25f) { isCarouselVisible = it }
+                modifier = Modifier.fillMaxWidth()
             ) {
                 items(
                     count = limitSongs.size,
@@ -354,7 +357,7 @@ fun QuickPicksSection(
                                     model = song.albumArtUriString,
                                     contentDescription = song.title,
                                     contentScale = ContentScale.Crop,
-                                    targetSize = artSize,
+                                    targetSize = SmartImageCardTargetSize,
                                     crossfadeDurationMillis = 0,
                                     modifier = Modifier.fillMaxSize()
                                 )
@@ -411,8 +414,6 @@ fun QuickPicksSection(
             val limitSongs = remember(songs) { songs.take(20) }
             val lazyListState = rememberLazyListState()
             val uncontainedCardShape = remember { AbsoluteSmoothCornerShape(24.dp, 80) }
-            val uncontainedCardSize = 150.dp
-            val artSize = smartImageTargetSizeFor(uncontainedCardSize, LocalDensity.current.density)
             
             LazyRow(
                 state = lazyListState,
@@ -426,6 +427,7 @@ fun QuickPicksSection(
                     contentType = { "quick_pick_uncontained_card" }
                 ) { uncontainedIndex ->
                     val song = limitSongs[uncontainedIndex]
+                    val uncontainedCardSize = 150.dp
                     Column(
                         modifier = Modifier
                             .width(uncontainedCardSize)
@@ -467,7 +469,7 @@ fun QuickPicksSection(
                                     model = song.albumArtUriString,
                                     contentDescription = song.title,
                                     contentScale = ContentScale.Crop,
-                                    targetSize = artSize,
+                                    targetSize = SmartImageCardTargetSize,
                                     crossfadeDurationMillis = 0,
                                     modifier = Modifier.fillMaxSize()
                                 )
@@ -521,14 +523,6 @@ fun QuickPicksSection(
                 }
             }
         } else {
-            val columns = remember(songs) {
-                val count = (songs.size / QuickPicksPillsPerColumn) * QuickPicksPillsPerColumn
-                buildQuickPickColumns(songs.take(count.coerceAtMost(QuickPicksLimit)))
-            }
-            val sectionHeight = if (columns.isEmpty()) 0.dp else {
-                QuickPicksPillHeight * QuickPicksPillsPerColumn +
-                    QuickPicksPillSpacing * (QuickPicksPillsPerColumn - 1)
-            }
             LazyRow(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -696,18 +690,18 @@ private fun CarouselItemScope.CenteredHeroCard(
     modifier: Modifier = Modifier
 ) {
     val drawInfo = carouselItemDrawInfo
-    val sizeFraction = remember(drawInfo) {
-        {
-            val range = drawInfo.maxSize - drawInfo.minSize
-            if (range > 0f) ((drawInfo.size - drawInfo.minSize) / range).coerceIn(0f, 1f) else 1f
-        }
+    val sizeFraction = if (drawInfo.maxSize > drawInfo.minSize) {
+        ((drawInfo.size - drawInfo.minSize) / (drawInfo.maxSize - drawInfo.minSize)).coerceIn(0f, 1f)
+    } else 1f
+
+    // 1. Dynamic curve transformation: quantized to prevent GC churn for ultra-smooth 60/120fps scrolling
+    val cornerRadiusDp = remember((sizeFraction * 12f).toInt()) {
+        (16 + (sizeFraction * 12f).toInt()).dp
     }
-    val cornerStep by remember(sizeFraction) { derivedStateOf { (sizeFraction() * 12f).toInt() } }
-    val cardShape = remember(cornerStep) { RoundedCornerShape((16 + cornerStep).dp) }
-    val textAlpha = remember(sizeFraction) { { ((sizeFraction() - 0.55f) / 0.45f).coerceIn(0f, 1f) } }
-    val showText by remember(textAlpha) { derivedStateOf { textAlpha() > 0.01f } }
-    val enableTextActions by remember(textAlpha) { derivedStateOf { textAlpha() > 0.5f } }
-    val hasRaisedElevation by remember(sizeFraction) { derivedStateOf { sizeFraction() > 0.85f } }
+    val cardShape = remember(cornerRadiusDp) { RoundedCornerShape(cornerRadiusDp) }
+
+    // 2. Text opacity: strictly visible for the centered carousel card
+    val textAlpha = ((sizeFraction - 0.55f) / 0.45f).coerceIn(0f, 1f)
 
     // Direct artwork URL - Coil manages caching seamlessly off the UI thread
     val artUri = song.albumArtUriString
@@ -754,7 +748,7 @@ private fun CarouselItemScope.CenteredHeroCard(
             containerColor = darkBase
         ),
         elevation = CardDefaults.cardElevation(
-            defaultElevation = if (hasRaisedElevation) 3.dp else 1.dp
+            defaultElevation = if (sizeFraction > 0.85f) 3.dp else 1.dp
         ),
         modifier = modifier
             .fillMaxSize()
@@ -783,18 +777,18 @@ private fun CarouselItemScope.CenteredHeroCard(
             )
 
             // 3-dots overflow options in top-right corner of the centered card
-            if (showText) {
+            if (textAlpha > 0.01f) {
                 var menuExpanded by remember { mutableStateOf(false) }
 
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(top = 10.dp, end = 10.dp)
-                        .graphicsLayer { alpha = textAlpha() }
+                        .graphicsLayer { alpha = textAlpha }
                 ) {
                     FilledIconButton(
                         onClick = { menuExpanded = true },
-                        enabled = enableTextActions,
+                        enabled = textAlpha > 0.5f,
                         modifier = Modifier.size(34.dp),
                         colors = IconButtonDefaults.filledIconButtonColors(
                             containerColor = Color.Black.copy(alpha = 0.42f),
@@ -884,13 +878,13 @@ private fun CarouselItemScope.CenteredHeroCard(
             }
 
             // Text and Equalizer strictly for the centered active hero card
-            if (showText) {
+            if (textAlpha > 0.01f) {
                 Column(
                     modifier = Modifier
                         .align(Alignment.BottomStart)
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 14.dp)
-                        .graphicsLayer { alpha = textAlpha() }
+                        .graphicsLayer { alpha = textAlpha }
                 ) {
                     // Title and Equalizer Bar
                     Row(
@@ -1061,5 +1055,214 @@ private fun buildQuickPickColumns(songs: List<Song>): List<QuickPicksColumnModel
             width = widthStep,
             songs = group
         )
+    }
+}
+
+private fun buildQuickPickRows(songs: List<Song>): List<QuickPicksPillRow> {
+    val groups = songs.chunked(QuickPicksPillsPerColumn).take(QuickPicksLimit / QuickPicksPillsPerColumn)
+    val columns = groups.mapIndexed { colIndex, group ->
+        val widthStep = QuickPicksWidthSteps[colIndex % QuickPicksWidthSteps.size]
+        group.map { QuickPicksPillCell(it, widthStep) }
+    }
+    // Transpose columns -> rows
+    val rows = mutableListOf<QuickPicksPillRow>()
+    for (rowIdx in 0 until QuickPicksPillsPerColumn) {
+        val pills = columns.mapNotNull { col -> col.getOrNull(rowIdx) }
+        if (pills.isEmpty()) continue
+        val totalWidth = pills.sumOf { it.width.value.toDouble() }.dp +
+                QuickPicksPillSpacing * (pills.size - 1)
+        rows.add(QuickPicksPillRow(pills, totalWidth))
+    }
+    return rows
+}
+
+@Composable
+private fun QuickPickClassicCard(
+    song: Song,
+    isPlaying: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val targetBg = if (isPlaying) {
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.92f)
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerLow
+    }
+    val bgColor by animateColorAsState(
+        targetValue = targetBg,
+        animationSpec = tween(durationMillis = 300),
+        label = "ClassicCardBg"
+    )
+    
+    // BUGFIX (was: a rememberInfiniteTransition was created unconditionally
+    // on every QuickPicks card, even when not playing). Each
+    // rememberInfiniteTransition starts a clock-driven animation that
+    // runs forever and wakes the UI thread at ~16ms intervals to advance
+    // the value. With ~10 cards on the home screen that's 10 parallel
+    // animators ticking even when no card is playing — pure waste. We
+    // now only create the transition when the card is actually playing.
+    val animatedBorderGlowAlpha = if (isPlaying) {
+        val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+        infiniteTransition.animateFloat(
+            initialValue = 0.3f,
+            targetValue = 0.7f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 1200, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "borderGlow"
+        ).value
+    } else {
+        1f
+    }
+    val borderGlowAlpha = animatedBorderGlowAlpha
+
+    // M3 Expressive card: press-scale spring + corner morph instead of a static Card.
+    ExpressiveCard(
+        onClick = onClick,
+        modifier = modifier
+            .height(112.dp)
+            .padding(bottom = 6.dp),
+        cornerRadius = 24.dp,
+        colors = CardDefaults.cardColors(containerColor = bgColor),
+        border = if (isPlaying) {
+            BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = borderGlowAlpha))
+        } else {
+            BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+        },
+        elevation = CardDefaults.cardElevation(defaultElevation = if (isPlaying) 6.dp else 2.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Album Art
+            Box(
+                modifier = Modifier
+                    .size(92.dp)
+                    .clip(RoundedCornerShape(16.dp))
+            ) {
+                SmartImage(
+                    model = song.albumArtUriString,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    placeholderResId = 0,
+                    errorResId = 0,
+                    modifier = Modifier.fillMaxSize()
+                )
+                
+                if (isPlaying) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.3f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        EqualizerAnimation(
+                            modifier = Modifier
+                                .width(20.dp)
+                                .height(16.dp),
+                            color = Color.White,
+                            barCount = 3
+                        )
+                    }
+                }
+            }
+            
+            // Metadata details
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
+                verticalArrangement = Arrangement.Center
+            ) {
+                // Badge indicating state
+                if (isPlaying) {
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(5.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.primary)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "NOW PLAYING",
+                                color = MaterialTheme.colorScheme.primary,
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.5.sp
+                            )
+                        }
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(2.dp))
+                
+                Text(
+                    text = song.title,
+                    style = MaterialTheme.typography.bodyLarge.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                    ),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = if (isPlaying) Modifier.basicMarquee() else Modifier
+                )
+                
+                Text(
+                    text = song.artist,
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    ),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            
+            // Action Button
+            Surface(
+                onClick = onClick,
+                shape = CircleShape,
+                color = if (isPlaying) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
+                tonalElevation = 2.dp,
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+            ) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    if (isPlaying) {
+                        EqualizerAnimation(
+                            modifier = Modifier
+                                .width(14.dp)
+                                .height(11.dp),
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            barCount = 3
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Rounded.PlayArrow,
+                            contentDescription = "Play",
+                            tint = if (isPlaying) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+            }
+        }
     }
 }

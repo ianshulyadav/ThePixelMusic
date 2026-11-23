@@ -11,9 +11,6 @@ import com.unshoo.pixelmusic.utils.AppReadinessSignal
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -28,7 +25,6 @@ import timber.log.Timber
 class StatsViewModel @Inject constructor(
     private val playbackStatsRepository: PlaybackStatsRepository,
     private val musicRepository: MusicRepository,
-    private val libraryStateHolder: LibraryStateHolder,
     private val artistImageRepository: com.unshoo.pixelmusic.data.repository.ArtistImageRepository
 ) : ViewModel() {
 
@@ -53,17 +49,29 @@ class StatsViewModel @Inject constructor(
     private val _artistImages = MutableStateFlow<Map<String, String>>(emptyMap())
     val artistImages: StateFlow<Map<String, String>> = _artistImages.asStateFlow()
 
-    private suspend fun loadArtistImages(summary: PlaybackStatsSummary?) {
-        val namesByKey = summary?.topArtists.orEmpty().associate { it.artist.trim().lowercase() to it.artist }
-        val currentImages = _artistImages.value.filterKeys { it in namesByKey }
-        _artistImages.value = currentImages
-        withContext(Dispatchers.IO) {
-            namesByKey.forEach { (key, name) ->
-                if (key in currentImages) return@forEach
+    private fun loadArtistImages(summary: PlaybackStatsSummary?) {
+        val names = summary?.topArtists?.map { it.artist }.orEmpty()
+        if (names.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            names.forEach { name ->
+                val key = name.trim().lowercase()
+                if (_artistImages.value.containsKey(key)) return@forEach
                 val url = runCatching { artistImageRepository.getArtistImageUrl(name, -1L) }.getOrNull()
-                ensureActive()
-                if (!url.isNullOrBlank()) _artistImages.update { it + (key to url) }
+                if (!url.isNullOrBlank()) {
+                    _artistImages.update { it + (key to url) }
+                }
             }
+        }
+    }
+
+    @Volatile
+    private var cachedSongs: List<Song>? = null
+
+    init {
+        observeStatsRefreshFlow()
+        viewModelScope.launch {
+            AppReadinessSignal.awaitReady()
+            refreshHomeOverview()
         }
     }
 
@@ -98,17 +106,7 @@ class StatsViewModel @Inject constructor(
     private val _mostListenedOverview = MutableStateFlow<PlaybackStatsSummary?>(null)
     val mostListenedOverview: StateFlow<PlaybackStatsSummary?> = _mostListenedOverview.asStateFlow()
     private var mostListenedRange: StatsTimeRange? = null
-    private var mostListenedJob: Job? = null
-    private var homeOverviewJob: Job? = null
-    private var rangeJob: Job? = null
-
-    init {
-        observeStatsRefreshFlow()
-        viewModelScope.launch {
-            AppReadinessSignal.awaitReady()
-            refreshHomeOverview()
-        }
-    }
+    private var mostListenedJob: kotlinx.coroutines.Job? = null
 
     fun loadMostListened(range: StatsTimeRange, force: Boolean = false) {
         if (!force && range == mostListenedRange && _mostListenedOverview.value != null) return
@@ -124,15 +122,14 @@ class StatsViewModel @Inject constructor(
                 _mostListenedOverview.value = summary
                 loadArtistImages(summary)
             }.onFailure { throwable ->
-                if (throwable is CancellationException) throw throwable
+                if (throwable is kotlinx.coroutines.CancellationException) throw throwable
                 Timber.e(throwable, "Failed to load most listened overview")
             }
         }
     }
 
     fun refreshHomeOverview() {
-        homeOverviewJob?.cancel()
-        homeOverviewJob = viewModelScope.launch {
+        viewModelScope.launch {
             runCatching {
                 withContext(Dispatchers.IO) {
                     val songs = loadSongs()
@@ -146,8 +143,8 @@ class StatsViewModel @Inject constructor(
                 }
             }.onSuccess { summary ->
                 _homeOverview.value = summary
+                loadArtistImages(summary)
             }.onFailure { throwable ->
-                if (throwable is CancellationException) throw throwable
                 Timber.e(throwable, "Failed to load home stats overview")
                 _homeOverview.value = null
             }
@@ -159,8 +156,7 @@ class StatsViewModel @Inject constructor(
         showLoading: Boolean = true,
         updateWeeklyOverview: Boolean = false
     ) {
-        rangeJob?.cancel()
-        rangeJob = viewModelScope.launch {
+        viewModelScope.launch {
             if (showLoading) {
                 _uiState.update { it.copy(isLoading = true, isRefreshing = false, selectedRange = range) }
             } else {
@@ -172,7 +168,6 @@ class StatsViewModel @Inject constructor(
                     playbackStatsRepository.loadSummary(range, songs)
                 }
             }
-            ensureActive()
             summary.getOrNull()?.let { loaded ->
                 if (updateWeeklyOverview) {
                     _weeklyOverview.value = loaded
@@ -215,11 +210,18 @@ class StatsViewModel @Inject constructor(
     }
 
     fun forceRegenerateStats() {
+        cachedSongs = null
         playbackStatsRepository.requestRefresh()
     }
 
-    private suspend fun loadSongs(): List<Song> =
-        libraryStateHolder.allSongs.value.ifEmpty { musicRepository.getAllSongsOnce() }
+    private suspend fun loadSongs(): List<Song> {
+        cachedSongs?.let { existing ->
+            if (existing.isNotEmpty()) return existing
+        }
+        val songs = musicRepository.getAllSongsOnce()
+        cachedSongs = songs
+        return songs
+    }
 
     private fun PlaybackStatsSummary.hasListeningActivity(): Boolean {
         return totalDurationMs > 0L ||

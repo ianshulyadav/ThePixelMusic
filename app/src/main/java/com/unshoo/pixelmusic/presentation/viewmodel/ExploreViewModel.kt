@@ -33,7 +33,6 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -377,6 +376,12 @@ class ExploreViewModel @Inject constructor(
         private const val CACHE_TIER_EXPIRED_MS = 24 * 60 * 60 * 1000L  // 4–24 hours: Old; > 24 hours: Expired
     }
 
+    private val gson by lazy {
+        com.google.gson.GsonBuilder()
+            .registerTypeAdapter(YTItem::class.java, YTItemTypeAdapter())
+            .create()
+    }
+
     private val cacheFile by lazy {
         // v2: caches written before the auth-keyed YouTube home cache fix could contain the
         // anonymous home tagged as the signed-in account; never restore those.
@@ -476,10 +481,9 @@ class ExploreViewModel @Inject constructor(
                     val localMap = combinedRecent.associateBy { it.id }
 
                     _uiState.update { current ->
-                        val rotatingIds = current.localHighlyRotatoryTracks.mapTo(HashSet()) { it.url }
                         current.copy(
                             localRecentlyAddedSongs = combinedRecent,
-                            localSongs = current.localSongs.filterKeys { it in rotatingIds } + localMap
+                            localSongs = current.localSongs + localMap
                         )
                     }
                 }
@@ -580,7 +584,7 @@ class ExploreViewModel @Inject constructor(
                 // BUGFIX (jank): the up-to-500KB cache read + Gson parse ran on the main thread
                 // (viewModelScope) on every Explore entry, dropping frames during the enter transition.
                 val parsedCache = withContext(ioDispatcher) {
-                    ExploreFeedCache.read(cacheFile)
+                    gson.fromJson(cacheFile.readText(), ExploreCacheModel::class.java)
                 }
                 // Never flash content fetched for a different account state (e.g. signed-out home
                 // that is then replaced by the personalised one): fetch fresh instead.
@@ -731,8 +735,6 @@ class ExploreViewModel @Inject constructor(
                 _uiState.update { it.copy(isLoading = true, isRefreshing = false, isSettled = false) }
                 false
             }
-        } catch (e: CancellationException) {
-            throw e
         } catch (e: Exception) {
             Timber.e(e, "Failed to restore explore data from cache")
             try { cacheFile.delete() } catch (_: Exception) {}
@@ -916,9 +918,14 @@ class ExploreViewModel @Inject constructor(
                     authKey = authKey,
                     feedData = _feedDataState.value.takeIf { it.lastUpdatedMillis > 0L || it.quickPicks.isNotEmpty() || it.topArtists.isNotEmpty() }
                 )
-                ExploreFeedCache.write(cacheFile, cache)
-            } catch (e: CancellationException) {
-                throw e
+                val json = gson.toJson(cache)
+                if (json.length < 500 * 1024) {
+                    val tempFile = java.io.File(context.cacheDir, "explore_cache.json.tmp")
+                    tempFile.writeText(json)
+                    if (tempFile.exists()) {
+                        tempFile.renameTo(cacheFile)
+                    }
+                }
             } catch (e: Exception) {
                 Timber.e(e, "Failed to persist explore data to cache")
             }
@@ -2087,10 +2094,7 @@ class ExploreViewModel @Inject constructor(
             val pureYtMusic = runCatching { userPreferencesRepository.pureYtMusicOnlyFlow.first() }.getOrDefault(false)
             val rawOfflineSongs = com.unshoo.pixelmusic.utils.OfflineAudioResolver.deduplicateQueue(downloadedSongs + localSongs).first
             val allOfflineSongs = if (pureYtMusic) rawOfflineSongs.filterNot(com.unshoo.pixelmusic.utils.ContentFilterUtils::isVideoSong) else rawOfflineSongs
-            val recentlyAdded = allOfflineSongs.take(20)
-            val rotatingIds = _uiState.value.localHighlyRotatoryTracks.mapTo(HashSet()) { it.url }
-            val localMap = allOfflineSongs.asSequence().filter { it.id in rotatingIds }
-                .associateBy { it.id } + recentlyAdded.associateBy { it.id }
+            val localMap = allOfflineSongs.associateBy { it.id }
 
             val offlineSongItems = allOfflineSongs.take(30).map { song ->
                 SongItem(
@@ -2118,7 +2122,6 @@ class ExploreViewModel @Inject constructor(
             val rawSections = listOfNotNull(offlineSection)
             val uiSections = rawSections.map { it.toUiModel() }
 
-            ensureActive()
             _sectionsState.value = uiSections
             _moodChipsState.value = emptyList()
             _isSettledState.value = true
@@ -2133,7 +2136,7 @@ class ExploreViewModel @Inject constructor(
                     albumsForYou = emptyList(),
                     moodChips = emptyList(),
                     localSongs = localMap,
-                    localRecentlyAddedSongs = recentlyAdded,
+                    localRecentlyAddedSongs = allOfflineSongs.take(20),
                     preparedArtistsForYou = it.localTopArtists,
                     preparedNewReleases = emptyList(),
                     preparedAlbumsForYou = emptyList(),
@@ -2174,8 +2177,6 @@ class ExploreViewModel @Inject constructor(
                 quickPicks = offlineFeedPicks,
                 lastUpdatedMillis = System.currentTimeMillis()
             )
-        } catch (e: CancellationException) {
-            throw e
         } catch (e: Exception) {
             Timber.e(e, "Error loading offline explore data")
             _errorState.value = e.localizedMessage
@@ -2282,5 +2283,64 @@ class ExploreViewModel @Inject constructor(
 
     suspend fun filterOfflineSongs(songs: List<Song>): List<Song> = withContext(ioDispatcher) {
         songs.filter { com.unshoo.pixelmusic.utils.OfflineAudioResolver.hasOfflineAudio(context, it) }
+    }
+}
+
+@androidx.annotation.Keep
+data class ExploreCacheModel(
+    val sections: List<HomePage.Section> = emptyList(),
+    val moodChips: List<HomePage.Chip> = emptyList(),
+    val newReleaseAlbums: List<AlbumItem> = emptyList(),
+    val albumsForYou: List<AlbumItem> = emptyList(),
+    val albums: List<AlbumItem> = emptyList(),
+    val charts: ChartsPage? = null,
+    val continuation: String? = null,
+    val timestamp: Long = 0L,
+    /** Account the payload was fetched for ("anon" or "auth:<account>"); null in old caches. */
+    val authKey: String? = null,
+    /** The exact feed that was on screen when cached. Null in caches written by older versions. */
+    val feedData: FeedData? = null,
+)
+
+private class YTItemTypeAdapter : com.google.gson.JsonSerializer<YTItem>, com.google.gson.JsonDeserializer<YTItem> {
+    override fun serialize(src: YTItem, typeOfSrc: java.lang.reflect.Type, context: com.google.gson.JsonSerializationContext): com.google.gson.JsonElement {
+        val obj = com.google.gson.JsonObject()
+        when (src) {
+            is SongItem -> {
+                obj.addProperty("type", "song")
+                obj.add("data", context.serialize(src, SongItem::class.java))
+            }
+            is AlbumItem -> {
+                obj.addProperty("type", "album")
+                obj.add("data", context.serialize(src, AlbumItem::class.java))
+            }
+            is PlaylistItem -> {
+                obj.addProperty("type", "playlist")
+                obj.add("data", context.serialize(src, PlaylistItem::class.java))
+            }
+            is ArtistItem -> {
+                obj.addProperty("type", "artist")
+                obj.add("data", context.serialize(src, ArtistItem::class.java))
+            }
+        }
+        return obj
+    }
+
+    override fun deserialize(json: com.google.gson.JsonElement, typeOfT: java.lang.reflect.Type, context: com.google.gson.JsonDeserializationContext): YTItem? {
+        return try {
+            val obj = json.asJsonObject
+            val type = obj.get("type")?.asString ?: return null
+            val targetClass = when (type) {
+                "song", "SongItem" -> SongItem::class.java
+                "album", "AlbumItem" -> AlbumItem::class.java
+                "playlist", "PlaylistItem" -> PlaylistItem::class.java
+                "artist", "ArtistItem" -> ArtistItem::class.java
+                else -> null
+            } ?: return null
+            val data = obj.get("data") ?: obj
+            context.deserialize(data, targetClass)
+        } catch (_: Exception) {
+            null
+        }
     }
 }

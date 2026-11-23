@@ -22,8 +22,6 @@ import coil.request.ImageRequest
 import coil.request.SuccessResult
 import coil.size.Precision
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.CoroutineStart
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -176,7 +174,7 @@ object CardColorExtractor {
             return existing.await()
         }
 
-        val deferred = appScope.async(Dispatchers.IO, start = CoroutineStart.LAZY) {
+        val deferred = appScope.async(Dispatchers.IO) {
             extractionSemaphore.withPermit {
                 try {
                     val ctx = context.applicationContext
@@ -229,21 +227,16 @@ object CardColorExtractor {
                         }
                     }
                     null
-                } catch (e: CancellationException) {
-                    throw e
                 } catch (e: Exception) {
                     Timber.d(e, "extractColor failed for $imageUrl")
                     null
+                } finally {
+                    inFlightMap.remove(imageUrl)
                 }
             }
         }
 
-        val inFlight = inFlightMap.putIfAbsent(imageUrl, deferred)
-        if (inFlight != null) {
-            deferred.cancel()
-            return inFlight.await()
-        }
-        deferred.invokeOnCompletion { inFlightMap.remove(imageUrl, deferred) }
+        inFlightMap[imageUrl] = deferred
         return deferred.await()
     }
 

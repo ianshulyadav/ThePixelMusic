@@ -331,9 +331,8 @@ class PlaybackStatsRepository @Inject constructor(
             )
         }
 
+        val songMap = songs.associateBy { it.id }
         val normalizedEvents = filteredEvents
-        val lastEventBySong = normalizedEvents.associateBy { it.songId }
-        val songMap = songs.asSequence().filter { it.id in lastEventBySong }.associateBy { it.id }
 
         val segmentsBySong = normalizedEvents
             .groupBy { it.songId }
@@ -354,7 +353,7 @@ class PlaybackStatsRepository @Inject constructor(
         val allSongs = segmentsBySong
             .mapNotNull { (songId, segmentsForSong) ->
                 val song = songMap[songId]
-                val lastEvent = lastEventBySong[songId]
+                val lastEvent = normalizedEvents.lastOrNull { it.songId == songId }
                 val title = song?.title?.takeIf { it.isNotBlank() }
                     ?: song?.path?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
                     ?: lastEvent?.title?.takeIf { it.isNotBlank() }
@@ -383,7 +382,7 @@ class PlaybackStatsRepository @Inject constructor(
             .groupBy { (songId, _) ->
                 // Use stored event genre as fallback when song is no longer in library
                 val genre = songMap[songId]?.genre
-                    ?: lastEventBySong[songId]?.genre
+                    ?: normalizedEvents.lastOrNull { it.songId == songId }?.genre
                 if (genre.isNullOrBlank() || genre in UNKNOWN_GENRE_KEYS) null else genre
             }
             .filterKeys { it != null }
@@ -391,7 +390,7 @@ class PlaybackStatsRepository @Inject constructor(
                 val flattened = groupedSongs.flatMap { it.value }
                 val uniqueArtists = groupedSongs
                     .flatMap { (songId, _) ->
-                        val fallbackArtist = lastEventBySong[songId]?.artist
+                        val fallbackArtist = normalizedEvents.lastOrNull { it.songId == songId }?.artist
                         statsArtistNames(songMap[songId], fallbackArtist)
                     }
                     .distinctBy { it.normalizedArtistKey() }
@@ -458,7 +457,7 @@ class PlaybackStatsRepository @Inject constructor(
 
         val topArtists = segmentsBySong.entries
             .flatMap { (songId, segmentsForSong) ->
-                val fallbackArtist = lastEventBySong[songId]?.artist
+                val fallbackArtist = normalizedEvents.lastOrNull { it.songId == songId }?.artist
                 statsArtistNames(songMap[songId], fallbackArtist).map { artist ->
                     ArtistSongPlayback(
                         artist = artist,
@@ -493,7 +492,7 @@ class PlaybackStatsRepository @Inject constructor(
             .groupBy { (songId, _) ->
                 val song = songMap[songId]
                 // Use event-stored album as fallback; filter out known placeholder values
-                val lastEvent = lastEventBySong[songId]
+                val lastEvent = normalizedEvents.lastOrNull { it.songId == songId }
                 val rawAlbum = song?.album?.takeIf { it.isNotBlank() && it !in UNKNOWN_ALBUM_KEYS }
                     ?: lastEvent?.album?.takeIf { it.isNotBlank() && it !in UNKNOWN_ALBUM_KEYS }
                 // Streaming singles usually carry no album name: treat the single as its album.
@@ -510,7 +509,7 @@ class PlaybackStatsRepository @Inject constructor(
                     .mapNotNull { songMap[it.key] }
                     .firstOrNull()
                 val fallbackArt = groupedSongs.asSequence()
-                    .mapNotNull { entry -> lastEventBySong[entry.key]?.thumbnail }
+                    .mapNotNull { entry -> normalizedEvents.lastOrNull { it.songId == entry.key }?.thumbnail }
                     .firstOrNull()
                 AlbumPlaybackSummary(
                     album = album!!,

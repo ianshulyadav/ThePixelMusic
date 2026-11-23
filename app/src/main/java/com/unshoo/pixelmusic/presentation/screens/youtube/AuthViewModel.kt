@@ -55,7 +55,7 @@ class AuthViewModel @Inject constructor(
                 youTubeLibrarySyncManager.syncAfterLogin()
                 // Immediately pull YT Music listening history so Recently Played shows
                 // local songs + authenticated YT history after login.
-                listeningStatsTracker.refreshHistory()
+                listeningStatsTracker.refreshMergedYoutubeHistory()
                 syncManager.incrementalSync()
             }
         }
