@@ -163,7 +163,7 @@ class ListeningStatsTracker @Inject constructor(
         genre: String? = null,
         album: String? = null
     ) {
-        finalizeCurrentSession(fromTrackChange = true)
+        finalizeCurrentSession()
         val safeSongId = songId?.takeIf { it.isNotBlank() }
         if (safeSongId == null) {
             return
@@ -536,11 +536,7 @@ class ListeningStatsTracker @Inject constructor(
     }
 
     @Synchronized
-    fun finalizeCurrentSession(
-        forceSynchronousPersistence: Boolean = false,
-        /** True only when the user moved to another song (skip / next), not stop or close. */
-        fromTrackChange: Boolean = false,
-    ) {
+    fun finalizeCurrentSession(forceSynchronousPersistence: Boolean = false) {
         val session = currentSession ?: return
         val nowRealtime = SystemClock.elapsedRealtime()
         val nowEpoch = System.currentTimeMillis()
@@ -552,18 +548,6 @@ class ListeningStatsTracker @Inject constructor(
             lastPositionMs = session.lastKnownPositionMs,
             durationMs = trackDuration
         )
-        // Smart auto-queue signals (Spotify-style), only when the song actually changed:
-        // < 30 s = skip; >= 60 s or half the song = a real listen; in between = neutral.
-        // (Play counts keep their own 15 s rule above.)
-        if (fromTrackChange && listened >= 1000L) {
-            val realListen = listened >= 60_000L || (trackDuration in 1..Long.MAX_VALUE && listened >= trackDuration / 2)
-            when {
-                realListen -> com.unshoo.pixelmusic.data.remote.youtube.AutoQueueManager
-                    .registerCompletion(session.songId, session.artist)
-                listened < 30_000L -> com.unshoo.pixelmusic.data.remote.youtube.AutoQueueManager
-                    .registerSkip(session.songId, session.artist)
-            }
-        }
         val countedDuration = if (completedPlayback) {
             if (trackDuration > 0) listened.coerceAtMost(trackDuration) else listened
         } else {
@@ -620,8 +604,10 @@ class ListeningStatsTracker @Inject constructor(
                 genre = session.genre,
                 album = session.album
             )
+        } else if (listened >= 1000L) {
+            // Log as negative feedback skip signal if song was started but skipped before 15 seconds.
+            com.unshoo.pixelmusic.data.remote.youtube.AutoQueueManager.registerSkip(session.songId)
         }
-        // (Skip signals for the auto-queue are sent above, only on real song changes.)
         currentSession = null
         if (pendingVoluntarySongId == session.songId) {
             pendingVoluntarySongId = null

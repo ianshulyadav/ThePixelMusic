@@ -446,18 +446,6 @@ interface MusicDao {
     )
     suspend fun getSongByIdOnce(songId: Long): SongEntity?
 
-    /** Liked songs for the smart auto-queue's favourites mix (bounded; cached by the caller). */
-    @Query(
-        "SELECT " + SONG_DETAIL_PROJECTION + """
-        FROM songs
-        LEFT JOIN lyrics AS song_lyrics ON song_lyrics.songId = songs.id
-        WHERE songs.is_favorite = 1
-        ORDER BY RANDOM()
-        LIMIT :limit
-        """
-    )
-    suspend fun getFavoriteSongsSample(limit: Int): List<SongEntity>
-
     @Query(
         "SELECT " + SONG_DETAIL_PROJECTION + """
         FROM songs
