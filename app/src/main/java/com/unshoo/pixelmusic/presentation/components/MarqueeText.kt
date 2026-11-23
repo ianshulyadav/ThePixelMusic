@@ -85,7 +85,9 @@ fun AutoScrollingText(
         if (com.unshoo.pixelmusic.utils.DevicePerformanceUtils.isLowEndDevice(context)) {
             LOW_END_MARQUEE_ITERATIONS
         } else {
-            Int.MAX_VALUE
+            // Was Int.MAX_VALUE: an endless marquee kept the app redrawing at 120 Hz forever
+            // (~40% RenderThread CPU while idle on a Galaxy S24).
+            HIGH_END_MARQUEE_ITERATIONS
         }
     }
     Box(
@@ -106,6 +108,8 @@ fun AutoScrollingText(
                 )
             }
     ) {
+      // Keyed on the text so each new song title scrolls again from the start.
+      androidx.compose.runtime.key(text) {
         Text(
             text = text,
             style = style,
@@ -125,7 +129,9 @@ fun AutoScrollingText(
                     } else Modifier
                 )
         )
+      }
     }
 }
 
 private const val LOW_END_MARQUEE_ITERATIONS = 2
+private const val HIGH_END_MARQUEE_ITERATIONS = 4

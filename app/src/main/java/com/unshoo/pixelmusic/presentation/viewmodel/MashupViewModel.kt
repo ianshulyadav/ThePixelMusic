@@ -121,7 +121,9 @@ class MashupViewModel @Inject constructor(
             while (isActive) {
                 updateDeckState(1) { it.copy(progress = deck1Controller.getProgress()) }
                 updateDeckState(2) { it.copy(progress = deck2Controller.getProgress()) }
-                delay(100)
+                // Poll fast only while something is actually playing; idle decks don't move.
+                val anyPlaying = _uiState.value.let { it.deck1.isPlaying || it.deck2.isPlaying }
+                delay(if (anyPlaying) 100 else 500)
             }
         }
     }

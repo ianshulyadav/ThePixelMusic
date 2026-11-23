@@ -242,3 +242,11 @@
 
 # Keep desugared library classes (prevent R8 from stripping backported JDK APIs)
 -keep class j$.** { *; }
+
+# ---- Discord Social SDK (Rich Presence) ----
+# The AAR's consumer rules keep com.discord.**; our JNI bridge looks up these by name.
+-keep class com.unshoo.pixelmusic.data.discord.DiscordNative { native <methods>; *; }
+-keep interface com.unshoo.pixelmusic.data.discord.DiscordNative$Sink { *; }
+-keep class * implements com.unshoo.pixelmusic.data.discord.DiscordNative$Sink { *; }
+-keep class com.discord.** { *; }
+-dontwarn com.discord.**

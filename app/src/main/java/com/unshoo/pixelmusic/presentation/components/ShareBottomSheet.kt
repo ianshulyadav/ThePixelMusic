@@ -98,7 +98,8 @@ import com.snapchat.kit.sdk.SnapCreative
 import com.snapchat.kit.sdk.creative.models.SnapPhotoContent
 import com.snapchat.kit.sdk.creative.models.SnapVideoContent
 
-private const val GITHUB_LINK = "https://github.com/ianshulyadav/PixelMusic"
+// Landing page: install / learn about PixelMusic (fallback share link for local-only songs).
+private const val GITHUB_LINK = com.unshoo.pixelmusic.utils.ShareLinks.SITE + "/"
 private const val SNAPCHAT_PACKAGE = "com.snapchat.android"
 private const val INSTAGRAM_PACKAGE = "com.instagram.android"
 
@@ -770,11 +771,7 @@ fun ShareBottomSheet(
                                 onClick = {
                                     captureAndShare { bitmap ->
                                         val file = saveBitmapToCache(bitmap)
-                                        val attachmentUrl = if (!song.youtubeId.isNullOrEmpty()) {
-                                            "https://music.youtube.com/watch?v=${song.youtubeId}"
-                                        } else {
-                                            GITHUB_LINK
-                                        }
+                                        val attachmentUrl = com.unshoo.pixelmusic.utils.ShareLinks.forSong(song)
                                         shareToSnapchat(context, file, attachmentUrl)
                                     }
                                 }
@@ -878,14 +875,14 @@ fun ShareBottomSheet(
                                         modifier = Modifier.size(22.dp)
                                     )
                                 },
-                                label = "YT Music Link",
+                                label = "PixelMusic Link",
                                 containerColor = Color(0xFFFF0000).copy(alpha = 0.12f),
                                 contentColor = Color(0xFFFF0000),
                                 onClick = {
-                                    val ytMusicLink = "https://music.youtube.com/watch?v=${song.youtubeId}"
+                                    val link = com.unshoo.pixelmusic.utils.ShareLinks.forSong(song)
                                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                    clipboard.setPrimaryClip(ClipData.newPlainText("YouTube Music Link", ytMusicLink))
-                                    Toast.makeText(context, "YouTube Music link copied", Toast.LENGTH_SHORT).show()
+                                    clipboard.setPrimaryClip(ClipData.newPlainText("PixelMusic link", link))
+                                    Toast.makeText(context, "PixelMusic link copied", Toast.LENGTH_SHORT).show()
                                 }
                             )
                         }
@@ -912,12 +909,8 @@ fun ShareBottomSheet(
                                         "${context.packageName}.fileprovider",
                                         file
                                     )
-                                    // Include YouTube Music link when sharing a YT song
-                                    val linkSuffix = if (!song.youtubeId.isNullOrEmpty()) {
-                                        "\n🎵 https://music.youtube.com/watch?v=${song.youtubeId}"
-                                    } else {
-                                        "\n$GITHUB_LINK"
-                                    }
+                                    // PixelMusic link: opens the song in the app if installed, else the website.
+                                    val linkSuffix = "\n🎵 " + com.unshoo.pixelmusic.utils.ShareLinks.forSong(song)
                                     val shareIntent = Intent(Intent.ACTION_SEND).apply {
                                         type = "image/png"
                                         putExtra(Intent.EXTRA_STREAM, uri)

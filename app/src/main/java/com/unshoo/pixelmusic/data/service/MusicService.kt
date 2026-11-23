@@ -170,6 +170,7 @@ class MusicService : MediaLibraryService() {
     private var lastTelemetryVideoId: String? = null
 
     private var scrobbleManager: com.unshoo.pixelmusic.data.lastfm.ScrobbleManager? = null
+    private var discordPresenceListener: Player.Listener? = null
 
     private var replayGainEnabled = false
     private var replayGainUseAlbumGain = false
@@ -251,6 +252,7 @@ class MusicService : MediaLibraryService() {
         /** Session extra: mediaId of the incoming track while a crossfade is audible. */
         const val SESSION_EXTRA_TRANSITION_DISPLAY_MEDIA_ID = "com.unshoo.pixelmusic.TRANSITION_DISPLAY_MEDIA_ID"
         private const val TAG = "MusicService_PixelMusic"
+        private const val VOICE_SEARCH_QUEUE_LIMIT = 50
         /** Only auto-resume when the service comes back soon after the kill (sticky restart). */
         private const val RESUME_AFTER_KILL_WINDOW_MS = 3 * 60 * 1000L
         const val NOTIFICATION_ID = 101
@@ -377,8 +379,10 @@ class MusicService : MediaLibraryService() {
         val oldPlayer = session.player
         if (oldPlayer !== player) {
             oldPlayer.removeListener(playerListener)
+            discordPresenceListener?.let { oldPlayer.removeListener(it) }
             session.player = player
             player.addListener(playerListener)
+            discordPresenceListener = com.unshoo.pixelmusic.data.discord.DiscordPresence.attach(player)
             AutoQueueManager.updatePlayer(player)
             QueuePreloadManager.updatePlayer(player)
 
@@ -1112,6 +1116,12 @@ class MusicService : MediaLibraryService() {
                 mediaItems: MutableList<MediaItem>
             ): ListenableFuture<MutableList<MediaItem>> {
                 return serviceScope.future {
+                    // "Play X on PixelMusic" from Gemini / Assistant / Bixby arrives as a
+                    // single item carrying only a search query.
+                    resolveVoiceSearchQueue(mediaItems)?.let { voice ->
+                        grantArtworkUriPermissions(controller.packageName, voice)
+                        return@future voice
+                    }
                     if (mediaItems.size == 1) {
                         resolveContextQueueForRequestedItem(mediaItems.first(), controller)?.let { queue ->
                             grantArtworkUriPermissions(controller.packageName, queue.mediaItems)
@@ -1132,6 +1142,10 @@ class MusicService : MediaLibraryService() {
                 startPositionMs: Long
             ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
                 return serviceScope.future {
+                    resolveVoiceSearchQueue(mediaItems)?.let { voice ->
+                        grantArtworkUriPermissions(controller.packageName, voice)
+                        return@future MediaSession.MediaItemsWithStartPosition(voice, 0, 0L)
+                    }
                     val requestedIndex = startIndex.coerceIn(0, (mediaItems.size - 1).coerceAtLeast(0))
                     val requestedItem = mediaItems.getOrNull(requestedIndex)
 
@@ -1201,6 +1215,8 @@ class MusicService : MediaLibraryService() {
             .setBitmapLoader(CoilBitmapLoader(this, serviceScope))
             .setPeriodicPositionUpdateEnabled(false)
             .build()
+
+        discordPresenceListener = com.unshoo.pixelmusic.data.discord.DiscordPresence.attach(sessionPlayer)
 
         mediaSession?.let { session ->
             val initialButtons = buildMediaButtonPreferences(session)
@@ -2586,6 +2602,8 @@ class MusicService : MediaLibraryService() {
         engine.removeNextPlayerPreparedListener(nextPlayerPreparedListener)
         engine.removeTransitionDisplayPlayerListener(transitionDisplayPlayerListener)
         engine.removeTransitionFinishedListener(transitionFinishedListener)
+        discordPresenceListener?.let { mediaSession?.player?.removeListener(it) }
+        discordPresenceListener = null
         mediaSession?.player?.removeListener(playerListener)
         engine.masterPlayer.removeListener(playerListener)
 
@@ -3982,6 +4000,32 @@ class MusicService : MediaLibraryService() {
      * named on the item itself (see CarLibraryTree), with the last browsed parent
      * as the fallback for hosts that rebuild items from ids.
      */
+    /**
+     * Voice assistants (Gemini, Google Assistant, Bixby, Android Auto) send "play X" as a single
+     * [MediaItem] with no media id and only [MediaItem.RequestMetadata.searchQuery] set.
+     * Returns the queue to play for it, or null when [items] is not a voice search request.
+     * An empty query ("play music on PixelMusic") plays the user's recent / for-you mix.
+     */
+    private suspend fun resolveVoiceSearchQueue(items: List<MediaItem>): MutableList<MediaItem>? {
+        val item = items.singleOrNull() ?: return null
+        if (item.mediaId.isNotBlank()) return null
+        val query = item.requestMetadata.searchQuery ?: return null
+        val trimmed = query.trim()
+        Timber.tag(TAG).i("Voice search request: \"%s\"", trimmed)
+        val songs = runCatching {
+            if (trimmed.isEmpty()) {
+                carLibraryTree.songsOf(CarLibraryTree.CONTEXT_RECENTS, null).shuffled()
+            } else {
+                carLibraryTree.songsOf(CarLibraryTree.CONTEXT_SEARCH, trimmed)
+            }
+        }.onFailure { Timber.tag(TAG).e(it, "Voice search failed for \"%s\"", trimmed) }
+            .getOrDefault(emptyList())
+            .take(VOICE_SEARCH_QUEUE_LIMIT)
+        if (songs.isEmpty()) return mutableListOf()
+        serviceScope.launch(Dispatchers.Main) { AutoQueueManager.resetAndReseedFromCurrentSong() }
+        return songs.map { MediaItemBuilder.buildForExternalController(this, it) }.toMutableList()
+    }
+
     private suspend fun resolveContextQueueForRequestedItem(
         requestedItem: MediaItem,
         controller: MediaSession.ControllerInfo

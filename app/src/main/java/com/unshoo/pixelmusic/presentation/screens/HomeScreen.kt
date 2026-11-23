@@ -584,9 +584,8 @@ fun HomeScreen(
                     } else {
                         LazyColumn(
                             state = listState,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(MaterialTheme.colorScheme.background),
+                            // No background: the Scaffold behind already paints it (overdraw).
+                            modifier = Modifier.fillMaxSize(),
                             contentPadding = PaddingValues(
                                 top = innerPadding.calculateTopPadding(),
                                 bottom = paddingValuesParent.calculateBottomPadding()

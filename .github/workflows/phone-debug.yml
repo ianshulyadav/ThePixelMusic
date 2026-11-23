@@ -29,6 +29,13 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v6
 
+      - name: Fetch Discord SDK (private)
+        uses: ./.github/actions/fetch-discord-sdk
+        with:
+          ssh-key: ${{ secrets.DISCORD_SDK_DEPLOY_KEY }}
+          # Releases must ship Discord; fork PRs have no secrets and build without it.
+          required: ${{ github.event_name != 'pull_request' }}
+
       - name: Create local.properties
         run: |
           echo "TELEGRAM_API_ID=${{ secrets.TELEGRAM_API_ID }}" > local.properties
@@ -36,6 +43,15 @@ jobs:
 
       - name: Build Phone debug APK
         run: gradle :app:assembleDebug -Ppixelmusic.enableAbiSplits=true
+
+      - name: Verify Discord is included
+        if: github.event_name != 'pull_request'
+        run: |
+          set -e
+          for apk in app/build/outputs/apk/debug/*.apk; do
+            unzip -l "$apk" | grep -q "libpixelmusic_discord.so" || { echo "::error::$apk has no Discord (libpixelmusic_discord.so missing)"; exit 1; }
+          done
+          echo "Discord integration present in all APKs"
 
       - name: Verify Phone split APKs
         run: |

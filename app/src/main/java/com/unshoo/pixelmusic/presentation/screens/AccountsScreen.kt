@@ -233,6 +233,12 @@ fun AccountsScreen(
                 )
             }
 
+            if (com.unshoo.pixelmusic.BuildConfig.DISCORD_ENABLED) {
+                item {
+                    com.unshoo.pixelmusic.presentation.components.DiscordAccountCard()
+                }
+            }
+
             item {
                 QuickImportCard(
                     onImportSpotify = { url, onDone ->

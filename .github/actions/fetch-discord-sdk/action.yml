@@ -1,0 +1,51 @@
+name: Fetch Discord Social SDK
+description: >
+  Copies the proprietary Discord Social SDK (kept out of this public repo) from the private
+  repo Rajat-Solankii/pixelmusic-discord-sdk into app/libs and app/src/main/cpp/discord,
+  using a read-only deploy key. Without it the app builds without Discord Rich Presence.
+
+inputs:
+  ssh-key:
+    description: Private half of the read-only deploy key (secret DISCORD_SDK_DEPLOY_KEY).
+    required: false
+    default: ""
+  required:
+    description: "true = fail the job if the SDK can't be fetched (release builds must ship Discord)."
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Fetch Discord SDK
+      shell: bash
+      env:
+        SDK_KEY: ${{ inputs.ssh-key }}
+        SDK_REQUIRED: ${{ inputs.required }}
+      run: |
+        set -euo pipefail
+        if [ -z "${SDK_KEY}" ]; then
+          if [ "${SDK_REQUIRED}" = "true" ]; then
+            echo "::error::DISCORD_SDK_DEPLOY_KEY is not available; refusing to build a release without Discord."
+            exit 1
+          fi
+          echo "::notice::Discord SDK key not available (e.g. fork PR); building without Discord."
+          exit 0
+        fi
+        key_file="$(mktemp)"
+        trap 'rm -f "$key_file"' EXIT
+        printf '%s\n' "${SDK_KEY}" > "$key_file"
+        chmod 600 "$key_file"
+        mkdir -p ~/.ssh
+        ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
+        sdk_dir="$(mktemp -d)"
+        GIT_SSH_COMMAND="ssh -i $key_file -o IdentitiesOnly=yes" \
+          git clone --quiet --depth 1 git@github.com:Rajat-Solankii/pixelmusic-discord-sdk.git "$sdk_dir"
+        mkdir -p app/libs app/src/main/cpp/discord/include
+        cp "$sdk_dir/discord_partner_sdk.aar" app/libs/
+        cp "$sdk_dir"/include/*.h app/src/main/cpp/discord/include/
+        cp "$sdk_dir/License-Notices.txt" app/src/main/cpp/discord/
+        rm -rf "$sdk_dir"
+        test -s app/libs/discord_partner_sdk.aar
+        test -s app/src/main/cpp/discord/include/discordpp.h
+        echo "Discord SDK ready: $(du -h app/libs/discord_partner_sdk.aar | cut -f1)"

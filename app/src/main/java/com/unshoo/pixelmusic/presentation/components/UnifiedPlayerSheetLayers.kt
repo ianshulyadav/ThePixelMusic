@@ -69,6 +69,11 @@ internal fun BoxScope.UnifiedPlayerMiniAndFullLayers(
     onQueueRelease: (Float, Float) -> Unit,
     onShowCastClicked: () -> Unit
 ) {
+    // Layer order only flips at the halfway point. Reading the fraction straight in
+    // composition (for zIndex) recomposed the whole sheet on every animation frame.
+    val miniOnTop by remember(playerContentExpansionFraction) {
+        androidx.compose.runtime.derivedStateOf { playerContentExpansionFraction.value < 0.5f }
+    }
     currentSong?.let { currentSongNonNull ->
         miniPlayerScheme?.let { readyScheme ->
             CompositionLocalProvider(
@@ -87,7 +92,7 @@ internal fun BoxScope.UnifiedPlayerMiniAndFullLayers(
                             scaleX = s
                             scaleY = s
                         }
-                        .zIndex(if (playerContentExpansionFraction.value < 0.5f) 1f else 0f)
+                        .zIndex(if (miniOnTop) 1f else 0f)
                 ) {
                     MiniPlayerContentInternal(
                         song = currentSongNonNull,
@@ -140,7 +145,7 @@ internal fun BoxScope.UnifiedPlayerMiniAndFullLayers(
                             scaleX = cs
                             scaleY = cs
                         }
-                        .zIndex(if (playerContentExpansionFraction.value >= 0.5f) 1f else 0f)
+                        .zIndex(if (miniOnTop) 0f else 1f)
                         .offset {
                             if (playerContentExpansionFraction.value <= 0.05f) IntOffset(0, 10000)
                             else IntOffset.Zero

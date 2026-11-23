@@ -24,7 +24,6 @@ import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -324,7 +323,7 @@ fun HomeGradientTopBar(
 }
 
 
-/** Bookmark icon for the announcements inbox, with a small dot when something is unread. */
+/** News-page icon for the announcements inbox, with a small dot when something is unread. */
 @Composable
 private fun AnnouncementsIcon(hasUnread: Boolean, size: androidx.compose.ui.unit.Dp) {
     androidx.compose.material3.BadgedBox(
@@ -337,7 +336,7 @@ private fun AnnouncementsIcon(hasUnread: Boolean, size: androidx.compose.ui.unit
         }
     ) {
         Icon(
-            imageVector = Icons.Rounded.Bookmark,
+            imageVector = com.unshoo.pixelmusic.presentation.components.icons.NewsFeedIcon,
             contentDescription = stringResource(
                 if (hasUnread) R.string.announcements_cd_unread else R.string.announcements_cd_open
             ),

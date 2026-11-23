@@ -509,23 +509,15 @@ fun SongInfoBottomSheet(
                                                         .fillMaxHeight(),
                                                     onClick = {
                                                         try {
-                                                            val isYtSong = !song.youtubeId.isNullOrEmpty()
-                                                            val link = if (isYtSong) {
-                                                                "https://music.youtube.com/watch?v=${song.youtubeId}"
-                                                            } else {
-                                                                "https://github.com/ianshulyadav/PixelMusic"
-                                                            }
-                                                            
+                                                            // PixelMusic link: opens in the app if installed, else the website.
+                                                            val link = com.unshoo.pixelmusic.utils.ShareLinks.forSong(song)
+
                                                             // Copy to clipboard
                                                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                                            val clip = ClipData.newPlainText(
-                                                                if (isYtSong) "YouTube Music Link" else "GitHub Link",
-                                                                link
-                                                            )
-                                                            clipboard.setPrimaryClip(clip)
+                                                            clipboard.setPrimaryClip(ClipData.newPlainText("PixelMusic link", link))
                                                             Toast.makeText(
                                                                 context,
-                                                                if (isYtSong) "YouTube Music link copied to clipboard" else "App link copied to clipboard",
+                                                                "PixelMusic link copied to clipboard",
                                                                 Toast.LENGTH_SHORT
                                                             ).show()
 

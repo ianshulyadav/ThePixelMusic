@@ -193,8 +193,15 @@ object QueuePreloadManager {
             ?.substringAfter("youtube://")
             ?.takeIf { it.isNotBlank() }
             ?.let { return it }
-        return mediaId.takeIf { it.isNotBlank() && !it.startsWith("-") }
+        // Local files (MediaStore ids like "2681", content:// or file:// URIs) are not YouTube
+        // songs. Treating any bare id as a video id made the preloader spend ~12 s per local
+        // queue item failing every YouTube client in turn — starving network/CPU on low-end phones.
+        val localUri = mediaItem.localConfiguration?.uri?.scheme
+        if (localUri == "content" || localUri == "file") return null
+        return mediaId.takeIf { YOUTUBE_VIDEO_ID.matches(it) }
     }
+
+    private val YOUTUBE_VIDEO_ID = Regex("^[A-Za-z0-9_-]{11}$")
 
     private suspend fun prefetchAudioBytes(ctx: Context, videoId: String, streamUrl: String) {
         val cache = exoCache?.cache ?: return

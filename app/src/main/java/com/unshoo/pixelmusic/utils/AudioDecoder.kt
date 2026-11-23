@@ -19,18 +19,19 @@ object AudioDecoder {
     suspend fun decodeToFloatArray(context: Context, uri: Uri, requiredSamples: Int): Result<FloatArray> = withContext(Dispatchers.IO) {
         runCatching {
             val extractor = MediaExtractor()
+            var decoder: MediaCodec? = null
+            try {
             extractor.setDataSource(context, uri, null)
 
             val trackIndex = findAudioTrack(extractor)
             if (trackIndex == -1) {
-                extractor.release()
                 error("No audio track found in the file.")
             }
             extractor.selectTrack(trackIndex)
             val format = extractor.getTrackFormat(trackIndex)
 
             val mime = format.getString(MediaFormat.KEY_MIME) ?: error("MIME type not found.")
-            val decoder = MediaCodec.createDecoderByType(mime)
+            decoder = MediaCodec.createDecoderByType(mime)
             decoder.configure(format, null, null, 0)
             decoder.start()
 
@@ -86,10 +87,6 @@ object AudioDecoder {
                 }
             }
 
-            decoder.stop()
-            decoder.release()
-            extractor.release()
-
             Timber.tag("AudioDecoder").d("Successfully decoded $pcmSize samples.")
 
             // Return exact FloatArray slice of requiredSamples (silence padded if shorter)
@@ -98,6 +95,11 @@ object AudioDecoder {
                 System.arraycopy(pcmData, 0, finalArray, 0, Math.min(pcmSize, requiredSamples))
             }
             finalArray
+            } finally {
+                // Always free the native codec/extractor, including on decode errors.
+                decoder?.let { d -> runCatching { d.stop() }; runCatching { d.release() } }
+                runCatching { extractor.release() }
+            }
         }
     }
 

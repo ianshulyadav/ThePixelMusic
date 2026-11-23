@@ -57,7 +57,8 @@ object AudioMetaUtils {
 
         // Fallback with MediaExtractor
         try {
-            MediaExtractor().apply {
+            val extractor = MediaExtractor()
+            try { extractor.apply {
                 setDataSource(filePath)
                 for (i in 0 until trackCount) {
                     val format: MediaFormat = getTrackFormat(i)
@@ -75,7 +76,8 @@ object AudioMetaUtils {
                         break
                     }
                 }
-                release()
+            } } finally {
+                runCatching { extractor.release() }
             }
         } catch (e: Exception) {
             Log.w("AudioMetaUtils", "Extractor failed for $filePath: ${e.message}")

@@ -2158,6 +2158,29 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Handles MEDIA_PLAY_FROM_SEARCH from Gemini / Google Assistant / Bixby. The query is sent to
+     * the service as a search-only MediaItem so the same resolution path serves both the intent
+     * and assistants that talk to the MediaSession directly. Works from a cold start.
+     */
+    fun playFromVoiceSearch(query: String?) {
+        val action: () -> Unit = action@{
+            val controller = mediaController ?: return@action
+            val request = MediaItem.Builder()
+                .setRequestMetadata(
+                    MediaItem.RequestMetadata.Builder()
+                        .setSearchQuery(query?.trim().orEmpty())
+                        .build()
+                )
+                .build()
+            controller.setMediaItem(request)
+            controller.prepare()
+            controller.play()
+            showPlayer()
+        }
+        if (mediaController == null) pendingPlaybackAction = action else action()
+    }
+
     fun playRandomSong() {
         viewModelScope.launch {
             val randomSongs = musicRepository.getRandomSongs(limit = 500)
@@ -5977,7 +6000,30 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
-    fun openYouTubeMusicLink(uri: Uri) {
+    /**
+     * @param startPositionMs where to start the first song (Discord "Join" = the host's
+     *   current position); 0 starts from the beginning.
+     */
+    /** Seeks once [songId] is the current item and its duration is known (max ~15 s wait). */
+    private fun seekWhenLoaded(songId: String, positionMs: Long) {
+        viewModelScope.launch {
+            val deadline = System.currentTimeMillis() + 15_000L
+            while (System.currentTimeMillis() < deadline) {
+                val controller = mediaController
+                val duration = controller?.duration ?: androidx.media3.common.C.TIME_UNSET
+                if (controller != null && controller.currentMediaItem?.mediaId?.contains(songId.removePrefix("youtube_")) == true &&
+                    duration != androidx.media3.common.C.TIME_UNSET && duration > 0
+                ) {
+                    // Host may be near the end; leave a little of the song to hear.
+                    if (positionMs < duration - 5_000L) controller.seekTo(positionMs)
+                    return@launch
+                }
+                delay(250L)
+            }
+        }
+    }
+
+    fun openYouTubeMusicLink(uri: Uri, startPositionMs: Long = 0L) {
         viewModelScope.launch {
             val host = uri.host?.lowercase().orEmpty()
             val path = uri.path.orEmpty()
@@ -6015,6 +6061,7 @@ class PlayerViewModel @Inject constructor(
                             listOf(song)
                         }
                         playSongs(queue, song, "YouTube Music", playlistId)
+                        if (startPositionMs > 0L) seekWhenLoaded(song.id, startPositionMs)
                     }
 
                     !playlistId.isNullOrBlank() -> {

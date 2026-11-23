@@ -19,22 +19,26 @@ object AudioFileProvider {
     suspend fun getWavFile(context: Context, uri: Uri): Result<File> = withContext(Dispatchers.IO) {
         runCatching {
             val extractor = MediaExtractor()
+            var decoder: MediaCodec? = null
+            var fileOutputStream: FileOutputStream? = null
+            var tempWavFile: File? = null
+            var success = false
+            try {
             extractor.setDataSource(context, uri, null)
             val trackIndex = findAudioTrack(extractor)
             if (trackIndex == -1) {
-                extractor.release()
                 error("No audio track found.")
             }
             extractor.selectTrack(trackIndex)
             val format = extractor.getTrackFormat(trackIndex)
 
             val mime = format.getString(MediaFormat.KEY_MIME) ?: error("MIME type not found.")
-            val decoder = MediaCodec.createDecoderByType(mime)
+            decoder = MediaCodec.createDecoderByType(mime)
             decoder.configure(format, null, null, 0)
             decoder.start()
 
-            val tempWavFile = File.createTempFile("input_mono", ".wav", context.cacheDir)
-            val fileOutputStream = FileOutputStream(tempWavFile)
+            tempWavFile = File.createTempFile("input_mono", ".wav", context.cacheDir)
+            fileOutputStream = FileOutputStream(tempWavFile)
             // Escribimos una cabecera WAV vacía (para 1 canal, mono)
             val wavHeader = WavHeader(0, 0, 0, 0, 1)
             fileOutputStream.write(wavHeader.asByteArray())
@@ -86,9 +90,7 @@ object AudioFileProvider {
             }
 
             fileOutputStream.close()
-            decoder.stop()
-            decoder.release()
-            extractor.release()
+            fileOutputStream = null
 
             val sampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
             val finalHeader = WavHeader(
@@ -101,7 +103,15 @@ object AudioFileProvider {
             finalHeader.updateHeader(tempWavFile)
 
             Log.d("AudioFileProvider", "Mono WAV file created at: ${tempWavFile.absolutePath}")
+            success = true
             tempWavFile
+            } finally {
+                runCatching { fileOutputStream?.close() }
+                decoder?.let { d -> runCatching { d.stop() }; runCatching { d.release() } }
+                runCatching { extractor.release() }
+                // Don't leave half-written temp WAVs piling up in cache on failure.
+                if (!success) runCatching { tempWavFile?.delete() }
+            }
         }
     }
 

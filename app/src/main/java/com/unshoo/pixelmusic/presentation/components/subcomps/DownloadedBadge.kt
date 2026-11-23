@@ -1,15 +1,18 @@
 package com.unshoo.pixelmusic.presentation.components.subcomps
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -64,21 +67,34 @@ fun DownloadedBadge(
     val outer = size + ringWidth * 2
     // Centre the badge roughly on the corner: ~45% of it hangs outside the artwork.
     val overhang = outer * 0.45f
+    val tickColor = colors.onPrimary
     Box(
         modifier = modifier
             .offset(x = overhang, y = overhang)
             .size(outer)
+            .clip(CircleShape)
             .background(ringColor, CircleShape)
             .padding(ringWidth)
+            .clip(CircleShape)
             .background(colors.primary, CircleShape),
         contentAlignment = Alignment.Center
     ) {
-        Icon(
-            imageVector = Icons.Rounded.Check,
-            contentDescription = null,
-            tint = colors.onPrimary,
-            modifier = Modifier.size(size * 0.7f)
-        )
+        // Bold, round-capped tick drawn directly (the Material check glyph is too thin at this size).
+        Canvas(modifier = Modifier.size(size * 0.62f)) {
+            val w = this.size.width
+            val h = this.size.height
+            val stroke = w * 0.22f
+            val tick = Path().apply {
+                moveTo(w * 0.10f, h * 0.53f)
+                lineTo(w * 0.40f, h * 0.82f)
+                lineTo(w * 0.92f, h * 0.22f)
+            }
+            drawPath(
+                path = tick,
+                color = tickColor,
+                style = Stroke(width = stroke, cap = StrokeCap.Round, join = StrokeJoin.Round)
+            )
+        }
     }
 }
 

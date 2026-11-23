@@ -47,3 +47,7 @@ scratch/
 profiling_logs/
 run_profiler.ps1
 *_PROFILING_REPORT.md
+# Discord Social SDK: proprietary (Discord Developer Terms), kept in a private repo.
+# CI fetches it via .github/actions/fetch-discord-sdk; without it the app builds without Discord.
+app/libs/discord_partner_sdk.aar
+app/src/main/cpp/discord/

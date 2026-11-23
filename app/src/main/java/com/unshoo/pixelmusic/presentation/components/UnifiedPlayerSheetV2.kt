@@ -570,16 +570,17 @@ fun UnifiedPlayerSheetV2(
     val playerAreaBackground = sheetThemeState.playerAreaBackground
     // Elevation is only visible in the mini/collapsed state (expansion < 0.18).
     // miniReadyAlpha fades the shadow in during the initial song-appear animation.
-    val visualCardShadowElevation by remember(showQueueSheet, miniReadyAlpha) {
-        derivedStateOf {
-            if (showQueueSheet || playerContentExpansionFraction.value > 0.18f) {
-                0.dp
-            } else {
-                val elevationFactor = 1f - (playerContentExpansionFraction.value / 0.18f).coerceIn(0f, 1f)
-                (3f * elevationFactor * miniReadyAlpha.value).dp
+    // Elevation is computed in the draw phase (graphicsLayer below). It used to be a
+    // derivedStateOf<Dp> read during composition, which recomposed this whole sheet on every
+    // frame of the first/last 18% of each open/close animation.
+    val shadowElevationPxProvider: androidx.compose.ui.unit.Density.() -> Float =
+        remember(showQueueSheet, miniReadyAlpha, playerContentExpansionFraction) {
+            {
+                val f = playerContentExpansionFraction.value
+                if (showQueueSheet || f > 0.18f) 0f
+                else 3.dp.toPx() * (1f - (f / 0.18f).coerceIn(0f, 1f)) * miniReadyAlpha.value
             }
         }
-    }
 
     val sheetInteractionState = rememberSheetInteractionState(
         scope = scope,
@@ -694,11 +695,11 @@ fun UnifiedPlayerSheetV2(
                             // structurally stable avoids the costly relayout/redraw
                             // restructure when the elevation crosses 0.dp during
                             // expand/collapse or right after play/pause.
-                            .shadow(
-                                elevation = visualCardShadowElevation,
-                                shape = sheetInteractionState.playerShadowShape,
+                            .graphicsLayer {
+                                shadowElevation = shadowElevationPxProvider()
+                                shape = sheetInteractionState.playerShadowShape
                                 clip = false
-                            )
+                            }
                             .background(
                                 color = playerAreaBackground,
                                 shape = sheetInteractionState.playerShadowShape

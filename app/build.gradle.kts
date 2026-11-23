@@ -25,6 +25,14 @@ val localProperties = Properties().apply {
     }
 }
 
+// The Discord Social SDK is proprietary and kept out of this public repo. CI fetches it from a
+// private repo (see .github/actions/fetch-discord-sdk); without it the app builds without Discord.
+val discordSdkAvailable = file("libs/discord_partner_sdk.aar").exists() &&
+    file("src/main/cpp/discord/include/discordpp.h").exists()
+if (!discordSdkAvailable) {
+    logger.lifecycle("Discord SDK not found (app/libs/discord_partner_sdk.aar): building without Discord")
+}
+
 val enableAbiSplits = providers.gradleProperty("pixelmusic.enableAbiSplits")
     .getOrElse("true")
     .toBoolean()
@@ -156,6 +164,8 @@ android {
                     ?: ""
                 ).trim()
         buildConfigField("String", "POOL_CLIENT_KEY", "\"$poolClientKey\"")
+        // Discord Rich Presence is compiled in only when the (private) SDK files are present.
+        buildConfigField("boolean", "DISCORD_ENABLED", discordSdkAvailable.toString())
     }
 
     val keystoreExists = rootProject.file("keystore.properties").exists() && rootProject.file("vz-pixelmusic.jks").exists()
@@ -194,6 +204,12 @@ android {
             initWith(getByName("release"))
             matchingFallbacks += listOf("release")
             isDebuggable = false
+            // -Ppixelmusic.benchmarkAsDebugApp=true: build the optimized APK under the debug
+            // package id so it installs as an update over an existing debug install (same debug
+            // signing key) and keeps that install's logins and library data.
+            if (providers.gradleProperty("pixelmusic.benchmarkAsDebugApp").orNull == "true") {
+                applicationIdSuffix = ".debug"
+            }
             // Profiling build: sign with the debug key when the release keystore isn't present,
             // so it can be installed on test devices.
             if (!keystoreExists) {
@@ -211,6 +227,18 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+        // Discord Social SDK ships its native lib as a Prefab module inside the AAR.
+        prefab = discordSdkAvailable
+    }
+
+    // Tiny JNI bridge to the Discord Social SDK (C++-only on Android). See src/main/cpp.
+    if (discordSdkAvailable) {
+        externalNativeBuild {
+            cmake {
+                path = file("src/main/cpp/CMakeLists.txt")
+                version = "3.22.1"
+            }
+        }
     }
 
     testOptions {
@@ -393,6 +421,9 @@ dependencies {
     implementation(libs.credentials.play.services.auth)
     implementation(libs.googleid)
     implementation(libs.androidx.security.crypto)
+    // Discord Social SDK (Rich Presence: "Listening to PixelMusic")
+    if (discordSdkAvailable) implementation(files("libs/discord_partner_sdk.aar"))
+    implementation(libs.androidx.browser)
     implementation(libs.google.play.services.cast.framework)
     implementation(libs.tdlib)
 

@@ -31,6 +31,13 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v6
 
+      - name: Fetch Discord SDK (private)
+        uses: ./.github/actions/fetch-discord-sdk
+        with:
+          ssh-key: ${{ secrets.DISCORD_SDK_DEPLOY_KEY }}
+          # Releases must ship Discord; fork PRs have no secrets and build without it.
+          required: ${{ github.event_name != 'pull_request' }}
+
       - name: Decode release keystore
         run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > vz-pixelmusic.jks
 
@@ -98,6 +105,15 @@ jobs:
           ./gradlew :app:assembleRelease -Ppixelmusic.targetOem=vivo -Ppixelmusic.enableAbiSplits=true -Ppixelmusic.onlyArm64=true -PAPP_VERSION_CODE=${{ steps.commit_count.outputs.count }} -PIS_RELEASE_BUILD=${{ steps.version_check.outputs.is_new_version }}
           cp app/build/outputs/apk/release/app-arm64-v8a-release.apk apk-staging/app-vivo-release.apk
           cp apk-staging/*.apk app/build/outputs/apk/release/
+
+      - name: Verify Discord is included
+        if: github.event_name != 'pull_request'
+        run: |
+          set -e
+          for apk in app/build/outputs/apk/release/*.apk; do
+            unzip -l "$apk" | grep -q "libpixelmusic_discord.so" || { echo "::error::$apk has no Discord (libpixelmusic_discord.so missing)"; exit 1; }
+          done
+          echo "Discord integration present in all APKs"
 
       - name: Verify all split APKs
         run: |

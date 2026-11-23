@@ -280,6 +280,7 @@ class MainActivity : ComponentActivity() {
             window.isNavigationBarContrastEnforced = false
         }
         super.onCreate(savedInstanceState)
+        com.unshoo.pixelmusic.data.discord.DiscordPresence.onActivityCreated(this)
         lifecycle.addObserver(AdaptiveRefreshRateManager(this, userPreferencesRepository))
 
         // LEER SEÑAL DE BENCHMARK
@@ -556,6 +557,13 @@ class MainActivity : ComponentActivity() {
                 intent.action = null
             }
 
+            // Voice assistants: "play <query> on PixelMusic"
+            intent.action == android.provider.MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH -> {
+                val query = intent.getStringExtra(android.app.SearchManager.QUERY)
+                playerViewModel.playFromVoiceSearch(query)
+                intent.action = null
+            }
+
             // Handle shuffle all shortcut / tile
             intent.action == MainActivityIntentContract.ACTION_SHUFFLE_ALL -> {
                 playerViewModel.triggerShuffleAllFromTile()
@@ -590,6 +598,31 @@ class MainActivity : ComponentActivity() {
                 resolveStreamUri(intent)?.let { uri ->
                     persistUriPermissionIfNeeded(intent, uri)
                     pendingM3uImportUri.value = uri
+                }
+                clearExternalIntentPayload(intent)
+            }
+
+            // Discord "Join" (pixelmusic.me/_discord/join?secret=...) and the
+            // "Listen on PixelMusic" button (pixelmusic.me/listen?v=<id>) open here when the
+            // app is installed; otherwise the same links open the website.
+            intent.action == android.content.Intent.ACTION_VIEW && isPixelMusicSiteLink(intent.data) -> {
+                val uri = intent.data!!
+                when (uri.path) {
+                    "/_discord/join" -> {
+                        val target = com.unshoo.pixelmusic.data.discord.DiscordPresence
+                            .parseJoinSecret(uri.getQueryParameter("secret"))
+                        if (target != null) {
+                            playerViewModel.openYouTubeMusicLink(
+                                android.net.Uri.parse("https://music.youtube.com/watch?v=${target.videoId}"),
+                                startPositionMs = target.positionMs
+                            )
+                        }
+                    }
+                    "/listen" -> uri.getQueryParameter("v")?.takeIf { it.isNotBlank() }?.let { v ->
+                        playerViewModel.openYouTubeMusicLink(
+                            android.net.Uri.parse("https://music.youtube.com/watch?v=$v")
+                        )
+                    }
                 }
                 clearExternalIntentPayload(intent)
             }
@@ -674,6 +707,13 @@ class MainActivity : ComponentActivity() {
         intent.data = null
         intent.clipData = null
         intent.removeExtra(android.content.Intent.EXTRA_STREAM)
+    }
+
+    private fun isPixelMusicSiteLink(uri: android.net.Uri?): Boolean {
+        if (uri == null || uri.scheme != "https") return false
+        val host = uri.host?.lowercase() ?: return false
+        return (host == "pixelmusic.me" || host == "www.pixelmusic.me") &&
+            (uri.path == "/_discord/join" || uri.path == "/listen")
     }
 
     private fun isYouTubeMusicLink(uri: android.net.Uri?): Boolean {
@@ -1071,6 +1111,9 @@ class MainActivity : ComponentActivity() {
 
                 Scaffold(
                 modifier = Modifier.fillMaxSize(),
+                // The root Surface already paints the background; painting it again here
+                // doubled full-screen overdraw on every frame (very costly on low-end GPUs).
+                containerColor = androidx.compose.ui.graphics.Color.Transparent,
                 bottomBar = {
                     if (shouldRenderNavigationBar && !useNavigationRail) {
                         // BUGFIX (was: collected the full PlayerUiState
@@ -1406,8 +1449,8 @@ class MainActivity : ComponentActivity() {
                         // entire content lambda. Use the StateFlow as a
                         // `State<Float>` directly with `collectAsStateWithLifecycle`.
                         val isMiniPlayerDismissingForOverlay by playerViewModel.isMiniPlayerDismissing.collectAsStateWithLifecycle()
-                        val expansionFractionForOverlay =
-                            playerViewModel.playerContentExpansionFraction.value
+                        // (Removed an unused read of playerContentExpansionFraction.value here: reading
+                        // it in composition recomposed this whole block on every animation frame.)
                         val isUndoBarVisibleForOverlay by remember {
                             playerViewModel.playerUiState
                                 .map { it.showDismissUndoBar }
