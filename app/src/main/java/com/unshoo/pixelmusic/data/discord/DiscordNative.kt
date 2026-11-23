@@ -51,7 +51,8 @@ internal object DiscordNative {
     external fun nativeDisconnect()
     external fun nativeSetPresence(
         title: String,
-        artist: String,
+        /** Second line, e.g. "by Artist" or "Paused · Artist". */
+        stateText: String,
         album: String,
         largeImage: String,
         smallImage: String,
@@ -60,6 +61,8 @@ internal object DiscordNative {
         partyId: String,
         joinSecret: String,
         buttonUrl: String,
+        /** 0 = "Listening to PixelMusic", 2 = "Listening to <song>" in member lists. */
+        statusDisplayType: Int,
     )
     external fun nativeClearPresence()
     /** Clears presence, disconnects and destroys the native client (full detach). */

@@ -187,17 +187,19 @@ Java_com_unshoo_pixelmusic_data_discord_DiscordNative_nativeDisconnect(JNIEnv*, 
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_unshoo_pixelmusic_data_discord_DiscordNative_nativeSetPresence(
-    JNIEnv* env, jobject, jstring title, jstring artist, jstring album, jstring largeImage,
+    JNIEnv* env, jobject, jstring title, jstring stateText, jstring album, jstring largeImage,
     jstring smallImage, jlong startMs, jlong endMs, jstring partyId, jstring joinSecret,
-    jstring buttonUrl) {
+    jstring buttonUrl, jint statusDisplayType) {
     if (!gClient) return;
 
     discordpp::Activity activity;
     activity.SetName("PixelMusic");
     activity.SetType(discordpp::ActivityTypes::Listening);
     activity.SetDetails(atLeastTwo(toStd(env, title)));
-    std::string artistStr = toStd(env, artist);
-    if (!artistStr.empty()) activity.SetState(atLeastTwo("by " + artistStr));
+    // 0 = "Listening to PixelMusic", 2 = "Listening to <song>" in friends' member lists.
+    activity.SetStatusDisplayType(static_cast<discordpp::StatusDisplayTypes>(statusDisplayType));
+    std::string state = toStd(env, stateText);
+    if (!state.empty()) activity.SetState(atLeastTwo(state));
 
     discordpp::ActivityAssets assets;
     std::string large = toStd(env, largeImage);

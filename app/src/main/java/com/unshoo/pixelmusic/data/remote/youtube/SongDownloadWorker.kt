@@ -56,6 +56,19 @@ class SongDownloadWorker(
                 ?: return@withContext Result.failure()
 
             var song = localSongRepository.getSong(songId)
+            // Already downloaded and still readable (plain file or SAF content:// URI): done.
+            // Playlist "download all" queues every song, including ones already on the phone.
+            song?.audioFilePath?.takeIf { it.isNotBlank() && !it.startsWith("http") }?.let { path ->
+                val readable = if (path.startsWith("content://")) {
+                    runCatching {
+                        appContext.contentResolver.openAssetFileDescriptor(android.net.Uri.parse(path), "r")
+                            ?.use { it.length != 0L }
+                    }.getOrNull() == true
+                } else {
+                    java.io.File(path).length() > 0L
+                }
+                if (readable) return@withContext Result.success()
+            }
             if (song == null || song.album.isNullOrBlank()) {
                 var fetchedSong: Song? = null
                 songRepository.getSongInfo(songId).collect { apiResult ->

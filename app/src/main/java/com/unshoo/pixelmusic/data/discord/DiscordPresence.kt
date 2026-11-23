@@ -46,6 +46,19 @@ object DiscordPresence {
         val error: String? = null,
         /** Presence goes through the installed, signed-in Discord app (no OAuth login needed). */
         val viaApp: Boolean = false,
+        val options: Options = Options(),
+    )
+
+    /** User choices from the Discord card's options dropdown (stored in plain prefs, not secret). */
+    data class Options(
+        /** Master switch: show the status at all (stays logged in when off). */
+        val showActivity: Boolean = true,
+        /** Friends' member list says "Listening to <song>" instead of "Listening to PixelMusic". */
+        val songNameInList: Boolean = false,
+        /** Keep a "Paused" status instead of clearing it when playback pauses. */
+        val showWhilePaused: Boolean = true,
+        /** Never show songs that only exist on this phone (privacy). */
+        val hideLocalSongs: Boolean = false,
     )
 
     private val _state = MutableStateFlow(UiState())
@@ -96,6 +109,7 @@ object DiscordPresence {
             // Cheap plain-prefs flag first: opening the encrypted store spins up the Keystore
             // and Tink, which measurably slowed cold start on low-end phones (Redmi 6A).
             if (started) runCatching { setSdkEngineActivity(activity) }
+            _state.update { it.copy(options = loadOptions(activity.applicationContext)) }
             if (!isEnabledFlag(activity.applicationContext)) return@launch
             val prefs = prefs() ?: return@launch
             _state.update { it.copy(enabled = true, linked = prefs.hasTokens()) }
@@ -165,6 +179,7 @@ object DiscordPresence {
             }
             // NOTE: do not null the SDK's engine Activity here: its RPC client unbinds from the
             // Discord app asynchronously using it, and nulling it crashed the app on Disconnect.
+            presenceVisible = false
             _state.value = UiState()
             Timber.tag(TAG).i("Discord fully disconnected; local auth deleted")
         }
@@ -265,27 +280,89 @@ object DiscordPresence {
         }
     }
 
+    /** True while a status is currently shown on Discord (so we only clear when needed). */
+    private var presenceVisible = false
+
     private fun applyPresence() {
         val snap = latest ?: return
         if (!started) return
         if (snap.sameAs(applied)) return
-        if (!snap.playing || snap.title.isBlank()) {
-            if (applied?.playing == true) DiscordNative.nativeClearPresence()
+        val opts = _state.value.options
+        val hide = !opts.showActivity ||
+            snap.title.isBlank() ||
+            (opts.hideLocalSongs && snap.videoId == null) ||
+            (!snap.playing && !opts.showWhilePaused)
+        if (hide) {
+            if (presenceVisible) DiscordNative.nativeClearPresence()
+            presenceVisible = false
+            if (_state.value.linked || _state.value.viaApp) {
+                val why = when {
+                    !opts.showActivity -> "activity is turned off"
+                    opts.hideLocalSongs && snap.videoId == null -> "local songs are hidden"
+                    !snap.playing -> "hidden while paused"
+                    else -> "your status updates when music plays"
+                }
+                _state.update { it.copy(status = "Connected — $why", error = null) }
+            }
         } else {
+            val paused = !snap.playing
+            val artistLine = snap.artist.takeIf { it.isNotBlank() }
             DiscordNative.nativeSetPresence(
                 title = snap.title,
-                artist = snap.artist,
+                // Paused used to clear the status entirely; now it stays as "Paused".
+                stateText = when {
+                    paused && artistLine != null -> "Paused · $artistLine"
+                    paused -> "Paused"
+                    artistLine != null -> "by $artistLine"
+                    else -> ""
+                },
                 album = snap.album,
                 largeImage = snap.artUrl ?: LOGO_ASSET,
                 smallImage = if (snap.artUrl != null) LOGO_ASSET else "",
-                startMs = snap.startMs,
-                endMs = snap.endMs,
-                partyId = if (snap.videoId != null) sessionPartyId else "",
-                joinSecret = snap.videoId?.let { joinSecretFor(it, snap.startMs) }.orEmpty(),
+                // No running timer while paused (it would keep counting up).
+                startMs = if (paused) 0L else snap.startMs,
+                endMs = if (paused) 0L else snap.endMs,
+                // Join only makes sense while playing (it starts at the host's position).
+                partyId = if (snap.videoId != null && !paused) sessionPartyId else "",
+                joinSecret = snap.videoId?.takeIf { !paused }?.let { joinSecretFor(it, snap.startMs) }.orEmpty(),
                 buttonUrl = snap.videoId?.let { "$SITE/listen?v=$it" }.orEmpty(),
+                statusDisplayType = if (opts.songNameInList) 2 else 0,
             )
+            presenceVisible = true
         }
         applied = snap
+    }
+
+    /** Changes one dropdown option, saves it, and re-sends (or clears) the status right away. */
+    fun updateOptions(change: (Options) -> Options) {
+        scope.launch {
+            val ctx = appContext ?: return@launch
+            val updated = change(_state.value.options)
+            saveOptions(ctx, updated)
+            _state.update { it.copy(options = updated) }
+            applied = null
+            applyPresence()
+        }
+    }
+
+    private fun loadOptions(ctx: Context): Options {
+        val p = ctx.getSharedPreferences(PREFS_NAME_FLAGS, Context.MODE_PRIVATE)
+        val d = Options()
+        return Options(
+            showActivity = p.getBoolean(KEY_OPT_SHOW, d.showActivity),
+            songNameInList = p.getBoolean(KEY_OPT_SONG_NAME, d.songNameInList),
+            showWhilePaused = p.getBoolean(KEY_OPT_PAUSED, d.showWhilePaused),
+            hideLocalSongs = p.getBoolean(KEY_OPT_HIDE_LOCAL, d.hideLocalSongs),
+        )
+    }
+
+    private fun saveOptions(ctx: Context, o: Options) {
+        ctx.getSharedPreferences(PREFS_NAME_FLAGS, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_OPT_SHOW, o.showActivity)
+            .putBoolean(KEY_OPT_SONG_NAME, o.songNameInList)
+            .putBoolean(KEY_OPT_PAUSED, o.showWhilePaused)
+            .putBoolean(KEY_OPT_HIDE_LOCAL, o.hideLocalSongs)
+            .apply()
     }
 
     private fun start(activity: Activity): Boolean {
@@ -412,14 +489,17 @@ object DiscordPresence {
 
         override fun onPresence(success: Boolean, message: String) {
             if (success) {
-                val showing = applied?.takeIf { it.playing }?.title
+                val shown = applied?.takeIf { presenceVisible }
                 _state.update {
                     it.copy(
                         error = null,
                         busy = false,
-                        status = if (showing != null) "Showing on Discord: $showing"
-                        else if (it.viaApp || it.linked) "Connected — your status updates when music plays"
-                        else it.status,
+                        status = when {
+                            shown != null && shown.playing -> "Showing on Discord: ${shown.title}"
+                            shown != null -> "Showing on Discord: Paused · ${shown.title}"
+                            it.viaApp || it.linked -> "Connected — your status updates when music plays"
+                            else -> it.status
+                        },
                     )
                 }
             } else {
@@ -480,6 +560,10 @@ object DiscordPresence {
     private const val TAG = "DiscordPresence"
     const val SITE = "https://www.pixelmusic.me"
     private const val KEY_ENABLED = "enabled"
+    private const val KEY_OPT_SHOW = "opt_show_activity"
+    private const val KEY_OPT_SONG_NAME = "opt_song_name_in_list"
+    private const val KEY_OPT_PAUSED = "opt_show_while_paused"
+    private const val KEY_OPT_HIDE_LOCAL = "opt_hide_local_songs"
     private const val KEY_ACCESS = "access_token"
     private const val KEY_REFRESH = "refresh_token"
     private const val KEY_EXPIRES_AT = "expires_at"

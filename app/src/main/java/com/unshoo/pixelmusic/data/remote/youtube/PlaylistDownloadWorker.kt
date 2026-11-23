@@ -99,6 +99,28 @@ class PlaylistDownloadWorker(
                     async {
                         semaphore.withPermit {
                             try {
+                                // Already downloaded by PixelMusic (file or SAF content:// still
+                                // there): skip it. Previously every song was re-fetched — metadata,
+                                // cover and full audio — so re-downloading a mostly-downloaded
+                                // playlist took as long as the first time.
+                                val existingPath = existingDownloadPath(song.youtubeId)
+                                if (existingPath != null) {
+                                    playlistRepository.insertCrossRef(
+                                        PlaylistSongCrossRef(
+                                            playlistId = Constants.Downloads.DOWNLOADED_PLAYLIST_ID,
+                                            songId = song.youtubeId,
+                                            position = currentDownloadedSize + index
+                                        )
+                                    )
+                                    succeededSongs.incrementAndGet()
+                                    val processed = processedSongs.incrementAndGet()
+                                    PixelMusicNotificationManager.showPlaylistDownloadProgress(
+                                        appContext, playlist, processed, totalSongs
+                                    )
+                                    setProgress(workDataOf(PROGRESS_CURRENT to processed, PROGRESS_TOTAL to totalSongs))
+                                    return@withPermit
+                                }
+
                                 var fullSong: Song? = null
                                 songRepository.getSongInfo(song.youtubeId)
                                     .collect { apiResult ->
@@ -236,6 +258,25 @@ class PlaylistDownloadWorker(
                 Result.failure()
             }
         }
+    }
+
+    /**
+     * Path of an existing PixelMusic download of [youtubeId] that is still readable, or null.
+     * Handles both plain files and SAF `content://` URIs (custom download folder), which
+     * Song.downloaded can't check (it only uses File.exists()).
+     */
+    private suspend fun existingDownloadPath(youtubeId: String): String? {
+        val path = runCatching { localSongRepository.getSong(youtubeId) }.getOrNull()
+            ?.audioFilePath?.takeIf { it.isNotBlank() && !it.startsWith("http") } ?: return null
+        val readable = if (path.startsWith("content://")) {
+            runCatching {
+                appContext.contentResolver.openAssetFileDescriptor(android.net.Uri.parse(path), "r")
+                    ?.use { it.length != 0L }
+            }.getOrNull() == true
+        } else {
+            File(path).length() > 0L
+        }
+        return path.takeIf { readable }
     }
 
     private fun embedAudioMetadata(
