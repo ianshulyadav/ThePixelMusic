@@ -24,6 +24,9 @@ import kotlinx.coroutines.withTimeoutOrNull
 import timber.log.Timber
 import kotlin.math.absoluteValue
 import com.unshoo.pixelmusic.utils.YouTubeIdUtils
+import com.unshoo.pixelmusic.data.remote.youtube.queue.SmartQueue
+import com.unshoo.pixelmusic.data.remote.youtube.queue.SongLanguage
+import com.unshoo.pixelmusic.data.database.toSong
 
 import unshoo.ianshulyadav.pixelmusic.innertube.models.WatchEndpoint
 import com.unshoo.pixelmusic.data.model.Song
@@ -303,8 +306,157 @@ object AutoQueueManager {
         scheduleAdaptiveRefill(delayMs = null, forceRefresh = forceRefresh)
     }
 
+    /**
+     * Quick skip (< 15 s). Spotify-style learning: saved per-song skip history, an artist
+     * skipped twice this session drops out of the upcoming auto-queue, and three skips in a
+     * row rebuild the radio from the last song the user actually finished.
+     */
     fun registerSkip(songId: String, artistName: String? = null) {
-        checkAndRefill()
+        val ctx = contextRef
+        getActiveScope().launch(Dispatchers.IO) {
+            runCatching {
+                ctx?.let { SmartQueue.recordSkip(it, keyOfSongId(songId)) }
+                val action = SmartQueue.onSkipped(artistName)
+                android.util.Log.w("SmartQueue", "skip: ${artistName.orEmpty()} -> $action")
+                when (action) {
+                    is SmartQueue.SkipAction.DropArtist -> withContext(Dispatchers.Main) {
+                        removeUpcomingAutoQueued { SmartQueue.primaryArtist(it.mediaMetadata.artist?.toString()) == action.artist }
+                    }
+                    is SmartQueue.SkipAction.Resteer -> {
+                        Timber.tag(TAG).d("3 skips in a row: re-steering radio from %s", action.seedVideoId)
+                        withContext(Dispatchers.Main) { removeUpcomingAutoQueued { true } }
+                        seedRadioFromVideoId(action.seedVideoId)
+                    }
+                    SmartQueue.SkipAction.None -> Unit
+                }
+            }.onFailure { Timber.tag(TAG).w(it, "registerSkip failed") }
+            checkAndRefill()
+        }
+    }
+
+    /** A song listened to properly: positive signal for the session and the skip history. */
+    fun registerCompletion(songId: String, artistName: String?) {
+        val ctx = contextRef
+        getActiveScope().launch(Dispatchers.IO) {
+            val key = keyOfSongId(songId)
+            SmartQueue.onCompleted(key.takeIf(SmartQueue::isVideoId), artistName)
+            android.util.Log.w("SmartQueue", "listened: ${artistName.orEmpty()}")
+            ctx?.let { SmartQueue.recordCompletion(it, key) }
+        }
+    }
+
+    private fun keyOfSongId(songId: String): String =
+        YouTubeIdUtils.extractVideoId(songId).takeIf(SmartQueue::isVideoId) ?: songId
+
+    /** Removes upcoming songs that the auto-queue added (never the user's own queue). */
+    private fun removeUpcomingAutoQueued(match: (MediaItem) -> Boolean) {
+        val p = livePlayer() ?: return
+        val autoIds = synchronized(sessionQueuedIds) { HashSet(sessionQueuedIds) }
+        var removed = 0
+        for (i in p.mediaItemCount - 1 downTo p.currentMediaItemIndex + 1) {
+            val item = p.getMediaItemAt(i)
+            val isAuto = item.mediaId in autoIds || SmartQueue.keyOf(item) in autoIds
+            if (isAuto && match(item)) {
+                p.removeMediaItem(i)
+                removed++
+            }
+        }
+        if (removed > 0) Timber.tag(TAG).d("Removed %d upcoming auto-queued items", removed)
+    }
+
+    private suspend fun seedRadioFromVideoId(videoId: String) {
+        val dao = musicDaoRef ?: return
+        currentQueue = ResilientRadioQueue.radio(videoId = videoId, musicDao = dao, isOnline = ::hasInternet)
+            .also { it.anchorProvider = SmartQueue::nextAnchor }
+        ensureLocalSeed(videoId)
+    }
+
+    /**
+     * Starts a SmartQueue session for a new listening context. If the user was playing a
+     * playlist or album (several songs queued), a few of its songs become extra radio seeds so
+     * autoplay continues the playlist's vibe, not just its last song's.
+     */
+    private suspend fun startSmartSession(currentMediaId: String) {
+        data class Start(val seed: String?, val lang: String, val playlistSeeds: List<String>)
+        val start = withContext(Dispatchers.Main) {
+            val p = livePlayer() ?: return@withContext Start(null, "", emptyList())
+            val cur = p.currentMediaItem
+            val seed = cur?.let(SmartQueue::keyOf)?.takeIf(SmartQueue::isVideoId)
+            val seedLang = cur?.let(SmartQueue::languageOf).orEmpty()
+            val count = p.mediaItemCount
+            // Playlist/album seeds: only songs in the seed's language, so a mixed list
+            // (e.g. Quick Picks) can't pull autoplay into other languages. When the seed's
+            // language is unknown, only songs whose language is also unknown qualify.
+            val others = if (count >= 3) {
+                val step = maxOf(1, count / 4)
+                (0 until count step step).map { p.getMediaItemAt(it) }
+                    .filter { item ->
+                        val l = SmartQueue.languageOf(item)
+                        if (seedLang.isEmpty()) l.isEmpty() else SongLanguage.compatible(seedLang, l)
+                    }
+                    .map(SmartQueue::keyOf)
+                    .filter(SmartQueue::isVideoId)
+            } else emptyList()
+            Start(seed, seedLang, others)
+        }
+        SmartQueue.startSession(
+            start.seed ?: keyOfSongId(currentMediaId).takeIf(SmartQueue::isVideoId),
+            start.playlistSeeds,
+            start.lang,
+        )
+        android.util.Log.w("SmartQueue", "session: lang=${start.lang.ifEmpty { "?" }} playlistSeeds=${start.playlistSeeds.size}")
+    }
+
+    // Favourites pool for the 1-in-4 mix; rebuilt at most every 10 minutes (one bounded query each).
+    @Volatile private var favoritesCache: Pair<Long, Pair<List<MediaItem>, Set<String>>>? = null
+
+    private suspend fun favoritesAndLikes(): Pair<List<MediaItem>, Set<String>> {
+        val now = System.currentTimeMillis()
+        favoritesCache?.let { (at, value) -> if (now - at < 10 * 60_000L) return value }
+        val dao = musicDaoRef ?: return emptyList<MediaItem>() to emptySet<String>()
+        val value = runCatching {
+            val liked = dao.getFavoriteSongsSample(80)
+            val likedItems = liked.map { MediaItemBuilder.build(it.toSong()) }
+            // Most-played songs not heard for 3h+ also count as favourites.
+            val top = engagementDaoRef?.getTopPlayedSongs(60).orEmpty()
+                .filter { it.playCount >= 3 && now - it.lastPlayedTimestamp > 3 * 60 * 60_000L }
+            val topIds = top.mapNotNull { e ->
+                e.songId.toLongOrNull() ?: YouTubeIdUtils.extractVideoId(e.songId)
+                    .takeIf(SmartQueue::isVideoId)?.let(YouTubeIdUtils::toUnifiedYoutubeSongId)
+            }
+            val topItems = if (topIds.isEmpty()) emptyList()
+            else dao.getSongsByIdsListSimple(topIds).map { MediaItemBuilder.build(it.toSong()) }
+            val all = (likedItems + topItems).distinctBy(SmartQueue::keyOf).shuffled()
+            all to likedItems.mapTo(HashSet<String>(), SmartQueue::keyOf)
+        }.getOrElse { emptyList<MediaItem>() to emptySet<String>() }
+        favoritesCache = now to value
+        return value
+    }
+
+    /** Ranks + mixes + spaces one refill batch. Cheap: a few dozen items, no network. */
+    private suspend fun arrangeBatch(items: List<MediaItem>, excludeKeys: Set<String>): List<MediaItem> {
+        val ctx = contextRef ?: return items
+        if (items.isEmpty()) return items
+        return runCatching {
+            val (favorites, likedKeys) = favoritesAndLikes()
+            val recentArtists = withContext(Dispatchers.Main) {
+                val p = livePlayer() ?: return@withContext emptyList<String>()
+                val from = maxOf(0, p.mediaItemCount - 9)
+                (from until p.mediaItemCount).map { p.getMediaItemAt(it).mediaMetadata.artist?.toString().orEmpty() }
+            }
+            val freshFavorites = favorites.filter { SmartQueue.keyOf(it) !in excludeKeys && it.mediaId !in excludeKeys }
+            SmartQueue.arrange(ctx, items, SmartQueue.Signals(likedKeys, freshFavorites, recentArtists)).also { out ->
+                android.util.Log.i(
+                    "SmartQueue",
+                    "refill: ${items.size} from radio, ${SmartQueue.lastDroppedForLanguage} off-language dropped " +
+                        "(lang=${SmartQueue.currentLanguage().ifEmpty { "?" }}) -> ${out.size} queued " +
+                        "(${out.size - items.count { it in out }} favourites mixed in)"
+                )
+            }
+        }.getOrElse {
+            Timber.tag(TAG).w(it, "arrangeBatch failed; keeping YouTube order")
+            items
+        }
     }
 
     suspend fun buildMixQueue(seedSong: Song, onlineRelated: List<Song>): List<Song> {
@@ -415,7 +567,10 @@ object AutoQueueManager {
 
         if (currentQueue === EmptyQueue) {
             val currentId = withContext(Dispatchers.Main) { livePlayer()?.currentMediaItem?.mediaId }
-            if (currentId != null) seedFromMediaId(currentId)
+            if (currentId != null) {
+                startSmartSession(currentId)
+                seedFromMediaId(currentId)
+            }
         }
 
         var batchAttempts = 0
@@ -487,7 +642,8 @@ object AutoQueueManager {
             val dislikedSongIds = runCatching { musicDaoRef?.getDislikedSongIds()?.map { it.toString() }?.toSet() }.getOrNull() ?: emptySet()
             val notInterestedIds = runCatching { userPreferencesRepository?.notInterestedSongIdsFlow?.first() }.getOrNull() ?: emptySet()
 
-            // Fetch recently played and over-rotated songs to prevent repetitive tracks in auto-queue
+            // Recently played songs are skipped to avoid repeats. Most-played songs are no longer
+            // banned: SmartQueue mixes favourites back in deliberately, Spotify-style.
             val recentPlayedSongIds = HashSet<String>()
             val highlyRotatedSongIds = HashSet<String>()
             runCatching {
@@ -497,13 +653,6 @@ object AutoQueueManager {
                     recentPlayedSongIds.add(it.songId.removePrefix("youtube_"))
                     val ext = YouTubeIdUtils.extractVideoId(it.songId)
                     if (ext.isNotBlank()) recentPlayedSongIds.add(ext)
-                }
-                val topEngagements = engagementDaoRef?.getTopPlayedSongs(25).orEmpty()
-                topEngagements.filter { it.playCount >= 6 }.forEach {
-                    highlyRotatedSongIds.add(it.songId)
-                    highlyRotatedSongIds.add(it.songId.removePrefix("youtube_"))
-                    val ext = YouTubeIdUtils.extractVideoId(it.songId)
-                    if (ext.isNotBlank()) highlyRotatedSongIds.add(ext)
                 }
             }
 
@@ -526,7 +675,8 @@ object AutoQueueManager {
                 (ytId.isNotBlank() && ytId in highlyRotatedSongIds) ||
                 item.mediaId in sessionQueuedIds ||
                 item.mediaId in recentPlayedSongIds ||
-                item.mediaId in highlyRotatedSongIds
+                item.mediaId in highlyRotatedSongIds ||
+                SmartQueue.isArtistBlocked(item.mediaMetadata.artist?.toString())
             }.let { items ->
                 var filtered = items
                 if (filterCoverLofi) {
@@ -554,8 +704,9 @@ object AutoQueueManager {
                     sessionQueuedIds.add(item.mediaId)
                 }
                 if (!firstBatchAdded && remaining <= 1) {
+                    val arranged = arrangeBatch(newItems, existingIds + recentPlayedSongIds)
                     withContext(Dispatchers.Main) {
-                        livePlayer()?.addMediaItems(newItems)
+                        livePlayer()?.addMediaItems(arranged)
                         onQueueItemsAddedCallback?.invoke()
                     }
                     firstBatchAdded = true
@@ -571,7 +722,14 @@ object AutoQueueManager {
                     batchAttempts, fetched.size, existingIds.size, consecutiveEmptyFetches)
 
                 if (consecutiveEmptyFetches >= 2) {
-                    // Try reseeding from current playing track or the last track in the player queue
+                    // Re-seed from the session anchor (original seed / songs the user finished);
+                    // fall back to the current or last queued track.
+                    val anchor = SmartQueue.nextAnchor()
+                    if (anchor != null) {
+                        android.util.Log.w("SmartQueue", "radio re-anchored to $anchor")
+                        seedRadioFromVideoId(anchor)
+                        continue
+                    }
                     val reseedId = withContext(Dispatchers.Main) {
                         val p = livePlayer() ?: return@withContext null
                         p.currentMediaItem?.mediaId
@@ -591,6 +749,19 @@ object AutoQueueManager {
         }
 
         if (batchedItems.isNotEmpty()) {
+            val excludeKeys = withContext(Dispatchers.Main) {
+                val p = livePlayer() ?: return@withContext emptySet<String>()
+                (0 until p.mediaItemCount).flatMapTo(HashSet()) { i ->
+                    val mi = p.getMediaItemAt(i)
+                    listOf(mi.mediaId, SmartQueue.keyOf(mi))
+                }
+            }
+            val arranged = arrangeBatch(batchedItems, excludeKeys)
+            batchedItems.clear()
+            batchedItems.addAll(arranged)
+            synchronized(sessionQueuedIds) {
+                arranged.forEach { sessionQueuedIds.add(it.mediaId); sessionQueuedIds.add(SmartQueue.keyOf(it)) }
+            }
             withContext(Dispatchers.Main) {
                 livePlayer()?.addMediaItems(batchedItems)
                 onQueueItemsAddedCallback?.invoke()
@@ -616,6 +787,7 @@ object AutoQueueManager {
             return
         }
         currentQueue = ResilientRadioQueue.radio(videoId = videoId, musicDao = dao, isOnline = ::hasInternet)
+            .also { it.anchorProvider = SmartQueue::nextAnchor }
         ensureLocalSeed(videoId)
     }
 

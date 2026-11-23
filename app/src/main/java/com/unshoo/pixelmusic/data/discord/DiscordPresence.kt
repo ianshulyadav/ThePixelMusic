@@ -90,13 +90,18 @@ object DiscordPresence {
         val artUrl: String?,
         val startMs: Long,
         val endMs: Long,
+        /** Playback position and length when the snapshot was taken (for the paused bar). */
+        val positionMs: Long = 0L,
+        val durationMs: Long = 0L,
     ) {
         /** Same song/state with timestamps within 2s → no need to re-send. */
         fun sameAs(other: Snapshot?): Boolean = other != null &&
             playing == other.playing && videoId == other.videoId &&
             title == other.title && artist == other.artist &&
             album == other.album && artUrl == other.artUrl &&
-            kotlin.math.abs(startMs - other.startMs) < 2_000
+            // While paused the wall-clock start moves; compare the frozen position instead.
+            (if (playing) kotlin.math.abs(startMs - other.startMs) < 2_000
+             else kotlin.math.abs(positionMs - other.positionMs) < 2_000)
     }
 
     // ------------------------------------------------------------------ public API (any thread)
@@ -246,7 +251,7 @@ object DiscordPresence {
             else -> url
         }?.takeIf { it.length <= 256 }
         val chosen = fixed ?: videoId?.let { "https://i.ytimg.com/vi/$it/hqdefault.jpg" }
-        android.util.Log.i(TAG, "presence artwork: ${chosen ?: "(app logo)"}")
+        android.util.Log.w(TAG, "presence artwork: ${chosen ?: "(app logo)"}")
         return chosen
     }
 
@@ -271,6 +276,8 @@ object DiscordPresence {
             artUrl = art,
             startMs = now - position,
             endMs = if (duration > 0) now - position + duration else 0L,
+            positionMs = position,
+            durationMs = duration,
         )
         publishJob?.cancel()
         publishJob = scope.launch {
@@ -291,7 +298,7 @@ object DiscordPresence {
         val hide = !opts.showActivity ||
             snap.title.isBlank() ||
             (opts.hideLocalSongs && snap.videoId == null) ||
-            (!snap.playing && !opts.showWhilePaused)
+            (!snap.playing && (!opts.showWhilePaused || longPauseHidden))
         if (hide) {
             if (presenceVisible) DiscordNative.nativeClearPresence()
             presenceVisible = false
@@ -306,6 +313,9 @@ object DiscordPresence {
             }
         } else {
             val paused = !snap.playing
+            val nowMs = System.currentTimeMillis()
+            val pausedStart = nowMs - snap.positionMs
+            val pausedEnd = if (snap.durationMs > 0) pausedStart + snap.durationMs else 0L
             val artistLine = snap.artist.takeIf { it.isNotBlank() }
             DiscordNative.nativeSetPresence(
                 title = snap.title,
@@ -319,9 +329,10 @@ object DiscordPresence {
                 album = snap.album,
                 largeImage = snap.artUrl ?: LOGO_ASSET,
                 smallImage = if (snap.artUrl != null) LOGO_ASSET else "",
-                // No running timer while paused (it would keep counting up).
-                startMs = if (paused) 0L else snap.startMs,
-                endMs = if (paused) 0L else snap.endMs,
+                // Paused: Discord can't freeze a bar, so show it at the paused position and
+                // re-send every 15 s (see pausedRefreshJob) to hold it there.
+                startMs = if (paused) pausedStart else snap.startMs,
+                endMs = if (paused) pausedEnd else snap.endMs,
                 // Join only makes sense while playing (it starts at the host's position).
                 partyId = if (snap.videoId != null && !paused) sessionPartyId else "",
                 joinSecret = snap.videoId?.takeIf { !paused }?.let { joinSecretFor(it, snap.startMs) }.orEmpty(),
@@ -331,6 +342,37 @@ object DiscordPresence {
             presenceVisible = true
         }
         applied = snap
+        updatePausedRefresh(paused = !snap.playing && presenceVisible)
+    }
+
+    /** Re-sends the paused status every 15 s so the bar stays at the paused position. */
+    private var pausedRefreshJob: Job? = null
+    private var pausedSinceMs = 0L
+    private var longPauseHidden = false
+
+    private fun updatePausedRefresh(paused: Boolean) {
+        if (!paused) {
+            pausedRefreshJob?.cancel()
+            pausedRefreshJob = null
+            if (latest?.playing == true) longPauseHidden = false
+            return
+        }
+        if (pausedRefreshJob?.isActive == true) return
+        pausedSinceMs = System.currentTimeMillis()
+        pausedRefreshJob = scope.launch {
+            while (isActive) {
+                delay(PAUSED_REFRESH_MS)
+                if (System.currentTimeMillis() - pausedSinceMs >= MAX_PAUSED_SHOW_MS - 500L) {
+                    // Long pause: stop updating (battery/network) and hide until play.
+                    longPauseHidden = true
+                    applied = null
+                    applyPresence()
+                    break
+                }
+                applied = null
+                applyPresence()
+            }
+        }
     }
 
     /** Changes one dropdown option, saves it, and re-sends (or clears) the status right away. */
@@ -568,6 +610,8 @@ object DiscordPresence {
     private const val KEY_REFRESH = "refresh_token"
     private const val KEY_EXPIRES_AT = "expires_at"
     private const val ONE_DAY_MS = 24L * 60 * 60 * 1000
+    private const val PAUSED_REFRESH_MS = 15_000L          // Discord-safe update rate
+    private const val MAX_PAUSED_SHOW_MS = 30_000L         // paused > 30 s: hide until play
     private const val PREFS_NAME = "discord_presence"
     private const val PREFS_NAME_PLAIN = "discord_presence_plain"
     /** Non-secret on/off flag only (no tokens), readable without the Keystore. */

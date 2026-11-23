@@ -22,6 +22,13 @@ class ResilientRadioQueue(
     private var hasAttemptedReseedAfterFailure = false
     private val usedLocalIds = mutableSetOf<Long>()
 
+    /**
+     * Where to restart the radio when YouTube's continuation runs out. Defaults to the last
+     * song the radio itself returned, which drifts further from the session's vibe on every
+     * restart; SmartQueue supplies the session anchor (original seed / finished songs).
+     */
+    var anchorProvider: (() -> String?)? = null
+
     override val preloadItem: MediaItem? = null
 
     override suspend fun getInitialStatus(): Queue.Status {
@@ -58,7 +65,7 @@ class ResilientRadioQueue(
         }
 
         if (online == null || online?.hasNextPage() == false || onlineExhausted) {
-            val seedId = lastKnownVideoId
+            val seedId = anchorProvider?.invoke() ?: lastKnownVideoId
             if (isOnline() && seedId != null && !hasAttemptedReseedAfterFailure) {
                 hasAttemptedReseedAfterFailure = true
                 val newOnline = YouTubeRadioQueue.radio(seedId)
