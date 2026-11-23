@@ -321,26 +321,10 @@ class PixelMusicApplication : Application(), ImageLoaderFactory, Configuration.P
             }
         }
 
-        // Bind Content Language and Country to YouTube.locale
         startupScope.launch {
-            // BitChord rules (see YtLocaleTags): hl = base language, default gl = US (TW/SG for
-            // Chinese) instead of a device-country guess that pointed users in unsupported regions
-            // at an empty catalogue, and search without gl unless the user picked a country.
-            kotlinx.coroutines.flow.combine(
-                userPreferencesRepository.get().contentLanguageFlow,
-                userPreferencesRepository.get().contentCountryExplicitFlow
-            ) { language, explicitCountry -> language to explicitCountry }
-                .collect { (language, explicitCountry) ->
-                    val tags = com.unshoo.pixelmusic.data.preferences.YtLocaleTags
-                    unshoo.ianshulyadav.pixelmusic.innertube.YouTube.applyLocaleSettings(
-                        newLocale = unshoo.ianshulyadav.pixelmusic.innertube.models.YouTubeLocale(
-                            gl = explicitCountry ?: tags.defaultGl(language),
-                            hl = tags.hl(language)
-                        ),
-                        omitGlForSearch = explicitCountry == null && tags.searchOmitsGl(language),
-                        acceptLanguage = tags.acceptLanguage(language)
-                    )
-                }
+            userPreferencesRepository.get().youTubeLocaleFlow.collect { locale ->
+                unshoo.ianshulyadav.pixelmusic.innertube.YouTube.locale = locale
+            }
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -354,6 +338,11 @@ class PixelMusicApplication : Application(), ImageLoaderFactory, Configuration.P
         }
 
         ProcessLifecycleOwner.get().lifecycle.addObserver(appLifecycleObserver)
+    }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        userPreferencesRepository.get().refreshDeviceContentLocale()
     }
 
     @Volatile

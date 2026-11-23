@@ -158,8 +158,8 @@ data class SettingsUiState(
     val playerStreamClient: PlayerStreamClient = PlayerStreamClient.ANDROID_VR,
     val pureYtMusicOnly: Boolean = false,
     val localModeEnabled: Boolean = false,
-    val contentLanguage: String = "en",
-    val contentCountry: String = com.unshoo.pixelmusic.data.preferences.getSafeDefaultContentCountry(),
+    val contentLanguage: String = com.unshoo.pixelmusic.data.preferences.YtLocaleTags.SYSTEM,
+    val contentCountry: String = com.unshoo.pixelmusic.data.preferences.YtLocaleTags.SYSTEM,
     val playlistSuggestionSource: PlaylistSuggestionSource = PlaylistSuggestionSource.BOTH,
     val hideExplicit: Boolean = false,
     val useDeviceLibraryMatches: Boolean = false,
@@ -1149,8 +1149,7 @@ class SettingsViewModel @Inject constructor(
 
     fun logoutYoutube() {
         viewModelScope.launch {
-            datastoreRepository.saveCookies(com.unshoo.pixelmusic.data.model.youtube.Cookies(""))
-            datastoreRepository.saveDataSyncId("")
+            datastoreRepository.saveYouTubeSession(com.unshoo.pixelmusic.data.model.youtube.Cookies(), "")
             datastoreRepository.saveYtProfile("", "", "")
             val cookieManager = android.webkit.CookieManager.getInstance()
             cookieManager.removeAllCookies(null)

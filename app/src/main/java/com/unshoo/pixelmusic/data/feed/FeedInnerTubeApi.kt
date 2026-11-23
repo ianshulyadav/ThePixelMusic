@@ -1,5 +1,6 @@
 package com.unshoo.pixelmusic.data.feed
 
+import com.unshoo.pixelmusic.data.preferences.YtLocaleTags
 import com.unshoo.pixelmusic.data.remote.youtube.upgradeThumbnailUrlToHighQuality
 import com.unshoo.pixelmusic.utils.ContentFilterUtils
 import kotlinx.coroutines.Dispatchers
@@ -29,6 +30,8 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
+import unshoo.ianshulyadav.pixelmusic.innertube.YouTube
+import unshoo.ianshulyadav.pixelmusic.innertube.models.YouTubeLocale
 
 data class ArtistAlbumItem(
     val title: String,
@@ -63,23 +66,29 @@ class FeedInnerTubeApi @Inject constructor(
         val apiKey: String,
         val clientVersion: String,
         val visitorData: String?,
+        val locale: YouTubeLocale,
     )
 
     private suspend fun getWebConfig(): WebConfig {
-        webConfig?.let { return it }
+        val locale = YouTube.locale
+        webConfig?.takeIf { it.locale == locale }?.let { return it }
         return configMutex.withLock {
-            webConfig?.let { return@withLock it }
-            val config = runCatching { fetchWebConfig() }
-                .getOrElse { WebConfig(FALLBACK_WEB_KEY, FALLBACK_WEB_VERSION, null) }
+            webConfig?.takeIf { it.locale == locale }?.let { return@withLock it }
+            val config = runCatching { fetchWebConfig(locale) }
+                .getOrElse {
+                    currentCoroutineContext().ensureActive()
+                    WebConfig(FALLBACK_WEB_KEY, FALLBACK_WEB_VERSION, null, locale)
+                }
             webConfig = config
             config
         }
     }
 
-    private suspend fun fetchWebConfig(): WebConfig {
+    private suspend fun fetchWebConfig(locale: YouTubeLocale): WebConfig {
         val request = Request.Builder()
-            .url("$YOUTUBE_MUSIC_ORIGIN/")
+            .url("$YOUTUBE_MUSIC_ORIGIN/?hl=${locale.hl}&gl=${locale.gl}")
             .header("User-Agent", WEB_USER_AGENT)
+            .header("Accept-Language", YtLocaleTags.acceptLanguage(locale.hl))
             .build()
         val (status, html) = withContext(Dispatchers.IO) {
             http.newCall(request).execute().use { response ->
@@ -91,6 +100,7 @@ class FeedInnerTubeApi @Inject constructor(
             apiKey = findConfig(html, "INNERTUBE_API_KEY") ?: FALLBACK_WEB_KEY,
             clientVersion = findConfig(html, "INNERTUBE_CONTEXT_CLIENT_VERSION") ?: FALLBACK_WEB_VERSION,
             visitorData = findConfig(html, "VISITOR_DATA"),
+            locale = locale,
         )
     }
 
@@ -105,16 +115,17 @@ class FeedInnerTubeApi @Inject constructor(
     }
 
     private suspend fun post(
+        config: WebConfig,
         url: String,
         body: JsonObject,
         authenticated: Boolean = false,
         callTimeoutMs: Long? = null,
     ): JsonObject {
-        val config = getWebConfig()
         val builder = Request.Builder()
             .url(url)
             .header("Content-Type", "application/json")
             .header("User-Agent", WEB_USER_AGENT)
+            .header("Accept-Language", YtLocaleTags.acceptLanguage(config.locale.hl))
             .header("Origin", YOUTUBE_MUSIC_ORIGIN)
             .header("X-Origin", YOUTUBE_MUSIC_ORIGIN)
             .header("Referer", "$YOUTUBE_MUSIC_ORIGIN/")
@@ -145,7 +156,7 @@ class FeedInnerTubeApi @Inject constructor(
             }
         }
         if (status !in 200..299) {
-            if (status == 400 || status == 403 || status == 429) webConfig = null
+            if ((status == 400 || status == 403 || status == 429) && webConfig === config) webConfig = null
             throw IOException("InnerTube HTTP $status")
         }
         return try {
@@ -158,9 +169,10 @@ class FeedInnerTubeApi @Inject constructor(
     private suspend fun browseRoot(browseId: String, authenticated: Boolean, params: String? = null): JsonObject {
         val config = getWebConfig()
         return post(
+            config = config,
             url = "$MUSIC_API/browse?key=${config.apiKey}&prettyPrint=false",
             body = buildJsonObject {
-                put("context", makeContext("WEB_REMIX", config.clientVersion, config.visitorData))
+                put("context", makeContext(config))
                 put("browseId", browseId)
                 if (!params.isNullOrBlank()) {
                     put("params", params)
@@ -173,30 +185,26 @@ class FeedInnerTubeApi @Inject constructor(
     private suspend fun browseContinuation(token: String, authenticated: Boolean): JsonObject {
         val config = getWebConfig()
         return post(
+            config = config,
             url = "$MUSIC_API/browse?key=${config.apiKey}&prettyPrint=false",
             body = buildJsonObject {
-                put("context", makeContext("WEB_REMIX", config.clientVersion, config.visitorData))
+                put("context", makeContext(config))
                 put("continuation", token)
             },
             authenticated = authenticated,
         )
     }
 
-    private fun makeContext(clientName: String, clientVersion: String, visitorData: String?): JsonObject {
-        val currentLocale = unshoo.ianshulyadav.pixelmusic.innertube.YouTube.locale
-        val gl = currentLocale.gl.ifBlank { "IN" }
-        val hl = currentLocale.hl.ifBlank { "en" }
-        return buildJsonObject {
-            put("client", buildJsonObject {
-                put("clientName", clientName)
-                put("clientVersion", clientVersion)
-                put("hl", hl)
-                put("gl", gl)
-                if (!visitorData.isNullOrBlank()) {
-                    put("visitorData", visitorData)
-                }
-            })
-        }
+    private fun makeContext(config: WebConfig): JsonObject = buildJsonObject {
+        put("client", buildJsonObject {
+            put("clientName", "WEB_REMIX")
+            put("clientVersion", config.clientVersion)
+            put("hl", config.locale.hl)
+            put("gl", config.locale.gl)
+            if (!config.visitorData.isNullOrBlank()) {
+                put("visitorData", config.visitorData)
+            }
+        })
     }
 
     suspend fun fetchNewReleases(authenticated: Boolean = ytAuth.connection.value.isConnected): List<YouTubePlaylistSummary> = withContext(Dispatchers.IO) {
@@ -233,7 +241,7 @@ class FeedInnerTubeApi @Inject constructor(
         if (tracksRegular.isNotEmpty()) return@withContext tracksRegular
 
         runCatching {
-            val currentGl = unshoo.ianshulyadav.pixelmusic.innertube.YouTube.locale.gl.ifBlank { "IN" }
+            val currentGl = YouTube.locale.gl
             val chartsPage = unshoo.ianshulyadav.pixelmusic.innertube.YouTube.getChartsPage(currentGl).getOrNull()
             chartsPage?.sections?.flatMap { it.items }
                 ?.filterIsInstance<unshoo.ianshulyadav.pixelmusic.innertube.models.SongItem>()
@@ -333,9 +341,10 @@ class FeedInnerTubeApi @Inject constructor(
         if (videoId.isBlank() || limit <= 0) return@withContext emptyList()
         val config = getWebConfig()
         val root = post(
+            config = config,
             url = "$MUSIC_API/next?key=${config.apiKey}&prettyPrint=false",
             body = buildJsonObject {
-                put("context", makeContext("WEB_REMIX", config.clientVersion, config.visitorData))
+                put("context", makeContext(config))
                 put("videoId", videoId)
                 put("playlistId", "RDAMVM$videoId")
                 put("params", "wAEB")
@@ -356,11 +365,12 @@ class FeedInnerTubeApi @Inject constructor(
         if (query.isBlank()) return@withContext emptyList()
         val config = getWebConfig()
         val body = buildJsonObject {
-            put("context", makeContext("WEB_REMIX", config.clientVersion, config.visitorData))
+            put("context", makeContext(config))
             put("query", query.trim())
             put("params", "EgWKAQIIAWoKEAkQBRAKEAMQBA==")
         }
         val root = post(
+            config = config,
             url = "$MUSIC_API/search?key=${config.apiKey}&prettyPrint=false",
             body = body,
         )
@@ -371,11 +381,12 @@ class FeedInnerTubeApi @Inject constructor(
         if (query.isBlank()) return@withContext emptyList()
         val config = getWebConfig()
         val body = buildJsonObject {
-            put("context", makeContext("WEB_REMIX", config.clientVersion, config.visitorData))
+            put("context", makeContext(config))
             put("query", query.trim())
             put("params", "EgWKAQIgAWoKEAkQBRAKEAMQBA==")
         }
         val root = post(
+            config = config,
             url = "$MUSIC_API/search?key=${config.apiKey}&prettyPrint=false",
             body = body,
         )
@@ -399,11 +410,12 @@ class FeedInnerTubeApi @Inject constructor(
         if (query.isBlank()) return@withContext emptyList()
         val config = getWebConfig()
         val body = buildJsonObject {
-            put("context", makeContext("WEB_REMIX", config.clientVersion, config.visitorData))
+            put("context", makeContext(config))
             put("query", query.trim())
             put("params", "EgWKAQIYAWoKEAkQBRAKEAMQBA==")
         }
         val root = post(
+            config = config,
             url = "$MUSIC_API/search?key=${config.apiKey}&prettyPrint=false",
             body = body,
         )

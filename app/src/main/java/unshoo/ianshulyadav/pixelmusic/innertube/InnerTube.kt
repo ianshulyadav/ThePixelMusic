@@ -11,6 +11,7 @@
 
 package unshoo.ianshulyadav.pixelmusic.innertube
 
+import com.unshoo.pixelmusic.data.preferences.YtLocaleTags
 import unshoo.ianshulyadav.pixelmusic.innertube.models.Context
 import unshoo.ianshulyadav.pixelmusic.innertube.models.MediaInfo
 import unshoo.ianshulyadav.pixelmusic.innertube.models.ReturnYouTubeDislikeResponse
@@ -53,25 +54,9 @@ import kotlin.io.encoding.ExperimentalEncodingApi
 class InnerTube {
     private var httpClient = createClient()
 
-    var locale = YouTubeLocale(
-        gl = com.unshoo.pixelmusic.data.preferences.YtLocaleTags.defaultGl(
-            com.unshoo.pixelmusic.data.preferences.getSafeDefaultContentLanguage()
-        ),
-        hl = com.unshoo.pixelmusic.data.preferences.YtLocaleTags.hl(
-            com.unshoo.pixelmusic.data.preferences.getSafeDefaultContentLanguage()
-        )
-    )
-
-    /**
-     * Search omits `gl` so YouTube ranks results for the connection's own region (what
-     * music.youtube.com does). Off when the user picked a Content country or for Chinese.
-     */
     @Volatile
-    var searchOmitsGl: Boolean = true
+    var locale = YouTubeLocale.DEFAULT
 
-    /** Sent on every request; YouTube localises some strings from this rather than `hl`. */
-    @Volatile
-    var acceptLanguage: String = "en-US,en;q=0.9"
     @Volatile
     private var authState: PlaybackAuthState = PlaybackAuthState.EMPTY
 
@@ -237,6 +222,7 @@ class InnerTube {
         setLogin: Boolean = false,
         authState: PlaybackAuthState = currentAuthState(),
         forceAnonymous: Boolean = false,
+        requestLocale: YouTubeLocale = locale,
     ) {
         val requestOrigin = client.requestOrigin()
         val requestReferer = client.requestReferer()
@@ -263,7 +249,7 @@ class InnerTube {
             }
         }
         userAgent(client.userAgent)
-        header("Accept-Language", acceptLanguage)
+        header("Accept-Language", YtLocaleTags.acceptLanguage(requestLocale.hl))
         parameter("prettyPrint", false)
     }
 
@@ -345,23 +331,21 @@ class InnerTube {
         query: String? = null,
         params: String? = null,
         continuation: String? = null,
+        requestLocale: YouTubeLocale = locale,
     ) = withRetry {
         httpClient.post("search") {
-        ytClient(client, setLogin = useLoginForBrowse)
-        setBody(
-            SearchBody(
-                context = client.toContext(
-                    locale,
-                    visitorData,
-                    if (useLoginForBrowse) dataSyncId else null,
-                    omitGl = searchOmitsGl
-                ),
-                query = query,
-                params = params
+            val login = useLoginForBrowse
+            val auth = currentAuthState().forLocale(requestLocale)
+            ytClient(client, setLogin = login, authState = auth, requestLocale = requestLocale)
+            setBody(
+                SearchBody(
+                    context = client.toContext(requestLocale, auth.visitorData, auth.dataSyncId.takeIf { login }),
+                    query = query,
+                    params = params
+                )
             )
-        )
-        parameter("continuation", continuation)
-        parameter("ctoken", continuation)
+            parameter("continuation", continuation)
+            parameter("ctoken", continuation)
         }
     }
 
@@ -489,16 +473,21 @@ class InnerTube {
         formData: BrowseBody.FormData? = null,
         setLogin: Boolean = false,
         forceAnonymous: Boolean = false,
+        requestLocale: YouTubeLocale = locale,
     ) = withRetry {
         httpClient.post("browse") {
-            val finalSetLogin = if (forceAnonymous) false else (setLogin || useLoginForBrowse)
-            ytClient(client, setLogin = finalSetLogin, forceAnonymous = forceAnonymous)
+            val finalSetLogin = !forceAnonymous && (setLogin || useLoginForBrowse)
+            val auth = currentAuthState().forLocale(requestLocale)
+            ytClient(
+                client, setLogin = finalSetLogin, authState = auth,
+                forceAnonymous = forceAnonymous, requestLocale = requestLocale
+            )
             setBody(
                 BrowseBody(
                     context = client.toContext(
-                        locale,
-                        if (forceAnonymous) null else visitorData,
-                        if (finalSetLogin) dataSyncId else null
+                        requestLocale,
+                        auth.visitorData.takeUnless { forceAnonymous },
+                        auth.dataSyncId.takeIf { finalSetLogin }
                     ),
                     browseId = browseId,
                     params = params,
@@ -508,6 +497,9 @@ class InnerTube {
             )
         }
     }
+
+    private fun PlaybackAuthState.forLocale(requestLocale: YouTubeLocale): PlaybackAuthState =
+        if (requestLocale == locale) this else copy(visitorData = null)
 
     suspend fun next(
         client: YouTubeClient,
@@ -542,12 +534,14 @@ class InnerTube {
     suspend fun getSearchSuggestions(
         client: YouTubeClient,
         input: String,
+        requestLocale: YouTubeLocale = locale,
     ) = withRetry {
         httpClient.post("music/get_search_suggestions") {
-            ytClient(client)
+            val auth = currentAuthState().forLocale(requestLocale)
+            ytClient(client, authState = auth, requestLocale = requestLocale)
             setBody(
                 GetSearchSuggestionsBody(
-                    context = client.toContext(locale, visitorData, null),
+                    context = client.toContext(requestLocale, auth.visitorData, null),
                     input = input
                 )
             )

@@ -73,8 +73,8 @@ open class DatastoreRepository(private val context: Context) {
         val avoidRepetitiveSongs = it[PreferenceKeys.AVOID_REPETITIVE_SONGS] ?: false
         val preloadQueueEnabled = it[PreferenceKeys.PRELOAD_QUEUE_ENABLED] ?: true
         val preloadQueueSize = it[PreferenceKeys.PRELOAD_QUEUE_SIZE] ?: 5
-        val cookies = cookies.first()
-        val dataSyncId = dataSyncId.first()
+        val cookies = Cookies(it[PreferenceKeys.COOKIES].orEmpty())
+        val dataSyncId = it[PreferenceKeys.DATA_SYNC_ID].orEmpty()
 
         PixelMusicSettings(
             updateChannel = updateChannel,
@@ -109,6 +109,10 @@ open class DatastoreRepository(private val context: Context) {
         it[PreferenceKeys.DATA_SYNC_ID] ?: ""
     }
 
+    val youtubeSession = context.youtubeDataStore.data.map {
+        it[PreferenceKeys.COOKIES].orEmpty() to it[PreferenceKeys.DATA_SYNC_ID].orEmpty()
+    }
+
     val ytUsername = context.youtubeDataStore.data.map {
         it[PreferenceKeys.YT_USERNAME] ?: ""
     }
@@ -137,15 +141,10 @@ open class DatastoreRepository(private val context: Context) {
         }
     }
 
-    suspend fun saveCookies(cookies: Cookies) {
+    suspend fun saveYouTubeSession(cookies: Cookies, dataSyncId: String) {
         context.youtubeDataStore.edit {
             it[PreferenceKeys.COOKIES] = cookies.toRawCookie()
-        }
-    }
-
-    suspend fun saveDataSyncId(newId: String) {
-        context.youtubeDataStore.edit {
-            it[PreferenceKeys.DATA_SYNC_ID] = newId
+            it[PreferenceKeys.DATA_SYNC_ID] = dataSyncId
         }
     }
 

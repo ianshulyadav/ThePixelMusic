@@ -395,7 +395,36 @@ class ExploreViewModelTest {
         assertEquals(2, updatedContent.dynamicShelves.size)
         assertEquals("Page 1 Shelf", updatedContent.dynamicShelves[0].title)
         assertEquals("Page 2 Shelf", updatedContent.dynamicShelves[1].title)
+        assertEquals(
+            listOf("Page 1 Shelf", "Page 2 Shelf"),
+            updatedContent.preparedOtherHomeSections.map { it.title }
+        )
         assertFalse(updatedContent.hasMoreContent)
+    }
+
+    @Test
+    fun loadMore_keepsNextTokenWhenPageHasNoRowsAndStopsOnRepeatedToken() = runTest(testDispatcher) {
+        val firstPage = createMockHomePage("First Shelf", 2, continuation = "empty_page")
+        coEvery { YouTube.home(continuation = null, params = null, forceRefresh = any()) } returns Result.success(firstPage)
+        coEvery { YouTube.newReleaseAlbums() } returns Result.success(emptyList())
+        coEvery { YouTube.home(continuation = "empty_page", params = null, forceRefresh = any()) } returns
+            Result.success(HomePage(chips = null, sections = emptyList(), continuation = "last_page"))
+        val lastPage = createMockHomePage("More Songs", 2, continuation = "last_page")
+        coEvery { YouTube.home(continuation = "last_page", params = null, forceRefresh = any()) } returns
+            Result.success(lastPage.copy(sections = lastPage.sections.map { it.copy(isListShelf = true) }))
+
+        val viewModel = createViewModel()
+        advanceUntilIdle()
+
+        viewModel.loadMore("empty_page")
+        advanceUntilIdle()
+        assertEquals("last_page", viewModel.uiState.value.homePageContinuation)
+
+        viewModel.loadMore("last_page")
+        advanceUntilIdle()
+        val content = viewModel.uiState.value as ExploreScreenUiState.Content
+        assertEquals(listOf("First Shelf", "More Songs"), content.preparedOtherHomeSections.map { it.title })
+        assertFalse(content.hasMoreContent)
     }
 
     @Test
@@ -789,6 +818,62 @@ class ExploreViewModelTest {
         coVerify(atLeast = 1) {
             mockPlayerViewModel.showAndPlaySong(any(), any(), queueName = "Chill Mix")
         }
+    }
+
+    @Test
+    fun testLivePerformancesAndForgottenFavoritesExcluded() = runTest(testDispatcher) {
+        val normalSection = HomePage.Section(
+            title = "Quick picks",
+            label = null,
+            thumbnail = null,
+            endpoint = null,
+            items = listOf(sampleSong("s1", "Normal Studio Song"))
+        )
+        val liveSection = HomePage.Section(
+            title = "Live performances",
+            label = null,
+            thumbnail = null,
+            endpoint = null,
+            items = listOf(sampleSong("s2", "Live Concert Song (Live)"))
+        )
+        val forgottenSection = HomePage.Section(
+            title = "Forgotten favorites",
+            label = null,
+            thumbnail = null,
+            endpoint = null,
+            items = listOf(sampleSong("s3", "Old Song"))
+        )
+
+        val chips = listOf(
+            HomePage.Chip(title = "All", endpoint = null, deselectEndPoint = null),
+            HomePage.Chip(title = "Live performances", endpoint = null, deselectEndPoint = null),
+            HomePage.Chip(title = "Forgotten favorites", endpoint = null, deselectEndPoint = null),
+            HomePage.Chip(title = "Relax", endpoint = null, deselectEndPoint = null)
+        )
+
+        val homePage = HomePage(
+            chips = chips,
+            sections = listOf(normalSection, liveSection, forgottenSection),
+            continuation = null
+        )
+
+        coEvery { YouTube.home(any(), any(), any()) } returns Result.success(homePage)
+        coEvery { YouTube.newReleaseAlbums() } returns Result.success(emptyList())
+
+        val viewModel = createViewModel()
+        viewModel.refreshOnEntry(force = true)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val uiState = viewModel.uiState.value
+        val sectionTitles = uiState.homePageSections.map { it.title }
+        assertFalse(sectionTitles.any { it.contains("live performance", ignoreCase = true) })
+        assertFalse(sectionTitles.any { it.contains("forgotten", ignoreCase = true) })
+        assertTrue(sectionTitles.contains("Quick picks"))
+
+        val chipTitles = uiState.moodChips.map { it.title }
+        assertFalse(chipTitles.any { it.contains("live performance", ignoreCase = true) })
+        assertFalse(chipTitles.any { it.contains("forgotten", ignoreCase = true) })
+        assertTrue(chipTitles.contains("Relax"))
     }
 
     private class TestYTItemTypeAdapter : com.google.gson.JsonSerializer<YTItem>, com.google.gson.JsonDeserializer<YTItem> {

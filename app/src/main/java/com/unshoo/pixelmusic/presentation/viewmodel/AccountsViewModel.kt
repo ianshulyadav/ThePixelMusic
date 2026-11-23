@@ -274,8 +274,7 @@ class AccountsViewModel @Inject constructor(
                         }
                         ExternalServiceAccount.GOOGLE_DRIVE -> gDriveRepository.logout()
                         ExternalServiceAccount.YOUTUBE -> {
-                            datastoreRepository.saveCookies(com.unshoo.pixelmusic.data.model.youtube.Cookies(""))
-                            datastoreRepository.saveDataSyncId("")
+                            datastoreRepository.saveYouTubeSession(com.unshoo.pixelmusic.data.model.youtube.Cookies(), "")
                             val cookieManager = android.webkit.CookieManager.getInstance()
                             cookieManager.removeAllCookies(null)
                             cookieManager.flush()

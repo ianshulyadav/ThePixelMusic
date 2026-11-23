@@ -624,9 +624,11 @@ class ExploreViewModel @Inject constructor(
                         return false
                     }
 
-                    val uiSections = cache.sections.map { it.toUiModel() }
+                    val cachedShelves = classifyHomeShelves(cache.sections)
+                    val uiSections = cachedShelves.sections.map { it.toUiModel() }
+                    val filteredCachedChips = cache.moodChips.filterNot { ContentFilterUtils.isBlockedExploreCategory(it.title) }
                     val uiChips = (listOf(ExploreChipUiModel(id = "All", title = "All", isSelected = true)) +
-                            cache.moodChips.map { ExploreChipUiModel(it.title, it.endpoint?.browseId, it.endpoint?.params) })
+                            filteredCachedChips.map { ExploreChipUiModel(it.title, it.endpoint?.browseId, it.endpoint?.params) })
                         .distinctBy { it.title }
                     _sectionsState.value = uiSections
                     _moodChipsState.value = uiChips
@@ -654,7 +656,6 @@ class ExploreViewModel @Inject constructor(
                     val cachedArtists = cache.feedData?.topArtists.orEmpty()
                     // Same structural classification as the network path so a cache restore and the
                     // following refresh never disagree on which shelf is which.
-                    val cachedShelves = classifyHomeShelves(cache.sections)
                     val cachedYtQuickPicks = cachedShelves.quickPickSongs
                     val cachedOtherSections = cachedShelves.otherSections(
                         hasAlbums = cachedAlbums.isNotEmpty(),
@@ -673,13 +674,16 @@ class ExploreViewModel @Inject constructor(
                     _isLoadingState.value = false
                     _isRefreshingState.value = isRefreshing
                     _isSettledState.value = true
+                    initialHomeContinuation = cache.continuation
 
                     _uiState.update {
                         it.copy(
                             isLoading = false,
                             isRefreshing = isRefreshing,
                             isSettled = true,
-                            homePageSections = cache.sections,
+                            isContinuationLoading = false,
+                            homePageSections = cachedShelves.sections,
+                            homePageContinuation = cache.continuation,
                             moodChips = cache.moodChips,
                             newReleaseAlbums = cache.newReleaseAlbums,
                             albumsForYou = cache.albumsForYou,
@@ -778,10 +782,14 @@ class ExploreViewModel @Inject constructor(
 
         fun allows(item: YTItem): Boolean = when (item) {
             is SongItem -> !(pureYtMusicOnly && (item.isMusicVideo || ContentFilterUtils.isVideoTitle(item.title))) &&
+                !ContentFilterUtils.isLivePerformance(item.title) &&
                 !rejects(item.title, item.artists.joinToString(", ") { it.name }, item.album?.name)
             is AlbumItem -> item.browseId !in blockedReleaseIds &&
+                !ContentFilterUtils.isLivePerformance(item.title) &&
                 !rejects(item.title, item.artists?.joinToString(", ") { it.name }, null)
-            is PlaylistItem -> !rejects(item.title, item.author?.name, null)
+            is PlaylistItem -> !ContentFilterUtils.isBlockedExploreSection(item.title) &&
+                !ContentFilterUtils.isLivePerformance(item.title) &&
+                !rejects(item.title, item.author?.name, null)
             else -> true
         }
 
@@ -825,8 +833,9 @@ class ExploreViewModel @Inject constructor(
 
     private fun classifyHomeShelves(input: List<HomePage.Section>): HomeShelves {
         val filter = contentFilter
+        val filteredInput = input.filterNot { ContentFilterUtils.isBlockedExploreSection(it.title) }
         val classified = HomeShelfClassifier.classifyAll(
-            input.map { it.copy(items = it.items.filter(filter::allows)) }.filter { it.items.isNotEmpty() }
+            filteredInput.map { it.copy(items = it.items.filter(filter::allows)) }.filter { it.items.isNotEmpty() }
         )
         val kinds = LinkedHashMap<String, HomeShelfClassifier.Kind>()
         val sections = ArrayList<HomePage.Section>(classified.size)
@@ -835,8 +844,7 @@ class ExploreViewModel @Inject constructor(
             // Pure YT Music mode hides videos everywhere, including the dedicated video shelves.
             if (kind == HomeShelfClassifier.Kind.MUSIC_VIDEOS && filter.pureYtMusicOnly) continue
             if (kinds.containsKey(section.title)) continue
-            val title = section.title.lowercase()
-            if (title.contains("long listens") || title.contains("local")) continue
+            if (ContentFilterUtils.isBlockedExploreSection(section.title)) continue
             val cleaned = if (kind == HomeShelfClassifier.Kind.MUSIC_VIDEOS) {
                 section
             } else {
@@ -907,7 +915,7 @@ class ExploreViewModel @Inject constructor(
         viewModelScope.launch(ioDispatcher) {
             try {
                 val cache = ExploreCacheModel(
-                    sections = sections.take(20),
+                    sections = sections,
                     moodChips = moodChips,
                     newReleaseAlbums = newReleases.take(20),
                     albumsForYou = albums.take(20),
@@ -1029,7 +1037,7 @@ class ExploreViewModel @Inject constructor(
         _isRefreshingState.value = false
         _isSettledState.value = true
         _uiState.update { it.copy(isLoading = false, isRefreshing = false, isSettled = true, error = message) }
-        _screenUiState.value = content.copy(isRefreshing = false)
+        _screenUiState.value = content.copy(isRefreshing = false, legacyState = _uiState.value)
         return true
     }
 
@@ -1054,17 +1062,22 @@ class ExploreViewModel @Inject constructor(
             _screenUiState.value = ExploreScreenUiState.Loading
         } else if (!isSilent) {
             _isRefreshingState.value = true
-            if (currentContent != null) {
-                _screenUiState.value = currentContent.copy(isRefreshing = true)
-            }
         }
         _errorState.value = null
         _uiState.update {
             it.copy(
                 isLoading = !hasContent,
                 isRefreshing = hasContent && !isSilent,
+                isContinuationLoading = false,
                 isSettled = hasContent,
                 error = null
+            )
+        }
+        if (currentContent != null) {
+            _screenUiState.value = currentContent.copy(
+                isRefreshing = hasContent && !isSilent,
+                isContinuationLoading = false,
+                legacyState = _uiState.value
             )
         }
 
@@ -1086,7 +1099,10 @@ class ExploreViewModel @Inject constructor(
 
             // Stage 1: Fetch source payloads on IO dispatcher
             val onlinePayload = withContext(ioDispatcher) {
-                val homeDeferred = async { runCatching { YouTube.home().getOrNull() }.getOrNull() }
+                val homeDeferred = async {
+                    YouTube.home().getOrNull()?.takeIf { it.sections.isNotEmpty() }
+                        ?: YouTube.explore().getOrNull()?.let { HomePage(it.chips, it.sections) }
+                }
                 val newReleasesDeferred = async { runCatching { YouTube.newReleaseAlbums().getOrNull().orEmpty() }.getOrDefault(emptyList()) }
                 val authAlbumsDeferred = async {
                     if (isYtConnected) {
@@ -1187,7 +1203,8 @@ class ExploreViewModel @Inject constructor(
                     val personalizedAlbums = (dedicatedAlbums + otherHomeAlbums + authAccountAlbums)
                         .distinctBy { it.browseId }
 
-                    val rawChips = initialHome.chips ?: emptyList()
+                    val rawChips = (initialHome.chips ?: emptyList())
+                        .filterNot { ContentFilterUtils.isBlockedExploreCategory(it.title) }
                     val uiChips = rawChips.map { ExploreChipUiModel(it.title, it.endpoint?.browseId, it.endpoint?.params) }
 
                     // Quick picks extracted from Home
@@ -1438,7 +1455,7 @@ class ExploreViewModel @Inject constructor(
                         isContinuationLoading = false,
                         error = null,
                         homePageSections = prepared.rawSections,
-                        homePageContinuation = prepared.currentContinuation,
+                        homePageContinuation = if (isCategoryActive) it.homePageContinuation else prepared.currentContinuation,
                         newReleaseAlbums = prepared.resolvedNewReleases,
                         albumsForYou = prepared.personalizedAlbums,
                         moodChips = prepared.rawChips,
@@ -1639,141 +1656,83 @@ class ExploreViewModel @Inject constructor(
         }
     }
 
-    fun loadMore() {
-        val filter = _uiState.value.selectedFilter
-        if (filter.equals("Local", ignoreCase = true)) return
-        val continuation = _uiState.value.homePageContinuation ?: return
-        if (_uiState.value.isContinuationLoading || _uiState.value.isLoading || _uiState.value.isRefreshing) return
-        if (!_uiState.value.isAdvancedExploreEnabled) return
+    fun loadMore(expectedContinuation: String? = null) {
+        val state = _uiState.value
+        val continuation = state.homePageContinuation ?: return
+        if (expectedContinuation != null && expectedContinuation != continuation) return
+        if (state.selectedFilter.equals("Local", ignoreCase = true) || !state.isAdvancedExploreEnabled) return
+        if (state.isContinuationLoading || state.isLoading || state.isRefreshing) return
 
-        val capturedRefreshGen = currentRefreshGeneration
-        val capturedMoodGen = currentMoodGeneration
-        val capturedFilter = filter
-        val isCategory = !filter.equals("All", ignoreCase = true)
+        val refreshGeneration = currentRefreshGeneration
+        val moodGeneration = currentMoodGeneration
+        val isCategory = !state.selectedFilter.equals("All", ignoreCase = true)
+
+        fun isCurrentRequest(): Boolean =
+            currentRefreshGeneration == refreshGeneration &&
+                currentMoodGeneration == moodGeneration &&
+                _uiState.value.selectedFilter == state.selectedFilter
 
         viewModelScope.launch {
             _uiState.update { it.copy(isContinuationLoading = true) }
-            val current = (_screenUiState.value as? ExploreScreenUiState.Content)
-                ?: (_screenUiState.value as? ExploreScreenUiState.Error)?.cachedContent
-            if (current != null) {
-                _screenUiState.value = current.copy(isContinuationLoading = true)
-            }
+            updateContinuationContent()
+
             try {
-                val continuationHome = withContext(ioDispatcher) {
-                    runCatching { YouTube.home(continuation = continuation).getOrNull() }.getOrNull()
+                val page = withContext(ioDispatcher) {
+                    YouTube.home(continuation = continuation).getOrThrow()
                 }
+                val newShelves = withContext(defaultDispatcher) { classifyHomeShelves(page.sections) }
+                if (!isCurrentRequest()) return@launch
 
-                if (currentRefreshGeneration != capturedRefreshGen ||
-                    currentMoodGeneration != capturedMoodGen ||
-                    _uiState.value.selectedFilter != capturedFilter
-                ) {
-                    return@launch
-                }
+                val current = _uiState.value
+                val previousSections = if (isCategory) current.explorePageSections else current.homePageSections
+                val mergedSections = (previousSections + newShelves.sections).distinctBy { it.title }
+                val nextContinuation = page.continuation?.takeIf { it != continuation }
+                val uiSections = mergedSections.map { it.toUiModel() }
+                _sectionsState.value = uiSections
 
-                if (continuationHome != null && continuationHome.sections.isNotEmpty()) {
-                    val newRawSections = continuationHome.sections.map { section ->
-                        val isVideoSection = section.title.contains("video", ignoreCase = true)
-                        if (isVideoSection) section else section.copy(items = section.items.filterVideo(true))
-                    }.filter { section ->
-                        val title = section.title.lowercase()
-                        !title.contains("trending") &&
-                        !title.contains("long listens") &&
-                        !title.contains("local") &&
-                        section.items.isNotEmpty()
-                    }
-
+                _uiState.update {
                     if (isCategory) {
-                        // Category pagination: append to explorePageSections ONLY
-                        val currentRaw = _uiState.value.explorePageSections
-                        val mergedRaw = (currentRaw + newRawSections).distinctBy { it.title }
-                        val uiSections = mergedRaw.map { it.toUiModel() }
-
-                        _sectionsState.value = uiSections
-                        _uiState.update {
-                            it.copy(
-                                isContinuationLoading = false,
-                                explorePageSections = mergedRaw,
-                                homePageContinuation = continuationHome.continuation
-                            )
-                        }
-                        val currentContent = (_screenUiState.value as? ExploreScreenUiState.Content)
-                            ?: (_screenUiState.value as? ExploreScreenUiState.Error)?.cachedContent
-                        if (currentContent != null) {
-                            _screenUiState.value = currentContent.copy(
-                                isContinuationLoading = false,
-                                dynamicShelves = uiSections,
-                                hasMoreContent = continuationHome.continuation != null,
-                                legacyState = _uiState.value
-                            )
-                        }
-                        // DO NOT call persistToCacheAtomic here - prevents cache contamination
-                    } else {
-                        // Base Home feed pagination
-                        val currentRaw = _uiState.value.homePageSections
-                        val mergedRaw = (currentRaw + newRawSections).distinctBy { it.title }
-                        val uiSections = mergedRaw.map { it.toUiModel() }
-
-                        _sectionsState.value = uiSections
-                        _uiState.update {
-                            it.copy(
-                                isContinuationLoading = false,
-                                homePageSections = mergedRaw,
-                                homePageContinuation = continuationHome.continuation
-                            )
-                        }
-                        initialHomeContinuation = continuationHome.continuation
-                        val currentContent = (_screenUiState.value as? ExploreScreenUiState.Content)
-                            ?: (_screenUiState.value as? ExploreScreenUiState.Error)?.cachedContent
-                        if (currentContent != null) {
-                            _screenUiState.value = currentContent.copy(
-                                isContinuationLoading = false,
-                                dynamicShelves = uiSections,
-                                hasMoreContent = continuationHome.continuation != null,
-                                legacyState = _uiState.value
-                            )
-                        }
-                        persistToCacheAtomic(
-                            sections = mergedRaw,
-                            moodChips = _uiState.value.moodChips,
-                            newReleases = _uiState.value.newReleaseAlbums,
-                            albums = _uiState.value.albumsForYou,
-                            continuation = continuationHome.continuation
-                        )
-                    }
-                } else {
-                    _uiState.update { it.copy(isContinuationLoading = false, homePageContinuation = null) }
-                    if (!isCategory) {
-                        initialHomeContinuation = null
-                    }
-                    val currentContent = (_screenUiState.value as? ExploreScreenUiState.Content)
-                        ?: (_screenUiState.value as? ExploreScreenUiState.Error)?.cachedContent
-                    if (currentContent != null) {
-                        _screenUiState.value = currentContent.copy(
+                        it.copy(
                             isContinuationLoading = false,
-                            hasMoreContent = false,
-                            legacyState = _uiState.value
+                            explorePageSections = mergedSections,
+                            homePageContinuation = nextContinuation
+                        )
+                    } else {
+                        // Later pages can have their own song and album shelves, even after the featured rows.
+                        val addedSections = mergedSections.drop(previousSections.size)
+                        it.copy(
+                            isContinuationLoading = false,
+                            homePageSections = mergedSections,
+                            preparedOtherHomeSections = it.preparedOtherHomeSections + addedSections,
+                            homePageContinuation = nextContinuation
                         )
                     }
                 }
+                if (!isCategory) initialHomeContinuation = nextContinuation
+                updateContinuationContent(uiSections)
+                // Disk keeps the initial feed paired with its continuation and account key.
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                if (currentRefreshGeneration == capturedRefreshGen &&
-                    currentMoodGeneration == capturedMoodGen &&
-                    _uiState.value.selectedFilter == capturedFilter
-                ) {
+                if (isCurrentRequest()) {
+                    Timber.w(e, "Failed to load more Explore shelves")
                     _uiState.update { it.copy(isContinuationLoading = false) }
-                    val currentContent = (_screenUiState.value as? ExploreScreenUiState.Content)
-                        ?: (_screenUiState.value as? ExploreScreenUiState.Error)?.cachedContent
-                    if (currentContent != null) {
-                        _screenUiState.value = currentContent.copy(
-                            isContinuationLoading = false,
-                            legacyState = _uiState.value
-                        )
-                    }
+                    updateContinuationContent()
                 }
             }
         }
+    }
+
+    private fun updateContinuationContent(shelves: List<ExploreSectionUiModel>? = null) {
+        val content = (_screenUiState.value as? ExploreScreenUiState.Content)
+            ?: (_screenUiState.value as? ExploreScreenUiState.Error)?.cachedContent ?: return
+        val state = _uiState.value
+        _screenUiState.value = content.copy(
+            isContinuationLoading = state.isContinuationLoading,
+            dynamicShelves = shelves ?: content.dynamicShelves,
+            hasMoreContent = state.homePageContinuation != null,
+            legacyState = state
+        )
     }
 
     fun setSelectedFilter(filter: String) {
@@ -1791,6 +1750,8 @@ class ExploreViewModel @Inject constructor(
                     selectedFilter = "Local",
                     activeMoodChip = null,
                     explorePageSections = emptyList(),
+                    homePageContinuation = null,
+                    isContinuationLoading = false,
                     isLoading = false,
                     error = null
                 )
@@ -1824,6 +1785,7 @@ class ExploreViewModel @Inject constructor(
                     selectedFilter = "All",
                     isLoading = false,
                     error = null,
+                    isContinuationLoading = false,
                     homePageContinuation = initialHomeContinuation
                 )
             }
@@ -1837,6 +1799,7 @@ class ExploreViewModel @Inject constructor(
                     selectedCategory = "All",
                     categories = currentContent.categories.map { it.copy(isSelected = it.title.equals("All", ignoreCase = true)) },
                     dynamicShelves = restoredShelves,
+                    isContinuationLoading = false,
                     hasMoreContent = initialHomeContinuation != null,
                     legacyState = _uiState.value
                 )
@@ -1867,7 +1830,16 @@ class ExploreViewModel @Inject constructor(
             browseId = effectiveChip.endpoint?.browseId,
             params = effectiveChip.endpoint?.params
         )
-        _uiState.update { it.copy(activeMoodChip = effectiveChip, selectedFilter = effectiveChip.title, isLoading = true, error = null) }
+        _uiState.update {
+            it.copy(
+                activeMoodChip = effectiveChip,
+                selectedFilter = effectiveChip.title,
+                isLoading = true,
+                isContinuationLoading = false,
+                homePageContinuation = null,
+                error = null
+            )
+        }
         _isLoadingState.value = true
 
         val current = (_screenUiState.value as? ExploreScreenUiState.Content)
@@ -1875,6 +1847,8 @@ class ExploreViewModel @Inject constructor(
         if (current != null) {
             _screenUiState.value = current.copy(
                 selectedCategory = name,
+                isContinuationLoading = false,
+                hasMoreContent = false,
                 categories = current.categories.map { it.copy(isSelected = it.title.equals(name, ignoreCase = true)) },
                 legacyState = _uiState.value
             )
@@ -1892,6 +1866,9 @@ class ExploreViewModel @Inject constructor(
                         if (result.isSuccess && result.getOrNull()?.sections?.isNotEmpty() == true) {
                             val homeResult = result.getOrThrow()
                             val rawSections = homeResult.sections
+                                .filterNot { ContentFilterUtils.isBlockedExploreSection(it.title) }
+                                .map { it.copy(items = it.items.filter(contentFilter::allows)) }
+                                .filter { it.items.isNotEmpty() }
                             val uiSections = rawSections.map { it.toUiModel() }
                             if (moodGen != currentMoodGeneration) return@withContext
                             _sectionsState.value = uiSections
@@ -1936,6 +1913,9 @@ class ExploreViewModel @Inject constructor(
                         }
                         if (result.isSuccess && result.getOrNull()?.isNotEmpty() == true) {
                             val rawSections = result.getOrThrow()
+                                .filterNot { ContentFilterUtils.isBlockedExploreSection(it.title) }
+                                .map { it.copy(items = it.items.filter(contentFilter::allows)) }
+                                .filter { it.items.isNotEmpty() }
                             val uiSections = rawSections.map { it.toUiModel() }
                             if (moodGen != currentMoodGeneration) return@withContext
                             _sectionsState.value = uiSections

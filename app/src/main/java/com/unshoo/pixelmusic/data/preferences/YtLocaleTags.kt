@@ -1,20 +1,17 @@
 package com.unshoo.pixelmusic.data.preferences
 
 import java.util.Locale
+import unshoo.ianshulyadav.pixelmusic.innertube.models.YouTubeLocale
 
 /**
  * How the app's language maps onto YouTube Music's `hl` / `gl` / Accept-Language.
  *
- * Same rules BitChord uses (github.com/kushagrasinghx/BitChord, `LocaleTags`):
  *  - `hl` is the base language ("en-IN" -> "en"); Chinese keeps its script as a region tag
  *    (Traditional -> "zh-TW", Simplified -> "zh-CN") because the script picks the catalogue.
- *  - Default `gl` is "US" (Chinese: TW / SG). A device-country guess sent users in countries where
- *    YouTube Music is not offered to an empty catalogue: zero home shelves and zero search results.
- *  - Search sends NO `gl` (except Chinese), so YouTube ranks by the connection's own region, which
- *    is what music.youtube.com itself does, instead of ranking everyone as if in one country.
- * An explicit "Content country" chosen in settings always wins over these defaults.
+ *  - Saved content settings override the device language and region independently.
  */
 object YtLocaleTags {
+    const val SYSTEM = "system"
     const val ZH_HANT = "zh-Hant"
     const val ZH_HANS = "zh-Hans"
 
@@ -31,7 +28,6 @@ object YtLocaleTags {
             }
         }
         val base = Locale.forLanguageTag(tag).language.lowercase(Locale.ROOT)
-            .ifBlank { lower.substringBefore('-') }
         return when (base) {
             "iw" -> "he"
             "in" -> "id"
@@ -46,17 +42,15 @@ object YtLocaleTags {
         else -> n
     }
 
-    fun defaultGl(appTag: String?): String = when (normalize(appTag)) {
-        ZH_HANT -> "TW"
-        ZH_HANS -> "SG"
-        else -> "US"
-    }
+    fun supportedCountry(country: String?): String? =
+        country?.trim()?.uppercase(Locale.ROOT)?.takeIf { it in SupportedYouTubeCountryCodes }
 
-    /** True when search requests should omit `gl` and let YouTube use the connection's region. */
-    fun searchOmitsGl(appTag: String?): Boolean = when (normalize(appTag)) {
-        ZH_HANT, ZH_HANS -> false
-        else -> true
-    }
+    fun resolve(language: String?, country: String?, deviceLocale: Locale): YouTubeLocale = YouTubeLocale(
+        gl = supportedCountry(country) ?: supportedCountry(deviceLocale.country) ?: YouTubeLocale.DEFAULT.gl,
+        hl = language?.trim()?.takeIf { it.isNotEmpty() && it != SYSTEM }?.let(::hl)
+            ?: hl(deviceLocale.toLanguageTag()).takeIf { it == "zh-TW" || it == "zh-CN" || it in LanguageCodeToName }
+            ?: YouTubeLocale.DEFAULT.hl,
+    )
 
     fun acceptLanguage(appTag: String?): String = when (val n = normalize(appTag)) {
         ZH_HANT -> "zh-TW,zh-Hant;q=0.9,zh;q=0.8,en-US;q=0.7,en;q=0.6"

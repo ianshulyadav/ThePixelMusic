@@ -272,7 +272,9 @@ fun ExploreScreen(
     }
     val effectiveCategories = remember(categories, exploreUiState.moodChips, isLocalMode, isEffectivelyOnline) {
         val fetchedTitles = exploreUiState.moodChips.map { it.title }
-        (listOf("All") + fetchedTitles + defaultYouTubeCategories + categories).distinct()
+        (listOf("All") + fetchedTitles + defaultYouTubeCategories + categories)
+            .distinct()
+            .filterNot { com.unshoo.pixelmusic.utils.ContentFilterUtils.isBlockedExploreCategory(it) }
     }
     val selectedCategory = exploreUiState.selectedFilter
     val isLocalSelected = isLocalMode || selectedCategory.equals("Local", ignoreCase = true)
@@ -335,17 +337,20 @@ fun ExploreScreen(
             exploreUiState.homePageSections
         }
     }
-    val shouldLoadMore by remember(listState) {
-        derivedStateOf {
-            val layoutInfo = listState.layoutInfo
-            val totalItems = layoutInfo.totalItemsCount
-            val lastVisibleIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            totalItems > 0 && lastVisibleIndex >= (totalItems - 2).coerceAtLeast(0)
-        }
-    }
-    LaunchedEffect(shouldLoadMore, isLocalSelected) {
-        if (!isLocalSelected && shouldLoadMore && exploreUiState.homePageContinuation != null && !exploreUiState.isContinuationLoading) {
-            exploreViewModel.loadMore()
+    LaunchedEffect(listState, selectedCategory, isLocalSelected, isEffectivelyOnline) {
+        if (isLocalSelected || !isEffectivelyOnline) return@LaunchedEffect
+        snapshotFlow {
+            val layout = listState.layoutInfo
+            val lastVisibleIndex = layout.visibleItemsInfo.lastOrNull()?.index ?: -1
+            val nearEnd = lastVisibleIndex >= (layout.totalItemsCount - 3).coerceAtLeast(0)
+            val feed = exploreUiState.legacyState
+            if (nearEnd && feed != null && feed.isAdvancedExploreEnabled && !feed.isLoading && !feed.isRefreshing) {
+                feed.homePageContinuation
+            } else {
+                null
+            }
+        }.collect { continuation ->
+            if (continuation != null) exploreViewModel.loadMore(continuation)
         }
     }
 
@@ -494,18 +499,8 @@ fun ExploreScreen(
         } else emptyList()
     }
 
-    val otherHomeSections = remember(
-        currentSections,
-        exploreUiState.preparedOtherHomeSections,
-        exploreUiState.activeMoodChip
-    ) {
-        if (exploreUiState.activeMoodChip != null) {
-            currentSections
-        } else if (exploreUiState.preparedOtherHomeSections.isNotEmpty()) {
-            exploreUiState.preparedOtherHomeSections
-        } else {
-            currentSections
-        }
+    val otherHomeSections = remember(exploreUiState.preparedOtherHomeSections) {
+        exploreUiState.preparedOtherHomeSections.filterNot { com.unshoo.pixelmusic.utils.ContentFilterUtils.isBlockedExploreSection(it.title) }
     }
 
     Scaffold(
@@ -3232,9 +3227,7 @@ private fun isBentoSection(title: String, itemSize: Int): Boolean {
         t.contains("featured") ||
         t.contains("supermix") ||
         t.contains("curated") ||
-        t.contains("mixed for you") ||
-        t.contains("forgotten favorites") ||
-        t.contains("forgotten")
+        t.contains("mixed for you")
     )
 }
 

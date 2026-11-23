@@ -93,7 +93,7 @@ class SearchStateHolder @Inject constructor(
         pureYtMusic: Boolean,
         hideVideo: Boolean
     ): String =
-        "${source.name}:${filter.name}:${pureYtMusic}:${hideVideo}:${query.lowercase().trim()}"
+        "${source.name}:${YouTube.locale}:${filter.name}:${pureYtMusic}:${hideVideo}:${query.lowercase().trim()}"
 
     fun initialize(scope: CoroutineScope) {
         this.scope = scope

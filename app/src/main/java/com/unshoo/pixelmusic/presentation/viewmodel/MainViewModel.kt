@@ -18,6 +18,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import com.unshoo.pixelmusic.data.preferences.PlaylistPreferencesRepository
+import unshoo.ianshulyadav.pixelmusic.innertube.YouTube
 
 @HiltViewModel
 class MainViewModel @Inject constructor(
@@ -37,30 +38,23 @@ class MainViewModel @Inject constructor(
             playlistPreferencesRepository.pruneExpiredPlaylists()
         }
         viewModelScope.launch {
-            datastoreRepository.cookies
-                .map { it.toRawCookie() }
+            datastoreRepository.youtubeSession
                 .distinctUntilChanged()
-                .collect { rawCookie ->
+                .collect { (rawCookie, dataSyncId) ->
+                    val previous = YouTube.authState
+                    YouTube.authState = previous.copy(cookie = rawCookie, dataSyncId = dataSyncId)
+                    val hasAuth = YouTube.hasLoginCookie()
+                    YouTube.useLoginForBrowse = hasAuth
                     val isInitialValue = lastKnownCookie == null
-                    val hasAuth = rawCookie.contains("SAPISID=") || rawCookie.contains("__Secure-3PAPISID=")
-                    unshoo.ianshulyadav.pixelmusic.innertube.YouTube.cookie = rawCookie
-                    unshoo.ianshulyadav.pixelmusic.innertube.YouTube.useLoginForBrowse = hasAuth
                     lastKnownCookie = rawCookie
-                    if (rawCookie.isNotEmpty()) {
+                    if (hasAuth) {
                         refreshProfile(rawCookie, delayForColdStart = isInitialValue)
                     } else {
-                        unshoo.ianshulyadav.pixelmusic.innertube.YouTube.useLoginForBrowse = false
                         profileRefreshJob?.cancel()
                         profileRefreshJob = null
                         datastoreRepository.saveYtProfile("", "", "")
                     }
                 }
-        }
-        viewModelScope.launch {
-            datastoreRepository.dataSyncId.collect { id ->
-                unshoo.ianshulyadav.pixelmusic.innertube.YouTube.dataSyncId = id
-                LogUtils.d(this@MainViewModel, "MainViewModel: Syncing dataSyncId to YouTube singleton.")
-            }
         }
     }
 

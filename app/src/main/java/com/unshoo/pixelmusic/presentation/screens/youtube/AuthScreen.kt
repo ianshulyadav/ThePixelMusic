@@ -2,7 +2,7 @@ package com.unshoo.pixelmusic.presentation.screens.youtube
 
 import android.annotation.SuppressLint
 import android.view.ViewGroup
-import android.webkit.JavascriptInterface
+import android.net.Uri
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
@@ -17,6 +17,7 @@ import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewFeature
 import com.unshoo.pixelmusic.data.remote.youtube.Constants
 import kotlinx.coroutines.flow.collectLatest
+import org.json.JSONObject
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -32,6 +33,9 @@ fun AuthScreen(
                 AuthViewModel.ScreenEvent.Out.LoginCompleted -> {
                     Toast.makeText(context, "Successfully logged in!", Toast.LENGTH_SHORT).show()
                     onBack()
+                }
+                AuthViewModel.ScreenEvent.Out.LoginFailed -> {
+                    Toast.makeText(context, "Couldn't save your YouTube Music sign-in", Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -56,35 +60,30 @@ fun AuthScreen(
                 webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView?, url: String?) {
                         super.onPageFinished(view, url)
-                        loadUrl("javascript:Android.onRetrieveDataSyncId(window.yt.config_.DATASYNC_ID)")
-                        authViewModel.onPageFinished(url)
-                        // FIX 5: Evaluate ytcfg to confirm the page actually exposes a signed-in identity.
-                        // Cookies alone don't prove login (multi-channel profile picker leaves user in Guest mode).
-                        loadUrl("""
-                            javascript:(function() {
-                              try {
-                                var cfg = window.ytcfg || window.yt.config_;
-                                var loggedIn = cfg && cfg.get && String(!!cfg.get('LOGGED_IN'));
-                                if (Android && Android.onYtcfgConfirmed) Android.onYtcfgConfirmed(loggedIn === 'true');
-                              } catch(e) { if (Android && Android.onYtcfgConfirmed) Android.onYtcfgConfirmed(false); }
+                        val page = url?.let(Uri::parse) ?: return
+                        if (view == null || page.scheme != "https" || page.host != "music.youtube.com") return
+                        view.evaluateJavascript(
+                            """
+                            (function() {
+                              if (location.origin !== 'https://music.youtube.com') return null;
+                              function config(key) {
+                                var value = window.ytcfg && window.ytcfg.get && window.ytcfg.get(key);
+                                return value == null && window.yt && window.yt.config_
+                                    ? window.yt.config_[key] : value;
+                              }
+                              var loggedIn = config('LOGGED_IN');
+                              if (loggedIn !== true && loggedIn !== 'true') return null;
+                              return {dataSyncId: config('DATASYNC_ID') || ''};
                             })()
-                        """.trimIndent())
-                    }
-                }
-                addJavascriptInterface(object {
-                    @JavascriptInterface
-                    fun onRetrieveDataSyncId(newDataSyncId: String?) {
-                        if (newDataSyncId != null) {
-                            val dataSyncId = newDataSyncId.substringBefore("||")
-                            authViewModel.onDataSyncIdFound(dataSyncId)
+                            """.trimIndent()
+                        ) { result ->
+                            if (view.url == url) {
+                                val session = runCatching { JSONObject(result.orEmpty()) }.getOrNull()
+                                session?.let { authViewModel.completeLogin(it.optString("dataSyncId")) }
+                            }
                         }
                     }
-
-                    @JavascriptInterface
-                    fun onYtcfgConfirmed(loggedIn: Boolean) {
-                        authViewModel.onYtcfgConfirmed(loggedIn)
-                    }
-                }, "Android")
+                }
                 loadUrl(Constants.Auth.START_URL)
             }
         },

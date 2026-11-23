@@ -278,12 +278,18 @@ class QuickPicksViewModel @Inject constructor(
     private suspend fun loadYtMusicHomeQuickPicks(): List<Song> = withContext(Dispatchers.IO) {
         try {
             val homePage = YouTube.home().getOrNull() ?: return@withContext emptyList()
-            homePage.chips?.map { it.title }?.let { chipTitles ->
-                _categories.value = (listOf("All", "Local") + chipTitles).distinct().toImmutableList()
-            }
-            val shelf = homePage.sections.firstOrNull { it.title.contains("quick pick", ignoreCase = true) }
-                ?: homePage.sections.firstOrNull { it.title.contains("quick", ignoreCase = true) }
-                ?: return@withContext emptyList()
+            homePage.chips?.map { it.title }
+                ?.filterNot { com.unshoo.pixelmusic.utils.ContentFilterUtils.isBlockedExploreCategory(it) }
+                ?.let { chipTitles ->
+                    _categories.value = (listOf("All", "Local") + chipTitles).distinct().toImmutableList()
+                }
+            val shelf = homePage.sections.firstOrNull {
+                !com.unshoo.pixelmusic.utils.ContentFilterUtils.isBlockedExploreSection(it.title) &&
+                    it.title.contains("quick pick", ignoreCase = true)
+            } ?: homePage.sections.firstOrNull {
+                !com.unshoo.pixelmusic.utils.ContentFilterUtils.isBlockedExploreSection(it.title) &&
+                    it.title.contains("quick", ignoreCase = true)
+            } ?: return@withContext emptyList()
             val hideVideos = userPreferencesRepository.pureYtMusicOnlyFlow.first() ||
                 userPreferencesRepository.hideVideoFlow.first()
             // filterVideo drops YouTube music videos by their item type, which titles alone miss.
@@ -471,22 +477,39 @@ class QuickPicksViewModel @Inject constructor(
         // Bucket C: YouTube Music personalized Home page sections + Trending
         val ytHomeRecommendationsDeferred = async(Dispatchers.IO) {
             try {
-                val homePage = YouTube.home().getOrNull() ?: return@async emptyList<SongItem>()
-                val chipTitles = homePage.chips?.map { it.title } ?: emptyList()
+                val homePage = YouTube.home().getOrNull()
+                val homeSections = homePage?.sections.orEmpty().filterNot {
+                    com.unshoo.pixelmusic.utils.ContentFilterUtils.isBlockedExploreSection(it.title)
+                }
+                val chipTitles = homePage?.chips?.map { it.title }
+                    ?.filterNot { com.unshoo.pixelmusic.utils.ContentFilterUtils.isBlockedExploreCategory(it) } ?: emptyList()
                 val updatedCategories = (listOf("All", "Local") + chipTitles).distinct()
                 _categories.value = updatedCategories.toImmutableList()
 
                 val items = mutableListOf<SongItem>()
-                val quickPicksShelf = homePage.sections.firstOrNull {
+                val quickPicksShelf = homeSections.firstOrNull {
                     it.title.contains("quick", ignoreCase = true)
                 }
                 if (quickPicksShelf != null) {
                     items.addAll(quickPicksShelf.items.filterIsInstance<SongItem>())
                 }
                 // Extract items from remaining home sections
-                homePage.sections.forEach { section ->
+                homeSections.forEach { section ->
                     if (section != quickPicksShelf) {
                         items.addAll(section.items.filterIsInstance<SongItem>())
+                    }
+                }
+                if (items.isEmpty()) {
+                    // Guest Home can contain only albums and mixes, with no song shelf.
+                    val homeAlbums = homeSections.flatMap { it.items }.filterIsInstance<AlbumItem>()
+                        .filter { it.playlistId.isNotBlank() }
+                    val albums = homeAlbums.ifEmpty { YouTube.newReleaseAlbums().getOrNull().orEmpty() }
+                        .filter { it.playlistId.isNotBlank() }
+                        .distinctBy { it.playlistId }
+                        .take(3)
+                    for (album in albums) {
+                        items.addAll(YouTube.albumSongs(album.playlistId, album).getOrNull()
+                            .orEmpty().filterVideo(pureYtMusicOnly).take(5))
                     }
                 }
                 items.filterVideo(pureYtMusicOnly)

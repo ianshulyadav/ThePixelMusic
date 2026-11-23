@@ -158,4 +158,90 @@ object ContentFilterUtils {
 
     fun matchesFilterKeywords(track: YouTubeMusicTrack, filterKeywords: Collection<String>?): Boolean =
         matchesFilterKeywords(track.title, track.artist, track.album, filterKeywords)
+
+    private val LIVE_PERFORMANCE_REGEX = Regex(
+        """(?i)\b(live\s+performance|live\s+performances|live\s+at\b|live\s+from\b|live\s+in\b|live\s+concert|live\s+session|live\s+sessions|live\s+recording|live\s+version|concert\s+live)\b|[\(\[\{]\s*live(\s+(performance|performances|at|from|in|version|session|sessions|concert|recording|tour|show|audio|video|edit))?\s*[\)\]\}]|[-|/／]\s*live(\s+(performance|performances|version|recording|session))?\s*$"""
+    )
+
+    fun isLivePerformance(title: String?): Boolean {
+        if (title.isNullOrBlank()) return false
+        val trimmed = title.trim()
+        if (trimmed.equals("live", ignoreCase = true) ||
+            trimmed.equals("live performance", ignoreCase = true) ||
+            trimmed.equals("live performances", ignoreCase = true)
+        ) return true
+        return LIVE_PERFORMANCE_REGEX.containsMatchIn(trimmed)
+    }
+
+    /**
+     * Checks if an explore section / shelf title should be blocked (e.g. Live performances, Forgotten favorites).
+     */
+    fun isBlockedExploreSection(title: String?): Boolean {
+        if (title.isNullOrBlank()) return false
+        val t = title.lowercase().trim()
+        if (t.contains("long listens") || t.contains("local")) return true
+        // Forgotten favorites category / shelf (including known localized strings)
+        if (t.contains("forgotten") ||
+            t.contains("vergessene favoriten") ||
+            t.contains("favoritos olvidados") ||
+            t.contains("favoris oubliés") ||
+            t.contains("favorit yang terlupakan") ||
+            t.contains("preferiti dimenticati") ||
+            t.contains("잊혀진 즐겨찾기") ||
+            t.contains("glemte favoritter") ||
+            t.contains("favoritos esquecidos") ||
+            t.contains("забытое избранное") ||
+            t.contains("被遗忘的最爱")
+        ) return true
+        // Live performances shelf (including known localized strings)
+        if (t == "live" ||
+            t.contains("live performance") ||
+            t.contains("live performances") ||
+            t.contains("live recording") ||
+            t.contains("live concert") ||
+            t.contains("live-auftritte") ||
+            t.contains("liveauftritte") ||
+            t.contains("performances en direct") ||
+            t.contains("actuaciones en directo") ||
+            t.contains("esibizioni dal vivo") ||
+            t.contains("apresentações ao vivo") ||
+            t.contains("живые выступления") ||
+            isLivePerformance(title)
+        ) return true
+        return false
+    }
+
+    /**
+     * Checks if a mood chip / category on Explore should be blocked.
+     */
+    fun isBlockedExploreCategory(category: String?): Boolean {
+        if (category.isNullOrBlank()) return false
+        val t = category.lowercase().trim()
+        if (t.contains("forgotten") ||
+            t.contains("vergessene favoriten") ||
+            t.contains("favoritos olvidados") ||
+            t.contains("favoris oubliés") ||
+            t.contains("favorit yang terlupakan") ||
+            t.contains("preferiti dimenticati") ||
+            t.contains("잊혀진 즐겨찾기") ||
+            t.contains("glemte favoritter") ||
+            t.contains("favoritos esquecidos") ||
+            t.contains("забытое избранное") ||
+            t.contains("被遗忘的最爱")
+        ) return true
+        if (t == "live" ||
+            t.contains("live performance") ||
+            t.contains("live performances") ||
+            t.contains("live recording") ||
+            t.contains("live concert") ||
+            t.contains("live-auftritte") ||
+            t.contains("liveauftritte") ||
+            t.contains("performances en direct") ||
+            t.contains("actuaciones en directo") ||
+            t.contains("esibizioni dal vivo") ||
+            t.contains("apresentações ao vivo") ||
+            t.contains("живые выступления")
+        ) return true
+        return false
+    }
 }

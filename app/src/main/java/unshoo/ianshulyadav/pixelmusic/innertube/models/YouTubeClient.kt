@@ -34,7 +34,7 @@ data class YouTubeClient(
     val useSignatureTimestamp: Boolean = false,
     val isEmbedded: Boolean = false,
 ) {
-    fun toContext(locale: YouTubeLocale, visitorData: String?, dataSyncId: String?, omitGl: Boolean = false) = Context(
+    fun toContext(locale: YouTubeLocale, visitorData: String?, dataSyncId: String?) = Context(
         client = Context.Client(
             clientName = clientName,
             clientVersion = clientVersion,
@@ -43,7 +43,7 @@ data class YouTubeClient(
             deviceMake = deviceMake,
             deviceModel = deviceModel,
             androidSdkVersion = androidSdkVersion,
-            gl = if (omitGl) null else locale.gl,
+            gl = locale.gl,
             hl = locale.hl,
             visitorData = visitorData
         ),

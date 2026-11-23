@@ -69,14 +69,23 @@ class YouTubeLibrarySyncManager @Inject constructor(
      * the account identity (dataSyncId) is settled and come back empty; retry the playlists then.
      */
     fun syncAfterLogin() {
+        val session = YouTube.currentPlaybackAuthState()
         appScope.launch {
+            fun isCurrentSession(): Boolean {
+                val current = YouTube.currentPlaybackAuthState()
+                return current.cookie == session.cookie && current.dataSyncId == session.dataSyncId
+            }
+            if (!isCurrentSession()) return@launch
             syncNow(force = true)
             for (attempt in 1..3) {
                 val count = runCatching { appDatabaseCountPlaylists() }.getOrDefault(0)
                 if (count > 0) break
                 delay(attempt * 3_000L)
                 try {
-                    syncLikedPlaylists(forceFull = true)
+                    syncMutex.withLock {
+                        if (!isCurrentSession()) return@launch
+                        syncLikedPlaylists(forceFull = true)
+                    }
                 } catch (e: Exception) {
                     if (e is kotlinx.coroutines.CancellationException) throw e
                     Timber.w(e, "YouTubeLibrarySyncManager: post-login playlist retry %d failed", attempt)
@@ -364,11 +373,15 @@ class YouTubeLibrarySyncManager @Inject constructor(
         val existingPlaylists = playlistRepo.getAll()
 
         // Clean up any deleted YouTube playlists locally
-        existingPlaylists.forEach { existing ->
-            val cleanId = existing.info.id.removePrefix("VL")
-            if (existing.info.id !in remoteIds && cleanId !in remoteIds && !existing.info.id.startsWith("LM")) {
-                Timber.i("YouTubeLibrarySyncManager: Removing deleted remote playlist '%s' (%s)", existing.info.title, existing.info.id)
-                persistenceManager.deletePlaylist(existing.info.id)
+        if (continuation == null) {
+            existingPlaylists.forEach { existing ->
+                val cleanId = existing.info.id.removePrefix("VL")
+                if (existing.info.id !in remoteIds && cleanId !in remoteIds &&
+                    !existing.info.id.startsWith("LM") && !existing.info.isDownloadedPlaylist
+                ) {
+                    Timber.i("YouTubeLibrarySyncManager: Removing deleted remote playlist '%s' (%s)", existing.info.title, existing.info.id)
+                    persistenceManager.deletePlaylist(existing.info.id)
+                }
             }
         }
 

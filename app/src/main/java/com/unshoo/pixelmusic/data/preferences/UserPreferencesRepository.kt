@@ -1,6 +1,7 @@
 package com.unshoo.pixelmusic.data.preferences
 
 import android.content.Context
+import android.content.res.Resources
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
@@ -25,6 +26,8 @@ import javax.inject.Singleton
 import kotlin.text.get
 import kotlin.text.set
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -33,6 +36,7 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import com.unshoo.pixelmusic.data.diagnostics.AdvancedPerformanceDiagnostics
 import com.unshoo.pixelmusic.data.remote.saavn.SaavnAudioQuality
+import java.util.Locale
 
 val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
 
@@ -127,6 +131,7 @@ enum class ProxyType {
 }
 
 val LanguageCodeToName = mapOf(
+    YtLocaleTags.SYSTEM to "Follow device",
     "en" to "English",
     "es" to "Español",
     "fr" to "Français",
@@ -141,6 +146,7 @@ val LanguageCodeToName = mapOf(
 )
 
 val CountryCodeToName = linkedMapOf(
+    YtLocaleTags.SYSTEM to "Follow device",
     "US" to "United States",
     "GB" to "United Kingdom",
     "CA" to "Canada",
@@ -173,16 +179,6 @@ val SupportedYouTubeCountryCodes: Set<String> = setOf(
     "AE", "AR", "BO", "BH", "EG", "GH", "KE", "LB", "OM", "SN", "TZ",
     "UG", "ZW", "BD", "NP", "LK"
 )
-
-/**
- * Content country used until the user picks one in Settings > Content: United States.
- * (Was a device-country guess; the US catalogue is the one YouTube Music serves everywhere.)
- */
-fun getSafeDefaultContentCountry(): String = "US"
-
-/** Content language used until the user picks one in Settings > Content: English ("en" = en-US). */
-fun getSafeDefaultContentLanguage(): String = "en"
-
 
 @Singleton
 class UserPreferencesRepository
@@ -2531,43 +2527,46 @@ constructor(
         }
     }
 
+    private fun readDeviceLocale(): Locale =
+        if (context == null) Locale.getDefault()
+        else Resources.getSystem().configuration.locales[0] ?: Locale.ROOT
+
+    private val deviceContentLocale = MutableStateFlow(readDeviceLocale())
+
+    fun refreshDeviceContentLocale() {
+        deviceContentLocale.value = readDeviceLocale()
+    }
+
     val contentLanguageFlow: Flow<String> =
         dataStore.data.map { preferences ->
-            preferences[PreferencesKeys.CONTENT_LANGUAGE] ?: getSafeDefaultContentLanguage()
+            preferences[PreferencesKeys.CONTENT_LANGUAGE] ?: YtLocaleTags.SYSTEM
         }.distinctUntilChanged()
 
     suspend fun setContentLanguage(language: String) {
         dataStore.edit { preferences ->
-            preferences[PreferencesKeys.CONTENT_LANGUAGE] = language
+            if (language == YtLocaleTags.SYSTEM) preferences.remove(PreferencesKeys.CONTENT_LANGUAGE)
+            else preferences[PreferencesKeys.CONTENT_LANGUAGE] = language
         }
     }
 
-    /** The Content country the user explicitly chose, or null when they never picked one. */
-    val contentCountryExplicitFlow: Flow<String?> =
-        dataStore.data.map { preferences ->
-            preferences[PreferencesKeys.CONTENT_COUNTRY]
-                ?.uppercase()
-                ?.takeIf { it.length == 2 && it in SupportedYouTubeCountryCodes }
+    val youTubeLocaleFlow =
+        combine(dataStore.data, deviceContentLocale) { preferences, deviceLocale ->
+            YtLocaleTags.resolve(
+                language = preferences[PreferencesKeys.CONTENT_LANGUAGE],
+                country = preferences[PreferencesKeys.CONTENT_COUNTRY],
+                deviceLocale = deviceLocale,
+            )
         }.distinctUntilChanged()
 
     val contentCountryFlow: Flow<String> =
-        dataStore.data.map { preferences ->
-            val stored = preferences[PreferencesKeys.CONTENT_COUNTRY]
-            if (!stored.isNullOrBlank() && stored.length == 2 && stored.uppercase() in SupportedYouTubeCountryCodes) {
-                stored.uppercase()
-            } else {
-                getSafeDefaultContentCountry()
-            }
-        }.distinctUntilChanged()
+        dataStore.data.map { YtLocaleTags.supportedCountry(it[PreferencesKeys.CONTENT_COUNTRY]) ?: YtLocaleTags.SYSTEM }
+            .distinctUntilChanged()
 
     suspend fun setContentCountry(country: String) {
-        val sanitized = if (country.length == 2 && country.uppercase() in SupportedYouTubeCountryCodes) {
-            country.uppercase()
-        } else {
-            getSafeDefaultContentCountry()
-        }
+        val sanitized = YtLocaleTags.supportedCountry(country)
         dataStore.edit { preferences ->
-            preferences[PreferencesKeys.CONTENT_COUNTRY] = sanitized
+            if (sanitized == null) preferences.remove(PreferencesKeys.CONTENT_COUNTRY)
+            else preferences[PreferencesKeys.CONTENT_COUNTRY] = sanitized
         }
     }
 
