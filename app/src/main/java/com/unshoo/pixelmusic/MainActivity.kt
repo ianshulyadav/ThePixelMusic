@@ -919,7 +919,7 @@ class MainActivity : ComponentActivity() {
         val navBarCornerRadius = sanitizeNavBarCornerRadius(navBarCornerRadiusRaw)
         val isMiniPlayerDismissing by playerViewModel.isMiniPlayerDismissing.collectAsStateWithLifecycle()
         val hapticsEnabled by playerViewModel.hapticsEnabled.collectAsStateWithLifecycle()
-        val useBlurEffects by playerViewModel.useBlurEffects.collectAsStateWithLifecycle(initialValue = true)
+        val useBlurEffects by playerViewModel.useBlurEffects.collectAsStateWithLifecycle()
         val playerExpansionBlurEnabled by playerViewModel.playerExpansionBlurEnabled.collectAsStateWithLifecycle(initialValue = true)
         val isPlayerExpansionBlurActive = useBlurEffects && playerExpansionBlurEnabled
         val rootView = LocalView.current
@@ -1077,11 +1077,12 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        val navBarFrostedBlur by com.unshoo.pixelmusic.presentation.components.rememberBooleanPreference(
+        val navBarFrostedBlurPreference by com.unshoo.pixelmusic.presentation.components.rememberBooleanPreference(
             context = context,
             key = com.unshoo.pixelmusic.presentation.components.UiEffectPreferenceKeys.NAV_BAR_FROSTED_BLUR,
             default = false
         )
+        val navBarFrostedBlur = useBlurEffects && navBarFrostedBlurPreference
         val mainBackdropSource = com.unshoo.pixelmusic.presentation.components.rememberBackdropSource()
 
         CompositionLocalProvider(

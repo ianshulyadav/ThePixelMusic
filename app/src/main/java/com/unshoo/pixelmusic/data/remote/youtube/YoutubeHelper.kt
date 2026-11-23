@@ -790,23 +790,12 @@ object YoutubeHelper {
     ): String {
         val videoId = song.youtubeId
 
-        if (song.audioFilePath?.isNotBlank() == true && File(song.audioFilePath).exists()) {
-            PixelMusicHelper.printd("$videoId : Playing directly from song.audioFilePath: ${song.audioFilePath}")
-            return song.audioFilePath
-        }
-
-        // ── OFFLINE-FIRST GATE ─────────────────────────────────────────────────
-        val cachedLocalPath = localFilePathCache.get(videoId)
-        if (cachedLocalPath != null && File(cachedLocalPath).exists()) {
-            PixelMusicHelper.printd("$videoId : Playing from in-memory local file cache")
-            return cachedLocalPath
-        }
-        // Downloaded copy or the same track in the user's own folders always wins over a
-        // (possibly cached) network stream.
-        resolveOfflineFirst(context, song)?.let { localPath ->
-            PixelMusicHelper.printd("$videoId : Playing on-device copy: $localPath")
-            return localPath
-        }
+        com.unshoo.pixelmusic.utils.OfflineAudioResolver.readableAudioPath(context, song.audioFilePath)
+            ?.let { return it }
+        com.unshoo.pixelmusic.utils.OfflineAudioResolver.readableAudioPath(context, localFilePathCache.get(videoId))
+            ?.let { return it }
+        val savedSong = getSavedSong(context, videoId)
+        resolveOfflineFirst(context, song, savedSong)?.let { return it }
 
         val plan = resolveStreamQualityPlan(context)
         val maxBitrate = plan.maxBitrateKbps
@@ -862,23 +851,6 @@ object YoutubeHelper {
                     PixelMusicHelper.printd("$videoId : INSTANT start from cached HIGH stream")
                     return it
                 }
-            }
-        }
-
-        // ── On LRU cache miss, check if song was saved/downloaded locally in DB ──
-        val localSongRepository = AppDatabase.getInstance(context).songRepository()
-        var savedSong: Song? = null
-        try {
-            savedSong = localSongRepository.getSong(videoId)
-        } catch (ex: Exception) {
-            PixelMusicHelper.printe(ex.toString())
-        }
-
-        if (savedSong != null) {
-            if (savedSong.audioFilePath != null && File(savedSong.audioFilePath).exists()) {
-                PixelMusicHelper.printd("$videoId : Was downloaded, playing from local file")
-                localFilePathCache.put(videoId, savedSong.audioFilePath)
-                return savedSong.audioFilePath
             }
         }
 
@@ -1174,32 +1146,24 @@ object YoutubeHelper {
      * Uses the LRU cache keyed by "<videoId>_low".
      * Target resolution time: < 200 ms on a normal connection.
      */
-    suspend fun getLowestQualityStreamUrl(context: Context, song: Song): String {
+    suspend fun getLowestQualityStreamUrl(context: Context, song: Song, skipLocalAudio: Boolean = false): String {
         val videoId = song.youtubeId
 
-        if (song.audioFilePath?.isNotBlank() == true && File(song.audioFilePath).exists()) {
-            return song.audioFilePath
-        }
-
-        // Offline-first gate
-        val cachedLocalPath = localFilePathCache.get(videoId)
-        if (cachedLocalPath != null && File(cachedLocalPath).exists()) {
-            return cachedLocalPath
-        }
-        val localSongRepository = AppDatabase.getInstance(context).songRepository()
-        val savedSong = try { localSongRepository.getSong(videoId) } catch (_: Exception) { null }
-        if (savedSong?.audioFilePath != null && File(savedSong.audioFilePath).exists()) {
-            localFilePathCache.put(videoId, savedSong.audioFilePath)
-            return savedSong.audioFilePath
+        if (!skipLocalAudio) {
+            com.unshoo.pixelmusic.utils.OfflineAudioResolver.readableAudioPath(context, song.audioFilePath)
+                ?.let { return it }
+            com.unshoo.pixelmusic.utils.OfflineAudioResolver.readableAudioPath(context, localFilePathCache.get(videoId))
+                ?.let { return it }
+            resolveOfflineFirst(context, song, getSavedSong(context, videoId))?.let { return it }
         }
 
         // LRU cache hit with validation
         streamUrlLruCache.get("${videoId}_low")?.let { 
-            if (isYoutubeUrlValid(it)) return it 
+            if (isYoutubeUrlValid(it) && (!skipLocalAudio || it.toUri().host?.endsWith(".googlevideo.com") == true)) return it
         }
         // If high-quality is already cached and valid, use it immediately (better than re-resolving)
         streamUrlLruCache.get("${videoId}_high")?.let { 
-            if (isYoutubeUrlValid(it)) return it 
+            if (isYoutubeUrlValid(it) && (!skipLocalAudio || it.toUri().host?.endsWith(".googlevideo.com") == true)) return it
         }
 
         val lowResult = getSongUrlFromYoutube(context, song, retries = 1, lowQuality = true)
@@ -1475,7 +1439,7 @@ object YoutubeHelper {
                 localFilePathCache.put(videoId, savedSong.audioFilePath)
                 return savedSong.audioFilePath
             }
-            resolveOfflineFirst(context, song)?.let { return it }
+            resolveOfflineFirst(context, song, savedSong)?.let { return it }
         }
 
         val entryPoint = EntryPointAccessors.fromApplication(
@@ -1717,7 +1681,14 @@ object YoutubeHelper {
      * Positive hits are cached in [localFilePathCache]; library misses are cached briefly in
      * [localMatchMissCache] so streaming never pays for the scan twice.
      */
-    private suspend fun resolveOfflineFirst(context: Context, song: Song): String? {
+    private suspend fun getSavedSong(context: Context, videoId: String): Song? = try {
+        AppDatabase.getInstance(context).songRepository().getSong(videoId)
+    } catch (e: Exception) {
+        if (e is kotlinx.coroutines.CancellationException) throw e
+        null
+    }
+
+    private suspend fun resolveOfflineFirst(context: Context, song: Song, saved: Song?): String? {
         val videoId = song.youtubeId
         if (videoId.isBlank()) return null
         runCatching {
@@ -1730,12 +1701,8 @@ object YoutubeHelper {
                 }
             }
         }
-        val saved = runCatching { AppDatabase.getInstance(context).songRepository().getSong(videoId) }.getOrNull()
-        val savedPath = saved?.audioFilePath
-            // Older builds recorded a matching phone-library file as the song's "download".
-            // Without the opt-in, only trust files the app itself saved.
-            ?.takeIf { useDeviceLibraryMatches || isAppSavedAudioPath(context, it) }
-        if (!savedPath.isNullOrBlank() && (savedPath.startsWith("content://") || File(savedPath).exists())) {
+        val savedPath = com.unshoo.pixelmusic.utils.OfflineAudioResolver.readableAudioPath(context, saved?.audioFilePath)
+        if (savedPath != null) {
             localFilePathCache.put(videoId, savedPath)
             return savedPath
         }
@@ -1757,17 +1724,6 @@ object YoutubeHelper {
     }
 
     private val OFFLINE_AUDIO_EXTENSIONS = arrayOf("m4a", "opus", "flac", "mp3", "ogg", "webm")
-
-    /** True for audio the app downloaded itself: its audio folder, a SAF download folder, or Download/PixelMusic. */
-    private fun isAppSavedAudioPath(context: Context, path: String): Boolean {
-        if (path.startsWith("content://")) return true
-        val audioDir = runCatching {
-            PixelMusicHelper.getDownloadDirectory(context, Constants.Downloads.AUDIO_FILES_FOLDER).absolutePath
-        }.getOrNull()
-        return (audioDir != null && path.startsWith(audioDir)) ||
-            path.contains("/Download/PixelMusic/", ignoreCase = true) ||
-            path.contains("/PixelMusic/", ignoreCase = true)
-    }
 
     /** Mirrors the "Use matching songs from phone storage" setting (set by MusicService). */
     @Volatile

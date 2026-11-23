@@ -2,8 +2,7 @@ package com.unshoo.pixelmusic.utils
 
 import android.content.Context
 import com.unshoo.pixelmusic.data.database.MusicDao
-import com.unshoo.pixelmusic.data.database.SongEntity
-import com.unshoo.pixelmusic.data.database.SourceType
+import com.unshoo.pixelmusic.data.database.LocalAudioCandidate
 import com.unshoo.pixelmusic.data.model.youtube.Song
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
@@ -67,28 +66,21 @@ object LocalAudioDuplicateMatcher {
         return prev[len2]
     }
 
-    /**
-     * Clean noisy tokens commonly found in YouTube titles / file names.
-     */
-    fun cleanMetadataText(text: String): String {
-        return text
-            .replace(Regex("(?i)\\.[a-z0-9]{2,4}$"), "") // Remove file extension (.mp3, .m4a, etc)
-            .replace(Regex("(?i)\\(official\\s*(music)?\\s*(video|audio|lyric\\s*video)?\\)"), "")
-            .replace(Regex("(?i)\\[official\\s*(music)?\\s*(video|audio|lyric\\s*video)?\\]"), "")
-            .replace(Regex("(?i)\\(lyrics?\\)"), "")
-            .replace(Regex("(?i)\\[lyrics?\\]"), "")
-            .replace(Regex("(?i)\\(audio\\)"), "")
-            .replace(Regex("(?i)\\[audio\\]"), "")
-            .replace(Regex("(?i)\\(full\\s*song\\)"), "")
-            .replace(Regex("(?i)\\[full\\s*song\\]"), "")
-            .replace(Regex("(?i)\\bft\\.?\\b.*"), "")
-            .replace(Regex("(?i)\\bfeat\\.?\\b.*"), "")
-            .replace(Regex("(?i)\\bfeaturing\\b.*"), "")
-            .replace(Regex("[^a-zA-Z0-9\\s]"), " ")
-            .replace(Regex("\\s+"), " ")
-            .trim()
-            .lowercase(Locale.ROOT)
-    }
+    private val extensionSuffix = Regex("""(?i)\.[a-z0-9]{2,4}$""")
+    private val titleAnnotation = Regex("""(?i)(?:\((official\s*(?:music)?\s*(?:video|audio|lyric\s*video)?|lyrics?|audio|full\s*song)\)|\[(official\s*(?:music)?\s*(?:video|audio|lyric\s*video)?|lyrics?|audio|full\s*song)\])""")
+    private val featuringSuffix = Regex("""(?i)\b(?:ft|feat|featuring)\b.*""")
+    private val punctuation = Regex("""[^\p{L}\p{M}\p{N}\s]""")
+    private val whitespace = Regex("""\s+""")
+    private val versionKeywords = listOf("remix", "instrumental", "karaoke", "cover", "acoustic", "live", "sped up", "speed up", "slowed", "reverb", "tribute")
+
+    fun cleanMetadataText(text: String): String = text
+        .replace(extensionSuffix, "")
+        .replace(titleAnnotation, "")
+        .replace(featuringSuffix, "")
+        .replace(punctuation, " ")
+        .replace(whitespace, " ")
+        .trim()
+        .lowercase(Locale.ROOT)
 
     /**
      * Calculate string similarity score between 0.0 and 1.0 using Levenshtein distance,
@@ -98,7 +90,6 @@ object LocalAudioDuplicateMatcher {
         val c1 = cleanMetadataText(s1)
         val c2 = cleanMetadataText(s2)
 
-        if (c1.isEmpty() && c2.isEmpty()) return 1.0
         if (c1.isEmpty() || c2.isEmpty()) return 0.0
         if (c1 == c2) return 1.0
 
@@ -170,8 +161,11 @@ object LocalAudioDuplicateMatcher {
         candidateArtist: String,
         candidateDurationSeconds: Int?
     ): Boolean {
-        // 1. Version keywords check: do not match remix, live, acoustic, instrumental, etc. against original
-        val versionKeywords = listOf("remix", "instrumental", "karaoke", "cover", "acoustic", "live", "sped up", "speed up", "slowed", "reverb", "tribute")
+        if (targetDurationSeconds != null && targetDurationSeconds > 0 &&
+            candidateDurationSeconds != null && candidateDurationSeconds > 0 &&
+            abs(targetDurationSeconds - candidateDurationSeconds) > DURATION_TOLERANCE_SECONDS
+        ) return false
+
         for (keyword in versionKeywords) {
             val targetHas = targetTitle.contains(keyword, ignoreCase = true)
             val candidateHas = candidateTitle.contains(keyword, ignoreCase = true)
@@ -191,19 +185,6 @@ object LocalAudioDuplicateMatcher {
             return false
         }
 
-        // 4. Duration check if both durations are present (> 0)
-        if (targetDurationSeconds != null && targetDurationSeconds > 0 &&
-            candidateDurationSeconds != null && candidateDurationSeconds > 0
-        ) {
-            val diff = abs(targetDurationSeconds - candidateDurationSeconds)
-            if (diff > DURATION_TOLERANCE_SECONDS) {
-                Timber.tag(TAG).d(
-                    "Candidates match title ($titleSim) and artist but duration difference $diff s exceeds tolerance"
-                )
-                return false
-            }
-        }
-
         Timber.tag(TAG).d(
             "Found duplicate match! Target=\"$targetTitle\" ($targetArtist) vs Local=\"$candidateTitle\" ($candidateArtist), titleSim=$titleSim"
         )
@@ -211,36 +192,39 @@ object LocalAudioDuplicateMatcher {
     }
 
     /**
-     * Search a provided list of local [SongEntity]s for an 80%+ match using a [Song] object.
+     * Search a provided list of local [LocalAudioCandidate]s for an 80%+ match using a [Song] object.
      */
     fun findMatchingLocalSong(
-        localSongs: List<SongEntity>,
+        localSongs: List<LocalAudioCandidate>,
         song: Song,
-        allowLossless: Boolean = true
-    ): SongEntity? {
+        allowLossless: Boolean = true,
+        context: Context? = null
+    ): LocalAudioCandidate? {
         val targetDurationSec = parseDurationToSeconds(song.duration)
         return findMatchingLocalSong(
             localSongs = localSongs,
             title = song.title,
             artist = song.artist,
             durationSeconds = targetDurationSec,
-            allowLossless = allowLossless
+            allowLossless = allowLossless,
+            context = context
         )
     }
 
     /**
-     * Search a provided list of local [SongEntity]s for an 80%+ match.
+     * Search a provided list of local [LocalAudioCandidate]s for an 80%+ match.
      */
     fun findMatchingLocalSong(
-        localSongs: List<SongEntity>,
+        localSongs: List<LocalAudioCandidate>,
         title: String,
         artist: String,
         durationSeconds: Int? = null,
-        allowLossless: Boolean = true
-    ): SongEntity? {
+        allowLossless: Boolean = true,
+        context: Context? = null
+    ): LocalAudioCandidate? {
         if (title.isBlank()) return null
         return localSongs.firstOrNull { localSong ->
-            val path = localSong.filePath
+            val path = localSong.filePath.ifBlank { localSong.contentUriString }
             if (path.isBlank()) return@firstOrNull false
             if (!allowLossless && isLosslessPath(path)) return@firstOrNull false
 
@@ -256,10 +240,18 @@ object LocalAudioDuplicateMatcher {
                 candidateDurationSeconds = localDurationSec
             )
             if (!matches) return@firstOrNull false
-            val file = File(path)
-            file.exists() && file.length() > 0L
+            if (context != null) {
+                resolveLocalSongPath(context, localSong) != null
+            } else {
+                val file = File(path)
+                file.isFile && file.length() > 0L
+            }
         }
     }
+
+    internal fun resolveLocalSongPath(context: Context, song: LocalAudioCandidate): String? =
+        OfflineAudioResolver.readableAudioPath(context, song.filePath)
+            ?: OfflineAudioResolver.readableAudioPath(context, song.contentUriString)
 
     /**
      * Search local database for an existing local audio file matching the song.
@@ -276,7 +268,7 @@ object LocalAudioDuplicateMatcher {
                 MatcherEntryPoint::class.java
             ).musicDao()
 
-            val localSongs = musicDao.getSongsBySourceType(SourceType.LOCAL)
+            val localSongs = musicDao.getLocalAudioCandidates()
             if (localSongs.isEmpty()) return null
 
             val targetDurationSec = parseDurationToSeconds(song.duration)
@@ -285,9 +277,10 @@ object LocalAudioDuplicateMatcher {
                 title = song.title,
                 artist = song.artist,
                 durationSeconds = targetDurationSec,
-                allowLossless = allowLossless
+                allowLossless = allowLossless,
+                context = context,
             )
-            matched?.filePath
+            matched?.let { resolveLocalSongPath(context, it) }
         } catch (e: Exception) {
             Timber.tag(TAG).w(e, "Error checking local duplicate songs")
             null

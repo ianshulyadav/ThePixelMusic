@@ -14,6 +14,16 @@ import org.json.JSONArray
 import org.json.JSONObject
 import com.unshoo.pixelmusic.utils.YouTubeIdUtils
 
+/** Columns required for matching a cloud track against device audio. */
+data class LocalAudioCandidate(
+    val title: String,
+    val artistName: String,
+    val duration: Long,
+    val filePath: String,
+    val contentUriString: String,
+    val albumArtUriString: String?,
+)
+
 /** Integer constants for the `source_type` column — faster than LIKE checks on URI scheme. */
 object SourceType {
     const val LOCAL = 0

@@ -26,6 +26,7 @@ import unshoo.ianshulyadav.pixelmusic.innertube.models.SongItem
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.filter
 import com.unshoo.pixelmusic.data.model.PlaybackQueueSnapshot
+import com.unshoo.pixelmusic.data.model.PlaybackQueueHistoryEntry
 import com.unshoo.pixelmusic.data.model.PlaybackQueueItemSnapshot
 import android.media.MediaMetadataRetriever
 import kotlin.math.absoluteValue
@@ -127,6 +128,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -4200,6 +4202,7 @@ class PlayerViewModel @Inject constructor(
                                 currentIndex = 0,
                                 currentPositionMs = player.currentPosition
                             )
+                            recordQueueHistory(fullQueue, song, queueName)
                         }
                         if (mediaItems.size > 1) {
                             launch(Dispatchers.IO) {
@@ -4789,6 +4792,75 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
+    val queueHistory = userPreferencesRepository.queueHistoryFlow.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList()
+    )
+
+    fun replayQueueHistory(entry: PlaybackQueueHistoryEntry) {
+        viewModelScope.launch {
+            val songs = withContext(Dispatchers.Default) {
+                val library = libraryStateHolder.allSongsById.value
+                entry.items.map { mapSnapshotItemToSong(it, library) }
+            }
+            val startSong = songs.getOrNull(entry.startIndex) ?: songs.firstOrNull() ?: return@launch
+            playSongs(
+                songs, startSong,
+                queueName = entry.name ?: context.getString(R.string.home_queue_history_title),
+                preserveQueueOrder = true,
+            )
+        }
+    }
+
+    fun removeQueueHistory(id: String) {
+        viewModelScope.launch { userPreferencesRepository.removeQueueHistory(id) }
+    }
+
+    fun clearQueueHistory() {
+        viewModelScope.launch { userPreferencesRepository.clearQueueHistory() }
+    }
+
+    private fun recordQueueHistory(queue: List<Song>, startSong: Song, queueName: String) {
+        if (queue.size < 2) return
+        val savedAt = System.currentTimeMillis()
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                userPreferencesRepository.recordQueueHistory(
+                    PlaybackQueueHistoryEntry(
+                        id = java.util.UUID.randomUUID().toString(),
+                        name = queueName.takeUnless { it.isBlank() || it == "None" },
+                        items = queue.map(::queueItemSnapshot),
+                        startIndex = queue.indexOfFirst { it.id == startSong.id }.coerceAtLeast(0),
+                        savedAtEpochMs = savedAt,
+                    )
+                )
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Timber.w(error, "Failed to record queue history")
+            }
+        }
+    }
+
+    private fun queueItemSnapshot(song: Song): PlaybackQueueItemSnapshot {
+        val uri = when {
+            song.contentUriString.isNotBlank() -> song.contentUriString
+            song.id.startsWith("youtube_") -> "youtube://${song.id.removePrefix("youtube_")}"
+            song.youtubeId != null -> "youtube://${song.youtubeId}"
+            else -> song.path
+        }
+        return PlaybackQueueItemSnapshot(
+            mediaId = song.id,
+            uri = uri,
+            title = song.title,
+            artist = song.artist,
+            albumTitle = song.album,
+            artworkUri = MediaItemBuilder.resolveArtworkUri(song.albumArtUriString, song.id, song.youtubeId),
+            durationMs = song.duration.takeIf { it > 0L },
+        )
+    }
+
+    private var playbackSnapshotWriteJob: Job? = null
+
     fun persistPlaybackSnapshotFromViewModel(
         queue: List<Song>,
         currentSong: Song?,
@@ -4803,38 +4875,20 @@ class PlayerViewModel @Inject constructor(
         val isShuffle = playbackStateHolder.stablePlayerState.value.isShuffleEnabled
         val repeat = playbackStateHolder.stablePlayerState.value.repeatMode
 
-        val snapshotItems = queue.map { song ->
-            val uri = when {
-                song.contentUriString.isNotBlank() -> song.contentUriString
-                song.id.startsWith("youtube_") -> "youtube://${song.id.removePrefix("youtube_")}"
-                song.youtubeId != null -> "youtube://${song.youtubeId}"
-                else -> song.path
-            }
-            val effectiveArt = MediaItemBuilder.resolveArtworkUri(song.albumArtUriString, song.id, song.youtubeId)
-
-            PlaybackQueueItemSnapshot(
-                mediaId = song.id,
-                uri = uri,
-                title = song.title,
-                artist = song.artist,
-                albumTitle = song.album,
-                artworkUri = effectiveArt,
-                durationMs = song.duration.takeIf { it > 0L }
-            )
-        }
-
-        val snapshot = PlaybackQueueSnapshot(
-            items = snapshotItems,
-            currentMediaId = effectiveCurrentSong.id,
-            currentIndex = resolvedCurrentIndex,
-            currentPositionMs = position,
-            playWhenReady = playWhenReady,
-            repeatMode = repeat,
-            shuffleEnabled = isShuffle
-        )
-
-        viewModelScope.launch(Dispatchers.IO) {
+        playbackSnapshotWriteJob?.cancel()
+        playbackSnapshotWriteJob = viewModelScope.launch(Dispatchers.IO) {
             runCatching {
+                val snapshotItems = queue.map(::queueItemSnapshot)
+                val snapshot = PlaybackQueueSnapshot(
+                    items = snapshotItems,
+                    currentMediaId = effectiveCurrentSong.id,
+                    currentIndex = resolvedCurrentIndex,
+                    currentPositionMs = position,
+                    playWhenReady = playWhenReady,
+                    repeatMode = repeat,
+                    shuffleEnabled = isShuffle
+                )
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
                 userPreferencesRepository.setPlaybackQueueSnapshot(snapshot)
             }.onFailure {
                 Timber.w(it, "Failed to persist playback snapshot from PlayerViewModel")
@@ -5841,7 +5895,10 @@ class PlayerViewModel @Inject constructor(
 
 
     // rebuildPlayerQueue functionality moved to PlaybackStateHolder (simplified)
-    fun playSongs(songsToPlay: List<Song>, startSong: Song, queueName: String = "None", playlistId: String? = null) {
+    fun playSongs(
+        songsToPlay: List<Song>, startSong: Song, queueName: String = "None",
+        playlistId: String? = null, preserveQueueOrder: Boolean = false,
+    ) {
         cancelPendingFullQueuePlayback()
         // FIX (miniplayer vanish on tap): Set preparingSongId IMMEDIATELY so the miniplayer
         // becomes visible before any async hydration work starts. Without this, the miniplayer
@@ -5898,7 +5955,7 @@ class PlayerViewModel @Inject constructor(
             queueStateHolder.setOriginalQueueOrder(availableSongs)
 
             // Check if the user wants shuffle to be persistent across different albums
-            val isPersistent = userPreferencesRepository.persistentShuffleEnabledFlow.first()
+            val isPersistent = !preserveQueueOrder && userPreferencesRepository.persistentShuffleEnabledFlow.first()
             throwIfDirectPlaybackRequestIsStale(requestToken)
             // Check if shuffle is currently active in the player
             val isShuffleOn = playbackStateHolder.stablePlayerState.value.isShuffleEnabled
@@ -6220,7 +6277,9 @@ class PlayerViewModel @Inject constructor(
 
             val baseItem = buildPlaybackMediaItem(song, playlistId)
             val telegramAlternative = telegramAlternativeKey(song.title, song.artist)?.let(telegramByKey::get)
-            mediaItems += if (telegramAlternative != null) {
+            mediaItems += if (telegramAlternative != null &&
+                !com.unshoo.pixelmusic.utils.OfflineAudioResolver.hasOfflineAudio(context, song)
+            ) {
                 // Stream audio from Telegram, but keep the YouTube MediaMetadata/artwork/title so
                 // the queue/full-player visuals remain the online YouTube Music version.
                 baseItem.buildUpon()
@@ -6299,16 +6358,6 @@ class PlayerViewModel @Inject constructor(
                 return
             }
         }
-        saveYoutubeSongsToDb(listOf(effectiveStartSong))
-        if (songsToPlay.size > 1) {
-            viewModelScope.launch(Dispatchers.IO) {
-                try {
-                    saveYoutubeSongsToDb(songsToPlay)
-                } catch (e: Exception) {
-                    Timber.e(e, "Failed to save YouTube songs to DB in background")
-                }
-            }
-        }
         com.unshoo.pixelmusic.data.remote.youtube.AutoQueueManager.reset()
 
         // Update dynamic shortcut for last played playlist
@@ -6348,21 +6397,7 @@ class PlayerViewModel @Inject constructor(
             if (scheme == "telegram") {
                 ensureTelegramPlaybackObserversStarted()
             }
-            if (scheme == "youtube") {
-                val videoId = startingUri.toString().substringAfter("youtube://")
-                val ytSong = try {
-                    com.unshoo.pixelmusic.data.database.youtube.AppDatabase.getInstance(context).songRepository().getSong(videoId)
-                } catch (e: Exception) {
-                    null
-                }
-                if (ytSong?.audioFilePath != null && java.io.File(ytSong.audioFilePath).exists()) {
-                    dualPlayerEngine.registerLocalPath(startingUri.toString(), ytSong.audioFilePath)
-                }
-            }
-            // Pre-resolve asynchronously on Dispatchers.IO to not block player preparation
-            viewModelScope.launch(Dispatchers.IO) {
-                dualPlayerEngine.resolveCloudUri(startingUri)
-            }
+            dualPlayerEngine.kickBackgroundResolve(startingUri)
         }
 
         val preparedPlaybackQueue = preparePlaybackQueue(
@@ -6372,17 +6407,14 @@ class PlayerViewModel @Inject constructor(
         )
 
         val playSongsAction: suspend () -> Unit = {
-            // Use Direct Engine Access to avoid TransactionTooLargeException on Binder
-            dualPlayerEngine.cancelNext()
-            val enginePlayer = dualPlayerEngine.masterPlayer
-
             if (preparedPlaybackQueue.mediaItems.isNotEmpty()) {
                 val applyJob = viewModelScope.launch {
                     val items = preparedPlaybackQueue.mediaItems.toMutableList()
                     val startIndex = preparedPlaybackQueue.startIndex
                     val startItem = items.getOrNull(startIndex)
 
-                    val resolvedStart = if (startItem != null) {
+                    val resolvedStart = async {
+                        if (startItem == null) return@async null
                         try {
                             dualPlayerEngine.getCachedResolvedMediaItem(startItem) ?: run {
                                 withContext(Dispatchers.IO) {
@@ -6395,16 +6427,18 @@ class PlayerViewModel @Inject constructor(
                                 }
                             }
                         } catch (e: Exception) {
+                            if (e is kotlinx.coroutines.CancellationException) throw e
                             Timber.w(e, "instant start resolve failed")
                             startItem
                         }
-                    } else {
-                        null
                     }
 
-                    if (resolvedStart != null) {
-                        items[startIndex] = resolvedStart
+                    if (mediaController == null || !_isMediaControllerReady.value) {
+                        withTimeoutOrNull(2000L) {
+                            _isMediaControllerReady.filter { it }.first()
+                        }
                     }
+                    resolvedStart.await()?.let { items[startIndex] = it }
 
                     if (isDirectPlaybackRequestStale(requestToken)) {
                         Timber.d(
@@ -6430,6 +6464,19 @@ class PlayerViewModel @Inject constructor(
                         player.prepare()
                         player.playWhenReady = true
                         player.play()
+                        persistPlaybackSnapshotFromViewModel(
+                            songsToPlay, effectiveStartSong, playWhenReady = true,
+                            currentIndex = startIndex, currentPositionMs = 0L
+                        )
+                        recordQueueHistory(songsToPlay, effectiveStartSong, queueName)
+                        viewModelScope.launch(Dispatchers.IO) {
+                            try {
+                                saveYoutubeSongsToDb(songsToPlay)
+                            } catch (e: Exception) {
+                                if (e is kotlinx.coroutines.CancellationException) throw e
+                                Timber.e(e, "Failed to save YouTube playback queue")
+                            }
+                        }
                         // Instant YT Music history sync for the song just launched.
                         player.currentMediaItem?.let { registerYoutubePlaybackHistoryIfNeeded(it) }
                         _playerUiState.update { it.copy(isLoadingInitialSongs = false) }
@@ -6462,16 +6509,6 @@ class PlayerViewModel @Inject constructor(
             }
         }
 
-        // Persist snapshot immediately from PlayerViewModel to prevent process death losing queue state
-        persistPlaybackSnapshotFromViewModel(songsToPlay, effectiveStartSong, playWhenReady = true)
-
-        // Ensure MediaController connection is ready before executing playback action
-        if (mediaController == null || !_isMediaControllerReady.value) {
-            Timber.w("MediaController not ready. Awaiting connection.")
-            withTimeoutOrNull(2000L) {
-                _isMediaControllerReady.filter { it }.first()
-            }
-        }
         playSongsAction()
     }
 
@@ -6727,6 +6764,13 @@ class PlayerViewModel @Inject constructor(
                         null
                     }
                     if (videoId != null) {
+                        val offlineAudio = com.unshoo.pixelmusic.utils.OfflineAudioResolver
+                        val knownPath = offlineAudio.readableAudioPath(context, song.path)
+                            ?: offlineAudio.readableAudioPath(context, song.contentUriString)
+                            ?: offlineAudio.readableAudioPath(
+                                context, offlineAudio.getDownloadedAudioUri(context, videoId)?.toString()
+                            )
+                        if (knownPath != null) return@forEach
                         val workRequest = OneTimeWorkRequestBuilder<SongDownloadWorker>()
                             .setInputData(workDataOf(SongDownloadWorker.SONG_KEY to videoId))
                             .addTag(downloadTag)
@@ -7999,7 +8043,6 @@ class PlayerViewModel @Inject constructor(
                         youTubeLibrarySyncManager.syncSubscribedArtists(forceFull = true)
                     }
                     LibraryTabId.PLAYLISTS -> {
-                        youTubeLibrarySyncManager.syncLikedPlaylists()
                         syncManager.forceRefresh(syncCloud = true)
                     }
                     else -> {

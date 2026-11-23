@@ -1,12 +1,12 @@
 package com.unshoo.pixelmusic.presentation.components
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.layout.LazyLayoutCacheWindow
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -23,6 +25,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -32,13 +35,14 @@ import com.unshoo.pixelmusic.data.model.Song
 import kotlinx.collections.immutable.ImmutableList
 
 private val RecentlyAddedArtShape = RoundedCornerShape(28.dp)
-private val RecentlyAddedImageSize = coil.size.Size(420, 420)
+private val RecentlyAddedCardWidth = 168.dp
 private const val NEW_WINDOW_MS = 7L * 24 * 60 * 60 * 1000
 
 /**
  * Home "Recently added" row: newest songs on the device, large artwork cards with a small
  * "NEW" tag for anything added in the last week and a relative "added" time.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun RecentlyAddedSection(
     songs: ImmutableList<Song>,
@@ -47,7 +51,11 @@ fun RecentlyAddedSection(
     modifier: Modifier = Modifier
 ) {
     if (songs.isEmpty()) return
-    val now = remember(songs) { System.currentTimeMillis() }
+    val now = remember { System.currentTimeMillis() }
+    val density = LocalDensity.current.density
+    val artworkSize = remember(density) { smartImageTargetSizeFor(RecentlyAddedCardWidth, density) }
+    val cacheWindow = remember { LazyLayoutCacheWindow(ahead = 180.dp, behind = 180.dp) }
+    val listState = rememberLazyListState(cacheWindow = cacheWindow)
     Column(modifier = modifier.fillMaxWidth()) {
         Text(
             text = stringResource(R.string.home_recently_added_title),
@@ -57,6 +65,7 @@ fun RecentlyAddedSection(
             modifier = Modifier.padding(start = 20.dp, end = 16.dp, bottom = 12.dp)
         )
         LazyRow(
+            state = listState,
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -66,6 +75,7 @@ fun RecentlyAddedSection(
                 }
                 RecentlyAddedCard(
                     song = song,
+                    artworkSize = artworkSize,
                     isNew = addedMs > 0 && now - addedMs < NEW_WINDOW_MS,
                     addedLabel = remember(addedMs, now) { relativeAddedLabel(addedMs, now) },
                     isCurrent = song.id == currentSongId,
@@ -79,6 +89,7 @@ fun RecentlyAddedSection(
 @Composable
 private fun RecentlyAddedCard(
     song: Song,
+    artworkSize: coil.size.Size,
     isNew: Boolean,
     addedLabel: String?,
     isCurrent: Boolean,
@@ -87,7 +98,7 @@ private fun RecentlyAddedCard(
     val colors = MaterialTheme.colorScheme
     Column(
         modifier = Modifier
-            .width(168.dp)
+            .width(RecentlyAddedCardWidth)
             .clip(RoundedCornerShape(24.dp))
             .clickable(onClick = onClick)
     ) {
@@ -96,7 +107,7 @@ private fun RecentlyAddedCard(
                 model = song.albumArtUriString,
                 contentDescription = song.title,
                 shape = RecentlyAddedArtShape,
-                targetSize = RecentlyAddedImageSize,
+                targetSize = artworkSize,
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(1f)
@@ -126,15 +137,17 @@ private fun RecentlyAddedCard(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(horizontal = 4.dp)
         )
-        Row(modifier = Modifier.padding(horizontal = 4.dp)) {
-            Text(
-                text = listOfNotNull(song.displayArtist.takeIf { it.isNotBlank() }, addedLabel).joinToString(" · "),
-                style = MaterialTheme.typography.bodySmall,
-                color = colors.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+        val subtitle = remember(song.displayArtist, addedLabel) {
+            listOfNotNull(song.displayArtist.takeIf(String::isNotBlank), addedLabel).joinToString(" · ")
         }
+        Text(
+            text = subtitle,
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 4.dp),
+        )
         Spacer(Modifier.height(4.dp))
     }
 }

@@ -1,6 +1,5 @@
 package com.unshoo.pixelmusic.presentation.components.player
 
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
@@ -14,20 +13,23 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.util.lerp as lerpFloat
 import com.unshoo.pixelmusic.data.model.Song
 import com.unshoo.pixelmusic.presentation.components.blur.ArtworkGaussianBlur
 import com.unshoo.pixelmusic.presentation.components.blur.BlurredArtworkImage
-import com.unshoo.pixelmusic.presentation.components.blur.rememberBlurredArtwork
 import com.unshoo.pixelmusic.ui.theme.LocalPixelMusicDarkTheme
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 
-// Smooth 850ms easing for fluid, liquid-like atmospheric color glide on song transition
+// Easing for the artwork dissolve.
 private val AtmosphereEasing = CubicBezierEasing(0.4f, 0.0f, 0.2f, 1.0f)
 
 /**
@@ -42,7 +44,7 @@ private val AtmosphereEasing = CubicBezierEasing(0.4f, 0.0f, 0.2f, 1.0f)
  *   with no muddy dark overlay. Clean contrast scrim only at the bottom controls.
  *
  * Transitions:
- * - Liquid-smooth 850ms crossfade with zero alpha dip (retains outgoing art until incoming completes).
+ * - A dissolve that keeps the outgoing artwork fully visible until the incoming artwork is ready.
  * - Upcoming song artwork is proactively cached by PlayerViewModel for instant cache hits.
  *
  * Mini player:
@@ -57,44 +59,47 @@ fun FullPlayerAtmosphereBackground(
     expansionFractionProvider: (() -> Float)? = null,
     showTopVignette: Boolean = true
 ) {
-    val context = LocalContext.current
-    val albumArtUri = currentSong?.albumArtUriString
-
-    // Zero-dip smooth crossfade state: retains outgoing art underneath at 100% opacity
-    // while incoming art fades in on top over 850ms, eliminating any background color flash/dip
-    var displayedArtUri by remember { mutableStateOf(albumArtUri) }
-    var previousArtUri by remember { mutableStateOf<String?>(null) }
+    val context = LocalContext.current.applicationContext
+    val artwork = currentSong?.albumArtUriString?.takeIf(String::isNotBlank)
+    var readyArtwork by remember { mutableStateOf(ArtworkGaussianBlur.cached(artwork)) }
+    var displayedBlur by remember { mutableStateOf(readyArtwork) }
+    var previousBlur by remember { mutableStateOf<ImageBitmap?>(null) }
     val crossfadeProgress = remember { Animatable(1f) }
 
-    LaunchedEffect(albumArtUri) {
-        if (albumArtUri != displayedArtUri) {
-            // Make sure the incoming blur is ready BEFORE the crossfade starts; otherwise the
-            // fade ran from the old artwork to an empty layer and the base colour flashed through.
-            if (!albumArtUri.isNullOrBlank()) {
-                runCatching { ArtworkGaussianBlur.load(context.applicationContext, albumArtUri) }
+    LaunchedEffect(context, artwork) {
+        readyArtwork = if (artwork == null) {
+            // Track metadata can temporarily arrive without artwork during hydration.
+            delay(180L)
+            null
+        } else {
+            try {
+                ArtworkGaussianBlur.load(context, artwork)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                timber.log.Timber.w(error, "Unable to load player background artwork")
+                null
             }
-            previousArtUri = displayedArtUri
-            displayedArtUri = albumArtUri
-            crossfadeProgress.snapTo(0f)
-            crossfadeProgress.animateTo(
-                targetValue = 1f,
-                animationSpec = tween(durationMillis = 850, easing = AtmosphereEasing)
-            )
-            previousArtUri = null
         }
     }
 
-    // Smooth crossfade on song / theme change matching blur animation
-    val animSpec = remember { tween<Color>(durationMillis = 850, easing = AtmosphereEasing) }
-    val animatedBaseColor by animateColorAsState(albumColorScheme.primaryContainer, animSpec, label = "atmo_base_color")
-
-    val displayedBlur by rememberBlurredArtwork(displayedArtUri)
-    val previousBlur by rememberBlurredArtwork(previousArtUri)
+    LaunchedEffect(Unit) {
+        // Finish the current dissolve before displaying the latest decoded frame, even when
+        // tracks are skipped rapidly. Both layers hold their bitmaps throughout the animation.
+        snapshotFlow { readyArtwork }.collect { incoming ->
+            if (incoming === displayedBlur) return@collect
+            crossfadeProgress.snapTo(0f)
+            previousBlur = displayedBlur
+            displayedBlur = incoming
+            crossfadeProgress.animateTo(1f, tween(durationMillis = 650, easing = AtmosphereEasing))
+            previousBlur = null
+        }
+    }
 
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(animatedBaseColor)
+            .background(albumColorScheme.primaryContainer)
     ) {
 
         // 2. GAUSSIAN BLURRED ALBUM ARTWORK LAYER WITH LIQUID CROSSFADE
@@ -117,26 +122,27 @@ fun FullPlayerAtmosphereBackground(
                     // Outside an artwork crossfade only one image is drawn, so applying the alpha
                     // per draw is pixel-identical and avoids a full-screen offscreen layer every
                     // frame. During the crossfade (two overlapping images) keep the offscreen pass.
-                    compositingStrategy = if (previousArtUri == null) {
+                    compositingStrategy = if (previousBlur == null) {
                         androidx.compose.ui.graphics.CompositingStrategy.ModulateAlpha
                     } else {
                         androidx.compose.ui.graphics.CompositingStrategy.Auto
                     }
                 }
         ) {
-            // Previous artwork held at 1.0f alpha underneath: eliminates Porter-Duff crossfade alpha dip
             val outgoing = previousBlur
-            if (!previousArtUri.isNullOrBlank() && outgoing != null) {
-                BlurredArtworkImage(image = outgoing, modifier = Modifier.fillMaxSize())
-            }
-
-            // Incoming artwork dissolving in on top from 0f -> 1f
             val incoming = displayedBlur
-            if (!displayedArtUri.isNullOrBlank() && incoming != null) {
+            if (outgoing != null) {
+                BlurredArtworkImage(
+                    image = outgoing,
+                    modifier = Modifier.fillMaxSize(),
+                    alphaProvider = { if (incoming == null) 1f - crossfadeProgress.value else 1f }
+                )
+            }
+            if (incoming != null) {
                 BlurredArtworkImage(
                     image = incoming,
                     modifier = Modifier.fillMaxSize(),
-                    alphaProvider = { if (previousArtUri != null) crossfadeProgress.value else 1f }
+                    alphaProvider = { crossfadeProgress.value }
                 )
             }
         }

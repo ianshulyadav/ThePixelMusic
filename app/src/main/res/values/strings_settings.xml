@@ -496,6 +496,18 @@
     <string name="setcat_fullscreen_player_title">Full screen player</string>
     <string name="setcat_fullscreen_player_subtitle">Hide the status bar while the full player is open. Swipe down from the top to show it.</string>
     <string name="home_most_played_title">Most listened</string>
+    <string name="home_queue_history_title">Queue history</string>
+    <plurals name="home_queue_history_count">
+        <item quantity="one">%d saved queue</item>
+        <item quantity="other">%d saved queues</item>
+    </plurals>
+    <string name="home_queue_history_options">Queue history options</string>
+    <string name="home_queue_history_starts_with">Starts with</string>
+    <string name="home_queue_history_tracks">tracks</string>
+    <string name="home_queue_history_replay">Replay queue</string>
+    <string name="home_queue_history_remove">Remove saved queue</string>
+    <string name="home_queue_history_clear">Clear queue history?</string>
+    <string name="home_queue_history_clear_button">Clear history</string>
     <string name="home_recently_added_title">Recently added</string>
     <string name="home_recently_added_new">NEW</string>
     <string name="customize_home_title">Customize Home</string>

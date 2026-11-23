@@ -125,6 +125,19 @@ interface MusicDao {
     @Query("SELECT * FROM songs WHERE source_type = :type")
     suspend fun getSongsBySourceType(type: Int): List<SongEntity>
 
+    @Query("""
+        SELECT title, artist_name AS artistName, duration, file_path AS filePath,
+            content_uri_string AS contentUriString, album_art_uri_string AS albumArtUriString
+        FROM songs WHERE source_type = 0
+    """)
+    suspend fun getLocalAudioCandidates(): List<LocalAudioCandidate>
+
+    @Query("SELECT file_path FROM songs WHERE source_type = 0 AND file_path != ''")
+    suspend fun getDeviceFilePaths(): List<String>
+
+    @Query("SELECT EXISTS(SELECT 1 FROM songs WHERE source_type = 0 AND file_path = :path)")
+    suspend fun isDeviceLibraryFile(path: String): Boolean
+
     @Query("UPDATE songs SET album_name = :albumName, album_id = :albumId, album_browse_id = :albumBrowseId WHERE id = :songId")
     suspend fun updateSongAlbum(songId: Long, albumName: String, albumId: Long, albumBrowseId: String?)
 
@@ -372,7 +385,17 @@ interface MusicDao {
 
         // Insert songs in chunks to allow concurrent reads
         songs.chunked(SONG_BATCH_SIZE).forEach { chunk ->
-            insertSongs(chunk)
+            val youtubeIdsWithoutPaths = chunk.filter {
+                it.sourceType == SourceType.YOUTUBE && it.filePath.isBlank()
+            }.map { it.id }
+            val savedPaths = if (youtubeIdsWithoutPaths.isEmpty()) emptyMap() else
+                getSongsByIdsListSimple(youtubeIdsWithoutPaths).associateBy { it.id }
+            insertSongs(chunk.map { song ->
+                val previous = savedPaths[song.id]
+                if (previous != null && previous.filePath.isNotBlank()) {
+                    song.copy(filePath = previous.filePath, parentDirectoryPath = previous.parentDirectoryPath)
+                } else song
+            })
         }
 
         // Delete old cross-refs for updated songs and insert new ones

@@ -6,14 +6,11 @@ import android.graphics.drawable.BitmapDrawable
 import android.util.LruCache
 import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.State
-import androidx.compose.runtime.produceState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import coil.imageLoader
@@ -166,26 +163,6 @@ object ArtworkGaussianBlur {
     private fun pack(a: Float, r: Float, g: Float, b: Float): Int {
         fun ch(v: Float) = v.roundToInt().coerceIn(0, 255)
         return (ch(a) shl 24) or (ch(r) shl 16) or (ch(g) shl 8) or ch(b)
-    }
-}
-
-/**
- * Blurred artwork for [model], or null while loading. Returns a cache hit synchronously on the
- * first composition so a re-opened sheet never flashes an empty backdrop.
- */
-@Composable
-fun rememberBlurredArtwork(
-    model: String?,
-    sigma: Float = ArtworkGaussianBlur.DEFAULT_SIGMA,
-): State<ImageBitmap?> {
-    val context = LocalContext.current.applicationContext
-    return produceState(initialValue = ArtworkGaussianBlur.cached(model, sigma), model, sigma) {
-        value = if (model.isNullOrBlank()) {
-            null
-        } else {
-            ArtworkGaussianBlur.cached(model, sigma)
-                ?: runCatching { ArtworkGaussianBlur.load(context, model, sigma) }.getOrNull()
-        }
     }
 }
 

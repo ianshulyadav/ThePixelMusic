@@ -237,9 +237,8 @@ fun BlurSettingsScreen(
                     title = stringResource(R.string.blur_settings_lyrics_screen_title),
                     subtitle = stringResource(R.string.blur_settings_lyrics_screen_desc),
                     icon = Icons.Outlined.MusicNote,
-                    checked = uiState.lyricsScreenBlurEnabled,
-                    // Independent of the global switch: the lyrics backdrop is a cheap precomputed blur.
-                    enabled = true,
+                    checked = uiState.useBlurEffects && uiState.lyricsScreenBlurEnabled,
+                    enabled = uiState.useBlurEffects,
                     onCheckedChange = { settingsViewModel.setLyricsScreenBlurEnabled(it) }
                 )
 
@@ -255,8 +254,8 @@ fun BlurSettingsScreen(
                     title = stringResource(R.string.setcat_frosted_navbar_title),
                     subtitle = stringResource(R.string.setcat_frosted_navbar_subtitle),
                     icon = Icons.Outlined.WaterDrop,
-                    checked = frostedNav,
-                    enabled = true,
+                    checked = uiState.useBlurEffects && frostedNav,
+                    enabled = uiState.useBlurEffects,
                     onCheckedChange = { enabled ->
                         frostedScope.launch {
                             frostedCtx.applicationContext.setBooleanPreference(

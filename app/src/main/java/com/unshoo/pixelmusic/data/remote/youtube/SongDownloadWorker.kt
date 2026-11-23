@@ -12,12 +12,12 @@ import com.kyant.taglib.Picture
 import com.kyant.taglib.TagLib
 import com.unshoo.pixelmusic.data.database.youtube.AppDatabase
 import com.unshoo.pixelmusic.data.model.youtube.Song
+import com.unshoo.pixelmusic.data.offline.CloudOfflineRepository
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import dagger.hilt.android.EntryPointAccessors
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import timber.log.Timber
@@ -25,6 +25,8 @@ import java.io.File
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.absoluteValue
 import com.unshoo.pixelmusic.utils.YouTubeIdUtils
+import com.unshoo.pixelmusic.utils.OfflineAudioResolver
+import com.unshoo.pixelmusic.utils.LocalAudioDuplicateMatcher
 
 class SongDownloadWorker(
     private val appContext: Context,
@@ -35,7 +37,7 @@ class SongDownloadWorker(
     @InstallIn(SingletonComponent::class)
     interface WorkerEntryPoint {
         fun musicDao(): com.unshoo.pixelmusic.data.database.MusicDao
-        fun userPreferencesRepository(): com.unshoo.pixelmusic.data.preferences.UserPreferencesRepository
+        fun cloudOfflineRepository(): CloudOfflineRepository
     }
 
     private val playlistRepository = AppDatabase.getInstance(appContext).playlistRepository()
@@ -46,7 +48,7 @@ class SongDownloadWorker(
         WorkerEntryPoint::class.java
     )
     private val musicDao = entryPoint.musicDao()
-    private val userPreferencesRepository = entryPoint.userPreferencesRepository()
+    private val cloudOfflineRepository = entryPoint.cloudOfflineRepository()
 
     @OptIn(UnstableApi::class)
     override suspend fun doWork(): Result {
@@ -55,22 +57,41 @@ class SongDownloadWorker(
             val songId = params.inputData.getString(SONG_KEY)
                 ?: return@withContext Result.failure()
 
-            var song = localSongRepository.getSong(songId)
-            // Already downloaded and still readable (plain file or SAF content:// URI): done.
-            // Playlist "download all" queues every song, including ones already on the phone.
-            song?.audioFilePath?.takeIf { it.isNotBlank() && !it.startsWith("http") }?.let { path ->
-                val readable = if (path.startsWith("content://")) {
-                    runCatching {
-                        appContext.contentResolver.openAssetFileDescriptor(android.net.Uri.parse(path), "r")
-                            ?.use { it.length != 0L }
-                    }.getOrNull() == true
-                } else {
-                    java.io.File(path).length() > 0L
-                }
-                if (readable) return@withContext Result.success()
+            if (cloudOfflineRepository.resolveLocalUri("youtube://$songId") != null) {
+                return@withContext Result.success()
             }
+            var song = localSongRepository.getSong(songId)
+            val existingPath = DownloadHelper.findExistingDownload(appContext, songId, song?.audioFilePath, musicDao)
+            if (existingPath != null) {
+                if (song == null) {
+                    localSongRepository.create(Song(youtubeId = songId, audioFilePath = existingPath,
+                        isPermanentlyDownloaded = true, downloadTimestamp = System.currentTimeMillis()))
+                } else if (existingPath != song.audioFilePath || !song.isPermanentlyDownloaded) {
+                    localSongRepository.saveDownloadPath(songId, existingPath)
+                }
+                playlistRepository.appendSongIfMissing(Constants.Downloads.DOWNLOADED_PLAYLIST_ID, songId)
+                OfflineAudioResolver.recordDownload(songId, existingPath)
+                return@withContext Result.success()
+            }
+            val localSongs = musicDao.getLocalAudioCandidates()
+            suspend fun mapLocalAudio(candidate: Song?): Boolean {
+                if (candidate == null) return false
+                val match = LocalAudioDuplicateMatcher.findMatchingLocalSong(localSongs, candidate, context = appContext)
+                    ?: return false
+                val path = LocalAudioDuplicateMatcher.resolveLocalSongPath(appContext, match) ?: return false
+                val mapped = candidate.copy(audioFilePath = path, thumbnailPath = candidate.thumbnailPath ?: match.albumArtUriString)
+                ensureYoutubeSongInLibrary(mapped)
+                musicDao.updateSongFilePathAndParent(toUnifiedYoutubeSongId(songId), path, "/Cloud/YouTube")
+                localSongRepository.saveDownloadPath(songId, path)
+                playlistRepository.appendSongIfMissing(Constants.Downloads.DOWNLOADED_PLAYLIST_ID, songId)
+                OfflineAudioResolver.recordDownload(songId, path)
+                PixelMusicNotificationManager.showSongDownloadSuccess(appContext, mapped)
+                return true
+            }
+            if (mapLocalAudio(song)) return@withContext Result.success()
+            var fetchedSong: Song? = null
+            val needsMetadata = song == null || song.album.isNullOrBlank()
             if (song == null || song.album.isNullOrBlank()) {
-                var fetchedSong: Song? = null
                 songRepository.getSongInfo(songId).collect { apiResult ->
                     if (apiResult is ApiResult.Success) {
                         fetchedSong = apiResult.data
@@ -87,6 +108,7 @@ class SongDownloadWorker(
                         thumbnailHref = if (song.thumbnailHref.isBlank()) fresh.thumbnailHref else song.thumbnailHref
                     ) ?: fresh
                     localSongRepository.create(song)
+                    if (mapLocalAudio(song)) return@withContext Result.success()
                 } else if (song == null) {
                     return@withContext Result.failure()
                 }
@@ -110,29 +132,13 @@ class SongDownloadWorker(
             }
 
             try {
-                var fullSong: Song? = null
-                songRepository.getSongInfo(song.youtubeId)
-                    .collect { apiResult ->
-                        when (apiResult) {
-                            is ApiResult.Success -> {
-                                fullSong = apiResult.data
-                            }
-                            else -> {}
-                        }
+                if (!needsMetadata) {
+                    songRepository.getSongInfo(song.youtubeId).collect { result ->
+                        if (result is ApiResult.Success) fetchedSong = result.data
                     }
+                }
+                val fullSong = fetchedSong
 
-                val downloadQuality = userPreferencesRepository.downloadAudioQualityFlow.first()
-                val allowLossless = (downloadQuality == com.unshoo.pixelmusic.data.preferences.DownloadAudioQuality.MAX)
-                val localSongs = musicDao.getSongsBySourceType(0)
-                val localMatching = if (!com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.useDeviceLibraryMatches) null else com.unshoo.pixelmusic.utils.LocalAudioDuplicateMatcher.findMatchingLocalSong(
-                    localSongs = localSongs,
-                    song = song,
-                    allowLossless = allowLossless
-                )
-
-                val isExistingLocal = localMatching != null
-                // Artwork first (small), so tags can be written on the local file before it is
-                // published to the download folder, instead of a second rewrite afterwards.
                 val thumbnailPath =
                     DownloadHelper.downloadImage(
                         appContext,
@@ -141,29 +147,24 @@ class SongDownloadWorker(
                     )
                 val tagAlbum = (fullSong?.album ?: song.album)?.takeIf { it.isNotBlank() } ?: "YouTube Music"
                 var taggedDuringDownload = false
-                val audioPath = if (localMatching != null) {
-                    Timber.i("Song '${song.title}' already exists in local storage at ${localMatching.filePath}. Skipping network download.")
-                    localMatching.filePath
-                } else {
-                    DownloadHelper.downloadAudio(appContext, song, onFileReady = { file ->
+                val audioPath = DownloadHelper.downloadAudio(appContext, song, checkDeviceLibrary = false, onFileReady = { file ->
                         DownloadHelper.withLowPriorityPostProcessing {
                             embedAudioMetadata(file.absolutePath, song.title, song.artist, tagAlbum, thumbnailPath)
                         }
                         taggedDuringDownload = true
-                    })
-                }
+                })
 
                 val updatedSong = song.copy(
-                    thumbnailPath = thumbnailPath?.path ?: localMatching?.albumArtUriString,
+                    thumbnailPath = thumbnailPath?.path ?: song.thumbnailPath,
                     audioFilePath = audioPath,
-                    album = fullSong?.album ?: song.album ?: localMatching?.albumName,
+                    isPermanentlyDownloaded = audioPath != null,
+                    downloadTimestamp = if (audioPath != null) System.currentTimeMillis() else 0L,
+                    album = fullSong?.album ?: song.album,
                     albumBrowseId = fullSong?.albumBrowseId ?: song.albumBrowseId,
                 )
                 localSongRepository.create(updatedSong)
 
-                val isMatchedToLocal = isExistingLocal || (audioPath != null && localSongs.any { it.filePath == audioPath })
-
-                if (audioPath != null && !isMatchedToLocal && !taggedDuringDownload) {
+                if (audioPath != null && !taggedDuringDownload) {
                     embedAudioMetadata(
                         audioPath = audioPath,
                         title = updatedSong.title,
@@ -177,24 +178,14 @@ class SongDownloadWorker(
 
                 if (audioPath != null) {
                     val mainId = toUnifiedYoutubeSongId(song.youtubeId)
-                    // If matched to an existing local song in storage, keep parent directory
-                    // as /Cloud/YouTube so the song does not duplicate inside the physical folder!
-                    val parentDir = if (isMatchedToLocal) {
-                        "/Cloud/YouTube"
-                    } else if (audioPath.startsWith("content://")) {
+                    val parentDir = if (audioPath.startsWith("content://")) {
                         "Music/PixelMusic"
                     } else {
                         File(audioPath).parentFile?.absolutePath ?: ""
                     }
                     musicDao.updateSongFilePathAndParent(mainId, audioPath, parentDir)
-                    com.unshoo.pixelmusic.utils.OfflineAudioResolver.invalidateCache()
-                    playlistRepository.insertCrossRef(
-                        com.unshoo.pixelmusic.data.model.youtube.PlaylistSongCrossRef(
-                            playlistId = Constants.Downloads.DOWNLOADED_PLAYLIST_ID,
-                            songId = song.youtubeId,
-                            position = 0
-                        )
-                    )
+                    OfflineAudioResolver.recordDownload(songId, audioPath)
+                    playlistRepository.appendSongIfMissing(Constants.Downloads.DOWNLOADED_PLAYLIST_ID, song.youtubeId)
                     PixelMusicNotificationManager.showSongDownloadSuccess(appContext, song)
                     Result.success()
                 } else {

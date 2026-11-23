@@ -3,27 +3,39 @@ package com.unshoo.pixelmusic.presentation.components.subcomps
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.ui.draw.clip
+import androidx.compose.material3.toShape
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.unshoo.pixelmusic.data.model.Song
+import com.unshoo.pixelmusic.R
 import com.unshoo.pixelmusic.utils.OfflineAudioResolver
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * True when an online-catalog song has a downloaded copy on device.
@@ -49,41 +61,48 @@ fun rememberIsDownloaded(song: Song): Boolean {
     return ytId in downloadedIds
 }
 
-/**
- * App-icon style "downloaded" badge: a small circle that sits on the bottom-right corner of the
- * album art, half on the artwork and half outside it, with a ring in [ringColor] (the colour
- * behind the artwork) so it looks cut out of the art like a launcher notification badge.
- *
- * Place it inside the (unclipped) album-art box; it aligns itself to the bottom-end corner.
- */
+@Composable
+fun rememberIsPlaylistDownloaded(songs: List<Song>, expectedSongCount: Int): Boolean {
+    if (songs.isEmpty() || songs.size < expectedSongCount) return false
+    val downloadedIds by OfflineAudioResolver.downloadedIds.collectAsState()
+    val context = LocalContext.current
+    var isDownloaded by remember(songs) { mutableStateOf(false) }
+    LaunchedEffect(songs, downloadedIds) {
+        isDownloaded = withContext(Dispatchers.IO) {
+            songs.all { song ->
+                song.isLocal || song.onlineYoutubeId?.let(downloadedIds::contains) == true ||
+                    (OfflineAudioResolver.readableAudioPath(context, song.path)
+                        ?: OfflineAudioResolver.readableAudioPath(context, song.contentUriString)) != null
+            }
+        }
+    }
+    return isDownloaded
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun DownloadedBadge(
     modifier: Modifier = Modifier,
-    size: Dp = 16.dp,
+    size: Dp = 12.dp,
     ringColor: Color = MaterialTheme.colorScheme.surfaceContainer,
-    ringWidth: Dp = 2.dp,
+    ringWidth: Dp = 1.dp,
 ) {
     val colors = MaterialTheme.colorScheme
-    val outer = size + ringWidth * 2
-    // Centre the badge roughly on the corner: ~45% of it hangs outside the artwork.
-    val overhang = outer * 0.45f
-    val tickColor = colors.onPrimary
+    val shape = MaterialShapes.Cookie9Sided.toShape()
+    val downloadedLabel = stringResource(R.string.downloaded_badge_label)
     Box(
         modifier = modifier
-            .offset(x = overhang, y = overhang)
-            .size(outer)
-            .clip(CircleShape)
-            .background(ringColor, CircleShape)
+            .size(size + ringWidth * 2)
+            .semantics { contentDescription = downloadedLabel }
+            .background(ringColor, shape)
             .padding(ringWidth)
-            .clip(CircleShape)
-            .background(colors.primary, CircleShape),
+            .background(colors.primary, shape),
         contentAlignment = Alignment.Center
     ) {
-        // Bold, round-capped tick drawn directly (the Material check glyph is too thin at this size).
-        Canvas(modifier = Modifier.size(size * 0.62f)) {
+        Canvas(modifier = Modifier.size(size * 0.58f)) {
             val w = this.size.width
             val h = this.size.height
-            val stroke = w * 0.22f
+            val stroke = w * 0.24f
             val tick = Path().apply {
                 moveTo(w * 0.10f, h * 0.53f)
                 lineTo(w * 0.40f, h * 0.82f)
@@ -91,7 +110,7 @@ fun DownloadedBadge(
             }
             drawPath(
                 path = tick,
-                color = tickColor,
+                color = colors.onPrimary,
                 style = Stroke(width = stroke, cap = StrokeCap.Round, join = StrokeJoin.Round)
             )
         }
@@ -100,12 +119,13 @@ fun DownloadedBadge(
 
 /** Convenience: the badge pinned to the bottom-end corner of the enclosing artwork Box. */
 @Composable
-fun androidx.compose.foundation.layout.BoxScope.ArtworkDownloadedBadge(
+fun BoxScope.ArtworkDownloadedBadge(
     ringColor: Color,
-    size: Dp = 16.dp,
+    size: Dp = 12.dp,
 ) {
+    val overhang = size * 0.35f
     DownloadedBadge(
-        modifier = Modifier.align(Alignment.BottomEnd),
+        modifier = Modifier.align(Alignment.BottomEnd).offset(x = overhang, y = overhang),
         size = size,
         ringColor = ringColor,
     )

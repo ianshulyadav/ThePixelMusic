@@ -2071,7 +2071,7 @@ fun QueuePlaylistSongItem(
                             targetSize = SmartImageCompactListTargetSize
                         )
                         if (rememberIsDownloaded(song)) {
-                            ArtworkDownloadedBadge(ringColor = backgroundColor, size = 14.dp)
+                            ArtworkDownloadedBadge(ringColor = backgroundColor)
                         }
                     }
 

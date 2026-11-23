@@ -227,6 +227,7 @@ private fun linearizedChannel(channel: Int): Double {
 fun LyricsSheet(
     stablePlayerStateFlow: StateFlow<StablePlayerState>,
     playbackPositionFlow: StateFlow<Long>,
+    useBlurEffects: Boolean,
     lyricsSearchUiState: LyricsSearchUiState,
     resetLyricsForCurrentSong: () -> Unit,
     onSearchLyrics: (Boolean) -> Unit,
@@ -354,21 +355,20 @@ fun LyricsSheet(
         context.dataStore.data.map { it[booleanPreferencesKey("animated_lyrics_blur_enabled")] ?: true }
     }
     val animatedLyricsBlurEnabledRaw by animatedLyricsBlurEnabledFlow.collectAsStateWithLifecycle(initialValue = true)
-    val animatedLyricsBlurEnabled = animatedLyricsBlurEnabledRaw && !performanceModeEnabled
+    val canBlurLyrics = useBlurEffects && !performanceModeEnabled
+    val animatedLyricsBlurEnabled = animatedLyricsBlurEnabledRaw && canBlurLyrics
 
     val animatedLyricsBlurStrengthFlow = remember(context) {
         context.dataStore.data.map { it[androidx.datastore.preferences.core.floatPreferencesKey("animated_lyrics_blur_strength")] ?: 2.5f }
     }
     val animatedLyricsBlurStrength by animatedLyricsBlurStrengthFlow.collectAsStateWithLifecycle(initialValue = 2.5f)
 
-    // Lyrics-screen Gaussian artwork backdrop: on by default, controlled only by its own
-    // "Lyrics screen blur" toggle (independent of the global blur switch, which stays off by
-    // default for the rest of the app). It is the cheap precomputed blur, not a RenderEffect.
     val isLyricsBlurActiveFlow = remember(context) {
-        context.dataStore.data.map { it[booleanPreferencesKey("lyrics_screen_blur_enabled")] ?: true }
+        context.dataStore.data.map { it[booleanPreferencesKey("lyrics_screen_blur_enabled")]
+            ?: !com.unshoo.pixelmusic.utils.DevicePerformanceUtils.isLowEndDevice(context) }
     }
-    val isLyricsBlurActiveRaw by isLyricsBlurActiveFlow.collectAsStateWithLifecycle(initialValue = true)
-    val isLyricsBlurActive = isLyricsBlurActiveRaw && !performanceModeEnabled
+    val isLyricsBlurActiveRaw by isLyricsBlurActiveFlow.collectAsStateWithLifecycle(initialValue = false)
+    val isLyricsBlurActive = isLyricsBlurActiveRaw && canBlurLyrics
 
     // Read keep-screen-on preference from DataStore
     val keepScreenOnFlow = remember(context) {
@@ -704,7 +704,7 @@ fun LyricsSheet(
             topFadePx = with(localDensity) { 110.dp.toPx() },
             bottomSolidPx = with(localDensity) { (controlsHeight - 12.dp).coerceAtLeast(0.dp).toPx() },
             bottomFadePx = with(localDensity) { 120.dp.toPx() },
-            maxBlurPx = if (performanceModeEnabled) 0f else with(localDensity) { 14.dp.toPx() }
+            maxBlurPx = if (canBlurLyrics) with(localDensity) { 14.dp.toPx() } else 0f
         )
         Box(modifier = Modifier.fillMaxSize()) {
             if (isLyricsBlurActive && currentSong != null) {
@@ -1574,7 +1574,7 @@ fun LyricLineRow(
                 // longer recomposes every visible line each frame (Modifier.blur(blurRadius) read it
                 // during composition and rebuilt a RenderEffect per line per frame). Effects are
                 // quantised and cached, and Decal tiling lets the glow bleed instead of hard-clipping.
-                renderEffect = LyricsLineBlur.effectFor(blurRadius.toPx())
+                renderEffect = if (animatedLyricsBlurEnabled) LyricsLineBlur.effectFor(blurRadius.toPx()) else null
             }
     } else baseModifier
 

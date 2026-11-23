@@ -2,8 +2,6 @@ package com.unshoo.pixelmusic.presentation.components.scoped
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.material3.ColorScheme
 import androidx.compose.runtime.Composable
@@ -237,38 +235,25 @@ internal fun rememberSheetThemeState(
     )
 }
 
-/**
- * Animates a [ColorScheme] transition using a single [Animatable]<Float> progress value
- * instead of 34 independent [animateColorAsState] calls.
- *
- * When [target] changes, a spring from 0→1 is run once, and the interpolated scheme is
- * derived from it. This reduces the number of running Springs from 34 → 1 and eliminates
- * the 34 concurrent [State] reads that were triggering recomposition on every animation frame.
- */
+/** Publishes one complete palette per frame and starts retargeting from the visible palette. */
 @Composable
 private fun rememberBatchAnimatedColorScheme(target: ColorScheme): ColorScheme {
-    val progress = remember { Animatable(1f) }
-    var fromScheme by remember { mutableStateOf(target) }
-    var toScheme by remember { mutableStateOf(target) }
+    val progress = remember { Animatable(0f) }
+    var visibleScheme by remember { mutableStateOf(target) }
 
     LaunchedEffect(target) {
-        if (toScheme == target) return@LaunchedEffect
-        // Snapshot current interpolated state as the new "from"
-        fromScheme = lerpColorScheme(fromScheme, toScheme, progress.value)
-        toScheme = target
+        val from = visibleScheme
+        if (from == target) return@LaunchedEffect
         progress.snapTo(0f)
         progress.animateTo(
             targetValue = 1f,
-            animationSpec = spring(stiffness = Spring.StiffnessLow)
-        )
+            animationSpec = tween(durationMillis = 420, easing = FastOutSlowInEasing)
+        ) {
+            visibleScheme = lerpColorScheme(from, target, value)
+        }
+        visibleScheme = target
     }
-
-    // derivedStateOf ensures we only recompose consumers when progress.value actually changes,
-    // not on every State read elsewhere in the composition.
-    val interpolated by remember {
-        derivedStateOf { lerpColorScheme(fromScheme, toScheme, progress.value) }
-    }
-    return interpolated
+    return visibleScheme
 }
 
 /**

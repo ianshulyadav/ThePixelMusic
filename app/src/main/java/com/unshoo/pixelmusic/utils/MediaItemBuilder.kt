@@ -101,6 +101,7 @@ object MediaItemBuilder {
     const val EXTERNAL_EXTRA_BITRATE = EXTERNAL_EXTRA_PREFIX + "BITRATE"
     const val EXTERNAL_EXTRA_SAMPLE_RATE = EXTERNAL_EXTRA_PREFIX + "SAMPLE_RATE"
     const val EXTERNAL_EXTRA_FILE_PATH = EXTERNAL_EXTRA_PREFIX + "FILE_PATH"
+    const val EXTERNAL_EXTRA_YOUTUBE_ID = EXTERNAL_EXTRA_PREFIX + "YOUTUBE_ID"
 
     fun build(song: Song): MediaItem {
         return MediaItem.Builder()
@@ -377,6 +378,7 @@ object MediaItemBuilder {
             putString(EXTERNAL_EXTRA_ALBUM, song.album)
             putLong(EXTERNAL_EXTRA_DURATION, song.duration)
             putString(EXTERNAL_EXTRA_CONTENT_URI, song.contentUriString)
+            song.youtubeId?.let { putString(EXTERNAL_EXTRA_YOUTUBE_ID, it) }
             (exposedArtworkUri?.toString() ?: song.albumArtUriString)?.let {
                 putString(EXTERNAL_EXTRA_ALBUM_ART, it)
             }

@@ -688,7 +688,9 @@ class DualPlayerEngine @Inject constructor(
         val player = if (::playerA.isInitialized) playerA else return
         if (player.isPlaying) return
         val currentItem = player.currentMediaItem ?: return
-        val uriStr = currentItem.localConfiguration?.uri?.toString() ?: ""
+        val currentUri = currentItem.localConfiguration?.uri ?: return
+        if (currentUri.scheme == "file" || currentUri.scheme == "content") return
+        val uriStr = currentUri.toString()
         val isAppleHlsStream = uriStr.startsWith("data:application/vnd.apple.mpegurl") ||
             uriStr.startsWith("data:application/x-mpegurl")
         val isRemoteStream = isAppleHlsStream ||
@@ -703,7 +705,11 @@ class DualPlayerEngine @Inject constructor(
         // After a long pause (>20 min) or cold start, remote CDN tokens (JioSaavn, YouTube, etc.)
         // are almost certainly expired. Force a proactive re-resolve instead of waiting for
         // the player to buffer-timeout.
-        val pausedForMs = if (lastPausedAtMs > 0L) SystemClock.elapsedRealtime() - lastPausedAtMs else Long.MAX_VALUE
+        val pausedForMs = when {
+            lastPausedAtMs > 0L -> SystemClock.elapsedRealtime() - lastPausedAtMs
+            currentUri.scheme == "http" || currentUri.scheme == "https" || isAppleHlsStream -> Long.MAX_VALUE
+            else -> 0L
+        }
         val isLongPause = pausedForMs > 20 * 60 * 1000L
         if (isLongPause) {
             Timber.tag("DualPlayerEngine").i("Long pause (%ds) detected, forcing re-resolve for %s", pausedForMs / 1000, currentItem.mediaId)
@@ -1046,6 +1052,7 @@ class DualPlayerEngine @Inject constructor(
     private val activePlaybackResolvedUris = java.util.concurrent.ConcurrentHashMap<String, Uri>()
     private val localFilePathCache = LruCache<String, String>(200)
     private val activeResolutions = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.Deferred<Uri>>()
+    private val failedLocalYoutubeSources = LruCache<String, Boolean>(128)
 
     /** Fire-and-forget stream resolve used by the non-blocking ResolvingDataSource path. */
     fun kickBackgroundResolve(uri: Uri) {
@@ -1064,13 +1071,20 @@ class DualPlayerEngine @Inject constructor(
 
     fun getCachedResolvedUri(uri: Uri): Uri? {
         val uriString = uri.toString()
-        localFilePathCache[uriString]?.let { localPath ->
-            if (localPath.startsWith("content://")) return Uri.parse(localPath)
-            if (java.io.File(localPath).exists()) return Uri.fromFile(java.io.File(localPath))
+        if (failedLocalYoutubeSources.get(uriString) != true) {
+            localFilePathCache[uriString]?.let { localPath ->
+                if (localPath.startsWith("content://")) return Uri.parse(localPath)
+                val file = File(localPath)
+                if (file.isFile && file.length() > 0L) return Uri.fromFile(file)
+            }
         }
-        if (uriString.startsWith("youtube://")) {
+        if (uri.scheme == "youtube" && failedLocalYoutubeSources.get(uriString) != true) {
             com.unshoo.pixelmusic.utils.OfflineAudioResolver
-                .peekDownloadedAudioUri(uriString.removePrefix("youtube://"))?.let { return it }
+                .peekDownloadedAudioUri(uriString.removePrefix("youtube://"))?.let { downloaded ->
+                    if (downloaded.scheme == "content" ||
+                        downloaded.path?.let { File(it).isFile && File(it).length() > 0L } == true
+                    ) return downloaded
+                }
         }
         val cached = resolvedUriCache.get(uriString) ?: activePlaybackResolvedUris[uriString]
         return if (cached != null && isResolvedUriFresh(uriString, cached)) cached else null
@@ -1078,8 +1092,17 @@ class DualPlayerEngine @Inject constructor(
 
     fun getCachedResolvedMediaItem(mediaItem: MediaItem): MediaItem? {
         val uri = mediaItem.localConfiguration?.uri ?: return mediaItem
+        if (uri.scheme == "file" || uri.scheme == "content") return mediaItem
+        if (uri.scheme == "youtube" && failedLocalYoutubeSources.get(uri.toString()) != true &&
+            !mediaItem.mediaMetadata.extras
+                ?.getString(com.unshoo.pixelmusic.utils.MediaItemBuilder.EXTERNAL_EXTRA_FILE_PATH).isNullOrBlank()
+        ) return null // Check the mapped file before returning a cached stream.
         val resolved = getCachedResolvedUri(uri) ?: return null
         val builder = mediaItem.buildUpon().setUri(resolved)
+        if (resolved.scheme == "content") return null // Verify document access on the I/O path.
+        if (resolved.scheme == "file") {
+            return builder.setMimeType(null).setCustomCacheKey(null).build()
+        }
         val cleanId = mediaItem.mediaId.removePrefix("youtube_").removePrefix("monochrome_")
         val containerMime = LosslessStreamResolver.resultFor(cleanId)?.containerMimeType
             ?: com.unshoo.pixelmusic.data.addons.AddonStreamRegistry.metaFor(resolved.toString())
@@ -1142,8 +1165,29 @@ class DualPlayerEngine @Inject constructor(
     private fun youtubeIdOf(item: MediaItem): String? {
         val uri = item.localConfiguration?.uri?.toString().orEmpty()
         if (uri.startsWith("youtube://")) return uri.removePrefix("youtube://").takeIf { it.isNotBlank() }
+        val extras = item.mediaMetadata.extras
+        extras?.getString(com.unshoo.pixelmusic.utils.MediaItemBuilder.EXTERNAL_EXTRA_YOUTUBE_ID)
+            ?.takeIf { it.isNotBlank() }?.let { return it }
+        val originalUri = extras?.getString(com.unshoo.pixelmusic.utils.MediaItemBuilder.EXTERNAL_EXTRA_CONTENT_URI)
+        if (originalUri?.startsWith("youtube://") == true) {
+            return originalUri.substringAfter("youtube://").substringBefore('?').takeIf { it.isNotBlank() }
+        }
         val id = item.mediaId.removePrefix("youtube_")
         return id.takeIf { YOUTUBE_ID_REGEX.matches(it) && !it.all(Char::isDigit) }
+    }
+
+    /** Retries the same queue item from YouTube after its mapped file fails to open or decode. */
+    fun youtubeFallbackForLocalError(item: MediaItem): MediaItem? {
+        val uri = item.localConfiguration?.uri ?: return null
+        val youtubeId = youtubeIdOf(item) ?: return null
+        val source = "youtube://$youtubeId"
+        val usedLocalAudio = uri.scheme == "file" || uri.scheme == "content" ||
+            (uri.scheme == "youtube" && localFilePathCache[source] != null)
+        if (!usedLocalAudio || failedLocalYoutubeSources.get(source) == true) return null
+        failedLocalYoutubeSources.put(source, true)
+        invalidateResolvedUri(source)
+        Timber.tag("DualPlayerEngine").w("Retrying %s via YouTube after local playback failed", youtubeId)
+        return item.buildUpon().setUri(Uri.parse(source)).setMimeType(null).setCustomCacheKey(null).build()
     }
 
     /**
@@ -1337,14 +1381,12 @@ class DualPlayerEngine @Inject constructor(
     }
 
     fun resolveLocalDiskFile(uriString: String): Uri? {
+        if (failedLocalYoutubeSources.get(uriString) == true) return null
         // 1. Check in-memory local file cache with disk validation
         localFilePathCache[uriString]?.let { path ->
-            if (path.startsWith("content://")) {
-                return Uri.parse(path)
-            }
-            val file = java.io.File(path)
-            if (file.isFile && file.length() > 0L) {
-                return Uri.fromFile(file)
+            val readable = com.unshoo.pixelmusic.utils.OfflineAudioResolver.readableAudioPath(context, path)
+            if (readable != null) {
+                return if (readable.startsWith("content://")) Uri.parse(readable) else Uri.fromFile(File(readable))
             }
         }
 
@@ -1353,8 +1395,10 @@ class DualPlayerEngine @Inject constructor(
             val videoId = uriString.removePrefix("youtube://")
             // Downloads index: app folder AND the user's custom (SAF) download folder.
             com.unshoo.pixelmusic.utils.OfflineAudioResolver.getDownloadedAudioUri(context, videoId)?.let { indexed ->
-                localFilePathCache.put(uriString, indexed.toString().takeIf { indexed.scheme == "content" } ?: indexed.path.orEmpty())
-                return indexed
+                com.unshoo.pixelmusic.utils.OfflineAudioResolver.readableAudioPath(context, indexed.toString())?.let { path ->
+                    localFilePathCache.put(uriString, path)
+                    return indexed
+                }
             }
             if (videoId.isNotBlank()) {
                 val candidateDirs = listOf(
@@ -2034,7 +2078,7 @@ class DualPlayerEngine @Inject constructor(
 
                 if (scheme == "telegram" || scheme == "gdrive" || scheme == "youtube") {
                     val originalUri = uriString
-                    val diskUri = resolveLocalDiskFile(originalUri)
+                    val diskUri = if (scheme != "youtube") resolveLocalDiskFile(originalUri) else null
                     if (diskUri != null) {
                         return dataSpec.buildUpon()
                             .setUri(diskUri)
@@ -2111,6 +2155,9 @@ class DualPlayerEngine @Inject constructor(
                             kotlinx.coroutines.withTimeoutOrNull(LOAD_THREAD_RESOLVE_AWAIT_MS) {
                                 resolveCloudUri(uri)
                             }
+                        }
+                        if (awaited?.scheme == "file" || awaited?.scheme == "content") {
+                            return dataSpec.buildUpon().setUri(awaited).setKey(null).build()
                         }
                         val ready = resolvedUriCache.get(originalUri)
                             ?: activePlaybackResolvedUris[originalUri]
@@ -2243,6 +2290,7 @@ class DualPlayerEngine @Inject constructor(
                         bypassCompleteFile
 
                     val factory = when {
+                        dataSpec.uri.scheme == "file" || dataSpec.uri.scheme == "content" -> directHttpDataSourceFactory
                         bypassCompleteFile -> losslessRoutingFactory
                         isLossless -> losslessCachingFactory
                         else -> cacheDataSourceFactory
@@ -2607,57 +2655,49 @@ class DualPlayerEngine @Inject constructor(
             resolvedUriCache.remove(uriString)
         }
 
-        val deferred = activeResolutions.getOrPut(uriString) {
-            scope.async(Dispatchers.IO) {
-                try {
-                    // BUGFIX: the outer timeout here must be the MAXIMUM of the two so
-                    // resolveYoutubeUriAsync's own timeout (which also branches on metered)
-                    // can complete before the outer fires. Previously the outer and inner
-                    // used the same value, making the inner's fallback unreachable.
-                    val timeoutMs = LOSSLESS_RESOLVE_EXTRA_MS + if (connectivityStateHolder.isMeteredNetwork.value) {
-                        STREAM_RESOLVE_TIMEOUT_LOW_CONNECTIVITY_MS + 4_000L
-                    } else {
-                        STREAM_RESOLVE_TIMEOUT_MS + 4_000L
-                    }
-                    val resolved: Uri? = withTimeoutOrNull(timeoutMs) {
-                        when (uri.scheme) {
-                            "telegram" -> resolveTelegramUriAsync(uri, uriString)
-                            "gdrive" -> resolveGDriveUriAsync(uriString)
-                            "youtube" -> resolveYoutubeUriAsync(uriString)
-                            "monochrome" -> {
-                                val trackId = uriString.substringAfter("monochrome://")
-                                Uri.parse("https://tracks.monochrome.st/track/$trackId")
-                            }
-                            else -> null
+        val deferred = activeResolutions.computeIfAbsent(uriString) {
+            scope.async(Dispatchers.IO, start = kotlinx.coroutines.CoroutineStart.LAZY) {
+                // Leave time for the YouTube resolver's own timeout and fallback.
+                val timeoutMs = LOSSLESS_RESOLVE_EXTRA_MS + if (connectivityStateHolder.isMeteredNetwork.value) {
+                    STREAM_RESOLVE_TIMEOUT_LOW_CONNECTIVITY_MS + 4_000L
+                } else {
+                    STREAM_RESOLVE_TIMEOUT_MS + 4_000L
+                }
+                val resolved = withTimeoutOrNull(timeoutMs) {
+                    when (uri.scheme) {
+                        "telegram" -> resolveTelegramUriAsync(uri, uriString)
+                        "gdrive" -> resolveGDriveUriAsync(uriString)
+                        "youtube" -> resolveYoutubeUriAsync(uriString)
+                        "monochrome" -> {
+                            val trackId = uriString.substringAfter("monochrome://")
+                            Uri.parse("https://tracks.monochrome.st/track/$trackId")
                         }
+                        else -> null
                     }
-                    if (resolved != null) {
+                }
+                if (resolved != null) {
+                    if (resolved.scheme != "file" && resolved.scheme != "content") {
                         resolvedUriCache.put(uriString, resolved)
                         activePlaybackResolvedUris[uriString] = resolved
-                        resolved
-                    } else {
-                        // BUGFIX: returning the original unresolvable youtube:// URI here made
-                        // the caller hand an unplayable URI to ExoPlayer as if it were a success.
-                        // Return the original URI only so callers can detect "no resolution" and
-                        // the load-thread resolver can throw the proper IOException.
-                        Timber.tag("DualPlayerEngine").w(
-                            "resolveCloudUri timed out/null for %s (metered=%s)",
-                            uriString,
-                            connectivityStateHolder.isMeteredNetwork.value
-                        )
-                        uri
                     }
-                } finally {
-                    activeResolutions.remove(uriString)
+                    resolved
+                } else {
+                    Timber.tag("DualPlayerEngine").w(
+                        "resolveCloudUri timed out/null for %s (metered=%s)",
+                        uriString,
+                        connectivityStateHolder.isMeteredNetwork.value
+                    )
+                    uri
                 }
             }
         }
+        deferred.invokeOnCompletion { activeResolutions.remove(uriString, deferred) }
 
         try {
             deferred.await()
         } catch (e: Exception) {
+            currentCoroutineContext().ensureActive()
             Timber.tag("DualPlayerEngine").e(e, "Error awaiting resolution for %s", uriString)
-            activeResolutions.remove(uriString)
             uri
         }
     }
@@ -2752,12 +2792,8 @@ class DualPlayerEngine @Inject constructor(
 
     private suspend fun resolveYoutubeUriAsync(uriString: String): Uri? = withContext(Dispatchers.IO) {
         val youtubeId = uriString.removePrefix("youtube://")
+        val skipLocalAudio = failedLocalYoutubeSources.get(uriString) == true
         try {
-            val localDiskUri = resolveLocalDiskFile(uriString)
-            // A downloaded copy always plays from disk (no data use), whatever the lossless setting.
-            if (localDiskUri != null) {
-                return@withContext localDiskUri
-            }
             val isLosslessEnabled = LosslessStreamResolver.isEnabled(context)
 
             val matchingItem = queueSnapshot.firstOrNull {
@@ -2801,15 +2837,18 @@ class DualPlayerEngine @Inject constructor(
             val fallbackBudgetMs = 3_000L
             val primaryBudgetMs = (timeoutMs - fallbackBudgetMs).coerceAtLeast(1_000L)
             var path = withTimeoutOrNull(primaryBudgetMs) {
-                com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper
-                    .getSongPlayerUrl(context, youtubeSong, allowLocal = localDiskUri == null)
+                if (skipLocalAudio) {
+                    com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper
+                        .getLowestQualityStreamUrl(context, youtubeSong, skipLocalAudio = true)
+                } else {
+                    com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.getSongPlayerUrl(context, youtubeSong)
+                }
             }
 
-            if (path.isNullOrBlank()) {
-                if (localDiskUri != null) return@withContext localDiskUri
+            if (path.isNullOrBlank() && !skipLocalAudio) {
                 path = withTimeoutOrNull(fallbackBudgetMs) {
                     com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper
-                        .getLowestQualityStreamUrl(context, youtubeSong)
+                        .getLowestQualityStreamUrl(context, youtubeSong, skipLocalAudio = skipLocalAudio)
                 }
             }
 
@@ -2859,7 +2898,8 @@ class DualPlayerEngine @Inject constructor(
                     com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper
                         .getLowestQualityStreamUrl(
                             context,
-                            com.unshoo.pixelmusic.data.model.youtube.Song(youtubeId = youtubeId)
+                            com.unshoo.pixelmusic.data.model.youtube.Song(youtubeId = youtubeId),
+                            skipLocalAudio = skipLocalAudio,
                         )
                 }.getOrNull()
             }
@@ -2879,8 +2919,26 @@ class DualPlayerEngine @Inject constructor(
         val uri = mediaItem.localConfiguration?.uri ?: return mediaItem
         val scheme = uri.scheme
         if (scheme !in REMOTE_MEDIA_SCHEMES) return mediaItem
+        if (scheme == "youtube" && failedLocalYoutubeSources.get(uri.toString()) != true) {
+            val path = mediaItem.mediaMetadata.extras
+                ?.getString(com.unshoo.pixelmusic.utils.MediaItemBuilder.EXTERNAL_EXTRA_FILE_PATH)
+                ?.takeIf { it.isNotBlank() }
+            if (path != null) {
+                val localPath = withContext(Dispatchers.IO) {
+                    com.unshoo.pixelmusic.utils.OfflineAudioResolver.readableAudioPath(context, path)
+                }
+                if (localPath != null) {
+                    val localUri = if (localPath.startsWith("content://")) Uri.parse(localPath) else Uri.fromFile(File(localPath))
+                    registerLocalPath(uri.toString(), localPath)
+                    return mediaItem.buildUpon().setUri(localUri).setMimeType(null).setCustomCacheKey(null).build()
+                }
+            }
+        }
         val resolvedUri = resolveCloudUri(uri)
         if (resolvedUri == uri) return mediaItem
+        if (resolvedUri.scheme == "file" || resolvedUri.scheme == "content") {
+            return mediaItem.buildUpon().setUri(resolvedUri).setMimeType(null).setCustomCacheKey(null).build()
+        }
         
         val builder = mediaItem.buildUpon().setUri(resolvedUri)
         val isLossless = LosslessStreamResolver.isLosslessUri(resolvedUri.toString()) ||

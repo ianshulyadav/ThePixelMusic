@@ -6,14 +6,16 @@ import com.unshoo.pixelmusic.data.model.Song
 import com.unshoo.pixelmusic.data.remote.youtube.Constants
 import com.unshoo.pixelmusic.data.remote.youtube.PixelMusicHelper
 import com.unshoo.pixelmusic.data.telegram.TelegramRepository
-import androidx.documentfile.provider.DocumentFile
 import com.unshoo.pixelmusic.data.database.youtube.AppDatabase
+import kotlinx.collections.immutable.persistentSetOf
+import kotlinx.collections.immutable.toPersistentSet
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -38,14 +40,29 @@ object OfflineAudioResolver {
      * Filled from the downloads table in the background by [refreshIndex].
      */
     @Volatile
-    private var externalDownloads: Map<String, String> = emptyMap()
+    private var externalDownloads = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     @Volatile
     private var appContext: Context? = null
     private val indexScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val indexMutex = Mutex()
+    private val cacheLock = Any()
+    private val refreshRequests = Channel<Unit>(Channel.CONFLATED)
+    init {
+        indexScope.launch {
+            for (request in refreshRequests) {
+                try {
+                    appContext?.let { refreshIndex(it) }
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
+                } catch (e: Exception) {
+                    timber.log.Timber.w(e, "Unable to refresh the download index")
+                }
+            }
+        }
+    }
 
-    private val _downloadedIds = MutableStateFlow<Set<String>>(emptySet())
+    private val _downloadedIds = MutableStateFlow(persistentSetOf<String>())
 
     /** YouTube ids that have a finished download anywhere (app folder or custom folder). */
     val downloadedIds: StateFlow<Set<String>> = _downloadedIds.asStateFlow()
@@ -65,39 +82,49 @@ object OfflineAudioResolver {
     }
 
     private fun refreshAsync() {
-        val ctx = appContext ?: return
-        indexScope.launch { refreshIndex(ctx) }
+        refreshRequests.trySend(Unit)
+    }
+
+    /** Workers call this after committing a verified path, so one song never requires a library scan. */
+    suspend fun recordDownload(youtubeId: String, path: String) = indexMutex.withLock {
+        synchronized(cacheLock) {
+            externalDownloads[youtubeId] = path
+            _downloadedIds.value = _downloadedIds.value.adding(youtubeId)
+        }
     }
 
     /** Rebuilds both the app-folder map and the external-download index. */
     suspend fun refreshIndex(context: Context) = indexMutex.withLock {
         appContext = context.applicationContext
-        val internal = scanInternalDownloads(context)
-        downloadedFilesCache = internal
-        lastCacheScanTime = System.currentTimeMillis()
-        val external = HashMap<String, String>()
-        val saved = runCatching {
-            AppDatabase.getInstance(context).songRepository().getDownloadedSongs()
-        }.getOrDefault(emptyList())
+        val internal = refreshInternalFiles(context)
+        val external = java.util.concurrent.ConcurrentHashMap<String, String>()
+        val saved = AppDatabase.getInstance(context).songRepository().getDownloadedSongs()
         for (song in saved) {
             val id = song.youtubeId
             val path = song.audioFilePath
             if (id.isBlank() || path.isNullOrBlank() || internal.containsKey(id)) continue
-            if (isReadableAudio(context, path)) external[id] = path
+            readableAudioPath(context, path)?.let { external[id] = it }
         }
-        externalDownloads = external
-        _downloadedIds.value = internal.keys + external.keys
+        synchronized(cacheLock) {
+            externalDownloads = external
+            _downloadedIds.value = downloadedFilesCache.orEmpty().keys.toPersistentSet().addingAll(external.keys)
+        }
     }
 
-    private fun isReadableAudio(context: Context, path: String): Boolean = runCatching {
+    /** Validates an on-device file or SAF document without accepting stream URLs. */
+    internal fun readableAudioPath(context: Context, path: String?): String? {
+        if (path.isNullOrBlank()) return null
         if (path.startsWith("content://")) {
-            val doc = DocumentFile.fromSingleUri(context, Uri.parse(path))
-            doc != null && doc.exists() && doc.length() > 0L
-        } else {
-            val f = File(path.removePrefix("file://"))
-            f.isFile && f.length() > 0L
+            val readable = runCatching {
+                context.contentResolver.openAssetFileDescriptor(Uri.parse(path), "r")
+                    ?.use { it.length != 0L }
+            }.getOrNull() == true
+            return path.takeIf { readable }
         }
-    }.getOrDefault(false)
+        val filePath = if (path.startsWith("file://")) Uri.parse(path).path ?: return null else path
+        val file = File(filePath)
+        return filePath.takeIf { file.isAbsolute && file.isFile && file.canRead() && file.length() > 0L }
+    }
 
     private fun scanInternalDownloads(context: Context): Map<String, File> {
         val candidateDirs = listOf(
@@ -123,6 +150,14 @@ object OfflineAudioResolver {
         return map
     }
 
+    private fun refreshInternalFiles(context: Context): Map<String, File> = synchronized(cacheLock) {
+        val files = scanInternalDownloads(context)
+        downloadedFilesCache = files
+        lastCacheScanTime = System.currentTimeMillis()
+        _downloadedIds.value = files.keys.toPersistentSet().addingAll(externalDownloads.keys)
+        files
+    }
+
     private fun getDownloadedFilesMap(context: Context): Map<String, File> {
         if (appContext == null) init(context)
         val now = System.currentTimeMillis()
@@ -130,12 +165,7 @@ object OfflineAudioResolver {
         if (cached != null && (now - lastCacheScanTime < CACHE_TTL_MS)) {
             return cached
         }
-        val map = scanInternalDownloads(context)
-        downloadedFilesCache = map
-        lastCacheScanTime = now
-        val merged = map.keys + externalDownloads.keys
-        if (merged != _downloadedIds.value) _downloadedIds.value = merged
-        return map
+        return refreshInternalFiles(context)
     }
 
     private fun youtubeIdOf(song: Song): String? =

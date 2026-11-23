@@ -26,6 +26,12 @@ interface LocalSongDataSource {
     )
     suspend fun getDownloadedSongs(): List<Song>
 
+    @Query("""
+        SELECT * FROM songs WHERE (audioFilePath IS NOT NULL AND audioFilePath != '')
+        OR EXISTS (SELECT 1 FROM PlaylistSongCrossRef ref WHERE ref.songId = songs.youtubeId)
+    """)
+    suspend fun getPlaylistAndDownloadedSongs(): List<Song>
+
     @Query("SELECT COUNT(*) FROM songs WHERE audioFilePath IS NOT NULL AND audioFilePath != ''")
     suspend fun getDownloadedSongCount(): Int
 
@@ -95,8 +101,18 @@ interface LocalSongDataSource {
     @Query("UPDATE songs SET audioFilePath = :audioPath WHERE youtubeId = :songId")
     suspend fun updateAudioPath(songId: String, audioPath: String)
 
-    @Query("SELECT * FROM songs WHERE genre IS NULL OR genre = ''")
-    suspend fun getSongsWithoutGenre(): List<Song>
+    @Query("""
+        UPDATE songs SET audioFilePath = :audioPath, isPermanentlyDownloaded = 1,
+            downloadTimestamp = CASE WHEN downloadTimestamp = 0 THEN :timestamp ELSE downloadTimestamp END
+        WHERE youtubeId = :songId
+    """)
+    suspend fun saveDownloadPath(songId: String, audioPath: String, timestamp: Long = System.currentTimeMillis())
+
+    @Query("UPDATE songs SET audioFilePath = NULL, isPermanentlyDownloaded = 0, downloadTimestamp = 0 WHERE youtubeId = :songId")
+    suspend fun clearDownloadPath(songId: String)
+
+    @Query("SELECT youtubeId FROM songs WHERE genre IS NULL OR genre = '' ORDER BY downloadTimestamp DESC LIMIT :limit")
+    suspend fun getSongIdsWithoutGenre(limit: Int): List<String>
 
     @Query("UPDATE songs SET album = :album, albumBrowseId = :albumBrowseId WHERE youtubeId = :songId")
     suspend fun updateAlbum(songId: String, album: String?, albumBrowseId: String?)

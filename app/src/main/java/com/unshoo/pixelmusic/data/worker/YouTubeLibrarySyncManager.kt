@@ -96,8 +96,8 @@ class YouTubeLibrarySyncManager @Inject constructor(
 
     private suspend fun appDatabaseCountPlaylists(): Int =
         com.unshoo.pixelmusic.data.database.youtube.AppDatabase.getInstance(context)
-            .playlistRepository().getAll()
-            .count { !it.info.id.startsWith("LM") && it.info.id != com.unshoo.pixelmusic.data.remote.youtube.Constants.Downloads.DOWNLOADED_PLAYLIST_ID }
+            .playlistRepository().getAllInfo()
+            .count { !it.id.startsWith("LM") && !it.isDownloadedPlaylist }
 
     private val syncMutex = Mutex()
     @Volatile private var lastSuccessfulSyncAtMs: Long = 0L
@@ -323,6 +323,7 @@ class YouTubeLibrarySyncManager @Inject constructor(
                 pages++
                 delay(30L)
             }
+            if (continuation != null && shouldDoFull) return@withContext
         }
 
         if (allSongItems.isEmpty()) return@withContext
@@ -342,10 +343,17 @@ class YouTubeLibrarySyncManager @Inject constructor(
         musicRepository.insertYoutubeSongs(nativeSongs)
     }
 
-    suspend fun syncLikedPlaylists(forceFull: Boolean = false) = withContext(Dispatchers.IO) {
+    private val playlistSyncMutex = Mutex()
+
+    /** Returns whether membership changed, or null when reconciliation could not finish. */
+    suspend fun syncLikedPlaylists(forceFull: Boolean = false): Boolean? = withContext(Dispatchers.IO) {
+        playlistSyncMutex.withLock { syncPlaylistMembership(forceFull) }
+    }
+
+    private suspend fun syncPlaylistMembership(forceFull: Boolean): Boolean? {
         val allPlaylists = mutableListOf<PlaylistItem>()
 
-        val firstPage = YouTube.library("FEmusic_liked_playlists").getOrNull() ?: return@withContext
+        val firstPage = YouTube.library("FEmusic_liked_playlists").getOrNull() ?: return null
         allPlaylists += firstPage.items.filterIsInstance<PlaylistItem>().filter {
             YouTubeItemFilter.isMusicPlaylist(it.title, it.id)
         }
@@ -353,62 +361,49 @@ class YouTubeLibrarySyncManager @Inject constructor(
         val appDatabase = com.unshoo.pixelmusic.data.database.youtube.AppDatabase.getInstance(context)
         val playlistRepo = appDatabase.playlistRepository()
 
-        var pages = 0
-        var continuation = firstPage.continuation
-        while (continuation != null && pages < MAX_CONTINUATION_PAGES) {
-            yield()
-            val next = YouTube.libraryContinuation(continuation).getOrNull() ?: break
-            allPlaylists += next.items.filterIsInstance<PlaylistItem>().filter {
-                YouTubeItemFilter.isMusicPlaylist(it.title, it.id)
-            }
-            continuation = next.continuation
-            pages++
-            delay(30L)
-        }
-
-        if (allPlaylists.isEmpty()) return@withContext
-
-        // Remote IDs set for detecting deleted playlists
-        val remoteIds = allPlaylists.map { it.id }.toSet()
-        val existingPlaylists = playlistRepo.getAll()
-
-        // Clean up any deleted YouTube playlists locally
-        if (continuation == null) {
-            existingPlaylists.forEach { existing ->
-                val cleanId = existing.info.id.removePrefix("VL")
-                if (existing.info.id !in remoteIds && cleanId !in remoteIds &&
-                    !existing.info.id.startsWith("LM") && !existing.info.isDownloadedPlaylist
-                ) {
-                    Timber.i("YouTubeLibrarySyncManager: Removing deleted remote playlist '%s' (%s)", existing.info.title, existing.info.id)
-                    persistenceManager.deletePlaylist(existing.info.id)
+        val listingComplete = collectPlaylistPages(firstPage.continuation, MAX_CONTINUATION_PAGES) { token ->
+            YouTube.libraryContinuation(token).map { next ->
+                allPlaylists += next.items.filterIsInstance<PlaylistItem>().filter {
+                    YouTubeItemFilter.isMusicPlaylist(it.title, it.id)
                 }
+                next.continuation
+            }
+        }
+        if (allPlaylists.isEmpty()) return null
+
+        val remoteIds = allPlaylists.mapTo(HashSet()) { it.id.removePrefix("VL") }
+        val existingPlaylists = playlistRepo.getAllInfo().associateBy { it.id }
+        var changed = false
+        var complete = listingComplete
+        for (existing in existingPlaylists.values) {
+            val id = existing.id.removePrefix("VL")
+            if (listingComplete && !existing.isDownloadedPlaylist && !id.startsWith("LM") && id != "liked_songs" && id !in remoteIds) {
+                persistenceManager.deletePlaylist(existing.id)
+                changed = true
             }
         }
 
-        for (item in allPlaylists) {
+        for (item in allPlaylists.distinctBy { it.id.removePrefix("VL") }) {
             yield()
-            val reportedCount = item.songCountText
-                ?.split(" ")?.firstOrNull()
-                ?.filter { it.isDigit() }?.toIntOrNull() ?: 0
-
-            val existing = playlistRepo.getPlaylistById(item.id)
-                ?: playlistRepo.getPlaylistById("VL${item.id}")
-
-            val existingSongs = existing?.songs ?: emptyList()
-            val countMatches = existing != null && existingSongs.size == reportedCount && reportedCount > 0
+            val id = item.id.removePrefix("VL")
+            val existing = existingPlaylists[id] ?: existingPlaylists["VL$id"]
 
             // Fetch page 1 to check signature and grab latest metadata
             val page1Result = YouTube.playlist(item.id).getOrNull()
             if (page1Result == null) {
-                // If playlist fetch failed, keep existing cache
+                complete = false
                 continue
             }
 
             val page1Songs = page1Result.songs
-            val page1Matches = countMatches && page1Songs.isNotEmpty() &&
-                page1Songs.indices.all { i ->
-                    i < existingSongs.size && page1Songs[i].id == existingSongs[i].youtubeId
-                }
+            val firstContinuation = page1Result.songsContinuation ?: page1Result.continuation
+            val reportedCount = sequenceOf(page1Result.playlist.songCountText, item.songCountText)
+                .mapNotNull { it?.substringBefore(' ')?.filter(Char::isDigit)?.toIntOrNull() }
+                .firstOrNull() ?: if (firstContinuation == null) page1Songs.size else 0
+            val existingIds = existing?.let { playlistRepo.getOrderedSongIds(it.id) }.orEmpty()
+            val page1Matches = existing != null && reportedCount == existingIds.size &&
+                page1Songs.isNotEmpty() && page1Songs.size <= existingIds.size &&
+                page1Songs.indices.all { page1Songs[it].id == existingIds[it] }
 
             // Self-made playlists often come back without a thumbnail in the library listing,
             // which left them coverless (e.g. "Bhajan"); fall back to the first song's art.
@@ -419,38 +414,46 @@ class YouTubeLibrarySyncManager @Inject constructor(
             ) ?: coverSource ?: ""
 
             val info = PlaylistInfo(
-                id = item.id,
+                id = existing?.id ?: id,
                 title = item.title,
                 coverHref = highQualityCover,
+                coverPath = existing?.coverPath,
                 lastSyncSongCount = reportedCount.takeIf { it > 0 } ?: page1Songs.size,
                 lastSyncTimestamp = System.currentTimeMillis()
             )
 
             if (!forceFull && page1Matches) {
                 Timber.d("YouTubeLibrarySyncManager: Playlist '%s' unchanged (signature & count match). Skipping.", item.title)
-                playlistRepo.insertPlaylist(info)
+                if (existing != info.copy(lastSyncTimestamp = existing.lastSyncTimestamp)) {
+                    playlistRepo.insertPlaylist(info)
+                }
                 continue
             }
 
             // Songs changed, added, removed, or reordered: page all songs
-            val fullSongItems = mutableListOf<SongItem>()
-            fullSongItems += page1Songs
-
-            var songPages = 0
-            var songContinuation = page1Result.songsContinuation ?: page1Result.continuation
-            while (songContinuation != null && songPages < MAX_CONTINUATION_PAGES) {
-                yield()
-                val nextSongs = YouTube.playlistContinuation(songContinuation).getOrNull() ?: break
-                fullSongItems += nextSongs.songs
-                songContinuation = nextSongs.continuation
-                songPages++
-                delay(30L)
+            val songs = page1Songs.mapTo(ArrayList()) { it.toYoutubeSong() }
+            val tracksComplete = collectPlaylistPages(firstContinuation, MAX_CONTINUATION_PAGES) { token ->
+                YouTube.playlistContinuation(token).map { next ->
+                    next.songs.mapTo(songs) { it.toYoutubeSong() }
+                    next.continuation
+                }
             }
-
-            val ytSongs = fullSongItems.map { it.toYoutubeSong() }
-            persistenceManager.persistPlaylist(info, ytSongs)
+            if (!tracksComplete) {
+                complete = false
+                continue
+            }
+            if (!forceFull && existing != null && existingIds.size == songs.size &&
+                songs.indices.all { songs[it].youtubeId == existingIds[it] }
+            ) {
+                val metadata = info.copy(lastSyncSongCount = songs.size, lastSyncTimestamp = existing.lastSyncTimestamp)
+                if (metadata != existing) playlistRepo.insertPlaylist(metadata)
+                continue
+            }
+            if (persistenceManager.persistPlaylist(info, songs)) changed = true
+            else complete = false
             delay(50L)
         }
+        return if (complete) changed else null
     }
 
     private fun ytSongId(youtubeId: String): Long =
@@ -475,4 +478,23 @@ class YouTubeLibrarySyncManager @Inject constructor(
         if (channelId.isBlank()) return ytArtistId(channelId)
         return -(17_000_000_000_000L + channelId.hashCode().toLong().absoluteValue)
     }
+}
+
+/** A partial traversal can add observations, but cannot establish that a playlist or track was removed. */
+internal suspend fun collectPlaylistPages(
+    firstToken: String?,
+    limit: Int,
+    fetchNext: suspend (String) -> Result<String?>,
+): Boolean {
+    var token = firstToken
+    val seen = HashSet<String>()
+    while (!token.isNullOrBlank()) {
+        if (seen.size >= limit || !seen.add(token)) return false
+        yield()
+        token = fetchNext(token).getOrElse { error ->
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            return false
+        }
+    }
+    return true
 }

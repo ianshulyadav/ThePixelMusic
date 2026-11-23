@@ -146,6 +146,8 @@ import com.unshoo.pixelmusic.presentation.components.ExpressiveScrollBar
 import com.unshoo.pixelmusic.presentation.components.SmartImage
 import com.unshoo.pixelmusic.presentation.components.SongInfoBottomSheet
 import com.unshoo.pixelmusic.presentation.components.resolveNavBarOccupiedHeight
+import com.unshoo.pixelmusic.presentation.components.subcomps.DownloadedBadge
+import com.unshoo.pixelmusic.presentation.components.subcomps.rememberIsPlaylistDownloaded
 import com.unshoo.pixelmusic.presentation.navigation.Screen
 import com.unshoo.pixelmusic.presentation.viewmodel.PlayerViewModel
 import com.unshoo.pixelmusic.presentation.viewmodel.PlaylistViewModel
@@ -254,11 +256,10 @@ fun PlaylistDetailScreen(
         uiState.playlists.any { it.id.removePrefix("VL") in targetIds }
     }
     val isYoutubePlaylistHydrating = isYoutubePlaylist && currentPlaylist?.songIds.isNullOrEmpty() && songsInPlaylist.isEmpty()
-    val isPlaylistFullyDownloaded by remember(songsInPlaylist) {
-        derivedStateOf {
-            songsInPlaylist.isNotEmpty() && songsInPlaylist.all { it.path.isNotBlank() || it.isLocal }
-        }
-    }
+    val isPlaylistFullyDownloaded = rememberIsPlaylistDownloaded(
+        songsInPlaylist,
+        maxOf(playlistDisplaySongCount, currentPlaylist?.songIds?.size ?: 0),
+    )
     // remember() the Flow itself (keyed on playlistId), not just collectAsState, because
     // observePlaylistDownloadStatus() builds a fresh WorkManager Flow on every call -- without
     // remember() a recomposition would resubscribe to WorkManager's Flow repeatedly instead of
@@ -278,7 +279,6 @@ fun PlaylistDetailScreen(
         wasPlaylistDownloading = isPlaylistDownloading
         lastSeenDownloadCompleted = playlistDownloadStatus.completed
         if (finishedNow || progressed) {
-            com.unshoo.pixelmusic.utils.OfflineAudioResolver.invalidateCache()
             if (progressed) kotlinx.coroutines.delay(600) // coalesce bursts of parallel completions
             playlistViewModel.loadPlaylistDetails(playlistId)
         }
@@ -841,14 +841,14 @@ fun PlaylistDetailScreen(
                                     ),
                                     modifier = Modifier.size(if (isPlaylistDownloading) actionButtonsHeight - 10.dp else actionButtonsHeight)
                                 ) {
-                                    Icon(
-                                        imageVector = when {
-                                            isPlaylistDownloading -> Icons.Rounded.Close
-                                            isPlaylistFullyDownloaded -> Icons.Rounded.Check
-                                            else -> Icons.Rounded.Download
-                                        },
-                                        contentDescription = if (isPlaylistDownloading) "Cancel download" else downloadPlaylistLabel
-                                    )
+                                    if (isPlaylistFullyDownloaded && !isPlaylistDownloading) {
+                                        DownloadedBadge(ringColor = MaterialTheme.colorScheme.primaryContainer)
+                                    } else {
+                                        Icon(
+                                            imageVector = if (isPlaylistDownloading) Icons.Rounded.Close else Icons.Rounded.Download,
+                                            contentDescription = if (isPlaylistDownloading) "Cancel download" else downloadPlaylistLabel
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -1108,7 +1108,7 @@ fun PlaylistDetailScreen(
                         }
                     )
                 }
-                if (!isPlaylistFullyDownloaded) {
+                if (!isPlaylistFullyDownloaded || isPlaylistDownloading) {
                     PlaylistActionItem(
                         icon = rememberVectorPainter(if (isPlaylistDownloading) Icons.Rounded.Close else Icons.Rounded.Download),
                         label = if (isPlaylistDownloading) "Cancel Download" else downloadPlaylistLabel,

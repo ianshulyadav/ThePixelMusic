@@ -14,6 +14,8 @@ import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.media3.common.Player
 import com.unshoo.pixelmusic.data.model.PlaybackQueueSnapshot
+import com.unshoo.pixelmusic.data.model.PlaybackQueueHistoryEntry
+import com.unshoo.pixelmusic.data.model.recordQueue
 import com.unshoo.pixelmusic.data.model.Playlist
 import com.unshoo.pixelmusic.data.model.SortOption // Added import
 import com.unshoo.pixelmusic.data.model.FolderSource
@@ -30,6 +32,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -39,6 +42,9 @@ import com.unshoo.pixelmusic.data.remote.saavn.SaavnAudioQuality
 import java.util.Locale
 
 val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
+private val Context.queueHistoryStore: DataStore<Preferences> by preferencesDataStore(name = "queue_history")
+private val QueueHistoryEntriesKey = stringPreferencesKey("entries")
+private const val QueueHistoryLimit = 12
 
 object ThemePreference {
     const val DEFAULT = "default"
@@ -831,6 +837,40 @@ constructor(
                 preferences[PreferencesKeys.PLAYBACK_QUEUE_SNAPSHOT] = json.encodeToString(snapshot)
             }
         }
+    }
+
+    val queueHistoryFlow: Flow<List<PlaybackQueueHistoryEntry>>
+        get() = context?.queueHistoryStore?.data
+            ?.map { it[QueueHistoryEntriesKey] }
+            ?.distinctUntilChanged()
+            ?.map(::decodeQueueHistory)
+            ?: flowOf(emptyList())
+
+    private fun decodeQueueHistory(raw: String?): List<PlaybackQueueHistoryEntry> =
+        raw?.let {
+            runCatching { json.decodeFromString<List<PlaybackQueueHistoryEntry>>(it) }
+                .getOrDefault(emptyList())
+                .filter { entry -> entry.items.size > 1 }
+        }.orEmpty()
+
+    suspend fun recordQueueHistory(entry: PlaybackQueueHistoryEntry) {
+        if (entry.items.size < 2) return
+        context?.queueHistoryStore?.edit { preferences ->
+            val updated = decodeQueueHistory(preferences[QueueHistoryEntriesKey]).recordQueue(entry, QueueHistoryLimit)
+            preferences[QueueHistoryEntriesKey] = json.encodeToString(updated)
+        }
+    }
+
+    suspend fun removeQueueHistory(id: String) {
+        context?.queueHistoryStore?.edit { preferences ->
+            val updated = decodeQueueHistory(preferences[QueueHistoryEntriesKey]).filterNot { it.id == id }
+            if (updated.isEmpty()) preferences.remove(QueueHistoryEntriesKey)
+            else preferences[QueueHistoryEntriesKey] = json.encodeToString(updated)
+        }
+    }
+
+    suspend fun clearQueueHistory() {
+        context?.queueHistoryStore?.edit { it.remove(QueueHistoryEntriesKey) }
     }
 
     // ===== Multi-Artist Settings =====

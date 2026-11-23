@@ -1983,6 +1983,21 @@ class MusicService : MediaLibraryService() {
 
             val player = mediaSession?.player ?: engine.masterPlayer
             val currentItem = player.currentMediaItem
+            val master = engine.masterPlayer
+            val localIndex = master.currentMediaItemIndex
+            if (currentItem != null && localIndex in 0 until master.mediaItemCount &&
+                master.currentMediaItem?.mediaId == currentItem.mediaId
+            ) {
+                engine.youtubeFallbackForLocalError(currentItem)?.let { fallback ->
+                    val playWhenReady = master.playWhenReady
+                    val position = master.currentPosition.coerceAtLeast(0L)
+                    master.replaceMediaItem(localIndex, fallback)
+                    master.seekTo(localIndex, position)
+                    master.prepare()
+                    master.playWhenReady = playWhenReady
+                    return
+                }
+            }
             val currentUri = currentItem?.localConfiguration?.uri?.toString()
             // Lossless-source streams (Tidal/Qobuz/Deezer CDN links, deezer://, tidal-dash://,
             // flattened Apple files) expire or get evicted; they recover through the same

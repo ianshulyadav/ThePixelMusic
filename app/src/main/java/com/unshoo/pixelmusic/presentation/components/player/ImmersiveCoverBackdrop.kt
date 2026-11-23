@@ -3,17 +3,19 @@ package com.unshoo.pixelmusic.presentation.components.player
 import com.unshoo.pixelmusic.presentation.components.fullBackdropSource
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.draw.drawWithCache
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
@@ -24,6 +26,7 @@ import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImagePainter
 import com.unshoo.pixelmusic.data.preferences.AlbumArtQuality
 import com.unshoo.pixelmusic.presentation.components.SafeOriginalAlbumArtSize
 import com.unshoo.pixelmusic.presentation.components.SmartImage
@@ -73,24 +76,52 @@ internal fun ImmersiveCoverBackdrop(
                 }
             }
     ) {
-        Crossfade(
-            targetState = artworkModel,
-            animationSpec = tween(350),
-            label = "immersiveCover",
+        var settledModel by remember { mutableStateOf<String?>(null) }
+        var loadState by remember(artworkModel, targetSize) { mutableStateOf<AsyncImagePainter.State?>(null) }
+        val outgoingModel = settledModel?.takeIf { it != artworkModel }
+        val reveal = remember(artworkModel, targetSize) {
+            Animatable(if (artworkModel != null && artworkModel == settledModel) 1f else 0f)
+        }
+        val failed = artworkModel.isNullOrBlank() || loadState is AsyncImagePainter.State.Error
+        LaunchedEffect(artworkModel, targetSize, loadState is AsyncImagePainter.State.Success, failed) {
+            if (failed || loadState is AsyncImagePainter.State.Success) {
+                reveal.animateTo(1f, tween(350))
+                settledModel = artworkModel.takeUnless { failed }
+            }
+        }
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(top = topOffset)
                 .fullBackdropSource(com.unshoo.pixelmusic.presentation.components.LocalCoverBackdropSource.current)
-        ) { model ->
-            SmartImage(
-                model = model,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                targetSize = targetSize,
-                crossfadeDurationMillis = 0,
-                modifier = Modifier
-                    .fillMaxSize()
-            )
+        ) {
+            if (outgoingModel != null) {
+                SmartImage(
+                    model = outgoingModel,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    targetSize = targetSize,
+                    placeholderResId = 0,
+                    errorResId = 0,
+                    placeHolderBackgroundColor = Color.Transparent,
+                    modifier = Modifier.fillMaxSize().graphicsLayer {
+                        alpha = if (failed) 1f - reveal.value else 1f
+                    },
+                )
+            }
+            if (!failed) {
+                SmartImage(
+                    model = artworkModel,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    targetSize = targetSize,
+                    placeholderResId = 0,
+                    errorResId = 0,
+                    placeHolderBackgroundColor = Color.Transparent,
+                    onState = { loadState = it },
+                    modifier = Modifier.fillMaxSize().graphicsLayer { alpha = reveal.value },
+                )
+            }
         }
         // Soft top scrim keeps the status bar and top buttons readable on bright art.
         Box(

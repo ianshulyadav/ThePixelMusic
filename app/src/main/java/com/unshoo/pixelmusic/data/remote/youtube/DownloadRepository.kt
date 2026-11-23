@@ -119,7 +119,9 @@ class DownloadRepository(appContext: Context) {
 
     suspend fun isSongDownloaded(youtubeId: String): Boolean {
         val song = localSongRepository.getSong(youtubeId)
-        return song?.downloaded == true
+        val resolver = com.unshoo.pixelmusic.utils.OfflineAudioResolver
+        return resolver.readableAudioPath(_appContext, song?.audioFilePath) != null ||
+            resolver.readableAudioPath(_appContext, resolver.getDownloadedAudioUri(_appContext, youtubeId)?.toString()) != null
     }
 
     suspend fun deleteSong(youtubeId: String) {
@@ -135,11 +137,13 @@ class DownloadRepository(appContext: Context) {
         File(imageDir, "$youtubeId.jpg").takeIf { it.exists() }?.delete()
 
         localPlaylistRepository.deleteCrossRef(Constants.Downloads.DOWNLOADED_PLAYLIST_ID, youtubeId)
+        localSongRepository.clearDownloadPath(youtubeId)
 
         val stillLinked = localPlaylistRepository.getSongIdsWithPlaylist(listOf(youtubeId)).isNotEmpty()
         if (!stillLinked) {
             localSongRepository.deleteByIds(listOf(youtubeId))
         }
+        com.unshoo.pixelmusic.utils.OfflineAudioResolver.invalidateCache()
     }
 
     private fun getExistingJobs(id: String): List<WorkInfo> {

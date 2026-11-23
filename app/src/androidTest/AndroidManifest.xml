@@ -1,0 +1,7 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <application>
+        <!-- Instrumentation runs in the target app, which owns the AndroidX Startup provider. -->
+        <provider android:name="androidx.startup.InitializationProvider" tools:node="remove" />
+    </application>
+</manifest>

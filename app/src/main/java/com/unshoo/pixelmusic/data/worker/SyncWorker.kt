@@ -24,10 +24,6 @@ import androidx.work.WorkManager
 import com.unshoo.pixelmusic.data.remote.youtube.YoutubePlaylistDataSource
 import com.unshoo.pixelmusic.data.remote.youtube.YoutubeRequestHelper
 import unshoo.ianshulyadav.pixelmusic.innertube.YouTube
-import com.unshoo.pixelmusic.data.model.youtube.Playlist
-import com.unshoo.pixelmusic.data.model.youtube.PlaylistInfo
-import com.unshoo.pixelmusic.data.remote.youtube.YouTubeItemFilter
-import com.unshoo.pixelmusic.data.repository.YouTubeLibraryPersistenceManager
 import com.unshoo.pixelmusic.data.database.AlbumEntity
 import com.unshoo.pixelmusic.data.database.ArtistEntity
 import com.unshoo.pixelmusic.data.database.MusicDao
@@ -98,7 +94,7 @@ constructor(
         private val favoritesDao: FavoritesDao,
         private val engagementDao: EngagementDao,
         private val telegramRepository: com.unshoo.pixelmusic.data.telegram.TelegramRepository,
-        private val persistenceManager: YouTubeLibraryPersistenceManager
+        private val youTubeLibrarySyncManager: YouTubeLibrarySyncManager
 ) : CoroutineWorker(appContext, workerParams) {
 
     private val contentResolver: ContentResolver = appContext.contentResolver
@@ -1883,101 +1879,18 @@ constructor(
             val appDatabase = com.unshoo.pixelmusic.data.database.youtube.AppDatabase.getInstance(applicationContext)
             val isMobile = isMobileNetwork(applicationContext)
 
-            // 1. Fetch remote user-created playlists (true delta sync)
-            var remotePlaylistsSuccess = false
-            var youtubePlaylistContentChanged = false
-            try {
-                val rawPlaylists = YoutubePlaylistDataSource().retrieveAll(settings)
-                val remotePlaylists = rawPlaylists.filter { YouTubeItemFilter.isMusicPlaylist(it.title, it.id) }
-
-                val remoteIds = remotePlaylists.map { it.id }.toSet()
-                // Metadata only: the cleanup below never touches playlist songs.
-                val existingPlaylists = appDatabase.playlistRepository().getAllInfo()
-
-                // Clean up any deleted YouTube playlists locally
-                existingPlaylists.forEach { existing ->
-                    val cleanId = existing.id.removePrefix("VL")
-                    if (existing.id !in remoteIds && cleanId !in remoteIds && !existing.id.startsWith("LM") && !existing.isDownloadedPlaylist) {
-                        Log.i(TAG, "SyncWorker: Removing deleted remote playlist '${existing.title}' (${existing.id})")
-                        persistenceManager.deletePlaylist(existing.id)
-                        youtubePlaylistContentChanged = true
-                    }
-                }
-
-                remotePlaylists.forEach { playlistInfo ->
-                    val existingPlaylist = appDatabase.playlistRepository().getPlaylistById(playlistInfo.id)
-                    appDatabase.playlistRepository().insertPlaylist(
-                        playlistInfo.copy(
-                            coverHref = com.unshoo.pixelmusic.data.remote.youtube.upgradeThumbnailUrlToHighQuality(
-                                playlistInfo.coverPath ?: playlistInfo.coverHref
-                            ) ?: playlistInfo.coverHref,
-                            lastSyncSongCount = existingPlaylist?.info?.lastSyncSongCount ?: playlistInfo.lastSyncSongCount,
-                            lastSyncTimestamp = existingPlaylist?.info?.lastSyncTimestamp ?: playlistInfo.lastSyncTimestamp
-                        )
-                    )
-                }
-
-                remotePlaylists.forEach { playlistInfo ->
-                    yield()
-                    val existingPlaylist = appDatabase.playlistRepository().getPlaylistById(playlistInfo.id)
-                        ?: appDatabase.playlistRepository().getPlaylistById("VL${playlistInfo.id}")
-                    val existingSongCount = existingPlaylist?.info?.lastSyncSongCount ?: 0
-                    val existingHydratedCount = existingPlaylist?.songs?.size ?: 0
-                    val remoteReportedCount = playlistInfo.lastSyncSongCount
-
-                    // Fetch page 1 to check signature before skipping continuation pages
-                    val page1Result = YouTube.playlist(playlistInfo.id).getOrNull()
-                    val page1Songs = page1Result?.songs ?: emptyList()
-                    val countMatches = existingPlaylist != null && existingHydratedCount > 0 &&
-                        remoteReportedCount > 0 && remoteReportedCount == existingSongCount
-
-                    val page1Matches = countMatches && page1Songs.isNotEmpty() &&
-                        page1Songs.indices.all { i ->
-                            i < existingPlaylist.songs.size && page1Songs[i].id == existingPlaylist.songs[i].youtubeId
-                        }
-
-                    if (page1Matches) {
-                        Log.d(TAG, "Skipping playlist '${playlistInfo.title}' — signature and count unchanged ($existingSongCount songs)")
-                        kotlinx.coroutines.delay(20L)
-                        return@forEach
-                    }
-
-                    val emptyPlaylist = Playlist(playlistInfo, emptyList())
-                    val fullPlaylist = YoutubePlaylistDataSource().retrieveOne(emptyPlaylist, settings)
-
-                    persistenceManager.persistPlaylist(fullPlaylist.info, fullPlaylist.songs)
-                    youtubePlaylistContentChanged = true
-                    Log.i(TAG, "Delta synced playlist '${playlistInfo.title}': ${fullPlaylist.songs.size} songs (was $existingSongCount)")
-                    kotlinx.coroutines.delay(50L)
-                }
-                remotePlaylistsSuccess = true
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to fetch remote YouTube playlists", e)
-            }
-
-            if (!remotePlaylistsSuccess && settings.cookies.raw.isNotBlank()) {
-                Log.w(TAG, "SyncWorker: Remote YouTube playlist fetch failed, but user is logged in. Aborting YouTube sync to prevent wiping local synchronized library.")
-                return
-            }
-
-            // 2. Fetch and sync Liked Songs playlist ("LM") — delta sync and mapping removed
-            val remoteLikedSongsList: List<com.unshoo.pixelmusic.data.model.youtube.Song> = emptyList()
+            val youtubePlaylistContentChanged = youTubeLibrarySyncManager.syncLikedPlaylists() ?: return
 
             // 3. Fetch missing genres (rate limited: 10 per sync cycle)
             if (!isMobile) {
                 try {
-                    val songsWithoutGenre = appDatabase.songRepository().getSongsWithoutGenre()
-                    val targetSongs = songsWithoutGenre
-                        .sortedByDescending { it.downloadTimestamp }
-                        .take(10)
-
-                    targetSongs.forEach { song ->
-                        val fetchedGenre = com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.extractGenre(song.youtubeId)
+                    appDatabase.songRepository().getSongIdsWithoutGenre(limit = 10).forEach { youtubeId ->
+                        val fetchedGenre = com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.extractGenre(youtubeId)
                         if (fetchedGenre != null) {
-                            appDatabase.songRepository().updateGenre(song.youtubeId, fetchedGenre)
-                            val unifiedId = toUnifiedYoutubeSongId(song.youtubeId)
+                            appDatabase.songRepository().updateGenre(youtubeId, fetchedGenre)
+                            val unifiedId = toUnifiedYoutubeSongId(youtubeId)
                             musicDao.updateSongGenre(unifiedId, fetchedGenre)
-                            Log.i(TAG, "Fetched genre '$fetchedGenre' for YouTube song '${song.title}'")
+                            Log.i(TAG, "Fetched genre '$fetchedGenre' for YouTube song $youtubeId")
                         }
                         kotlinx.coroutines.delay(500)
                     }
@@ -1987,13 +1900,6 @@ constructor(
             } else {
                 Log.i(TAG, "SyncWorker: Mobile data active. Skipping missing genres network fetch.")
             }
-
-            val allPlaylists = playlistPreferencesRepository.getPlaylistsOnce()
-            val localPlaylistSongIds = allPlaylists
-                .filter { it.source == "LOCAL" || it.source == "SMART" }
-                .flatMap { it.songIds }
-                .mapNotNull { it.toLongOrNull() }
-                .toSet()
 
             val existingUnifiedYoutubeIds = musicDao.getAllYoutubeSongIds()
 
@@ -2005,10 +1911,17 @@ constructor(
                 return
             }
 
-            val youtubePlaylists = appDatabase.playlistRepository().getAll()
-            val downloadedSongs = appDatabase.songRepository().getDownloadedSongs()
+            val allPlaylists = playlistPreferencesRepository.getPlaylistsOnce()
+            val localPlaylistSongIds = allPlaylists
+                .filter { it.source == "LOCAL" || it.source == "SMART" }
+                .flatMap { it.songIds }
+                .mapNotNull { it.toLongOrNull() }
+                .toSet()
 
-            if (youtubePlaylists.isEmpty() && downloadedSongs.isEmpty() && remoteLikedSongsList.isEmpty()) {
+            val youtubePlaylists = appDatabase.playlistRepository().getAllInfo()
+            val downloadedCount = appDatabase.songRepository().getDownloadedSongCount()
+
+            if (youtubePlaylists.isEmpty() && downloadedCount == 0) {
                 if (existingUnifiedYoutubeIds.isNotEmpty()) {
                     val toDelete = existingUnifiedYoutubeIds.filter { it !in localPlaylistSongIds }
                     if (toDelete.isNotEmpty()) {
@@ -2024,32 +1937,29 @@ constructor(
             }
 
             // Combine all unique songs
-            val allUniqueSongs = mutableMapOf<String, com.unshoo.pixelmusic.data.model.youtube.Song>()
-            downloadedSongs.forEach { allUniqueSongs[it.youtubeId] = it }
-            youtubePlaylists.forEach { playlist ->
-                playlist.songs.forEach { allUniqueSongs[it.youtubeId] = it }
-            }
-            remoteLikedSongsList.forEach { allUniqueSongs[it.youtubeId] = it }
+            val allUniqueSongs = appDatabase.songRepository().getPlaylistAndDownloadedSongs()
 
             val localFavorites = favoritesDao.getFavoriteSongIdsOnce().toSet()
             val existingSongsMap = if (existingUnifiedYoutubeIds.isNotEmpty()) {
-                musicDao.getSongsByIdsListSimple(existingUnifiedYoutubeIds).associateBy { it.id }
+                buildMap {
+                    existingUnifiedYoutubeIds.chunked(800).forEach { ids ->
+                        musicDao.getSongsByIdsListSimple(ids).associateByTo(this) { it.id }
+                    }
+                }
             } else {
                 emptyMap()
             }
             val libraryMembershipKeys = engagementDao.getAllLibraryMembershipKeys().toSet()
             val likedAlbumIds = userPreferencesRepository.likedAlbumIdsFlow.first()
             val songsWithValidAlbums = musicDao.getSongsWithValidAlbumIds().toSet()
-            val localSongFilePaths = musicDao.getSongsBySourceType(SourceType.LOCAL)
-                .mapNotNull { it.filePath.takeIf(String::isNotBlank) }
-                .toSet()
+            val localSongFilePaths = musicDao.getDeviceFilePaths().toHashSet()
 
             val songsToInsert = ArrayList<SongEntity>(allUniqueSongs.size)
             val artistsToInsert = LinkedHashMap<Long, ArtistEntity>()
             val albumsToInsert = LinkedHashMap<Long, AlbumEntity>()
             val crossRefsToInsert = mutableListOf<SongArtistCrossRef>()
 
-            allUniqueSongs.values.forEach { ySong ->
+            allUniqueSongs.forEach { ySong ->
                 val songId = toUnifiedYoutubeSongId(ySong.youtubeId)
                 val existingSong = existingSongsMap[songId]
                 val artistNames = parseYoutubeArtistNames(ySong.artist)
@@ -2191,36 +2101,36 @@ constructor(
             )
 
             // Sync YouTube Playlists to user preferences/database
-            val syncedPlaylistIds = youtubePlaylists.map { it.info.id }.toSet()
+            val syncedPlaylistIds = youtubePlaylists.mapTo(HashSet()) { it.id.removePrefix("VL") }
 
             // Delete orphaned synced playlists
-            allPlaylists.filter { it.source == "YOUTUBE" && it.id !in syncedPlaylistIds }.forEach {
+            allPlaylists.filter { it.source == "YOUTUBE" && it.id.removePrefix("VL") !in syncedPlaylistIds }.forEach {
                 playlistPreferencesRepository.deletePlaylist(it.id)
             }
 
             // Upsert actual YouTube playlists
             youtubePlaylists.forEach { playlist ->
-                val playlistSongIds = playlist.songs.map { "youtube_${it.youtubeId}" }
-                val targetCoverUri = com.unshoo.pixelmusic.data.remote.youtube.upgradeThumbnailUrlToHighQuality(playlist.info.coverPath ?: playlist.info.coverHref)
+                val playlistSongIds = appDatabase.playlistRepository().getOrderedSongIds(playlist.id).map { "youtube_$it" }
+                val targetCoverUri = com.unshoo.pixelmusic.data.remote.youtube.upgradeThumbnailUrlToHighQuality(playlist.coverPath ?: playlist.coverHref)
 
                 // Check if already exists in main database to avoid overwriting user edits or custom playlist attributes
-                val existing = allPlaylists.find { it.id == playlist.info.id }
+                val existing = allPlaylists.find { it.id == playlist.id.removePrefix("VL") }
                 if (existing == null) {
                     playlistPreferencesRepository.createPlaylist(
-                        name = playlist.info.title,
+                        name = playlist.title,
                         songIds = playlistSongIds,
                         coverImageUri = targetCoverUri,
-                        customId = playlist.info.id,
+                        customId = playlist.id,
                         source = "YOUTUBE"
                     )
                 } else {
-                    val isUnchanged = existing.name == playlist.info.title &&
+                    val isUnchanged = existing.name == playlist.title &&
                         existing.songIds == playlistSongIds &&
                         (existing.coverImageUri == targetCoverUri || targetCoverUri.isNullOrBlank())
                     if (!isUnchanged) {
                         playlistPreferencesRepository.updatePlaylist(
                             existing.copy(
-                                name = playlist.info.title,
+                                name = playlist.title,
                                 songIds = playlistSongIds,
                                 coverImageUri = targetCoverUri ?: existing.coverImageUri
                             )

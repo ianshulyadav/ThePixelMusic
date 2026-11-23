@@ -32,8 +32,10 @@ data class Playlist(
     val crossRefs: List<PlaylistSongCrossRef> = listOf()
 ) {
     val songs: List<Song>
-        get() = crossRefs.sortedBy { it.position }.mapNotNull { ref ->
-            unsortedSongs.find { it.youtubeId == ref.songId }
+        get() {
+            val byId = HashMap<String, Song>(unsortedSongs.size)
+            for (song in unsortedSongs) byId.putIfAbsent(song.youtubeId, song)
+            return crossRefs.sortedBy { it.position }.mapNotNull { byId[it.songId] }
         }
 
     val mediaItems: List<MediaItem>

@@ -671,9 +671,7 @@ class CloudDownloadsViewModel @Inject constructor(
                 repository.remove(song.contentUriString)
                 dao.deleteBySourceUri(song.contentUriString)
             }
-            if (song.path.isNotBlank()) {
-                runCatching { File(song.path).delete() }
-            }
+            deleteDownloadFile(song)
         }
     }
 
@@ -697,9 +695,7 @@ class CloudDownloadsViewModel @Inject constructor(
                     repository.remove(song.contentUriString)
                     dao.deleteBySourceUri(song.contentUriString)
                 }
-                if (song.path.isNotBlank()) {
-                    runCatching { File(song.path).delete() }
-                }
+                deleteDownloadFile(song)
             }
             withContext(Dispatchers.Main) {
                 clearSelection()
@@ -741,14 +737,19 @@ class CloudDownloadsViewModel @Inject constructor(
                     repository.remove(song.contentUriString)
                     dao.deleteBySourceUri(song.contentUriString)
                 }
-                if (song.path.isNotBlank()) {
-                    runCatching { File(song.path).delete() }
-                }
+                deleteDownloadFile(song)
             }
             repository.deleteAllDownloaded()
             withContext(Dispatchers.Main) {
                 clearSelection()
             }
         }
+    }
+
+    private suspend fun deleteDownloadFile(song: Song) {
+        val path = song.path
+        if (path.isBlank() || musicDao.isDeviceLibraryFile(path)) return
+        runCatching { File(path).delete() }
+        com.unshoo.pixelmusic.utils.OfflineAudioResolver.invalidateCache()
     }
 }

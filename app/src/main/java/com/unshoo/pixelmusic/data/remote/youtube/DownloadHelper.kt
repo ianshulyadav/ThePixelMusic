@@ -6,6 +6,7 @@ import android.os.Environment
 import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 import androidx.datastore.preferences.core.intPreferencesKey
+import com.unshoo.pixelmusic.data.database.MusicDao
 import com.unshoo.pixelmusic.data.model.youtube.Song
 import com.unshoo.pixelmusic.data.preferences.dataStore
 import kotlinx.coroutines.Dispatchers
@@ -13,6 +14,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -28,6 +31,8 @@ import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
 import com.unshoo.pixelmusic.data.preferences.DownloadAudioQuality
 import com.unshoo.pixelmusic.data.preferences.UserPreferencesRepository
+import com.unshoo.pixelmusic.utils.OfflineAudioResolver
+import com.unshoo.pixelmusic.utils.YouTubeIdUtils
 
 object DownloadHelper {
     @EntryPoint
@@ -79,6 +84,7 @@ object DownloadHelper {
 
     /** Files smaller than this download over a single connection (splitting costs more than it saves). */
     private const val MIN_SPLIT_BYTES = 3L * 1024 * 1024
+    private val downloadLocks = List(64) { Mutex() }
 
     /**
      * CPU/disk-heavy post-processing (container remux, tag writing) runs one file at a time on a
@@ -100,6 +106,22 @@ object DownloadHelper {
         }
     }
 
+    /** Finds a finished download before the workers fetch metadata, artwork, or audio. */
+    internal suspend fun findExistingDownload(
+        context: Context,
+        youtubeId: String,
+        recordedPath: String?,
+        musicDao: MusicDao,
+    ): String? {
+        OfflineAudioResolver.readableAudioPath(context, recordedPath)?.let { return it }
+        val indexedUri = OfflineAudioResolver.getDownloadedAudioUri(context, youtubeId)
+        OfflineAudioResolver.readableAudioPath(context, indexedUri?.toString())?.let { return it }
+        val librarySong = musicDao.getSongByIdOnce(YouTubeIdUtils.toUnifiedSongId(youtubeId))
+        if (librarySong == null) return null
+        return OfflineAudioResolver.readableAudioPath(context, librarySong.filePath)
+            ?: OfflineAudioResolver.readableAudioPath(context, librarySong.contentUriString)
+    }
+
     /**
      * @param connections parallel HTTP range requests for one file. Kept low (4) by default;
      *   playlist downloads pass 2 because several songs already download side by side.
@@ -111,7 +133,21 @@ object DownloadHelper {
         context: Context,
         song: Song,
         connections: Int = 4,
+        checkDeviceLibrary: Boolean = true,
         onFileReady: (suspend (File) -> Unit)? = null,
+    ): String? {
+        val lockIndex = (song.youtubeId.hashCode() and Int.MAX_VALUE) % downloadLocks.size
+        return downloadLocks[lockIndex].withLock {
+            downloadAudioToStorage(context, song, connections, checkDeviceLibrary, onFileReady)
+        }
+    }
+
+    private suspend fun downloadAudioToStorage(
+        context: Context,
+        song: Song,
+        connections: Int,
+        checkDeviceLibrary: Boolean,
+        onFileReady: (suspend (File) -> Unit)?,
     ): String? = withContext(Dispatchers.IO) {
 
         val userPreferencesRepository = try {
@@ -127,7 +163,7 @@ object DownloadHelper {
         val allowLossless = (downloadQuality == DownloadAudioQuality.MAX)
 
         // ── Check if audio file already exists locally with >= 80% data similarity and matching artist ──
-        val existingLocalFile = if (YoutubeHelper.useDeviceLibraryMatches) {
+        val existingLocalFile = if (checkDeviceLibrary && YoutubeHelper.useDeviceLibraryMatches) {
             com.unshoo.pixelmusic.utils.LocalAudioDuplicateMatcher.findMatchingLocalFilePath(
                 context,
                 song,
@@ -149,16 +185,6 @@ object DownloadHelper {
                 val treeUri = Uri.parse(customPath)
                 val documentDir = DocumentFile.fromTreeUri(context, treeUri)
                 val baseName = "$safeTitle - $safeArtist"
-                // Leftovers from interrupted attempts: our own ".partial" files, plus the
-                // unplayable "<name>.<ext> (N)" duplicates older builds created on retry.
-                documentDir?.listFiles()?.forEach { doc ->
-                    val name = doc.name ?: return@forEach
-                    if (name.startsWith(baseName) &&
-                        (name.endsWith(".partial") || Regex("""\.(webm|m4a|opus|ogg|flac|mp3) ?\(\d+\)$""", RegexOption.IGNORE_CASE).containsMatchIn(name))
-                    ) {
-                        runCatching { doc.delete() }
-                    }
-                }
                 val extensions = buildList {
                     if (allowLossless) add("flac")
                     addAll(listOf("m4a", "opus", "ogg", "webm"))
@@ -208,8 +234,9 @@ object DownloadHelper {
 
         val tempFile = File(audioDir, "${song.youtubeId}.tmp")
 
+        val remuxTemp = File(audioDir, "${song.youtubeId}.remux.tmp")
         fun cleanupTempFile() {
-            try { tempFile.delete() } catch (_: Exception) {}
+            tempFile.delete()
         }
 
         val isSaavnEnabled = userPreferencesRepository?.enableSaavnStreamingFlow?.first() ?: true
@@ -282,7 +309,6 @@ object DownloadHelper {
                         tempFile.copyTo(segOutputFile, overwrite = true)
                         cleanupTempFile()
                     }
-                    enforceStorageLimit(context, keepFile = segOutputFile)
                     return@withContext segOutputFile.absolutePath
                 }
 
@@ -445,7 +471,7 @@ object DownloadHelper {
                 // WebM is indexed by Android as video, so it never appears in the music library or
                 // folder scans. Rewrap the Opus stream into Ogg (no re-encode, no quality loss).
                 if (finalExt == "webm") {
-                    val oggTemp = File(audioDir, "${song.youtubeId}.remux.tmp")
+                    val oggTemp = remuxTemp
                     if (withLowPriorityPostProcessing { AudioContainerRemuxer.remuxWebmToOgg(tempFile, oggTemp) }) {
                         cleanupTempFile()
                         if (!oggTemp.renameTo(tempFile)) {
@@ -456,6 +482,7 @@ object DownloadHelper {
                         finalMime = "audio/ogg"
                     }
                 }
+                remuxTemp.delete()
                 val finalFileName = "$safeTitle - $safeArtist.$finalExt"
                 val finalOutputFile = File(audioDir, "${song.youtubeId}.$finalExt")
 
@@ -485,14 +512,15 @@ object DownloadHelper {
                     runCatching { if (outputFile.exists()) outputFile.delete() }
                 }
 
-                enforceStorageLimit(context, keepFile = finalOutputFile)
                 return@withContext finalOutputFile.absolutePath
 
             } catch (e: CancellationException) {
+                remuxTemp.delete()
                 cleanupTempFile()
                 throw e
             } catch (e: Exception) {
                 lastException = e
+                remuxTemp.delete()
                 cleanupTempFile()
                 PixelMusicHelper.printe("Download attempt $attempt/$maxRetries failed for ${song.title}: ${e.message}")
                 if (!bypassLossless) {
@@ -570,15 +598,6 @@ object DownloadHelper {
             else -> null
         }
     }.getOrNull()
-
-    private suspend fun enforceStorageLimit(context: Context, keepFile: File? = null) = withContext(Dispatchers.IO) {
-        // User downloaded songs and thumbnails are permanent offline media and must NOT be silently deleted.
-        // Only clean up dangling temporary files (.tmp / .part) here.
-        val audioDir = PixelMusicHelper.getDownloadDirectory(context, Constants.Downloads.AUDIO_FILES_FOLDER)
-        audioDir.listFiles()?.filter { it.name.endsWith(".tmp") || it.name.contains(".part") }?.forEach { temp ->
-            try { temp.delete() } catch (_: Exception) {}
-        }
-    }
 
     suspend fun copyToPublicDownload(context: Context, sourceFilePath: String, songTitle: String, artistName: String): File? {
         try {

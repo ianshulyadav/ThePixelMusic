@@ -60,7 +60,6 @@ import com.unshoo.pixelmusic.presentation.viewmodel.PlaylistViewModel
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.material.icons.rounded.Sync
-import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -101,6 +100,8 @@ import com.unshoo.pixelmusic.data.model.Playlist
 import com.unshoo.pixelmusic.data.model.Song
 import com.unshoo.pixelmusic.data.model.SortOption
 import com.unshoo.pixelmusic.presentation.components.subcomps.SineWaveLine
+import com.unshoo.pixelmusic.presentation.components.subcomps.ArtworkDownloadedBadge
+import com.unshoo.pixelmusic.presentation.components.subcomps.rememberIsPlaylistDownloaded
 import com.unshoo.pixelmusic.presentation.navigation.Screen
 import com.unshoo.pixelmusic.presentation.screens.PlayerSheetCollapsedCornerRadius
 import com.unshoo.pixelmusic.presentation.viewmodel.PlayerViewModel
@@ -398,34 +399,20 @@ fun PlaylistItem(
     val playlistViewModel: PlaylistViewModel = hiltViewModel()
     val syncProgressMap by playlistViewModel.playlistSyncProgress.collectAsStateWithLifecycle()
     val syncProgress = syncProgressMap[playlist.id]
-    val playlistPreviewSongIds = remember(playlist.songIds) {
-        playlist.songIds.take(4)
+    var playlistSongs by remember(playlist.songIds) {
+        mutableStateOf(emptyList<Song>())
     }
-    // Use a one-shot load instead of a reactive Flow per-item.
-    // Previously, each PlaylistItem subscribed its own reactive DB Flow via observeSongs(),
-    // creating N simultaneous DB watchers for N playlists — causing ANR/freeze on large libraries.
-    // Now we do a single non-reactive fetch on the IO dispatcher and cache the result.
-    var playlistSongs by remember(playlistPreviewSongIds) {
-        mutableStateOf<List<Song>?>(if (playlistPreviewSongIds.isEmpty()) emptyList() else null)
-    }
-    LaunchedEffect(playlistPreviewSongIds) {
-        if (playlistPreviewSongIds.isNotEmpty()) {
-            playlistSongs = playerViewModel.getSongs(playlistPreviewSongIds)
+    LaunchedEffect(playlist.songIds) {
+        if (playlist.songIds.isNotEmpty()) {
+            playlistSongs = playerViewModel.getSongs(playlist.songIds)
         }
     }
 
     val isLikedMusicHero = playlist.id == "ytm_liked_music"
-
-    // Small circular badge for playlists whose online songs are all saved on the device.
-    var isFullyDownloaded by remember(playlist.id, playlist.songIds) { mutableStateOf(false) }
-    LaunchedEffect(playlist.id, playlist.songIds) {
-        isFullyDownloaded = playlist.songIds.isNotEmpty() && runCatching {
-            val songs = playerViewModel.getSongs(playlist.songIds)
-            songs.size >= playlist.songIds.size &&
-                songs.any { !it.isLocal } &&
-                songs.all { it.isLocal || it.path.isNotBlank() }
-        }.getOrDefault(false)
-    }
+    val playlistPreview = remember(playlistSongs) { playlistSongs.take(4) }
+    val isFullyDownloaded = rememberIsPlaylistDownloaded(
+        playlistSongs, maxOf(playlist.songIds.size, playlist.displaySongCount ?: 0)
+    )
 
     val selectionScale by animateFloatAsState(
         targetValue = if (isSelected) 0.98f else 1f,
@@ -498,11 +485,16 @@ fun PlaylistItem(
             modifier = Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            PlaylistCover(
-                playlist = playlist,
-                playlistSongs = playlistSongs ?: emptyList(),
-                size = if (isLikedMusicHero) 52.dp else 48.dp
-            )
+            Box {
+                PlaylistCover(
+                    playlist = playlist,
+                    playlistSongs = playlistPreview,
+                    size = if (isLikedMusicHero) 52.dp else 48.dp
+                )
+                if (isFullyDownloaded) {
+                    ArtworkDownloadedBadge(ringColor = containerColor)
+                }
+            }
 
             Spacer(modifier = Modifier.width(16.dp))
 
@@ -598,23 +590,6 @@ fun PlaylistItem(
                 "QQMUSIC" -> "QQ Music"
                 "LOCAL", "", null -> "Local"
                 else -> playlist.source?.lowercase()?.replaceFirstChar { if (it.isLowerCase()) it.titlecase(java.util.Locale.ROOT) else it.toString() } ?: "Local"
-            }
-
-            if (isFullyDownloaded) {
-                Box(
-                    modifier = Modifier
-                        .size(16.dp)
-                        .background(MaterialTheme.colorScheme.primary, CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.ArrowDownward,
-                        contentDescription = "Downloaded",
-                        tint = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier.size(11.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.width(6.dp))
             }
 
             Surface(

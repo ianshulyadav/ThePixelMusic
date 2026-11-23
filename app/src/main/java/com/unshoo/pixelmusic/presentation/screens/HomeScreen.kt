@@ -377,7 +377,8 @@ fun HomeScreen(
             com.unshoo.pixelmusic.data.preferences.MostListenedRange.ALL_TIME -> R.string.customize_home_range_all
         }
     )
-    val recentlyAddedSongs = remember(homeMixPreviewSongs, isEffectivelyOnline) {
+    val queueHistory by playerViewModel.queueHistory.collectAsStateWithLifecycle()
+    val recentlyAddedSongs = remember(homeMixPreviewSongs) {
         homeMixPreviewSongs.take(20).toImmutableList()
     }
     val mostPlayedArtistImages by statsViewModel.artistImages.collectAsStateWithLifecycle()
@@ -602,6 +603,19 @@ fun HomeScreen(
                                         userName = userName,
                                         customGreeting = homeLayout.customGreeting
                                     )
+                                }
+                            }
+
+                            val queueHistoryItem: androidx.compose.foundation.lazy.LazyListScope.() -> Unit = {
+                                if (queueHistory.isNotEmpty()) {
+                                    item(key = "home_queue_history", contentType = "queue_history") {
+                                        com.unshoo.pixelmusic.presentation.components.QueueHistorySection(
+                                            entries = queueHistory,
+                                            onReplay = playerViewModel::replayQueueHistory,
+                                            onRemove = playerViewModel::removeQueueHistory,
+                                            onClear = playerViewModel::clearQueueHistory,
+                                        )
+                                    }
                                 }
                             }
 
@@ -859,8 +873,12 @@ fun HomeScreen(
                                                 )
                                             }
                                         }
+                                        queueHistoryItem()
                                     }
                                 }
+                            }
+                            if (com.unshoo.pixelmusic.data.preferences.HomeSectionId.LISTENING_STATS !in homeLayout.sections) {
+                                queueHistoryItem()
                             }
                         }
                     }

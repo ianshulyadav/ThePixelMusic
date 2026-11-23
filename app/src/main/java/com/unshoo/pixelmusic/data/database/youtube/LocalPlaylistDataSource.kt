@@ -46,6 +46,13 @@ interface LocalPlaylistDataSource {
     @Query("SELECT * FROM PlaylistSongCrossRef WHERE playlistId = :playlistId ORDER BY position ASC")
     suspend fun getCrossRefsForPlaylist(playlistId: String): List<PlaylistSongCrossRef>
 
+    @Query("""
+        SELECT ref.songId FROM PlaylistSongCrossRef AS ref
+        INNER JOIN songs ON songs.youtubeId = ref.songId
+        WHERE ref.playlistId = :playlistId ORDER BY ref.position
+    """)
+    suspend fun getOrderedSongIds(playlistId: String): List<String>
+
     @Transaction
     @Query("SELECT * FROM playlists WHERE id = :playlistId")
     suspend fun getPlaylistById(playlistId: String): Playlist?
@@ -72,14 +79,26 @@ interface LocalPlaylistDataSource {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertCrossRef(ref: PlaylistSongCrossRef)
 
+    @Query("""
+        INSERT INTO PlaylistSongCrossRef (playlistId, songId, position)
+        SELECT :playlistId, :songId, COALESCE(
+            (SELECT MAX(position) FROM PlaylistSongCrossRef WHERE playlistId = :playlistId), -1
+        ) + 1
+        WHERE NOT EXISTS (
+            SELECT 1 FROM PlaylistSongCrossRef WHERE playlistId = :playlistId AND songId = :songId
+        )
+    """)
+    suspend fun appendSongIfMissing(playlistId: String, songId: String)
+
     @Query("DELETE FROM PlaylistSongCrossRef WHERE playlistId = :playlistId AND songId = :songId")
     suspend fun deleteCrossRef(playlistId: String, songId: String)
     
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertPlaylist(playlistInfo: PlaylistInfo)
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertSongs(songs: List<Song>)
+    // Playlist imports can carry catalog-only rows. Keep any existing offline file links.
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertNewSongs(songs: List<Song>)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertCrossRefs(refs: List<PlaylistSongCrossRef>)
@@ -91,14 +110,14 @@ interface LocalPlaylistDataSource {
         if (playlist.info.id == "_downloaded_") {
             insertPlaylist(playlist.info)
             val songs = playlist.songs
-            insertSongs(songs)
+            insertNewSongs(songs)
             val refs = songs.mapIndexed { index, song -> PlaylistSongCrossRef(playlist.info.id, song.youtubeId, index) }
             insertCrossRefs(refs)
         } else {
             deleteCrossRefsByPlaylistId(playlist.info.id)
             insertPlaylist(playlist.info)
             val songs = playlist.songs
-            insertSongs(songs)
+            insertNewSongs(songs)
             val refs = songs.mapIndexed { index, song -> PlaylistSongCrossRef(playlist.info.id, song.youtubeId, index) }
             insertCrossRefs(refs)
         }
@@ -109,24 +128,25 @@ interface LocalPlaylistDataSource {
         playlist: Playlist,
         songDataSource: LocalSongDataSource,
     ) {
+        val songs = playlist.songs
         val updatedInfo = playlist.info.copy(
-            lastSyncSongCount = playlist.songs.size,
+            lastSyncSongCount = songs.size,
             lastSyncTimestamp = System.currentTimeMillis()
         )
         insertPlaylist(updatedInfo)
 
-        val allSongIds = playlist.songs.map { it.youtubeId }
+        val allSongIds = songs.map { it.youtubeId }
         val existingIds = songDataSource.getExistingSongIds(allSongIds).toSet()
-        val newSongs = playlist.songs.filter { it.youtubeId !in existingIds }
+        val newSongs = songs.filter { it.youtubeId !in existingIds }
 
         if (newSongs.isNotEmpty()) {
             newSongs.chunked(YOUTUBE_DB_BATCH_SIZE).forEach { chunk ->
-                insertSongs(chunk)
+                insertNewSongs(chunk)
             }
         }
 
         deleteCrossRefsByPlaylistId(playlist.info.id)
-        playlist.songs
+        songs
             .asSequence()
             .mapIndexed { index, song -> PlaylistSongCrossRef(playlist.info.id, song.youtubeId, index) }
             .chunked(YOUTUBE_DB_BATCH_SIZE)

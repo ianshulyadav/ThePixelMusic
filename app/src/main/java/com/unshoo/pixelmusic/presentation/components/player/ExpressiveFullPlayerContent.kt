@@ -51,7 +51,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material.icons.rounded.Extension
-import androidx.compose.material.icons.rounded.SurroundSound
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.FilledIconButton
@@ -192,7 +191,6 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.withContext
 
-private val TIDO_LABEL_REGEX = Regex("(?i)\\bTido\\s*[•·]?\\s*")
 private const val PREVIOUS_TRACK_RESTART_THRESHOLD_MS = 10_000L
 private const val SKIP_COMMAND_GUARD_MS = 96L
 
@@ -648,8 +646,6 @@ internal fun ExpressiveFullPlayerContent(
             playbackMetadataSampleRate = playbackAudioMetadata.sampleRate,
             playbackMetadataBitDepth = playbackAudioMetadata.bitDepth,
             playbackMetadataFormatTag = playbackAudioMetadata.formatTag,
-            playbackMetadataSourceName = playbackAudioMetadata.sourceName,
-            playbackMetadataIsConfirmed = playbackAudioMetadata.isConfirmed,
             onFormatBadgeClick = { showAudioFormatInfoDialog = true },
             currentPositionProvider = currentPositionProvider,
             totalDurationValue = totalDurationValue,
@@ -1159,6 +1155,7 @@ internal fun ExpressiveFullPlayerContent(
             modifier = Modifier.fillMaxSize(),
             stablePlayerStateFlow = playerViewModel.stablePlayerState,
             playbackPositionFlow = playerViewModel.currentPlaybackPosition,
+            useBlurEffects = playerConfig.useBlurEffects,
             lyricsSearchUiState = lyricsSearchUiState,
             resetLyricsForCurrentSong = {
                 showLyricsSheet = false
@@ -2077,8 +2074,6 @@ private fun FullPlayerProgressSection(
     playbackMetadataSampleRate: Int?,
     playbackMetadataBitDepth: Int? = null,
     playbackMetadataFormatTag: String? = null,
-    playbackMetadataSourceName: String? = null,
-    playbackMetadataIsConfirmed: Boolean = false,
     onFormatBadgeClick: () -> Unit = {},
     currentPositionProvider: () -> Long,
     totalDurationValue: Long,
@@ -2107,7 +2102,6 @@ private fun FullPlayerProgressSection(
     val audioSampleRate = if (isMetadataForCurrentSong) playbackMetadataSampleRate ?: local?.sampleRate else local?.sampleRate
     val audioBitDepth = if (isMetadataForCurrentSong) playbackMetadataBitDepth else null
     val audioFormatTag = if (isMetadataForCurrentSong) playbackMetadataFormatTag else null
-    val audioSourceName = if (isMetadataForCurrentSong) playbackMetadataSourceName else null
 
     PlayerProgressBarSection(
         songId = song.id,
@@ -2119,7 +2113,6 @@ private fun FullPlayerProgressSection(
         audioSampleRate = audioSampleRate,
         audioBitDepth = audioBitDepth,
         audioFormatTag = audioFormatTag,
-        audioSourceName = audioSourceName,
         onFormatBadgeClick = onFormatBadgeClick,
         showAudioFileInfo = showPlayerFileInfo,
         onSeek = onSeek,
@@ -2648,7 +2641,6 @@ private fun PlayerProgressBarSection(
     audioSampleRate: Int?,
     audioBitDepth: Int? = null,
     audioFormatTag: String? = null,
-    audioSourceName: String? = null,
     onFormatBadgeClick: () -> Unit = {},
     showAudioFileInfo: Boolean,
     onSeek: (Long) -> Unit,
@@ -2687,41 +2679,9 @@ private fun PlayerProgressBarSection(
         kotlin.math.abs(reportedDuration - hintDuration) <= 1500L -> reportedDuration
         else -> minOf(reportedDuration, hintDuration)
     }
-    val audioMetaLabel = remember(
-        showAudioFileInfo,
-        audioMimeType,
-        audioBitrate,
-        audioSampleRate,
-        audioBitDepth,
-        audioFormatTag,
-        audioSourceName
-    ) {
-        if (showAudioFileInfo) {
-            val baseLabel = com.unshoo.pixelmusic.utils.AudioMetaUtils.formatAudioMetaLabel(
-                mimeType = audioMimeType,
-                bitrate = audioBitrate,
-                sampleRate = audioSampleRate,
-                bitDepth = audioBitDepth,
-                formatTag = audioFormatTag
-            )
-            val clean = baseLabel?.replace(TIDO_LABEL_REGEX, "")?.trim()
-                ?.removePrefix("•")?.removePrefix("·")?.trim()
-            clean?.takeIf { it.isNotBlank() }
-        } else {
-            null
-        }
-    }
-    var displayAudioMetaLabel by remember(songId) { mutableStateOf<String?>(null) }
-    LaunchedEffect(songId, audioMetaLabel, showAudioFileInfo) {
-        if (!showAudioFileInfo) {
-            displayAudioMetaLabel = null
-        } else if (!audioMetaLabel.isNullOrBlank()) {
-            displayAudioMetaLabel = audioMetaLabel
-        } else {
-            // When metadata clears on track transition, clear immediately so previous song info doesn't linger
-            displayAudioMetaLabel = null
-        }
-    }
+    val displayAudioMetaLabel = rememberPlayerAudioDetails(
+        songId, showAudioFileInfo, audioMimeType, audioBitrate, audioSampleRate, audioBitDepth, audioFormatTag
+    )
     val durationForCalc = displayDurationValue.coerceAtLeast(1L)
     
     // Pass isVisible to rememberSmoothProgress
@@ -2967,68 +2927,13 @@ private fun EfficientTimeLabels(
             )
         }
 
-        val targetBadge = audioMetaLabel?.takeIf { it.isNotBlank() }
-
-        // Smooth format-upgrade badge: tween-only, zero spring bounce
-        AnimatedContent(
-            targetState = targetBadge,
-            modifier = Modifier.align(Alignment.Center),
-            transitionSpec = {
-                (fadeIn(tween(280, easing = FastOutSlowInEasing))
-                    togetherWith fadeOut(tween(200, easing = FastOutSlowInEasing)))
-                    .using(
-                        androidx.compose.animation.SizeTransform(clip = false) { _, _ ->
-                            tween(300, easing = FastOutSlowInEasing)
-                        }
-                    )
-            },
-            label = "audioMetaBadge"
-        ) { badge ->
-            if (!badge.isNullOrBlank()) {
-                Surface(
-                    modifier = Modifier
-                        .padding(horizontal = 48.dp)
-                        .clip(RoundedCornerShape(999.dp))
-                        .then(
-                            if (onBadgeClick != null) Modifier.clickable(onClick = onBadgeClick)
-                            else Modifier
-                        ),
-                    shape = RoundedCornerShape(999.dp),
-                    color = textColor.copy(alpha = 0.14f),
-                    contentColor = textColor.copy(alpha = 0.96f)
-                ) {
-                    val isDolbyAtmos = remember(badge) {
-                        badge.contains("DOLBY", ignoreCase = true) ||
-                            badge.contains("ATMOS", ignoreCase = true) ||
-                            badge.contains("EAC3", ignoreCase = true) ||
-                            badge.contains("AC-4", ignoreCase = true)
-                    }
-                    Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        if (isDolbyAtmos) {
-                            Icon(
-                                imageVector = Icons.Rounded.SurroundSound,
-                                contentDescription = "Dolby Atmos",
-                                modifier = Modifier.size(14.dp),
-                                tint = textColor.copy(alpha = 0.96f)
-                            )
-                            Spacer(Modifier.width(4.dp))
-                        }
-                        Text(
-                            text = badge,
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontWeight = FontWeight.Medium,
-                                fontSize = 11.sp
-                            ),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-            }
+        if (audioMetaLabel != null) {
+            PlayerAudioDetailsBadge(
+                label = audioMetaLabel,
+                color = textColor,
+                onClick = onBadgeClick,
+                modifier = Modifier.align(Alignment.Center).padding(horizontal = 48.dp),
+            )
         }
     }
 }
