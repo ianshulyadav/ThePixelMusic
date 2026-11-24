@@ -15,21 +15,15 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.SideEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.unshoo.pixelmusic.R
 import com.unshoo.pixelmusic.utils.AudioMetaUtils
 
 private val ProviderPrefix = Regex("(?i)\\bTido\\s*[•·]?\\s*")
@@ -37,7 +31,6 @@ private val BadgeShape = RoundedCornerShape(999.dp)
 
 @Composable
 internal fun rememberPlayerAudioDetails(
-    songId: String,
     enabled: Boolean,
     mimeType: String?,
     bitrate: Int?,
@@ -46,14 +39,11 @@ internal fun rememberPlayerAudioDetails(
     formatTag: String?,
 ): String? {
     if (!enabled) return null
-    val label = remember(mimeType, bitrate, sampleRate, bitDepth, formatTag) {
+    return remember(mimeType, bitrate, sampleRate, bitDepth, formatTag) {
         AudioMetaUtils.formatAudioMetaLabel(mimeType, bitrate, sampleRate, bitDepth, formatTag)
             ?.replace(ProviderPrefix, "")?.trim()?.trimStart('•', '·')?.trim()
             ?.takeIf(String::isNotBlank)
     }
-    var lastKnownLabel by remember(songId) { mutableStateOf<String?>(null) }
-    if (label != null && label != lastKnownLabel) SideEffect { lastKnownLabel = label }
-    return label ?: lastKnownLabel ?: stringResource(R.string.cd_audio_format_icon)
 }
 
 @Composable

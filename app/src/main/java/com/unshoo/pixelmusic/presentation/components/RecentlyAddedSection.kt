@@ -35,7 +35,7 @@ import com.unshoo.pixelmusic.data.model.Song
 import kotlinx.collections.immutable.ImmutableList
 
 private val RecentlyAddedArtShape = RoundedCornerShape(28.dp)
-private val RecentlyAddedCardWidth = 168.dp
+internal val RecentlyAddedCardWidth = 168.dp
 private const val NEW_WINDOW_MS = 7L * 24 * 60 * 60 * 1000
 
 /**

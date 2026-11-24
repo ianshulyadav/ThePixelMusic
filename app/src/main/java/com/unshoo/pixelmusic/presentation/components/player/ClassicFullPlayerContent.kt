@@ -2502,7 +2502,7 @@ private fun PlayerProgressBarSection(
         else -> minOf(reportedDuration, hintDuration)
     }
     val displayAudioMetaLabel = rememberPlayerAudioDetails(
-        songId, showAudioFileInfo, audioMimeType, audioBitrate, audioSampleRate, audioBitDepth, audioFormatTag
+        showAudioFileInfo, audioMimeType, audioBitrate, audioSampleRate, audioBitDepth, audioFormatTag
     )
     val durationForCalc = displayDurationValue.coerceAtLeast(1L)
     

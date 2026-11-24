@@ -135,7 +135,7 @@ fun QuickPicksSection(
     onSeeAllClick: (() -> Unit)? = null,
     currentSongId: String? = null,
     displayMode: QuickPicksDisplayMode = QuickPicksDisplayMode.LIST,
-    cardSize: Dp = 150.dp,
+    cardSize: Dp = RecentlyAddedCardWidth,
     onPlayNext: ((Song) -> Unit)? = null,
     onAddToQueue: ((Song) -> Unit)? = null,
     onDownload: ((Song) -> Unit)? = null,
@@ -228,7 +228,8 @@ fun QuickPicksSection(
                 onSongClick = onSongClick,
                 onPlayNext = handlePlayNext,
                 onAddToQueue = handleAddToQueue,
-                onDownload = handleDownload
+                onDownload = handleDownload,
+                cardSize = cardSize,
             )
         } else if (displayMode == QuickPicksDisplayMode.CARD) {
             val limitSongs = remember(songs) { songs.take(20) }
@@ -244,12 +245,13 @@ fun QuickPicksSection(
 
             HorizontalCenteredHeroCarousel(
                 state = carouselState,
+                maxItemWidth = cardSize,
                 itemSpacing = 8.dp,
                 flingBehavior = flingBehavior,
                 contentPadding = PaddingValues(horizontal = 16.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(280.dp)
+                    .height(cardSize)
             ) { page ->
                 val song = limitSongs[page]
                 CenteredHeroCard(
@@ -427,15 +429,14 @@ fun QuickPicksSection(
                     contentType = { "quick_pick_uncontained_card" }
                 ) { uncontainedIndex ->
                     val song = limitSongs[uncontainedIndex]
-                    val uncontainedCardSize = 150.dp
                     Column(
                         modifier = Modifier
-                            .width(uncontainedCardSize)
+                            .width(cardSize)
                             .clickable { onSongClick(song) }
                     ) {
                         Card(
                             modifier = Modifier
-                                .size(uncontainedCardSize)
+                                .size(cardSize)
                                 .graphicsLayer {
                                     val layoutInfo = lazyListState.layoutInfo
                                     val visibleItems = layoutInfo.visibleItemsInfo

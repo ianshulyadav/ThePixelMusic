@@ -2870,7 +2870,8 @@ class MusicService : MediaLibraryService() {
         replacement: List<MediaItem>?,
         startIndex: Int,
         sourceName: String?,
-    ) {
+    ): Boolean {
+        var archived = false
         if (replacement == null || player.shouldArchiveQueueBeforeReplacing(replacement)) {
             val items = snapshotItemsFor(player, player.mediaItemCount)
             if (items.size >= 2) {
@@ -2881,7 +2882,8 @@ class MusicService : MediaLibraryService() {
                     startIndex = items.indexOfFirst { it.mediaId == queueHistoryStartMediaId }.coerceAtLeast(0),
                     savedAtEpochMs = System.currentTimeMillis(),
                 )
-                serviceScope.launch {
+                archived = true
+                appScope.launch {
                     try {
                         userPreferencesRepository.recordQueueHistory(entry)
                     } catch (error: java.io.IOException) {
@@ -2892,6 +2894,7 @@ class MusicService : MediaLibraryService() {
         }
         queueHistorySourceName = sourceName?.takeUnless { it.isBlank() || it == "None" }
         queueHistoryStartMediaId = replacement?.getOrNull(startIndex)?.mediaId
+        return archived
     }
 
     private fun capturePlaybackSnapshotFromPlayer(
@@ -3846,6 +3849,7 @@ class MusicService : MediaLibraryService() {
     }
 
     private fun closeNotificationPlayer() {
+        engine.archiveQueueBeforeDiscard()
         stopPlaybackAndUnload(
             reason = "notification_close_button",
             preservePlaybackSnapshot = false

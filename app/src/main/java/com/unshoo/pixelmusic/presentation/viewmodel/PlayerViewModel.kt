@@ -7888,7 +7888,27 @@ class PlayerViewModel @Inject constructor(
             },
             clearPlayback = {
                 runOnMainImmediate {
-                    dualPlayerEngine.archiveQueueBeforeDiscard()
+                    if (!dualPlayerEngine.archiveQueueBeforeDiscard()) {
+                        val dismissed = _playerUiState.value
+                        val items = dismissed.dismissedQueue.map(::queueItemSnapshot)
+                            .filter { it.uri.isNotBlank() }
+                        if (items.size >= 2) {
+                            val entry = PlaybackQueueHistoryEntry(
+                                id = java.util.UUID.randomUUID().toString(),
+                                name = dismissed.dismissedQueueName.takeIf { it.isNotBlank() && it != "None" },
+                                items = items,
+                                startIndex = 0,
+                                savedAtEpochMs = System.currentTimeMillis(),
+                            )
+                            viewModelScope.launch {
+                                try {
+                                    userPreferencesRepository.recordQueueHistory(entry)
+                                } catch (error: java.io.IOException) {
+                                    Timber.w(error, "Could not save discarded queue")
+                                }
+                            }
+                        }
+                    }
                     mediaController?.stop()
                     mediaController?.clearMediaItems()
                     dualPlayerEngine.cancelNext()

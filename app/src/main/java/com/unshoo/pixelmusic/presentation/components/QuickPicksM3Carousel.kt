@@ -33,6 +33,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.size.Size
 import com.unshoo.pixelmusic.data.model.Song
@@ -47,7 +48,6 @@ enum class QuickPicksM3CarouselStyle {
 }
 
 /** Same height as the Home Recently Played shelf (3 pills x 58dp + 2 x 8dp gaps). */
-private val QuickPicksM3CarouselHeight = 190.dp
 private val QuickPicksM3ItemSpacing = 8.dp
 
 /**
@@ -67,29 +67,29 @@ fun QuickPicksM3Carousel(
     onAddToQueue: (Song) -> Unit,
     onDownload: (Song) -> Unit,
     modifier: Modifier = Modifier,
+    cardSize: Dp = RecentlyAddedCardWidth,
 ) {
     if (songs.isEmpty()) return
     val state = rememberCarouselState { songs.size }
     BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
         val contentPadding = PaddingValues(horizontal = 16.dp)
-        val available = maxWidth - 32.dp
+        val itemWidth = cardSize.coerceAtMost((maxWidth - 32.dp).coerceAtLeast(1.dp))
         when (style) {
             QuickPicksM3CarouselStyle.MULTI_BROWSE -> HorizontalMultiBrowseCarousel(
                 state = state,
-                // ~55% of the width for the large item leaves room for one medium + one small.
-                preferredItemWidth = available * 0.55f,
+                preferredItemWidth = itemWidth,
                 itemSpacing = QuickPicksM3ItemSpacing,
                 contentPadding = contentPadding,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(QuickPicksM3CarouselHeight),
+                    .height(itemWidth),
             ) { index ->
                 QuickPicksM3Item(songs[index], songs[index].id == activePlayingSongId, onSongClick, onPlayNext, onAddToQueue, onDownload)
             }
 
             QuickPicksM3CarouselStyle.HERO -> HorizontalCenteredHeroCarousel(
                 state = state,
-                maxItemWidth = available * 0.68f,
+                maxItemWidth = itemWidth,
                 // Side items were 40-56dp slivers; keep them wide enough to read as cards.
                 minSmallItemWidth = 56.dp,
                 maxSmallItemWidth = 72.dp,
@@ -97,7 +97,7 @@ fun QuickPicksM3Carousel(
                 contentPadding = contentPadding,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(QuickPicksM3CarouselHeight),
+                    .height(itemWidth),
             ) { index ->
                 QuickPicksM3Item(songs[index], songs[index].id == activePlayingSongId, onSongClick, onPlayNext, onAddToQueue, onDownload)
             }

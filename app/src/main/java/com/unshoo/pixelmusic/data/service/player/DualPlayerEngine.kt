@@ -220,11 +220,10 @@ class DualPlayerEngine @Inject constructor(
     }
 
     private val onPlayerSwappedListeners = mutableListOf<(Player) -> Unit>()
-    internal var beforeQueueReplacement: ((Player, List<MediaItem>?, Int, String?) -> Unit)? = null
+    internal var beforeQueueReplacement: ((Player, List<MediaItem>?, Int, String?) -> Boolean)? = null
 
-    internal fun archiveQueueBeforeDiscard() {
-        beforeQueueReplacement?.invoke(masterPlayer, null, 0, null)
-    }
+    internal fun archiveQueueBeforeDiscard(): Boolean =
+        beforeQueueReplacement?.invoke(masterPlayer, null, 0, null) == true
 
     internal fun replacePlaybackQueue(items: List<MediaItem>, startIndex: Int, sourceName: String) {
         val player = masterPlayer
