@@ -90,7 +90,7 @@ fun DeezerLoginScreen(onBack: () -> Unit) {
             prefs[DeezerAccountNameKey] = info.name
             prefs[DeezerAccountPremiumKey] = info.lossless
             prefs[DeezerEnabledKey] = true
-            prefs[LosslessStreamingEnabledKey] = true
+            if (prefs[LosslessStreamingEnabledKey] == null) prefs[LosslessStreamingEnabledKey] = true
         }
         DeezerAudioProvider.setManualArl(arl, info.lossless)
         toast(context.getString(R.string.lossless_deezer_login_success, info.name))

@@ -57,6 +57,7 @@ import com.unshoo.pixelmusic.R
 import com.unshoo.pixelmusic.data.model.PlayerInfo
 import com.unshoo.pixelmusic.data.model.PlaybackQueueItemSnapshot
 import com.unshoo.pixelmusic.data.model.PlaybackQueueSnapshot
+import com.unshoo.pixelmusic.data.model.PlaybackQueueHistoryEntry
 import com.unshoo.pixelmusic.data.preferences.EqualizerPreferencesRepository
 import com.unshoo.pixelmusic.data.preferences.ThemePreferencesRepository
 import com.unshoo.pixelmusic.data.preferences.UserPreferencesRepository
@@ -207,6 +208,9 @@ class MusicService : MediaLibraryService() {
     // service's work — snapshot writes, queue re-seeds, MediaLibrary
     // callbacks, telemetry — now runs off the UI thread.
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val notificationArtworkLoader by lazy {
+        androidx.media3.session.CacheBitmapLoader(CoilBitmapLoader(this, serviceScope))
+    }
     private var keepPlayingInBackground = true
     private var isManualShuffleEnabled = false
     private var persistentShuffleEnabled = false
@@ -564,6 +568,7 @@ class MusicService : MediaLibraryService() {
 
         // Handle player swaps (crossfade) to keep MediaSession in sync
         engine.addPlayerSwapListener(playerSwapListener)
+        engine.beforeQueueReplacement = ::archiveReplacedQueue
         engine.addNextPlayerPreparedListener(nextPlayerPreparedListener)
         engine.addTransitionDisplayPlayerListener(transitionDisplayPlayerListener)
         engine.addTransitionFinishedListener(transitionFinishedListener)
@@ -1210,11 +1215,12 @@ class MusicService : MediaLibraryService() {
         ).also {
             castSessionPlayer = it
             it.skipTransition = engine::fadedSkip
+            it.beforeQueueReplacement = ::onSessionQueueReplacement
         }
 
         mediaSession = MediaLibrarySession.Builder(this, sessionPlayer, callback)
             .setSessionActivity(getOpenAppPendingIntent())
-            .setBitmapLoader(CoilBitmapLoader(this, serviceScope))
+            .setBitmapLoader(notificationArtworkLoader)
             .setPeriodicPositionUpdateEnabled(false)
             .build()
 
@@ -1945,6 +1951,7 @@ class MusicService : MediaLibraryService() {
             requestWidgetFullUpdate(force = true)
             mediaSession?.let { refreshMediaSessionUiWithFollowUp(it) }
             grantArtworkPermissionsForCurrentSong()
+            publishNotificationArtwork(mediaSession?.player?.currentMediaItem)
             // Only recompute RG if the track actually changed — onMediaMetadataChanged
             // also fires on queue edits (add/remove) without a track change, which would
             // launch a redundant IO coroutine and cause a brief volume spike.
@@ -2231,6 +2238,7 @@ class MusicService : MediaLibraryService() {
         val player = mediaSession?.player ?: engine.masterPlayer
         syncLocalListeningStatsFromPlayer(player, forceNewSession = true)
         grantArtworkPermissionsForCurrentSong(mediaItem)
+        publishNotificationArtwork(mediaItem)
         // Reset recovery counters — a successful transition clears any per-song blacklist.
         streamRecoveryAttempts = 0
         lastStreamRecoveryMediaId = null
@@ -2292,6 +2300,41 @@ class MusicService : MediaLibraryService() {
         if (player.isPlaying || player.playWhenReady) {
             startTelemetryReporting()
         }
+    }
+
+    private var artworkRequestItem: MediaItem? = null
+
+    private fun publishNotificationArtwork(item: MediaItem?) {
+        val player = castSessionPlayer ?: return
+        if (item == null || player.mediaMetadata.artworkData != null || artworkRequestItem === item) return
+        val uri = resolveArtworkUri(item.mediaMetadata) ?: MediaItemBuilder.artworkUri(
+            MediaItemBuilder.resolveArtworkUri(null, item.mediaId,
+                item.mediaMetadata.extras?.getString(MediaItemBuilder.EXTERNAL_EXTRA_CONTENT_URI)
+                    ?.removePrefix("youtube://"))
+        ) ?: return
+        artworkRequestItem = item
+        val future = notificationArtworkLoader.loadBitmap(uri)
+        future.addListener({
+            serviceScope.launch {
+                if (artworkRequestItem === item) artworkRequestItem = null
+                val activePlayer = castSessionPlayer ?: return@launch
+                if (activePlayer.currentMediaItem != item) return@launch
+                val bytes = withContext(Dispatchers.Default) {
+                    runCatching {
+                        val bitmap = Futures.getDone(future)
+                        val scale = (512f / maxOf(bitmap.width, bitmap.height)).coerceAtMost(1f)
+                        val cover = if (scale < 1f) Bitmap.createScaledBitmap(
+                            bitmap, (bitmap.width * scale).toInt().coerceAtLeast(1),
+                            (bitmap.height * scale).toInt().coerceAtLeast(1), true,
+                        ) else bitmap
+                        java.io.ByteArrayOutputStream().use { output ->
+                            if (cover.compress(Bitmap.CompressFormat.JPEG, 90, output)) output.toByteArray() else null
+                        }
+                    }.getOrNull()
+                } ?: return@launch
+                castSessionPlayer?.publishCurrentArtwork(item, bytes)
+            }
+        }, com.google.common.util.concurrent.MoreExecutors.directExecutor())
     }
 
     /**
@@ -2491,6 +2534,7 @@ class MusicService : MediaLibraryService() {
             localPlayer, playback, playbackNavigationHistory, engine::isSkipFadeActive
         )
         wrapper.skipTransition = engine::fadedSkip
+        wrapper.beforeQueueReplacement = ::onSessionQueueReplacement
         castSessionPlayer = wrapper
         publishMediaSessionPlayer(wrapper, logMessage)
         if (previous !== wrapper) previous?.release()
@@ -2623,6 +2667,7 @@ class MusicService : MediaLibraryService() {
         QueuePreloadManager.detach(engine.masterPlayer)
 
         engine.removePlayerSwapListener(playerSwapListener)
+        engine.beforeQueueReplacement = null
         engine.removeNextPlayerPreparedListener(nextPlayerPreparedListener)
         engine.removeTransitionDisplayPlayerListener(transitionDisplayPlayerListener)
         engine.removeTransitionFinishedListener(transitionFinishedListener)
@@ -2897,6 +2942,31 @@ class MusicService : MediaLibraryService() {
             repeatMode = safeRepeatMode,
             shuffleEnabled = isManualShuffleEnabled,
         )
+    }
+
+    private fun onSessionQueueReplacement(player: Player, replacement: List<MediaItem>) {
+        archiveReplacedQueue(player, replacement)
+        engine.clearQueueHistoryContext()
+    }
+
+    private fun archiveReplacedQueue(player: Player, replacement: List<MediaItem>) {
+        if (!player.shouldArchiveQueueBeforeReplacing(replacement)) return
+        val items = snapshotItemsFor(player, player.mediaItemCount)
+        if (items.size < 2) return
+        val entry = PlaybackQueueHistoryEntry(
+            id = java.util.UUID.randomUUID().toString(),
+            name = engine.queueHistorySourceName,
+            items = items,
+            startIndex = items.indexOfFirst { it.mediaId == engine.queueHistoryStartMediaId }.coerceAtLeast(0),
+            savedAtEpochMs = System.currentTimeMillis(),
+        )
+        serviceScope.launch {
+            try {
+                userPreferencesRepository.recordQueueHistory(entry)
+            } catch (error: java.io.IOException) {
+                Timber.tag(TAG).w(error, "Could not save replaced queue")
+            }
+        }
     }
 
     // ── Resume after an OEM "clear from Recents" kill ─────────────────────────────────────

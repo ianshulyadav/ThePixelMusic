@@ -24,6 +24,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import com.unshoo.pixelmusic.utils.readResponse
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -771,6 +772,8 @@ object YoutubeHelper {
                     result = apiResult.data
                 }
             }
+        } catch (error: kotlinx.coroutines.CancellationException) {
+            throw error
         } catch (_: Exception) {}
         return result
     }
@@ -809,6 +812,7 @@ object YoutubeHelper {
 
         val isSaavnEnabled = userPreferencesRepository.enableSaavnStreamingFlow.first()
         val saavnQuality = userPreferencesRepository.saavnAudioQualityFlow.first()
+        val losslessAllowed = allowLossless && LosslessStreamResolver.isEnabled(context)
 
         // If Saavn is disabled, proactively evict any stale Saavn URLs so playback never touches Saavn
         if (!isSaavnEnabled) {
@@ -837,7 +841,7 @@ object YoutubeHelper {
 
         // ── Cache hit at the quality the user actually wants ───────────────────
         streamUrlLruCache.get(targetCacheKey)?.let {
-            if (isUrlAllowed(it, isSaavnEnabled) && isYoutubeUrlValid(it)) {
+            if (isUrlAllowed(it, isSaavnEnabled, losslessAllowed) && isYoutubeUrlValid(it)) {
                 PixelMusicHelper.printd(
                     "$videoId : INSTANT start from cache ($targetCacheKey, quality=${plan.quality})"
                 )
@@ -847,7 +851,7 @@ object YoutubeHelper {
         // HIGH: also accept a valid _high entry under any alias.
         if (maxBitrate == 0) {
             streamUrlLruCache.get("${videoId}_high")?.let {
-                if (isUrlAllowed(it, isSaavnEnabled) && isYoutubeUrlValid(it)) {
+                if (isUrlAllowed(it, isSaavnEnabled, losslessAllowed) && isYoutubeUrlValid(it)) {
                     PixelMusicHelper.printd("$videoId : INSTANT start from cached HIGH stream")
                     return it
                 }
@@ -872,7 +876,8 @@ object YoutubeHelper {
         }
 
         // When quality is AUTO, avoid slow external scrapers so YouTube playback starts instantly
-        if (allowLossless && !fastPlaybackForAuto && (!LosslessStreamResolver.isFailedForTrack(videoId) || unifiedSongOverride != null)) {
+        if (losslessAllowed && (!fastPlaybackForAuto || unifiedSongOverride != null) &&
+            (!LosslessStreamResolver.isFailedForTrack(videoId) || unifiedSongOverride != null)) {
             // BUGFIX (lossless fallback): the lossless chain used to run inline with its own 10s
             // budget, while DualPlayerEngine aborts the WHOLE resolve after ~5s, so a slow or
             // unavailable addon never reached the YouTube step and the engine played the
@@ -890,13 +895,15 @@ object YoutubeHelper {
             }
             val hedged: String? = kotlinx.coroutines.coroutineScope {
                 val lossless = async {
-                    resolveLosslessStreamUrl(
-                        context = context,
-                        song = song,
-                        savedSong = savedSong,
-                        cacheKeys = listOf(targetCacheKey, "${videoId}_high"),
-                        lowDataMode = lowDataMode,
-                    )
+                    withTimeoutOrNull(budgetMs) {
+                        resolveLosslessStreamUrl(
+                            context = context,
+                            song = song,
+                            savedSong = savedSong,
+                            cacheKeys = listOf(targetCacheKey, "${videoId}_high"),
+                            lowDataMode = lowDataMode,
+                        )
+                    }
                 }
                 val headStart = withTimeoutOrNull(LOSSLESS_HEDGE_HEAD_START_MS) { lossless.await() }
                 when {
@@ -921,7 +928,9 @@ object YoutubeHelper {
                     }
                 }
             }
-            if (!hedged.isNullOrBlank()) return hedged
+            if (!hedged.isNullOrBlank() &&
+                (!LosslessStreamResolver.isLosslessUri(hedged) || LosslessStreamResolver.isEnabled(context))
+            ) return hedged
         }
 
         // JioSaavn gate: only try if explicitly forced or not in AUTO mode
@@ -1157,13 +1166,12 @@ object YoutubeHelper {
             resolveOfflineFirst(context, song, getSavedSong(context, videoId))?.let { return it }
         }
 
-        // LRU cache hit with validation
-        streamUrlLruCache.get("${videoId}_low")?.let { 
-            if (isYoutubeUrlValid(it) && (!skipLocalAudio || it.toUri().host?.endsWith(".googlevideo.com") == true)) return it
-        }
-        // If high-quality is already cached and valid, use it immediately (better than re-resolving)
-        streamUrlLruCache.get("${videoId}_high")?.let { 
-            if (isYoutubeUrlValid(it) && (!skipLocalAudio || it.toUri().host?.endsWith(".googlevideo.com") == true)) return it
+        // Reuse a valid low or high stream before resolving YouTube again.
+        for (key in listOf("${videoId}_low", "${videoId}_high")) {
+            val cached = streamUrlLruCache.get(key) ?: continue
+            if (skipLocalAudio && cached.toUri().host?.endsWith(".googlevideo.com") != true) continue
+            if (LosslessStreamResolver.isLosslessUri(cached) && !LosslessStreamResolver.isEnabled(context)) continue
+            if (isYoutubeUrlValid(cached)) return cached
         }
 
         val lowResult = getSongUrlFromYoutube(context, song, retries = 1, lowQuality = true)
@@ -1200,8 +1208,10 @@ object YoutubeHelper {
 
         val maxBitrate = getTargetBitrateCeiling(context)
         val cacheKey = if (maxBitrate > 0) "${videoId}_q$maxBitrate" else "${videoId}_high"
-        streamUrlLruCache.get(cacheKey)?.let { 
-            if (isYoutubeUrlValid(it)) return it 
+        streamUrlLruCache.get(cacheKey)?.let { cached ->
+            if ((!LosslessStreamResolver.isLosslessUri(cached) || LosslessStreamResolver.isEnabled(context)) &&
+                isYoutubeUrlValid(cached)
+            ) return cached
         }
 
         val highResult = getSongUrlFromYoutube(context, song, lowQuality = false, maxBitrateKbps = maxBitrate)
@@ -1270,7 +1280,7 @@ object YoutubeHelper {
             var effectiveDuration = parseDurationToSeconds(song.duration.ifBlank { savedSong?.duration.orEmpty() })
 
             if (effectiveTitle.isBlank() && videoId.isNotBlank()) {
-                val fetched = fetchSongMetadata(videoId)
+                val fetched = withTimeoutOrNull(1_200L) { fetchSongMetadata(videoId) }
                 if (fetched != null) {
                     effectiveTitle = fetched.title
                     effectiveArtist = fetched.artist
@@ -1283,7 +1293,9 @@ object YoutubeHelper {
             // that share the title and artist (they play back sounding 0.7-0.9x). Queue items
             // often carry no duration, so look it up instead of resolving without the check.
             if ((effectiveDuration ?: 0) <= 0 && videoId.isNotBlank()) {
-                effectiveDuration = fetchSongMetadata(videoId)?.duration?.let { parseDurationToSeconds(it) }
+                effectiveDuration = withTimeoutOrNull(if (forDownload) 1_500L else 400L) {
+                    fetchSongMetadata(videoId)?.duration?.let(::parseDurationToSeconds)
+                }
             }
 
             val artistsList = effectiveArtist.split(",", "&", "feat.", "ft.", ";")
@@ -1311,14 +1323,17 @@ object YoutubeHelper {
             // under the original title. Its real length gives it away, so for direct FLAC
             // streams read the header and refuse a track whose length doesn't match the song.
             val expectedMs = effectiveDuration?.takeIf { it > 0 }?.let { it * 1000L }
-            if (expectedMs != null && isLengthMismatchedFlac(result.uri, result.headers, expectedMs)) {
+            if (expectedMs != null && result.mimeType.equals("audio/flac", ignoreCase = true) &&
+                isLengthMismatchedFlac(result.uri, result.headers, expectedMs, forDownload)) {
                 PixelMusicHelper.printe(
                     "$videoId : Lossless stream rejected (length differs from the song; likely a slowed/sped version), falling back"
                 )
+                LosslessStreamResolver.clearResolved(videoId)
                 LosslessStreamResolver.markFailedForTrack(videoId)
                 return null
             }
 
+            if (!LosslessStreamResolver.isEnabled(context)) return null
             cacheKeys.forEach { key ->
                 streamUrlLruCache.put(key, result.uri)
                 streamMimeTypeLruCache.put(key, result.mimeType)
@@ -1345,6 +1360,7 @@ object YoutubeHelper {
         uri: String,
         headers: Map<String, String>,
         expectedMs: Long,
+        forDownload: Boolean,
     ): Boolean = withContext(Dispatchers.IO) {
         if (!uri.startsWith("http://") && !uri.startsWith("https://")) return@withContext false
         runCatching {
@@ -1353,9 +1369,9 @@ object YoutubeHelper {
                 .header("Range", "bytes=0-511")
                 .apply { headers.forEach { (k, v) -> header(k, v) } }
                 .build()
-            val bytes = withTimeoutOrNull(2_500L) {
-                client.newCall(request).execute().use { resp ->
-                    if (!resp.isSuccessful) return@use null
+            val bytes = withTimeoutOrNull(if (forDownload) 2_500L else 650L) {
+                client.newCall(request).readResponse { resp ->
+                    if (!resp.isSuccessful) return@readResponse null
                     resp.body.byteStream().use { input ->
                         val buf = ByteArray(512)
                         var read = 0
@@ -1373,13 +1389,16 @@ object YoutubeHelper {
             val actualMs = info.durationMs ?: return@runCatching false
             val diff = kotlin.math.abs(actualMs - expectedMs)
             diff > 6_000L && diff > expectedMs * 3 / 100
-        }.getOrDefault(false)
+        }.getOrElse { error ->
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            false
+        }
     }
 
     /** Inline budget for the lossless chain on a user tap (YouTube result is used after this). */
     const val LOSSLESS_INLINE_BUDGET_MS = 3_000L
     /** Lossless head start before the parallel YouTube resolve begins (fast answers pay nothing). */
-    private const val LOSSLESS_HEDGE_HEAD_START_MS = 1_200L
+    private const val LOSSLESS_HEDGE_HEAD_START_MS = 750L
     /** Budget for preloads / explicit per-song overrides, where nobody is waiting on audio yet. */
     private const val LOSSLESS_PRELOAD_BUDGET_MS = 9_000L
 
@@ -1457,7 +1476,7 @@ object YoutubeHelper {
         val cacheKey = if (maxBitrateKbps > 0) "${videoId}_q${maxBitrateKbps}" else "${videoId}_high"
         if (!forDownload) {
             streamUrlLruCache.get(cacheKey)?.let { 
-                if (isUrlAllowed(it, isSaavnEnabled) && isYoutubeUrlValid(it)) return it 
+                if (isUrlAllowed(it, isSaavnEnabled, isLosslessEnabled && !bypassLossless) && isYoutubeUrlValid(it)) return it
             }
         }
 
@@ -2422,8 +2441,8 @@ object YoutubeHelper {
         url.contains("jiosaavn.com", ignoreCase = true) ||
         url.contains("saavn", ignoreCase = true)
 
-    private fun isUrlAllowed(url: String, isSaavnEnabled: Boolean): Boolean =
-        isSaavnEnabled || !isSaavnUrl(url)
+    private fun isUrlAllowed(url: String, isSaavnEnabled: Boolean, allowLossless: Boolean): Boolean =
+        (isSaavnEnabled || !isSaavnUrl(url)) && (allowLossless || !LosslessStreamResolver.isLosslessUri(url))
 
     private suspend fun isYoutubeUrlValid(url: String): Boolean = withContext(Dispatchers.IO) {
         // HOT PATH: never hit the network here. Cache revalidation must stay O(1).

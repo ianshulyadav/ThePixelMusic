@@ -318,7 +318,7 @@ fun AppleMusicLoginScreen(onBack: () -> Unit) {
                 prefs[AppleMusicMediaUserTokenKey] = mediaToken
                 if (devToken.isNotBlank()) prefs[AppleMusicDevTokenKey] = devToken
                 prefs[AppleMusicSourceEnabledKey] = true
-                prefs[LosslessStreamingEnabledKey] = true
+                if (prefs[LosslessStreamingEnabledKey] == null) prefs[LosslessStreamingEnabledKey] = true
             }
             AppleMusicAudioProvider.clearStorefrontCache()
             LosslessStreamResolver.clearAll()

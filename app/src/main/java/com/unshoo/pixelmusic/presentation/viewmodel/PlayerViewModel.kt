@@ -4202,7 +4202,6 @@ class PlayerViewModel @Inject constructor(
                                 currentIndex = 0,
                                 currentPositionMs = player.currentPosition
                             )
-                            recordQueueHistory(fullQueue, song, queueName)
                         }
                         if (mediaItems.size > 1) {
                             launch(Dispatchers.IO) {
@@ -4817,28 +4816,6 @@ class PlayerViewModel @Inject constructor(
 
     fun clearQueueHistory() {
         viewModelScope.launch { userPreferencesRepository.clearQueueHistory() }
-    }
-
-    private fun recordQueueHistory(queue: List<Song>, startSong: Song, queueName: String) {
-        if (queue.size < 2) return
-        val savedAt = System.currentTimeMillis()
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                userPreferencesRepository.recordQueueHistory(
-                    PlaybackQueueHistoryEntry(
-                        id = java.util.UUID.randomUUID().toString(),
-                        name = queueName.takeUnless { it.isBlank() || it == "None" },
-                        items = queue.map(::queueItemSnapshot),
-                        startIndex = queue.indexOfFirst { it.id == startSong.id }.coerceAtLeast(0),
-                        savedAtEpochMs = savedAt,
-                    )
-                )
-            } catch (cancelled: kotlinx.coroutines.CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                Timber.w(error, "Failed to record queue history")
-            }
-        }
     }
 
     private fun queueItemSnapshot(song: Song): PlaybackQueueItemSnapshot {
@@ -6453,7 +6430,7 @@ class PlayerViewModel @Inject constructor(
                     withContext(Dispatchers.Main.immediate) {
                         dualPlayerEngine.cancelNext()
                         val player = dualPlayerEngine.masterPlayer
-                        player.setMediaItems(items, startIndex, 0L)
+                        dualPlayerEngine.replacePlaybackQueue(items, startIndex, queueName)
                         val isShuffle = playbackStateHolder.stablePlayerState.value.isShuffleEnabled
                         player.shuffleModeEnabled = isShuffle
                         if (isShuffle) {
@@ -6468,7 +6445,6 @@ class PlayerViewModel @Inject constructor(
                             songsToPlay, effectiveStartSong, playWhenReady = true,
                             currentIndex = startIndex, currentPositionMs = 0L
                         )
-                        recordQueueHistory(songsToPlay, effectiveStartSong, queueName)
                         viewModelScope.launch(Dispatchers.IO) {
                             try {
                                 saveYoutubeSongsToDb(songsToPlay)

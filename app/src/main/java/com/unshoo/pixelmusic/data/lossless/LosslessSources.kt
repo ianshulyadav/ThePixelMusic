@@ -37,9 +37,11 @@ import com.unshoo.pixelmusic.data.lossless.tidal.TidalInstanceHealthManager
 import com.unshoo.pixelmusic.data.preferences.dataStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.supervisorScope
 import timber.log.Timber
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -73,26 +75,19 @@ object LosslessSources {
         // work. The first emission also performs the initial load, so the startup refresh sees
         // the user's override rather than only the build-time key.
         scope.launch(Dispatchers.IO) {
-            var first = true
             dataStore.data
                 .map { Triple(it[PoolBaseUrlKey].orEmpty(), it[PoolApiKeyKey].orEmpty(), it[LosslessStreamingEnabledKey]) }
                 .distinctUntilChanged()
-                .collect { (url, key, enabledPref) ->
+                .collectLatest { (url, key, enabledPref) ->
                     PoolAccountManager.applyRuntimeConfig(url, key)
-                    val enabled = enabledPref ?: LosslessStreamResolver.defaultEnabled()
-                    if (!enabled) {
-                        first = false
-                        return@collect
-                    }
-                    if (PoolAccountManager.isEnabled) {
-                        if (first) runCatching { PoolAccountManager.loadCached(app) }
-                        launch {
-                            runCatching { PoolAccountManager.refresh(app, force = !first) }
-                                .onFailure { Timber.tag(TAG).w(it, "Pool account refresh failed") }
+                    if (!(enabledPref ?: LosslessStreamResolver.defaultEnabled())) return@collectLatest
+                    supervisorScope {
+                        if (PoolAccountManager.isEnabled) {
+                            launch {
+                                runCatching { PoolAccountManager.refresh(app) }
+                                    .onFailure { Timber.tag(TAG).w(it, "Pool account refresh failed") }
+                            }
                         }
-                    }
-                    if (first) {
-                        first = false
                         launch { startupTidalScan(app) }
                         launch { restoreQobuzProbeTrack(app) }
                         launch {

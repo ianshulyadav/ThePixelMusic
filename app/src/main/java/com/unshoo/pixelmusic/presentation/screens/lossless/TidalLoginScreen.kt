@@ -106,7 +106,7 @@ fun TidalLoginScreen(onBack: () -> Unit) {
                 prefs[TidalSubscriptionKey] = status.name
                 prefs[TidalNeedsReloginKey] = false
                 prefs[TidalEnabledKey] = true
-                prefs[LosslessStreamingEnabledKey] = true
+                if (prefs[LosslessStreamingEnabledKey] == null) prefs[LosslessStreamingEnabledKey] = true
             }
             toast(context.getString(R.string.lossless_tidal_login_success))
             if (status == TidalSubscriptionStatus.FREE) {

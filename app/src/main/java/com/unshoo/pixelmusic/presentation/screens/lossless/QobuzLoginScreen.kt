@@ -107,7 +107,7 @@ fun QobuzLoginScreen(onBack: () -> Unit) {
                         QobuzToken(token = token, appId = appId, appSecret = appSecret, label = "Web login")
                 prefs[QobuzTokensKey] = QobuzToken.listToJson(merged)
                 prefs[QobuzEnabledKey] = true
-                prefs[LosslessStreamingEnabledKey] = true
+                if (prefs[LosslessStreamingEnabledKey] == null) prefs[LosslessStreamingEnabledKey] = true
             }
             toast(context.getString(R.string.lossless_qobuz_login_success))
             onBack()

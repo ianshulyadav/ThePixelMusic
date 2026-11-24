@@ -29,7 +29,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.Icon
@@ -45,6 +44,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.Player
@@ -253,8 +253,8 @@ fun ExpressivePlayerControls(
                 }
             ) {
                 Icon(
-                    imageVector = Icons.Rounded.Menu,
-                    contentDescription = "More options",
+                    painter = painterResource(R.drawable.rounded_more_vert_24),
+                    contentDescription = stringResource(R.string.cd_player_more_options),
                     tint = segmentInactiveContent,
                     modifier = Modifier.size(25.dp)
                 )
