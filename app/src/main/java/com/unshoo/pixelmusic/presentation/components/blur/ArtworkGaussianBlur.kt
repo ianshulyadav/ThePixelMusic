@@ -88,17 +88,12 @@ object ArtworkGaussianBlur {
             side
         )
         val scaled = Bitmap.createScaledBitmap(cropped, size, size, true)
-        val config = scaled.config ?: Bitmap.Config.ARGB_8888
-        val working = if (config == Bitmap.Config.ARGB_8888 && scaled.isMutable) {
-            scaled
-        } else {
-            scaled.copy(Bitmap.Config.ARGB_8888, true)
-        }
         val pixels = IntArray(size * size)
-        working.getPixels(pixels, 0, size, 0, 0, size, size)
+        scaled.getPixels(pixels, 0, size, 0, 0, size, size)
         gaussianBlurArgb(pixels, size, size, sigma)
-        working.setPixels(pixels, 0, size, 0, 0, size, size)
-        return working
+        return Bitmap.createBitmap(pixels, size, size, Bitmap.Config.ARGB_8888).apply {
+            if (pixels.all { it ushr 24 == 255 }) setHasAlpha(false)
+        }
     }
 
     /**

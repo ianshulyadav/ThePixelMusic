@@ -19,6 +19,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.util.lerp as lerpFloat
@@ -102,47 +103,45 @@ fun FullPlayerAtmosphereBackground(
             .background(albumColorScheme.primaryContainer)
     ) {
 
-        // 2. GAUSSIAN BLURRED ALBUM ARTWORK LAYER WITH LIQUID CROSSFADE
-        // Perf: the artwork is Gaussian-blurred ONCE at 64px on a background thread
-        // (ArtworkGaussianBlur) and drawn upscaled with bilinear filtering. The previous
-        // Modifier.blur(52-60dp) re-ran a full-screen RenderEffect blur on every frame of the
-        // sheet drag (the alpha below changes per frame), which was the main source of dropped
-        // frames at 120Hz, and it rendered no blur at all below Android 12. Alpha is applied in
-        // the layer/draw phase, so expansion never recomposes this tree.
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer {
-                    val expansionFraction = expansionFractionProvider?.invoke() ?: 1f
-                    alpha = if (isDarkTheme) {
-                        lerpFloat(0.45f, 0.65f, expansionFraction)
-                    } else {
-                        lerpFloat(0.18f, 0.45f, expansionFraction)
-                    }
-                    // Outside an artwork crossfade only one image is drawn, so applying the alpha
-                    // per draw is pixel-identical and avoids a full-screen offscreen layer every
-                    // frame. During the crossfade (two overlapping images) keep the offscreen pass.
-                    compositingStrategy = if (previousBlur == null) {
-                        androidx.compose.ui.graphics.CompositingStrategy.ModulateAlpha
-                    } else {
-                        androidx.compose.ui.graphics.CompositingStrategy.Auto
-                    }
-                }
-        ) {
-            val outgoing = previousBlur
-            val incoming = displayedBlur
+        val outgoing = previousBlur
+        val incoming = displayedBlur
+        val compositeGroup = outgoing != null && incoming != null &&
+            remember(incoming) { incoming.asAndroidBitmap().hasAlpha() }
+        val artworkOpacity = {
+            val expansion = expansionFractionProvider?.invoke() ?: 1f
+            if (isDarkTheme) lerpFloat(0.45f, 0.65f, expansion)
+            else lerpFloat(0.18f, 0.45f, expansion)
+        }
+        val artworkLayer = if (compositeGroup) {
+            Modifier.graphicsLayer { alpha = artworkOpacity() }
+        } else {
+            Modifier
+        }
+        Box(modifier = artworkLayer.fillMaxSize()) {
             if (outgoing != null) {
                 BlurredArtworkImage(
                     image = outgoing,
                     modifier = Modifier.fillMaxSize(),
-                    alphaProvider = { if (incoming == null) 1f - crossfadeProgress.value else 1f }
+                    alphaProvider = {
+                        val progress = crossfadeProgress.value
+                        val opacity = artworkOpacity()
+                        when {
+                            compositeGroup -> 1f
+                            incoming == null -> opacity * (1f - progress)
+                            // The incoming opaque draw covers this fraction of the outgoing draw.
+                            // Compensate to preserve the group fade without a screen-sized buffer.
+                            else -> opacity * (1f - progress) / (1f - opacity * progress)
+                        }
+                    }
                 )
             }
             if (incoming != null) {
                 BlurredArtworkImage(
                     image = incoming,
                     modifier = Modifier.fillMaxSize(),
-                    alphaProvider = { crossfadeProgress.value }
+                    alphaProvider = {
+                        crossfadeProgress.value * if (compositeGroup) 1f else artworkOpacity()
+                    }
                 )
             }
         }
