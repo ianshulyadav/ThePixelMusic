@@ -279,8 +279,16 @@ fun ExploreScreen(
     val selectedCategory = exploreUiState.selectedFilter
     val isLocalSelected = isLocalMode || selectedCategory.equals("Local", ignoreCase = true)
     val quickPicksDisplayMode by playerViewModel.quickPicksDisplayMode.collectAsStateWithLifecycle()
-    val localAlbums by playerViewModel.albumsFlow.collectAsStateWithLifecycle()
-    val localArtists by playerViewModel.artistsFlow.collectAsStateWithLifecycle()
+    val localAlbums = if (isEffectivelyOnline) {
+        emptyList()
+    } else {
+        playerViewModel.albumsFlow.collectAsStateWithLifecycle().value
+    }
+    val localArtists = if (isEffectivelyOnline) {
+        emptyList()
+    } else {
+        playerViewModel.artistsFlow.collectAsStateWithLifecycle().value
+    }
 
     val isPlaying by remember(playerViewModel) {
         playerViewModel.stablePlayerState.map { it.isPlaying }.distinctUntilChanged()
@@ -365,21 +373,26 @@ fun ExploreScreen(
     val isAdvancedExplore = exploreUiState.isAdvancedExploreEnabled
 
     // Artists for you: Pre-computed online artists -> Local topArtists / library artists strictly when offline
-    val artistsForYou = if (isEffectivelyOnline) {
-        exploreUiState.preparedArtistsForYou.ifEmpty { feedData.topArtists }
-    } else {
-        if (exploreUiState.localTopArtists.isNotEmpty()) {
-            exploreUiState.localTopArtists
-        } else if (localArtists.isNotEmpty()) {
-            localArtists.sortedByDescending { it.songCount }.take(10).map { artist ->
-                FeedArtist(
-                    name = artist.name,
-                    browseId = null,
-                    artworkUrl = artist.customImageUri ?: artist.imageUrl
-                )
-            }
+    val artistsForYou = remember(
+        isEffectivelyOnline, exploreUiState.preparedArtistsForYou,
+        feedData.topArtists, exploreUiState.localTopArtists, localArtists
+    ) {
+        if (isEffectivelyOnline) {
+            exploreUiState.preparedArtistsForYou.ifEmpty { feedData.topArtists }
         } else {
-            emptyList()
+            if (exploreUiState.localTopArtists.isNotEmpty()) {
+                exploreUiState.localTopArtists
+            } else if (localArtists.isNotEmpty()) {
+                localArtists.sortedByDescending { it.songCount }.take(10).map { artist ->
+                    FeedArtist(
+                        name = artist.name,
+                        browseId = null,
+                        artworkUrl = artist.customImageUri ?: artist.imageUrl
+                    )
+                }
+            } else {
+                emptyList()
+            }
         }
     }
 
@@ -471,32 +484,36 @@ fun ExploreScreen(
         }
     }
 
-    val mixesToDisplay = feedData.mixes.ifEmpty {
-        quickPicks.take(6).map { song ->
-            FeedMix(
-                title = "${song.artist} Mix",
-                seed = com.unshoo.pixelmusic.data.feed.YouTubeMusicTrack(
-                    videoId = song.youtubeId ?: if (song.id.startsWith("youtube_")) song.id.removePrefix("youtube_") else song.id,
-                    title = song.title,
-                    artist = song.artist,
-                    artworkUrl = song.albumArtUriString
+    val mixesToDisplay = remember(feedData.mixes, quickPicks) {
+        feedData.mixes.ifEmpty {
+            quickPicks.take(6).map { song ->
+                FeedMix(
+                    title = "${song.artist} Mix",
+                    seed = com.unshoo.pixelmusic.data.feed.YouTubeMusicTrack(
+                        videoId = song.youtubeId ?: if (song.id.startsWith("youtube_")) song.id.removePrefix("youtube_") else song.id,
+                        title = song.title,
+                        artist = song.artist,
+                        artworkUrl = song.albumArtUriString
+                    )
                 )
-            )
-        }.filter { it.seed.videoId.isNotBlank() }
-    }.distinctBy { it.seed.videoId }
+            }.filter { it.seed.videoId.isNotBlank() }
+        }.distinctBy { it.seed.videoId }
+    }
 
-    val heavyToDisplay = feedData.heavyRotation.ifEmpty {
-        if (quickPicks.size > 8) {
-            quickPicks.drop(8).take(10).map { song ->
-                com.unshoo.pixelmusic.data.feed.GeneratedTrack(
-                    name = song.title,
-                    artist = song.artist,
-                    artworkUrl = song.albumArtUriString,
-                    url = "https://www.youtube.com/watch?v=${song.youtubeId ?: song.id.removePrefix("youtube_")}",
-                    album = song.album
-                )
-            }
-        } else emptyList()
+    val heavyToDisplay = remember(feedData.heavyRotation, quickPicks) {
+        feedData.heavyRotation.ifEmpty {
+            if (quickPicks.size > 8) {
+                quickPicks.subList(8, minOf(18, quickPicks.size)).map { song ->
+                    com.unshoo.pixelmusic.data.feed.GeneratedTrack(
+                        name = song.title,
+                        artist = song.artist,
+                        artworkUrl = song.albumArtUriString,
+                        url = "https://www.youtube.com/watch?v=${song.youtubeId ?: song.id.removePrefix("youtube_")}",
+                        album = song.album
+                    )
+                }
+            } else emptyList()
+        }
     }
 
     val otherHomeSections = remember(exploreUiState.preparedOtherHomeSections) {

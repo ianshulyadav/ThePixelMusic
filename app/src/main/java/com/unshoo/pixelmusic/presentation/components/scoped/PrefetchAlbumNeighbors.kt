@@ -3,17 +3,20 @@ package com.unshoo.pixelmusic.presentation.components.scoped
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.platform.LocalContext
 import coil.imageLoader
+import coil.memory.MemoryCache
 import coil.request.CachePolicy
 import coil.size.Size
 import com.unshoo.pixelmusic.data.model.Song
+import com.unshoo.pixelmusic.presentation.components.AlbumArtPreviewSize
 import com.unshoo.pixelmusic.presentation.components.albumArtMemoryCacheKey
+import com.unshoo.pixelmusic.presentation.components.albumArtPreviewUrl
 import com.unshoo.pixelmusic.presentation.components.safeAlbumArtTargetSize
 import com.unshoo.pixelmusic.utils.LocalArtworkUri
+import com.unshoo.pixelmusic.utils.MediaItemBuilder
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.coroutines.flow.distinctUntilChanged
 
@@ -83,9 +86,25 @@ fun PrefetchAlbumNeighbors(
                 val indices = (page - radius..page + radius)
                     .filter { it in queue.indices && it != page }
                 indices.forEach { idx ->
-                    queue[idx].albumArtUriString?.let { uri ->
+                    val song = queue[idx]
+                    MediaItemBuilder.resolveArtworkUri(song.albumArtUriString, song.id, song.youtubeId)?.let { uri ->
+                        albumArtPreviewUrl(uri)?.let { preview ->
+                            val previewKey = albumArtMemoryCacheKey(preview, AlbumArtPreviewSize)
+                            if (previewKey != null && imageLoader.memoryCache?.get(MemoryCache.Key(previewKey)) == null) {
+                                imageLoader.enqueue(
+                                    coil.request.ImageRequest.Builder(context)
+                                        .data(preview)
+                                        .size(AlbumArtPreviewSize)
+                                        .memoryCacheKey(previewKey)
+                                        .build()
+                                )
+                            }
+                        }
                         val diskPolicy = if (LocalArtworkUri.isLocalArtworkUri(uri)) coil.request.CachePolicy.DISABLED else coil.request.CachePolicy.ENABLED
                         val memoryCacheKey = albumArtMemoryCacheKey(uri, requestTargetSize)
+                        if (memoryCacheKey != null &&
+                            imageLoader.memoryCache?.get(MemoryCache.Key(memoryCacheKey)) != null
+                        ) return@let
                         val req = coil.request.ImageRequest.Builder(context)
                             .data(uri)
                             .size(requestTargetSize)

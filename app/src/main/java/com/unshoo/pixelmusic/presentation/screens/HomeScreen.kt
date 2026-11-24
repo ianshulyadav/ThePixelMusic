@@ -256,19 +256,19 @@ fun HomeScreen(
     val usesFallbackHomeMix = remember(curatedYourMixSongs, dailyMixSongs) {
         curatedYourMixSongs.isEmpty() && dailyMixSongs.isEmpty()
     }
-    val allLibrarySongs by playerViewModel.allSongsFlow.collectAsStateWithLifecycle()
+    val allLibrarySongs = if (isEffectivelyOnline) {
+        persistentListOf()
+    } else {
+        playerViewModel.allSongsFlow.collectAsStateWithLifecycle().value
+    }
+    val baseMixSongs = dailyMixSongs.ifEmpty { curatedYourMixSongs.ifEmpty { homeMixPreviewSongs } }
     val yourMixSongs by produceState(
         initialValue = if (isEffectivelyOnline) dailyMixSongs else persistentListOf(),
-        dailyMixSongs, curatedYourMixSongs, isEffectivelyOnline, allLibrarySongs.size
+        baseMixSongs, isEffectivelyOnline, allLibrarySongs
     ) {
-        val baseList = when {
-            dailyMixSongs.isNotEmpty() -> dailyMixSongs
-            curatedYourMixSongs.isNotEmpty() -> curatedYourMixSongs
-            else -> homeMixPreviewSongs
-        }
         value = if (!isEffectivelyOnline) {
             withContext(Dispatchers.IO) {
-                val offline = baseList.filter { com.unshoo.pixelmusic.utils.OfflineAudioResolver.hasOfflineAudio(context, it) }
+                val offline = baseMixSongs.filter { com.unshoo.pixelmusic.utils.OfflineAudioResolver.hasOfflineAudio(context, it) }
                 // BUGFIX (Local mode stuck on the loader): the mix is built from online picks, so
                 // offline it often filters down to nothing. Fall back to the on-device library.
                 offline.ifEmpty {
@@ -276,7 +276,7 @@ fun HomeScreen(
                 }.toImmutableList()
             }
         } else {
-            baseList
+            baseMixSongs
         }
     }
 

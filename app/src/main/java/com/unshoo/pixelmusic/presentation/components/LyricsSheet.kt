@@ -1243,14 +1243,16 @@ fun SyncedLyricsList(
     footer: LazyListScope.() -> Unit = {}
 ) {
     val density = LocalDensity.current
-    val playbackPosition by playbackPositionFlow.collectAsStateWithLifecycle()
+    val playbackPosition = playbackPositionFlow.collectAsStateWithLifecycle()
     val position = remember(playbackPosition, lyricsSyncOffset, positionOverrideMs) {
-        positionOverrideMs ?: (playbackPosition + lyricsSyncOffset).coerceAtLeast(0L)
+        derivedStateOf {
+            positionOverrideMs ?: (playbackPosition.value + lyricsSyncOffset).coerceAtLeast(0L)
+        }
     }
     val isPreviewSeeking = positionOverrideMs != null
     val currentLineIndex by remember(position, lines) {
         derivedStateOf {
-            resolveCurrentLineIndex(lines = lines, position = position)
+            resolveCurrentLineIndex(lines = lines, position = position.value)
         }
     }
     var hasAlignedInitialLine by remember(lines) { mutableStateOf(false) }
@@ -1461,10 +1463,10 @@ fun SyncedLyricsList(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun LyricLineRow(
+private fun LyricLineRow(
     line: SyncedLine,
     nextTime: Int,
-    position: Long,
+    position: State<Long>,
     distanceFromCurrent: Int = 100,
     useAnimatedLyrics: Boolean = false,
     animatedLyricsBlurEnabled: Boolean = true,
@@ -1489,7 +1491,7 @@ fun LyricLineRow(
         resolveLineEndTimeMs(line, nextTime)
     }
     val isCurrentLine by remember(position, line.time, lineEndTime) {
-        derivedStateOf { position in line.time.toLong()..<lineEndTime }
+        derivedStateOf { position.value in line.time.toLong()..<lineEndTime }
     }
     val unhighlightedColor = LocalContentColor.current.copy(alpha = 0.45f)
     val lineColor by animateColorAsState(
@@ -1664,7 +1666,7 @@ fun LyricLineRow(
             derivedStateOf {
                 resolveHighlightedWordIndex(
                     words = requireNotNull(sanitizedWords),
-                    positionMs = position,
+                    positionMs = position.value,
                     lineStartTimeMs = line.time.toLong(),
                     lineEndTimeMs = lineEndTime
                 )

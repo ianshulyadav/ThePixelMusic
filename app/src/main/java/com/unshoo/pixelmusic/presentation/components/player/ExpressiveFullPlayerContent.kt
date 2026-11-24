@@ -1126,7 +1126,11 @@ internal fun ExpressiveFullPlayerContent(
             } else {
                 FullPlayerPortraitContent(
                     paddingValues = paddingValues,
-                    artworkModel = song.albumArtUriString,
+                    artworkModel = remember(song.id, song.albumArtUriString, song.youtubeId) {
+                        com.unshoo.pixelmusic.utils.MediaItemBuilder.resolveArtworkUri(
+                            song.albumArtUriString, song.id, song.youtubeId
+                        )
+                    },
                     albumArtQuality = albumArtQuality,
                     onSwipeNext = onNextWithOptimisticCarousel,
                     onSwipePrevious = onPreviousWithOptimisticCarousel,

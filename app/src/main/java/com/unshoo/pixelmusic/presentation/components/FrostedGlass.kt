@@ -18,7 +18,6 @@ import androidx.compose.ui.graphics.RenderEffect
 import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.drawscope.translate
-import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
@@ -110,45 +109,28 @@ class BackdropSource internal constructor(val layer: GraphicsLayer) {
 
 val LocalBackdropSource = staticCompositionLocalOf<BackdropSource?> { null }
 
-/** Height of the bottom strip captured for frosted chrome (nav bar + search button + margin). */
-private val BackdropCaptureHeight = 220.dp
-
 @Composable
 fun rememberBackdropSource(): BackdropSource {
     val layer = rememberGraphicsLayer()
     return remember(layer) { BackdropSource(layer) }
 }
 
-/** Records this node's content into [source] while still drawing it normally. */
+/** Records the screen for the frosted navigation controls when they are enabled. */
 fun Modifier.backdropSource(source: BackdropSource?, enabled: Boolean = true): Modifier {
-    if (source == null || !enabled) return this
-    return this
-        .onGloballyPositioned { source.positionInRoot = it.positionInRoot() }
-        .drawWithContent {
-            // Only the strip behind the bottom chrome is ever sampled, so record just that:
-            // everything above is clipped away and HWUI skips re-drawing it a second time.
-            // (Recording the whole screen every frame doubled the draw work while scrolling.)
-            val captureTop = (size.height - BackdropCaptureHeight.toPx()).coerceAtLeast(0f)
-            source.layer.record {
-                clipRect(top = captureTop) {
-                    this@drawWithContent.drawContent()
-                }
-            }
-            drawContent()
-        }
+    return if (enabled) fullBackdropSource(source) else this
 }
 
 /**
- * Records this node's whole content into [source] (no strip clipping). Used for the player
- * cover art, which only redraws when the artwork changes, so recording is effectively free.
+ * Record draw commands once and replay them for both the visible content and its backdrop.
+ * Each frosted control still clips its downsampled blur to its own bounds.
  */
 fun Modifier.fullBackdropSource(source: BackdropSource?): Modifier {
-    if (source == null) return this
+    if (source == null || !FrostedBlurSupported) return this
     return this
         .onGloballyPositioned { source.positionInRoot = it.positionInRoot() }
         .drawWithContent {
             source.layer.record { this@drawWithContent.drawContent() }
-            drawContent()
+            drawLayer(source.layer)
         }
 }
 

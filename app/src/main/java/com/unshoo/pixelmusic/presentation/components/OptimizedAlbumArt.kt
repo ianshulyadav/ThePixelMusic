@@ -33,12 +33,20 @@ import coil.request.ImageRequest
 import coil.size.Dimension
 import coil.size.Size
 import com.unshoo.pixelmusic.R
+import com.unshoo.pixelmusic.data.preferences.AlbumArtQuality
+import com.unshoo.pixelmusic.data.remote.youtube.upgradeThumbnailUrlToQuality
 import com.unshoo.pixelmusic.utils.LocalArtworkUri
 
 // Keep "original" album art bounded. 1920px provides pristine sharpness and texture
 // for high-resolution displays in the full player without risking OOM.
 internal const val MaxSafeAlbumArtDimensionPx = 1920
 internal val SafeOriginalAlbumArtSize = Size(MaxSafeAlbumArtDimensionPx, MaxSafeAlbumArtDimensionPx)
+internal val AlbumArtPreviewSize = Size(256, 256)
+
+internal fun albumArtPreviewUrl(model: String?): String? =
+    model?.takeIf { it.startsWith("http") }
+        ?.let { upgradeThumbnailUrlToQuality(it, AlbumArtQuality.LOW) }
+        ?.takeIf { it != model }
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -56,19 +64,17 @@ fun OptimizedAlbumArt(
     // first and the full-resolution cover fades in over it once loaded. If the full-size image
     // does not exist (e.g. YouTube "maxresdefault" 404s), the preview simply stays.
     val lowQualityUrl = remember(uri) {
-        (uri as? String)
-            ?.takeIf { it.startsWith("http") }
-            ?.let { com.unshoo.pixelmusic.data.remote.youtube.upgradeThumbnailUrlToQuality(it, com.unshoo.pixelmusic.data.preferences.AlbumArtQuality.LOW) }
-            ?.takeIf { it != uri }
+        albumArtPreviewUrl(uri as? String)
     }
     if (lowQualityUrl != null) {
         Box(modifier = modifier) {
             AsyncImage(
-                model = remember(lowQualityUrl) {
+                model = remember(context, lowQualityUrl) {
                     ImageRequest.Builder(context)
                         .data(lowQualityUrl)
-                        .size(Size(256, 256))
-                        .memoryCacheKey("${lowQualityUrl}_256x256")
+                        .size(AlbumArtPreviewSize)
+                        .memoryCacheKey(albumArtMemoryCacheKey(lowQualityUrl, AlbumArtPreviewSize))
+                        .crossfade(false)
                         .build()
                 },
                 contentDescription = "Album art of $title",

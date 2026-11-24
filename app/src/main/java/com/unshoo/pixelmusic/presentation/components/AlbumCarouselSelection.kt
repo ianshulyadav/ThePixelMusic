@@ -257,4 +257,4 @@ private fun resolveCurrentQueueIndex(
 }
 
 /** How long the focused cover stays low-quality when playback has not started yet. */
-private const val HIGH_QUALITY_ART_GRACE_MS = 4_000L
+private const val HIGH_QUALITY_ART_GRACE_MS = 1500L

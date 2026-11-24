@@ -25,11 +25,17 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
+import coil.request.ImageRequest
 import com.unshoo.pixelmusic.data.preferences.AlbumArtQuality
+import com.unshoo.pixelmusic.presentation.components.AlbumArtPreviewSize
 import com.unshoo.pixelmusic.presentation.components.SafeOriginalAlbumArtSize
 import com.unshoo.pixelmusic.presentation.components.SmartImage
+import com.unshoo.pixelmusic.presentation.components.albumArtMemoryCacheKey
+import com.unshoo.pixelmusic.presentation.components.albumArtPreviewUrl
 
 /**
  * Cover art drawn edge-to-edge from the very top of the full player (behind the status bar and
@@ -44,6 +50,17 @@ internal fun ImmersiveCoverBackdrop(
     /** How far below the top edge the artwork starts (it still fills the full width). */
     topOffset: androidx.compose.ui.unit.Dp = 0.dp
 ) {
+    val context = LocalContext.current
+    val previewRequest = remember(context, artworkModel) {
+        albumArtPreviewUrl(artworkModel)?.let { preview ->
+            ImageRequest.Builder(context)
+                .data(preview)
+                .size(AlbumArtPreviewSize)
+                .memoryCacheKey(albumArtMemoryCacheKey(preview, AlbumArtPreviewSize))
+                .crossfade(false)
+                .build()
+        }
+    }
     val targetSize = remember(albumArtQuality) {
         if (albumArtQuality.maxSize == 0) SafeOriginalAlbumArtSize
         else coil.size.Size(albumArtQuality.maxSize, albumArtQuality.maxSize)
@@ -82,11 +99,12 @@ internal fun ImmersiveCoverBackdrop(
         val reveal = remember(artworkModel, targetSize) {
             Animatable(if (artworkModel != null && artworkModel == settledModel) 1f else 0f)
         }
-        val failed = artworkModel.isNullOrBlank() || loadState is AsyncImagePainter.State.Error
-        LaunchedEffect(artworkModel, targetSize, loadState is AsyncImagePainter.State.Success, failed) {
-            if (failed || loadState is AsyncImagePainter.State.Success) {
+        val missingArtwork = artworkModel.isNullOrBlank()
+        val hasFullCover = loadState is AsyncImagePainter.State.Success
+        LaunchedEffect(artworkModel, targetSize, hasFullCover) {
+            if (missingArtwork || hasFullCover) {
                 reveal.animateTo(1f, tween(350))
-                settledModel = artworkModel.takeUnless { failed }
+                settledModel = artworkModel.takeUnless { missingArtwork }
             }
         }
         Box(
@@ -105,11 +123,19 @@ internal fun ImmersiveCoverBackdrop(
                     errorResId = 0,
                     placeHolderBackgroundColor = Color.Transparent,
                     modifier = Modifier.fillMaxSize().graphicsLayer {
-                        alpha = if (failed) 1f - reveal.value else 1f
+                        alpha = if (missingArtwork) 1f - reveal.value else 1f
                     },
                 )
             }
-            if (!failed) {
+            if (previewRequest != null && settledModel != artworkModel) {
+                AsyncImage(
+                    model = previewRequest,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            if (!missingArtwork) {
                 SmartImage(
                     model = artworkModel,
                     contentDescription = null,
@@ -118,6 +144,7 @@ internal fun ImmersiveCoverBackdrop(
                     placeholderResId = 0,
                     errorResId = 0,
                     placeHolderBackgroundColor = Color.Transparent,
+                    crossfadeDurationMillis = 0,
                     onState = { loadState = it },
                     modifier = Modifier.fillMaxSize().graphicsLayer { alpha = reveal.value },
                 )

@@ -7,7 +7,6 @@ import android.util.Log
 import androidx.core.graphics.scale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -57,18 +56,9 @@ object PixelMusicHelper {
                     .url(url)
                     .build()
 
-                val response = client.newCall(request).execute()
-
-                if (!response.isSuccessful) return@withContext null
-
-                val bytes = response.body?.bytes() ?: return@withContext null
-
-                val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                    ?: return@withContext null
-
-                val stream = ByteArrayOutputStream()
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 90, stream)
-                stream.toByteArray().cappedTo()
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) response.body?.bytes()?.cappedTo() else null
+                }
             } catch (e: Exception) {
                 Log.e("Artwork", "Failed to fetch artwork: ${e.message}")
                 null
@@ -79,11 +69,20 @@ object PixelMusicHelper {
 
 fun ByteArray.cappedTo(maxSize: Int = PixelMusicHelper.WEAROS_MAX_IMAGE_SIZE): ByteArray? {
     val bitmap = BitmapFactory.decodeByteArray(this, 0, size) ?: return null
-    val capped = if (bitmap.width <= maxSize && bitmap.height <= maxSize) bitmap else {
-        val scale = maxSize.toFloat() / maxOf(bitmap.width, bitmap.height)
-        bitmap.scale((bitmap.width * scale).toInt(), (bitmap.height * scale).toInt())
+    try {
+        val capped = if (bitmap.width <= maxSize && bitmap.height <= maxSize) bitmap else {
+            val scale = maxSize.toFloat() / maxOf(bitmap.width, bitmap.height)
+            bitmap.scale((bitmap.width * scale).toInt(), (bitmap.height * scale).toInt())
+        }
+        try {
+            val stream = ByteArrayOutputStream()
+            return if (capped.compress(Bitmap.CompressFormat.JPEG, 90, stream)) {
+                stream.toByteArray()
+            } else null
+        } finally {
+            if (capped !== bitmap) capped.recycle()
+        }
+    } finally {
+        bitmap.recycle()
     }
-    val stream = ByteArrayOutputStream()
-    capped.compress(Bitmap.CompressFormat.JPEG, 90, stream)
-    return stream.toByteArray()
 }

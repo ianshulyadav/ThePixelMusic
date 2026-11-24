@@ -168,9 +168,7 @@ class PixelMusicApplication : Application(), ImageLoaderFactory, Configuration.P
         // Background index of every downloaded song (app folder + custom download folder).
         com.unshoo.pixelmusic.utils.OfflineAudioResolver.init(this)
 
-        if (BuildConfig.BUILD_TYPE != "benchmark") {
-            CrashHandler.install(this)
-        }
+        CrashHandler.install(this)
 
         if (BuildConfig.DEBUG) {
             Timber.plant(Timber.DebugTree())
