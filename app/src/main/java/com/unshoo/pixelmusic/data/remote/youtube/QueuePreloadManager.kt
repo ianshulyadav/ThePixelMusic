@@ -42,6 +42,14 @@ object QueuePreloadManager {
                 triggerPreload(includeCurrent = true)
             }
         }
+
+        override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
+            if (reason == Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED) triggerPreload()
+        }
+
+        override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+            triggerPreload()
+        }
     }
 
     fun attach(
@@ -98,16 +106,18 @@ object QueuePreloadManager {
 
             val playerState = withContext(Dispatchers.Main) {
                 if (playerRef == null) null
-                else Pair(player.currentMediaItemIndex, player.mediaItemCount)
+                else Triple(player.currentMediaItemIndex, player.mediaItemCount, player.nextMediaItemIndex)
             } ?: return@launch
 
-            val (currentIndex, totalCount) = playerState
+            val (currentIndex, totalCount, nextIndex) = playerState
 
             if (totalCount <= 0 || currentIndex < 0) return@launch
             val startIndex = if (includeCurrent) currentIndex else currentIndex + 1
             val endIndex = (currentIndex + settings.preloadQueueSize).coerceAtMost(totalCount - 1)
-            if (startIndex > endIndex) return@launch
-            val indicesAhead = startIndex..endIndex
+            val sequentialIndices = if (startIndex <= endIndex) (startIndex..endIndex).toList() else emptyList()
+            val indicesAhead = (listOf(nextIndex) + sequentialIndices)
+                .filter { it in 0 until totalCount && (includeCurrent || it != currentIndex) }
+                .distinct()
 
             for (i in indicesAhead) {
                 // Yield network priority to currently playing track if it is buffering or low on buffer cushion (<20s)
@@ -139,7 +149,8 @@ object QueuePreloadManager {
                 try {
                     // Prefetch at the user's selected quality (HIGH → highest stream first).
                     streamUrl = YoutubeHelper.getSongPlayerUrl(ctx, song, allowLocal = false, isNextInQueue = true)
-                    if (!streamUrl.isNullOrBlank() && (streamUrl.startsWith("http") || streamUrl.startsWith("data:") || streamUrl.startsWith("apple-pending:"))) {
+                    if (!streamUrl.isNullOrBlank() && (streamUrl.startsWith("http") ||
+                            com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver.isLosslessUri(streamUrl))) {
                         val ytUri = "youtube://$videoId"
                         engineRef?.resolvedUriCache?.put(ytUri, android.net.Uri.parse(streamUrl))
                         if (streamUrl.startsWith("http") &&
@@ -148,6 +159,18 @@ object QueuePreloadManager {
                             !streamUrl.endsWith(".flac", ignoreCase = true)
                         ) {
                             engineRef?.preCacheFirstChunk(streamUrl, videoId)
+                        }
+                    }
+                    if (i == nextIndex && !streamUrl.isNullOrBlank() &&
+                        com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver.isLosslessUri(streamUrl)) {
+                        withContext(Dispatchers.Main) {
+                            val engine = engineRef
+                            if (engine != null && playerRef === player &&
+                                player.nextMediaItemIndex == i &&
+                                engine.getPreparedNextMediaId() != mediaItem.mediaId) {
+                                engine.getNextTransitionTarget(player.currentMediaItem ?: mediaItem, player.repeatMode)
+                                    ?.let { engine.prepareNext(it) }
+                            }
                         }
                     }
                 } catch (_: Exception) {

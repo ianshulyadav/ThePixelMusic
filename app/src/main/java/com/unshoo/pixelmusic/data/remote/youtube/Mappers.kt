@@ -16,14 +16,14 @@ fun upgradeThumbnailUrlToQuality(
         com.unshoo.pixelmusic.data.preferences.AlbumArtQuality.LOW -> "=w256-h256-l90-rj"
         com.unshoo.pixelmusic.data.preferences.AlbumArtQuality.MEDIUM -> "=w512-h512-l90-rj"
         com.unshoo.pixelmusic.data.preferences.AlbumArtQuality.HIGH -> "=w800-h800-l90-rj"
-        com.unshoo.pixelmusic.data.preferences.AlbumArtQuality.ORIGINAL -> "=w1920-h1920-l100-rj"
+        com.unshoo.pixelmusic.data.preferences.AlbumArtQuality.ORIGINAL -> "=w1024-h1024-l90-rj"
     }
 
     val sParam = when (quality) {
         com.unshoo.pixelmusic.data.preferences.AlbumArtQuality.LOW -> "=s256"
         com.unshoo.pixelmusic.data.preferences.AlbumArtQuality.MEDIUM -> "=s512"
         com.unshoo.pixelmusic.data.preferences.AlbumArtQuality.HIGH -> "=s800"
-        com.unshoo.pixelmusic.data.preferences.AlbumArtQuality.ORIGINAL -> "=s1920"
+        com.unshoo.pixelmusic.data.preferences.AlbumArtQuality.ORIGINAL -> "=s1024"
     }
 
     val ytQuality = when (quality) {

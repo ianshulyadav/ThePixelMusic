@@ -37,9 +37,8 @@ import com.unshoo.pixelmusic.data.preferences.AlbumArtQuality
 import com.unshoo.pixelmusic.data.remote.youtube.upgradeThumbnailUrlToQuality
 import com.unshoo.pixelmusic.utils.LocalArtworkUri
 
-// Keep "original" album art bounded. 1920px provides pristine sharpness and texture
-// for high-resolution displays in the full player without risking OOM.
-internal const val MaxSafeAlbumArtDimensionPx = 1920
+// Keep original album art bounded to avoid large decoded images in the player.
+internal const val MaxSafeAlbumArtDimensionPx = 1280
 internal val SafeOriginalAlbumArtSize = Size(MaxSafeAlbumArtDimensionPx, MaxSafeAlbumArtDimensionPx)
 internal val AlbumArtPreviewSize = Size(256, 256)
 

@@ -835,9 +835,11 @@ object YoutubeHelper {
             }
         }
 
+        val losslessEnabled = allowLossless && LosslessStreamResolver.isEnabled(context)
         // ── Cache hit at the quality the user actually wants ───────────────────
         streamUrlLruCache.get(targetCacheKey)?.let {
-            if (isUrlAllowed(it, isSaavnEnabled) && isYoutubeUrlValid(it)) {
+            if ((losslessEnabled || !LosslessStreamResolver.isLosslessUri(it)) &&
+                isUrlAllowed(it, isSaavnEnabled) && isYoutubeUrlValid(it)) {
                 PixelMusicHelper.printd(
                     "$videoId : INSTANT start from cache ($targetCacheKey, quality=${plan.quality})"
                 )
@@ -847,7 +849,8 @@ object YoutubeHelper {
         // HIGH: also accept a valid _high entry under any alias.
         if (maxBitrate == 0) {
             streamUrlLruCache.get("${videoId}_high")?.let {
-                if (isUrlAllowed(it, isSaavnEnabled) && isYoutubeUrlValid(it)) {
+                if ((losslessEnabled || !LosslessStreamResolver.isLosslessUri(it)) &&
+                    isUrlAllowed(it, isSaavnEnabled) && isYoutubeUrlValid(it)) {
                     PixelMusicHelper.printd("$videoId : INSTANT start from cached HIGH stream")
                     return it
                 }
@@ -856,12 +859,12 @@ object YoutubeHelper {
 
         // ── UNIFIED ADDONS & LOSSLESS SOURCES GATE ──
         val isAutoQuality = plan.quality == StreamingAudioQuality.AUTO
-        val fastPlaybackForAuto = isAutoQuality || plan.preferLowFirst
+        val fastPlaybackForAuto = plan.preferLowFirst
 
         // Unified addons & lossless sources gate
-        val unifiedSongOverride = runCatching {
+        val unifiedSongOverride = if (losslessEnabled) runCatching {
             LosslessStreamResolver.getUnifiedSongSourceOverride(context, videoId)
-        }.getOrNull()
+        }.getOrNull() else null
         val unifiedOrder = runCatching {
             com.unshoo.pixelmusic.data.addons.AddonManager.readUnifiedOrder(context)
         }.getOrDefault(emptyList())
@@ -872,7 +875,7 @@ object YoutubeHelper {
         }
 
         // When quality is AUTO, avoid slow external scrapers so YouTube playback starts instantly
-        if (allowLossless && !fastPlaybackForAuto && (!LosslessStreamResolver.isFailedForTrack(videoId) || unifiedSongOverride != null)) {
+        if (losslessEnabled && !fastPlaybackForAuto && (!LosslessStreamResolver.isFailedForTrack(videoId) || unifiedSongOverride != null)) {
             // BUGFIX (lossless fallback): the lossless chain used to run inline with its own 10s
             // budget, while DualPlayerEngine aborts the WHOLE resolve after ~5s, so a slow or
             // unavailable addon never reached the YouTube step and the engine played the
@@ -1457,7 +1460,8 @@ object YoutubeHelper {
         val cacheKey = if (maxBitrateKbps > 0) "${videoId}_q${maxBitrateKbps}" else "${videoId}_high"
         if (!forDownload) {
             streamUrlLruCache.get(cacheKey)?.let { 
-                if (isUrlAllowed(it, isSaavnEnabled) && isYoutubeUrlValid(it)) return it 
+                if ((isLosslessEnabled || !LosslessStreamResolver.isLosslessUri(it)) &&
+                    isUrlAllowed(it, isSaavnEnabled) && isYoutubeUrlValid(it)) return it
             }
         }
 

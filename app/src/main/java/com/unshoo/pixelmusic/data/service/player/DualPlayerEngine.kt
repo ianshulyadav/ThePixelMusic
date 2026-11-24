@@ -1193,7 +1193,7 @@ class DualPlayerEngine @Inject constructor(
     private fun onLosslessPolicyChanged(enabled: Boolean) {
         Timber.tag("DualPlayerEngine").i("Lossless policy changed -> enabled=%b; purging stream decisions", enabled)
         com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.invalidateAllStreamCaches()
-        if (enabled) LosslessStreamResolver.clearAll()
+        LosslessStreamResolver.clearAll()
         resolvedUriCache.evictAll()
         activeResolutions.values.forEach { it.cancel() }
         activeResolutions.clear()
@@ -1630,7 +1630,10 @@ class DualPlayerEngine @Inject constructor(
         if (lastSeekAtMs > 0L && SystemClock.elapsedRealtime() - lastSeekAtMs < 2_000L) return
         val currentItem = player.currentMediaItem ?: return
         val currentUri = currentItem.localConfiguration?.uri?.toString() ?: return
-        if (!LosslessStreamResolver.isLosslessUri(currentUri)) return
+        val playingUri = activePlaybackResolvedUris[currentUri]?.toString()
+            ?: resolvedUriCache.get(currentUri)?.toString()
+            ?: currentUri
+        if (!LosslessStreamResolver.isLosslessUri(playingUri)) return
 
         val watchedMediaId = currentItem.mediaId
         val timeoutMs = LOSSLESS_STALL_FALLBACK_TIMEOUT_MS

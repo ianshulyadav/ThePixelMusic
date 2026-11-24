@@ -114,8 +114,7 @@ fun smartImageBucketForPx(rawPx: Int, isThumbnail: Boolean = false): Int {
         rawPx <= 320 -> 256
         rawPx <= 448 -> 384
         rawPx <= 768 -> 512
-        rawPx <= 1024 -> 1024
-        else -> 1920
+        else -> 1024
     }
 }
 

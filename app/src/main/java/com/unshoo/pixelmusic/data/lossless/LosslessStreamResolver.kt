@@ -936,6 +936,8 @@ object LosslessStreamResolver {
             return null
         }
 
+        // A mirror probe can finish after the user turns lossless off.
+        if (!isEnabled(context)) return null
         return when (val outcome = winner.second) {
             is CandidateOutcome.AddonWin -> {
                 val r = outcome.resolved
