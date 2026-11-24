@@ -849,6 +849,16 @@ fun SettingsCategoryScreen(
                             val useSmoothCorners by settingsViewModel.useSmoothCorners.collectAsStateWithLifecycle()
                             val highRefreshRate by settingsViewModel.highRefreshRate.collectAsStateWithLifecycle()
 
+                            SettingsSubsection(title = stringResource(R.string.tab_home)) {
+                                SettingsItem(
+                                    title = stringResource(R.string.customize_home_title),
+                                    subtitle = stringResource(R.string.customize_home_desc),
+                                    leadingIcon = { Icon(Icons.Outlined.GridView, null, tint = MaterialTheme.colorScheme.secondary) },
+                                    trailingIcon = { Icon(Icons.Rounded.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                                    onClick = { navController.navigateSafely(Screen.CustomizeHome.route) }
+                                )
+                            }
+
                             SettingsSubsection(title = stringResource(R.string.setcat_global_theme)) {
                                 ThemeSelectorItem(
                                     label = stringResource(R.string.setcat_language_label),
@@ -1028,16 +1038,6 @@ fun SettingsCategoryScreen(
                                     selectedKey = uiState.carouselStyle,
                                     onSelectionChanged = { settingsViewModel.setCarouselStyle(it) },
                                     leadingIcon = { Icon(painterResource(R.drawable.rounded_view_carousel_24), null, tint = MaterialTheme.colorScheme.secondary) }
-                                )
-                            }
-
-                            SettingsSubsection(title = stringResource(R.string.tab_home)) {
-                                SettingsItem(
-                                    title = stringResource(R.string.customize_home_title),
-                                    subtitle = stringResource(R.string.customize_home_desc),
-                                    leadingIcon = { Icon(Icons.Outlined.GridView, null, tint = MaterialTheme.colorScheme.secondary) },
-                                    trailingIcon = { Icon(Icons.Rounded.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-                                    onClick = { navController.navigateSafely(Screen.CustomizeHome.route) }
                                 )
                             }
 
