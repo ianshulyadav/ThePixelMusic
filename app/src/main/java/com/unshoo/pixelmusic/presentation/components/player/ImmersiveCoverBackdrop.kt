@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -93,61 +94,48 @@ internal fun ImmersiveCoverBackdrop(
                 }
             }
     ) {
-        var settledModel by remember { mutableStateOf<String?>(null) }
-        var loadState by remember(artworkModel, targetSize) { mutableStateOf<AsyncImagePainter.State?>(null) }
-        val outgoingModel = settledModel?.takeIf { it != artworkModel }
-        val reveal = remember(artworkModel, targetSize) {
-            Animatable(if (artworkModel != null && artworkModel == settledModel) 1f else 0f)
-        }
-        val missingArtwork = artworkModel.isNullOrBlank()
-        val hasFullCover = loadState is AsyncImagePainter.State.Success
-        LaunchedEffect(artworkModel, targetSize, hasFullCover) {
-            if (missingArtwork || hasFullCover) {
-                reveal.animateTo(1f, tween(350))
-                settledModel = artworkModel.takeUnless { missingArtwork }
-            }
-        }
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(top = topOffset)
                 .fullBackdropSource(com.unshoo.pixelmusic.presentation.components.LocalCoverBackdropSource.current)
         ) {
-            if (outgoingModel != null) {
-                SmartImage(
-                    model = outgoingModel,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    targetSize = targetSize,
-                    placeholderResId = 0,
-                    errorResId = 0,
-                    placeHolderBackgroundColor = Color.Transparent,
-                    modifier = Modifier.fillMaxSize().graphicsLayer {
-                        alpha = if (missingArtwork) 1f - reveal.value else 1f
-                    },
-                )
-            }
-            if (previewRequest != null && settledModel != artworkModel) {
-                AsyncImage(
-                    model = previewRequest,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
-            if (!missingArtwork) {
-                SmartImage(
-                    model = artworkModel,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    targetSize = targetSize,
-                    placeholderResId = 0,
-                    errorResId = 0,
-                    placeHolderBackgroundColor = Color.Transparent,
-                    crossfadeDurationMillis = 0,
-                    onState = { loadState = it },
-                    modifier = Modifier.fillMaxSize().graphicsLayer { alpha = reveal.value },
-                )
+            if (!artworkModel.isNullOrBlank()) {
+                // Dispose both painters and any in-flight reveal when the artwork changes.
+                key(artworkModel, targetSize) {
+                    var previewReady by remember { mutableStateOf(false) }
+                    var fullCoverReady by remember { mutableStateOf(false) }
+                    var revealFinished by remember { mutableStateOf(false) }
+                    val reveal = remember { Animatable(0f) }
+                    LaunchedEffect(fullCoverReady) {
+                        if (fullCoverReady) {
+                            if (previewReady) reveal.animateTo(1f, tween(350))
+                            else reveal.snapTo(1f)
+                            revealFinished = true
+                        }
+                    }
+                    if (previewRequest != null && !revealFinished) {
+                        AsyncImage(
+                            model = previewRequest,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                            onSuccess = { previewReady = true },
+                        )
+                    }
+                    SmartImage(
+                        model = artworkModel,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        targetSize = targetSize,
+                        placeholderResId = 0,
+                        errorResId = 0,
+                        placeHolderBackgroundColor = Color.Transparent,
+                        crossfadeDurationMillis = 0,
+                        onState = { fullCoverReady = it is AsyncImagePainter.State.Success },
+                        modifier = Modifier.fillMaxSize().graphicsLayer { alpha = reveal.value },
+                    )
+                }
             }
         }
         // Soft top scrim keeps the status bar and top buttons readable on bright art.
