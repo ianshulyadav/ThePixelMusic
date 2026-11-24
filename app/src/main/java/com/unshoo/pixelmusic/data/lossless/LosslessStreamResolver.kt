@@ -243,8 +243,29 @@ object LosslessStreamResolver {
 
     // ── Public helpers used by the player / YoutubeHelper ─────────────────────────────────────
 
-    suspend fun isEnabled(context: Context): Boolean =
-        prefs(context)[LosslessStreamingEnabledKey] ?: defaultEnabled()
+    private fun hasActiveInstalledAddons(context: Context?, p: androidx.datastore.preferences.core.Preferences): Boolean {
+        val addonsMaster = p[AddonsEnabledKey] ?: true
+        if (!addonsMaster) return false
+        val list = if (context != null) AddonManager.ensureLoadedBlocking(context) else AddonManager.installedAddons.value
+        return list.any { it.enabled }
+    }
+
+    /**
+     * Master switch: true when either Lossless Streaming is enabled OR the user has installed and
+     * enabled at least one Addon/JS module in Developer Options -> Addons.
+     */
+    suspend fun isEnabled(context: Context): Boolean {
+        val p = prefs(context)
+        // The master switch is authoritative once the user has set it: OFF turns every lossless
+        // source (and addon) off; ON uses whatever sources were enabled last time.
+        when (p[LosslessStreamingEnabledKey]) {
+            true -> return true
+            false -> return false
+            null -> Unit
+        }
+        if (defaultEnabled()) return true
+        return hasActiveInstalledAddons(context, p)
+    }
 
     /**
      * BUGFIX (perf): this is called from ExoPlayer's loader thread on every DataSource open and
@@ -271,10 +292,21 @@ object LosslessStreamResolver {
     }
 
     /**
-     * Emits the master switch so the player can discard stream decisions made under the previous policy.
+     * Emits the effective master switch ([isEnabled] semantics) whenever the lossless toggle or the
+     * set of enabled addons changes. Used by the player to purge stream decisions made under the
+     * previous policy so a toggle takes effect on the very next track instead of hours later.
      */
     fun enabledFlow(context: Context): Flow<Boolean> =
-        context.dataStore.data.map { it[LosslessStreamingEnabledKey] ?: defaultEnabled() }
+        kotlinx.coroutines.flow.combine(
+            context.dataStore.data,
+            AddonManager.installedAddons,
+        ) { p, addons ->
+            when (p[LosslessStreamingEnabledKey]) {
+                true -> true
+                false -> false
+                null -> defaultEnabled() || ((p[AddonsEnabledKey] ?: true) && addons.any { it.enabled })
+            }
+        }
             .distinctUntilChanged()
             .onEach { updateEnabledSnapshot(it) }
 
@@ -296,10 +328,13 @@ object LosslessStreamResolver {
     }
 
     fun hasAnyActiveLosslessSource(p: androidx.datastore.preferences.core.Preferences): Boolean {
-        if (!(p[LosslessStreamingEnabledKey] ?: defaultEnabled())) return false
+        if (p[LosslessStreamingEnabledKey] == false) return false
         if ((p[AddonsEnabledKey] ?: true) && AddonManager.installedAddons.value.any { it.enabled }) {
             return true
         }
+        val masterEnabled = p[LosslessStreamingEnabledKey] ?: defaultEnabled()
+        if (!masterEnabled) return false
+
         val monochromeEnabled = p[MonochromeEnabledKey] ?: false
         val hasMonochrome = monochromeEnabled && isMonochromeUp()
 
@@ -314,10 +349,8 @@ object LosslessStreamResolver {
     }
 
     suspend fun hasAnyActiveLosslessSource(context: Context): Boolean {
-        val p = prefs(context)
-        if (!(p[LosslessStreamingEnabledKey] ?: defaultEnabled())) return false
         AddonManager.ensureLoadedBlocking(context)
-        return hasAnyActiveLosslessSource(p)
+        return hasAnyActiveLosslessSource(prefs(context))
     }
 
     /**
@@ -327,8 +360,9 @@ object LosslessStreamResolver {
         kotlinx.coroutines.flow.combine(
             context.dataStore.data,
             AddonManager.installedAddons,
-        ) { p, _ ->
-            hasAnyActiveLosslessSource(p)
+        ) { p, addons ->
+            val addonsActive = (p[AddonsEnabledKey] ?: true) && addons.any { it.enabled }
+            addonsActive || hasAnyActiveLosslessSource(p)
         }
 
     /** True when [uri] came out of this resolver (any source, any scheme). */
@@ -340,6 +374,7 @@ object LosslessStreamResolver {
             uri.startsWith("apple-pending:") ||
             uri.startsWith("data:application/vnd.apple.mpegurl") ||
             uri.startsWith("data:application/x-mpegurl") ||
+            uri.startsWith("data:") ||
             uri.startsWith("monochrome://") ||
             uri.contains("monochrome.st/track/") ||
             resolvedByMediaId.values.any { it.uri == uri }
@@ -402,9 +437,9 @@ object LosslessStreamResolver {
             directStreamCache.remove(sourceCacheKey(it, clean))
         }
         addonResultCache.keys.removeIf { it.endsWith(":$mediaId") || it.endsWith(":$clean") }
-        resolvedByMediaId.remove(mediaId)?.let { uriFreshness[it.uri] = 0L }
+        resolvedByMediaId.remove(mediaId)?.let { uriFreshness.remove(it.uri) }
         if (clean != mediaId) {
-            resolvedByMediaId.remove(clean)?.let { uriFreshness[it.uri] = 0L }
+            resolvedByMediaId.remove(clean)?.let { uriFreshness.remove(it.uri) }
         }
         resolvedSourcesByMediaId.remove(mediaId)
         AppleMusicDrm.clear(mediaId)
@@ -434,8 +469,8 @@ object LosslessStreamResolver {
         directStreamCache.remove(sourceCacheKey(active.source, clean))
         addonResultCache.remove("${active.sourceId}:$mediaId")
         addonResultCache.remove("${active.sourceId}:$clean")
-        resolvedByMediaId.remove(mediaId)?.let { uriFreshness[it.uri] = 0L }
-        resolvedByMediaId.remove(clean)?.let { uriFreshness[it.uri] = 0L }
+        resolvedByMediaId.remove(mediaId)?.let { uriFreshness.remove(it.uri) }
+        resolvedByMediaId.remove(clean)?.let { uriFreshness.remove(it.uri) }
         if (!newlyAdded || set.size >= 6) {
             markFailedForTrack(mediaId)
             return false
@@ -474,12 +509,11 @@ object LosslessStreamResolver {
     }
 
     fun clearAll() {
+        enabledSnapshot = null
         directStreamCache.clear()
         addonResultCache.clear()
         resolvedByMediaId.clear()
-        // Expired entries still identify the provider URLs already handed to the player.
-        uriFreshness.replaceAll { _, _ -> 0L }
-        _lastResolved.value = null
+        uriFreshness.clear()
         resolvedSourcesByMediaId.clear()
         failedMediaIds.clear()
         failedSourceIdsByTrack.clear()
@@ -705,14 +739,9 @@ object LosslessStreamResolver {
             val mutex = inFlight.getOrPut(mediaId) { Mutex() }
             try {
                 mutex.withLock {
-                    try {
-                        resolveLocked(appContext, request, lowDataMode, forDownload)
-                    } catch (error: kotlinx.coroutines.CancellationException) {
-                        throw error
-                    } catch (error: Exception) {
-                        Timber.tag(TAG).w(error, "Unified stream resolve crashed for %s", mediaId)
-                        null
-                    }
+                    runCatching { resolveLocked(appContext, request, lowDataMode, forDownload) }
+                        .onFailure { Timber.tag(TAG).w(it, "Unified stream resolve crashed for %s", mediaId) }
+                        .getOrNull()
                 }
             } finally {
                 inFlight.remove(mediaId, mutex)
@@ -733,7 +762,6 @@ object LosslessStreamResolver {
         val mediaId = request.mediaId
         val cleanMediaId = mediaId.removePrefix("youtube_").removePrefix("monochrome_")
         val settings = readSettings(context)
-        if (!settings.losslessMasterEnabled) return null
         val unifiedOverride = UnifiedSongSourceOverride.get(settings.overrideRaw, mediaId)
 
         // 1. Instant offline cache check (only when no explicit source override is active)
@@ -820,13 +848,14 @@ object LosslessStreamResolver {
             }
         }
 
-        // Refresh runs in LosslessSources. Playback only needs the locally cached accounts.
+        // Load pool accounts only when at least one built-in pool-backed provider is in the chain
         val p = prefs(context)
         val needsPool = candidateChain.any {
             it in setOf("builtin:TIDAL", "builtin:QOBUZ", "builtin:DEEZER", "builtin:APPLE")
         }
         if (needsPool && (PoolAccountManager.hasReadKey || !p[PoolApiKeyKey].isNullOrBlank() || com.unshoo.pixelmusic.BuildConfig.SOURCE_PROVIDER_KEY.isNotBlank())) {
-            PoolAccountManager.loadCached(context)
+            runCatching { PoolAccountManager.loadCached(context) }
+            runCatching { PoolAccountManager.refresh(context) }
         }
 
         val addonMap = settings.installedAddons.associateBy { it.id }
@@ -902,7 +931,6 @@ object LosslessStreamResolver {
             }
         }
 
-        if (!isEnabled(context)) return null
         if (winner == null) {
             Timber.tag(TAG).w("Unified chain returned no matching stream for \"%s\"; yielding to fallback", request.title)
             return null
@@ -941,15 +969,11 @@ object LosslessStreamResolver {
                 recordResolvedSource(mediaId, winningSource)
                 if (winningSource == AudioSourceType.TIDAL) {
                     TidalAudioProvider.lastResolvedTrackId?.takeIf { it.isNotBlank() }?.let { probe ->
-                        ioScope.launch {
-                            runCatching { context.dataStore.edit { prefs -> prefs[TidalLastProbeTrackKey] = probe } }
-                        }
+                        runCatching { context.dataStore.edit { prefs -> prefs[TidalLastProbeTrackKey] = probe } }
                     }
                 } else if (winningSource == AudioSourceType.QOBUZ) {
                     QobuzAudioProvider.lastResolvedTrackId?.takeIf { it.isNotBlank() }?.let { probe ->
-                        ioScope.launch {
-                            runCatching { context.dataStore.edit { prefs -> prefs[QobuzLastProbeTrackKey] = probe } }
-                        }
+                        runCatching { context.dataStore.edit { prefs -> prefs[QobuzLastProbeTrackKey] = probe } }
                     }
                 }
                 applyDirectStream(mediaId, winningStream)

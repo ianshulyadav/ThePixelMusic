@@ -263,6 +263,7 @@ class LosslessSourcesViewModel @Inject constructor(
                 }
             }
         }
+        if (!enabled) LosslessStreamResolver.clearAll()
         if (enabled && (uiState.value.poolApiKey.isNotBlank() || com.unshoo.pixelmusic.BuildConfig.SOURCE_PROVIDER_KEY.isNotBlank() || PoolAccountManager.hasReadKey)) {
             refreshPool(force = true)
         }
@@ -423,7 +424,7 @@ class LosslessSourcesViewModel @Inject constructor(
                 prefs[QobuzTokensKey] = QobuzToken.listToJson(merged)
                 prefs.remove(QobuzVerifiedTokensKey)
                 prefs[QobuzEnabledKey] = true
-                if (prefs[LosslessStreamingEnabledKey] == null) prefs[LosslessStreamingEnabledKey] = true
+                prefs[LosslessStreamingEnabledKey] = true
             }
             _lastMessage.value = "Added ${parsed.size} Qobuz token(s)"
         }
@@ -498,7 +499,7 @@ class LosslessSourcesViewModel @Inject constructor(
                 prefs[AppleMusicMediaUserTokenKey] = media
                 if (devToken.isNotBlank()) prefs[AppleMusicDevTokenKey] = devToken.trim()
                 prefs[AppleMusicSourceEnabledKey] = true
-                if (prefs[LosslessStreamingEnabledKey] == null) prefs[LosslessStreamingEnabledKey] = true
+                prefs[LosslessStreamingEnabledKey] = true
             }
             _lastMessage.value = "Apple Music tokens verified"
         }

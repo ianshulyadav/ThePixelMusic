@@ -504,10 +504,6 @@
     <string name="home_queue_history_options">Queue history options</string>
     <string name="home_queue_history_starts_with">Starts with</string>
     <string name="home_queue_history_tracks">tracks</string>
-    <plurals name="home_queue_history_track_count">
-        <item quantity="one">%d track</item>
-        <item quantity="other">%d tracks</item>
-    </plurals>
     <string name="home_queue_history_replay">Replay queue</string>
     <string name="home_queue_history_remove">Remove saved queue</string>
     <string name="home_queue_history_clear">Clear queue history?</string>

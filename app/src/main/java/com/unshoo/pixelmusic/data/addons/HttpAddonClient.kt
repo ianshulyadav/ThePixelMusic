@@ -2,7 +2,6 @@ package com.unshoo.pixelmusic.data.addons
 
 import android.media.MediaCodecList
 import android.os.Build
-import com.unshoo.pixelmusic.utils.readResponse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -414,7 +413,7 @@ class HttpAddonClient(
         }
     }
 
-    private suspend fun executeJsonGet(
+    private fun executeJsonGet(
         sourceId: String,
         url: String,
         treat404AsSoftMiss: Boolean = false,
@@ -427,29 +426,29 @@ class HttpAddonClient(
             .build()
 
         return try {
-            httpClient.newCall(req).readResponse { resp ->
+            httpClient.newCall(req).execute().use { resp ->
                 if (resp.code == 429) {
                     AddonHealthTracker.noteOriginRateLimit(url, resp.header("Retry-After"))
                     AddonHealthTracker.recordFailure(sourceId, "Rate limited (HTTP 429)")
-                    return@readResponse null
+                    return null
                 }
                 if (resp.code == 402) {
                     AddonHealthTracker.recordFailure(sourceId, "Deployment disabled / payment required (HTTP 402)", permanentHint = true)
-                    return@readResponse null
+                    return null
                 }
                 if (resp.code == 404 && treat404AsSoftMiss) {
-                    return@readResponse null
+                    return null
                 }
                 if (!resp.isSuccessful) {
                     if (resp.code >= 500 || resp.code == 403 || resp.code == 401) {
                         AddonHealthTracker.recordFailure(sourceId, "HTTP ${resp.code}")
                     }
-                    return@readResponse null
+                    return null
                 }
                 val text = resp.body?.string().orEmpty()
                 if (text.contains("DEPLOYMENT_DISABLED", ignoreCase = true)) {
                     AddonHealthTracker.recordFailure(sourceId, "Deployment disabled", permanentHint = true)
-                    return@readResponse null
+                    return null
                 }
                 text.takeIf { it.isNotBlank() }
             }

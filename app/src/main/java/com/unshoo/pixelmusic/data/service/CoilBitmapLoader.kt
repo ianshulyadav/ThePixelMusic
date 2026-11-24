@@ -42,31 +42,35 @@ class CoilBitmapLoader(private val context: Context, private val scope: Coroutin
 
     override fun loadBitmap(uri: Uri): ListenableFuture<Bitmap> {
         val unwrapped = SharedArtworkContentProvider.unwrapRemoteUrl(uri.toString())
-        if (unwrapped != null && (unwrapped.startsWith("http://") || unwrapped.startsWith("https://"))) {
+        val data: Any = if (unwrapped != null && (unwrapped.startsWith("http://") || unwrapped.startsWith("https://"))) {
             // Ask for the very URL the in-app player and mini player load, so the lock screen /
             // notification reuse that download from the disk cache instead of fetching again.
             val playerSize = com.unshoo.pixelmusic.presentation.components.smartImageRequestSize(
                 com.unshoo.pixelmusic.presentation.components.PlayerCoverTargetSize
             )
-            val optimized = (com.unshoo.pixelmusic.presentation.components.smartImageOptimizedModel(
+            (com.unshoo.pixelmusic.presentation.components.smartImageOptimizedModel(
                 unwrapped, playerSize, isThumbnail = false
             ) as? String) ?: unwrapped
-            val candidates = (listOf(optimized, unwrapped) + youtubeThumbnailFallbacks(unwrapped)).distinct()
-            return loadBitmapInternal(candidates, retry = true)
+        } else {
+            uri
         }
-        return loadBitmapInternal(listOf(uri))
+        return loadBitmapInternal(data)
     }
 
     override fun decodeBitmap(data: ByteArray): ListenableFuture<Bitmap> {
-        return loadBitmapInternal(listOf(data))
+        return loadBitmapInternal(data)
     }
 
-    private fun loadBitmapInternal(candidates: List<Any>, retry: Boolean = false): ListenableFuture<Bitmap> {
+    private fun loadBitmapInternal(data: Any): ListenableFuture<Bitmap> {
         val future = SettableFuture.create<Bitmap>()
+        val isRemote = data is String
 
         scope.launch {
             var lastError: Throwable? = null
-            val attempts = if (retry) RETRY_DELAYS_MS.size else 1
+            val attempts = if (isRemote) RETRY_DELAYS_MS.size else 1
+            // YouTube only has "maxresdefault" for some videos: step down through smaller
+            // thumbnails instead of retrying a URL that will always 404.
+            val candidates = (data as? String)?.let(::youtubeThumbnailFallbacks) ?: listOf(data)
             for (attempt in 0 until attempts) {
                 if (future.isCancelled) return@launch
                 val wait = RETRY_DELAYS_MS[attempt]
@@ -85,7 +89,7 @@ class CoilBitmapLoader(private val context: Context, private val scope: Coroutin
                         .build()
 
                     val result = context.imageLoader.execute(request)
-                    val drawable = (result as? SuccessResult)?.drawable
+                    val drawable = (result as? SuccessResult)?.drawable ?: result.drawable
                     if (drawable != null) {
                         val raw = drawable.toBitmap()
                         // Private, software copy owned exclusively by Media3.
@@ -99,15 +103,12 @@ class CoilBitmapLoader(private val context: Context, private val scope: Coroutin
                             return@launch
                         }
                     }
-                    lastError = IllegalStateException("Coil returned no artwork")
-                } catch (e: kotlinx.coroutines.CancellationException) {
-                    future.cancel(false)
-                    throw e
+                    lastError = IllegalStateException("Coil returned no image for: $data")
                 } catch (e: Exception) {
                     lastError = e
                 }
             }
-            future.setException(lastError ?: IllegalStateException("Artwork load failed"))
+            future.setException(lastError ?: IllegalStateException("Artwork load failed: $data"))
         }
         return future
     }

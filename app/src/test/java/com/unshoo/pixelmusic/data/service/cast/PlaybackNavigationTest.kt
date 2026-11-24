@@ -7,7 +7,6 @@ import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.common.util.UnstableApi
 import com.unshoo.pixelmusic.data.service.player.PlaybackNavigationHistory
-import com.unshoo.pixelmusic.data.service.shouldArchiveQueueBeforeReplacing
 import io.mockk.every
 import io.mockk.mockk
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -16,29 +15,6 @@ import org.junit.jupiter.api.Test
 @OptIn(UnstableApi::class)
 class PlaybackNavigationTest {
     private val history = PlaybackNavigationHistory()
-
-    @Test
-    fun `only replacing a multi-track queue with a different queue archives the old one`() {
-        val queue = QueuePlayer(listOf("A", "B"))
-        val session = sessionFor(queue)
-        val archived = mutableListOf<List<String>>()
-        session.beforeQueueReplacement = { player, replacement ->
-            if (player.shouldArchiveQueueBeforeReplacing(replacement)) {
-                archived.add((0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaId })
-            }
-        }
-        val sameQueue = listOf(queue.player.getMediaItemAt(0), queue.player.getMediaItemAt(1))
-
-        session.seekToNextMediaItem()
-        queue.append("Auto queue item")
-        session.setMediaItems(sameQueue + queue.player.getMediaItemAt(2), 1, 0L)
-        session.setMediaItem(MediaItem.Builder().setMediaId("Fresh song").build())
-        session.setMediaItems(sameQueue, 0, 0L)
-        session.setMediaItems(emptyList(), 0, 0L)
-        session.setMediaItems(sameQueue, 0, 0L)
-
-        assertEquals(listOf(listOf("A", "B", "Auto queue item")), archived)
-    }
 
     @Test
     fun `rapid next and previous commands visit every track even while buffering`() {
@@ -163,10 +139,8 @@ class PlaybackNavigationTest {
 
         val player = mockk<Player>(relaxed = true).also { player ->
             every { player.currentTimeline } answers { timeline }
-            every { player.mediaItemCount } answers { items.size }
-            every { player.getMediaItemAt(any()) } answers { items[firstArg()].second }
             every { player.currentMediaItemIndex } answers { index }
-            every { player.currentMediaItem } answers { items.getOrNull(index)?.second }
+            every { player.currentMediaItem } answers { items[index].second }
             every { player.currentPosition } answers { positionMs }
             every { player.playbackState } returns Player.STATE_BUFFERING
             every { player.addListener(any()) } answers { listeners.add(firstArg()); Unit }
@@ -176,8 +150,6 @@ class PlaybackNavigationTest {
             every { player.seekToNextMediaItem() } answers { move(nextIndices.removeFirstOrNull() ?: index + 1) }
             every { player.seekTo(any<Int>(), any<Long>()) } answers { move(firstArg()) }
             every { player.seekTo(any<Long>()) } answers { positionMs = firstArg(); Unit }
-            every { player.setMediaItems(any()) } answers { replace(firstArg(), 0) }
-            every { player.setMediaItems(any(), any<Int>(), any<Long>()) } answers { replace(firstArg(), secondArg()) }
         }
 
         fun append(id: String) {
@@ -208,13 +180,6 @@ class PlaybackNavigationTest {
         private fun refreshTimeline() {
             timeline = QueueTimeline(items.toList())
             listeners.forEach { it.onTimelineChanged(timeline, Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED) }
-        }
-
-        private fun replace(replacement: List<MediaItem>, startIndex: Int) {
-            items.clear()
-            items.addAll(replacement.map { Any() to it })
-            index = startIndex
-            refreshTimeline()
         }
 
         private fun move(target: Int) {

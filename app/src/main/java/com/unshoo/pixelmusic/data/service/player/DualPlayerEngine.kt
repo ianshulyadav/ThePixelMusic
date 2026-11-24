@@ -191,7 +191,6 @@ class DualPlayerEngine @Inject constructor(
     private var transitionJob: Job? = null
     private var bufferingFallbackJob: Job? = null
     private var transitionRunning = false
-    private var transitionGeneration = 0L
     private var preResolutionJob: Job? = null
     private var queueSnapshot: List<MediaItem> = emptyList()
     private var activeWindowStartIndex = 0
@@ -221,25 +220,6 @@ class DualPlayerEngine @Inject constructor(
     }
 
     private val onPlayerSwappedListeners = mutableListOf<(Player) -> Unit>()
-    internal var beforeQueueReplacement: ((Player, List<MediaItem>) -> Unit)? = null
-
-    internal var queueHistorySourceName: String? = null
-        private set
-    internal var queueHistoryStartMediaId: String? = null
-        private set
-
-    fun replacePlaybackQueue(items: List<MediaItem>, startIndex: Int, sourceName: String) {
-        val player = masterPlayer
-        beforeQueueReplacement?.invoke(player, items)
-        player.setMediaItems(items, startIndex, 0L)
-        queueHistorySourceName = sourceName.takeUnless { it.isBlank() || it == "None" }
-        queueHistoryStartMediaId = items.getOrNull(startIndex)?.mediaId
-    }
-
-    internal fun clearQueueHistoryContext() {
-        queueHistorySourceName = null
-        queueHistoryStartMediaId = null
-    }
     private val onNextPlayerPreparedListeners = mutableListOf<(Player) -> Unit>()
     private val onTransitionDisplayPlayerListeners = mutableListOf<(Player) -> Unit>()
     private val onTransitionFinishedListeners = mutableListOf<() -> Unit>()
@@ -371,8 +351,11 @@ class DualPlayerEngine @Inject constructor(
                     // BUGFIX: when already ducked, playerA.volume is the 20% ducked level. Capturing it
                     // made GAIN restore the ducked level permanently (quiet playback after a
                     // notification followed by a call). Capture the pre-duck level instead.
-                    prePauseVolumeA = if (skipFadeActive) skipFadeRestVolume
-                    else transitionOutgoingRestVolume ?: if (isDucked) preDuckVolumeA else playerA.volume
+                    prePauseVolumeA = when {
+                        skipFadeActive -> skipFadeRestVolume
+                        isDucked -> preDuckVolumeA
+                        else -> playerA.volume
+                    }
                     playerA.playWhenReady = false
                 }
                 if (::playerB.isInitialized) {
@@ -1208,7 +1191,7 @@ class DualPlayerEngine @Inject constructor(
     }
 
     /**
-     * Called when the master lossless switch changes.
+     * Called when the effective lossless switch changes (master toggle or enabled-addon set).
      * Every cached decision was made under the previous policy, so purge them and point queued
      * items that were already pre-resolved back at their youtube:// source; they re-resolve under
      * the new policy when they play. When lossless is switched OFF while a lossless stream is
@@ -1217,7 +1200,7 @@ class DualPlayerEngine @Inject constructor(
     private fun onLosslessPolicyChanged(enabled: Boolean) {
         Timber.tag("DualPlayerEngine").i("Lossless policy changed -> enabled=%b; purging stream decisions", enabled)
         com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.invalidateAllStreamCaches()
-        LosslessStreamResolver.clearAll()
+        if (enabled) LosslessStreamResolver.clearAll()
         resolvedUriCache.evictAll()
         activeResolutions.values.forEach { it.cancel() }
         activeResolutions.clear()
@@ -1226,12 +1209,11 @@ class DualPlayerEngine @Inject constructor(
             activePlaybackResolvedUris.clear()
             return
         }
-        cancelNext()
+        if (!transitionRunning) cancelNext()
 
         val currentIndex = playerA.currentMediaItemIndex
         val currentItem = playerA.currentMediaItem
         val currentUri = currentItem?.localConfiguration?.uri?.toString()
-        val resolvedCurrentUri = currentUri?.let { activePlaybackResolvedUris[it]?.toString() }
         activePlaybackResolvedUris.keys.retainAll { key ->
             currentItem != null && (key == currentUri || key == "youtube://${youtubeIdOf(currentItem)}")
         }
@@ -1266,15 +1248,9 @@ class DualPlayerEngine @Inject constructor(
             resetRange(0, currentIndex)
         }
 
-        if (!enabled && currentItem != null &&
-            (LosslessStreamResolver.isLosslessUri(currentUri) || LosslessStreamResolver.isLosslessUri(resolvedCurrentUri))
-        ) {
-            if (youtubeIdOf(currentItem) != null) {
-                failoverLosslessToYoutube(currentItem, reason = "Lossless switched off", allowSourceFailover = false)
-            } else {
-                playerA.stop()
-            }
-        }
+        // The current song is intentionally left untouched: swapping its source mid-song means a
+        // gap plus a re-buffer. The new policy applies seamlessly from the next track (whose queue
+        // entry was reset above and whose crossfade standby was cancelled).
     }
 
     suspend fun preResolveForPlayback(mediaItems: List<MediaItem>, startIndex: Int): List<MediaItem> {
@@ -1471,12 +1447,8 @@ class DualPlayerEngine @Inject constructor(
         if (::playerB.isInitialized) applyAudioOffload(playerB)
     }
 
-    private var crossfadeEnabled = false
-
-    private fun applyAudioOffload(player: ExoPlayer, forOverlap: Boolean = false) {
-        // Hardware offload can keep the sink clock running while the second output goes silent.
-        val canOffload = audioOffloadEnabled && !crossfadeEnabled && !forOverlap
-        val mode = if (canOffload) {
+    private fun applyAudioOffload(player: ExoPlayer) {
+        val mode = if (audioOffloadEnabled) {
             TrackSelectionParameters.AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_ENABLED
         } else {
             TrackSelectionParameters.AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_DISABLED
@@ -1490,7 +1462,7 @@ class DualPlayerEngine @Inject constructor(
 
         // Media3 versions expose different offload scheduling APIs. Mirror ArchiveTune's
         // defensive reflection so the setting works across builds instead of silently no-oping.
-        val schedulingEnabled = canOffload && !transitionRunning
+        val schedulingEnabled = audioOffloadEnabled && !transitionRunning
         listOf("experimentalSetOffloadSchedulingEnabled", "setOffloadSchedulingEnabled", "setOffloadEnabled")
             .firstNotNullOfOrNull { name ->
                 runCatching { player.javaClass.getMethod(name, Boolean::class.javaPrimitiveType) }.getOrNull()
@@ -1504,14 +1476,6 @@ class DualPlayerEngine @Inject constructor(
      * preference was never observed again. They are now (re)started with every fresh scope.
      */
     private fun startPreferenceCollectors() {
-        scope.launch {
-            userPreferencesRepository.isCrossfadeEnabledFlow.collect { enabled ->
-                if (crossfadeEnabled != enabled) {
-                    crossfadeEnabled = enabled
-                    applyAudioOffloadToActivePlayers()
-                }
-            }
-        }
         scope.launch {
             userPreferencesRepository.audioOffloadEnabledFlow.collect { enabled ->
                 if (audioOffloadEnabled != enabled) {
@@ -1712,19 +1676,25 @@ class DualPlayerEngine @Inject constructor(
     fun failoverLosslessToYoutube(
         mediaItem: MediaItem,
         targetPlayer: ExoPlayer? = null,
-        reason: String = "Lossless stream failed or stalled",
-        allowSourceFailover: Boolean = true,
+        reason: String = "Lossless stream failed or stalled"
     ) {
         val player = targetPlayer ?: if (::playerA.isInitialized) playerA else return
         val rawUri = mediaItem.localConfiguration?.uri?.toString().orEmpty()
-        val videoId = youtubeIdOf(mediaItem)
+        // shortcut: only tracks with 11-char YouTube IDs can failover to YouTube; pure custom streams are unhandled, upgrade if custom streaming services get alternate fallback mirrors
+        val videoId = mediaItem.mediaId.removePrefix("youtube_").takeIf { it.isNotBlank() && it.length == 11 && !it.contains("_") }
+            ?: when {
+                rawUri.startsWith("youtube://") -> rawUri.removePrefix("youtube://")
+                else -> null
+            } ?: queueSnapshot.firstOrNull { it.mediaId == mediaItem.mediaId }?.let {
+                it.mediaId.removePrefix("youtube_").takeIf { id -> id.length == 11 && !id.contains("_") }
+            }
 
         if (videoId.isNullOrBlank()) {
             Timber.tag("DualPlayerEngine").w("failoverLosslessToYoutube: could not determine YouTube videoId for %s", mediaItem.mediaId)
             return
         }
 
-        val shouldStepDown = allowSourceFailover && LosslessStreamResolver.markCurrentSourceFailedForTrack(videoId, reason)
+        val shouldStepDown = LosslessStreamResolver.markCurrentSourceFailedForTrack(videoId, reason)
         Timber.tag("DualPlayerEngine").w(
             "Source Failover: %s (%s) -> stepDown=%s",
             videoId,
@@ -1766,18 +1736,12 @@ class DualPlayerEngine @Inject constructor(
                 val replacement = mediaItem.buildUpon()
                     .setUri(fallbackUri)
                     .apply {
-                        if (!isStillLossless) {
-                            setCustomCacheKey(streamCacheKey(videoId, ytUrl))
-                            setMimeType(null)
-                            setDrmConfiguration(null)
-                        } else if (containerMime != null) {
-                            setMimeType(containerMime)
-                        }
+                        if (!isStillLossless) setCustomCacheKey(streamCacheKey(videoId, ytUrl))
+                        if (containerMime != null) setMimeType(containerMime)
                     }
                     .build()
 
                 withContext(Dispatchers.Main.immediate) {
-                    if (!allowSourceFailover && LosslessStreamResolver.isEnabled(context)) return@withContext
                     val currentIdx = player.currentMediaItemIndex
                     val currentItem = if (currentIdx != C.INDEX_UNSET && currentIdx < player.mediaItemCount) {
                         player.getMediaItemAt(currentIdx)
@@ -2313,11 +2277,6 @@ class DualPlayerEngine @Inject constructor(
 
                 override fun open(dataSpec: androidx.media3.datasource.DataSpec): Long {
                     val uriStr = dataSpec.uri.toString()
-                    if (LosslessStreamResolver.isLosslessUri(uriStr) &&
-                        !LosslessStreamResolver.isEnabledBlocking(context)
-                    ) {
-                        throw java.io.IOException("Lossless streaming is disabled")
-                    }
                     val bypassCompleteFile = uriStr.startsWith("data:") ||
                         uriStr.contains("itunes.apple.com") ||
                         uriStr.contains("apple.com") ||
@@ -2752,7 +2711,7 @@ class DualPlayerEngine @Inject constructor(
             resolved.contains("monochrome.st/track/") ||
             originalUriString.startsWith("monochrome://")
         ) {
-            return LosslessStreamResolver.isEnabledBlocking(context) && LosslessStreamResolver.isFreshUri(resolved)
+            return LosslessStreamResolver.isFreshUri(resolved)
         }
         if (resolvedUri.scheme == "file" || resolvedUri.scheme == "content") {
             return true
@@ -2837,23 +2796,30 @@ class DualPlayerEngine @Inject constructor(
         try {
             val isLosslessEnabled = LosslessStreamResolver.isEnabled(context)
 
-            fun matches(item: MediaItem): Boolean =
-                youtubeIdOf(item) == youtubeId || item.requestMetadata.mediaUri?.toString() == uriString
-
-            val matchingItem = queueSnapshot.firstOrNull(::matches) ?: withContext(Dispatchers.Main.immediate) {
+            val matchingItem = queueSnapshot.firstOrNull {
+                it.mediaId == youtubeId ||
+                    it.mediaId == "youtube_$youtubeId" ||
+                    it.requestMetadata.mediaUri?.toString() == uriString
+            } ?: withContext(Dispatchers.Main.immediate) {
+                fun matches(item: androidx.media3.common.MediaItem?): Boolean =
+                    item != null && (
+                        item.mediaId == youtubeId ||
+                            item.mediaId == "youtube_$youtubeId" ||
+                            item.requestMetadata.mediaUri?.toString() == uriString
+                    )
                 val itemA = if (::playerA.isInitialized) playerA.currentMediaItem else null
                 val itemB = if (::playerB.isInitialized) playerB.currentMediaItem else null
-                itemA?.takeIf(::matches) ?: itemB?.takeIf(::matches)
+                when {
+                    matches(itemA) -> itemA
+                    matches(itemB) -> itemB
+                    else -> null
+                }
             }
 
             val youtubeSong = com.unshoo.pixelmusic.data.model.youtube.Song(
                 youtubeId = youtubeId,
                 title = matchingItem?.mediaMetadata?.title?.toString().orEmpty(),
                 artist = matchingItem?.mediaMetadata?.artist?.toString().orEmpty(),
-                duration = matchingItem?.mediaMetadata?.extras
-                    ?.getLong(com.unshoo.pixelmusic.utils.MediaItemBuilder.EXTERNAL_EXTRA_DURATION)
-                    ?.takeIf { it > 0L }
-                    ?.let { com.unshoo.pixelmusic.utils.formatDuration(it) }.orEmpty(),
                 album = matchingItem?.mediaMetadata?.albumTitle?.toString().orEmpty()
             )
 
@@ -2875,9 +2841,7 @@ class DualPlayerEngine @Inject constructor(
                     com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper
                         .getLowestQualityStreamUrl(context, youtubeSong, skipLocalAudio = true)
                 } else {
-                    com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.getSongPlayerUrl(
-                        context, youtubeSong, allowLossless = isLosslessEnabled,
-                    )
+                    com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.getSongPlayerUrl(context, youtubeSong)
                 }
             }
 
@@ -2993,9 +2957,7 @@ class DualPlayerEngine @Inject constructor(
             else -> mediaItem.mediaId.removePrefix("youtube_").takeIf { it.isNotBlank() }
         }
         // If this track is already 100% complete in the lossless disk cache, serve directly from file
-        val cachedComplete = if (isLossless && LosslessStreamResolver.isEnabled(context)) {
-            cleanId?.let { LosslessFileCache.getCompleteFile(context, it) }
-        } else null
+        val cachedComplete = cleanId?.let { LosslessFileCache.getCompleteFile(context, it) }
         if (cachedComplete != null) {
             return mediaItem.buildUpon()
                 .setUri(Uri.fromFile(cachedComplete))
@@ -3075,7 +3037,6 @@ class DualPlayerEngine @Inject constructor(
             val resolvedItem = resolveMediaItem(target.mediaItem)
 
             val standbyPlayer = ensurePlayerB()
-            applyAudioOffload(standbyPlayer, forOverlap = true)
             standbyPlayer.stop()
             standbyPlayer.clearMediaItems()
             // Standby player loads ONLY the target item to pre-buffer.
@@ -3104,7 +3065,6 @@ class DualPlayerEngine @Inject constructor(
             try {
                 val resolvedItem = resolveMediaItem(mediaItem)
                 val standbyPlayer = ensurePlayerB()
-                applyAudioOffload(standbyPlayer, forOverlap = true)
                 standbyPlayer.stop()
                 standbyPlayer.clearMediaItems()
                 standbyPlayer.setMediaItem(resolvedItem, startPositionMs.coerceAtLeast(0L))
@@ -3134,10 +3094,8 @@ class DualPlayerEngine @Inject constructor(
             android.os.Handler(android.os.Looper.getMainLooper()).post { cancelNext() }
             return
         }
-        val wasRunning = transitionRunning
-        transitionGeneration++
-        transitionRunning = false
         transitionJob?.cancel()
+        transitionRunning = false
         _standbyAudioSessionId.value = 0
         pendingTransitionTarget = null
         resetPreparedWindowState()
@@ -3156,13 +3114,10 @@ class DualPlayerEngine @Inject constructor(
         }
         incomingTrackReplayGainVolume = null
         setPauseAtEndOfMediaItems(false)
-        if (wasRunning) onTransitionFinishedListeners.forEach { it() }
     }
 
     fun performTransition(settings: TransitionSettings) {
-        if (transitionRunning) return
-        val generation = ++transitionGeneration
-        val outgoingPlayer = playerA
+        transitionJob?.cancel()
         transitionRunning = true
         if (::playerB.isInitialized && !playerBReleased) {
             val sid = playerB.audioSessionId
@@ -3171,10 +3126,10 @@ class DualPlayerEngine @Inject constructor(
         transitionJob = scope.launch {
             try {
                 performOverlapTransition(settings)
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e
             } catch (e: Exception) {
-                Timber.tag("TransitionDebug").e(e, "Error performing transition")
+                if (e !is kotlinx.coroutines.CancellationException) {
+                    Timber.tag("TransitionDebug").e(e, "Error performing transition")
+                }
                 if (::playerA.isInitialized) restoreMasterRestVolume(playerA)
                 setPauseAtEndOfMediaItems(false)
                 if (::playerB.isInitialized && !playerBReleased) {
@@ -3185,16 +3140,10 @@ class DualPlayerEngine @Inject constructor(
                     } catch (_: Exception) {}
                 }
             } finally {
-                if (generation == transitionGeneration) {
-                    transitionRunning = false
-                    pendingTransitionTarget = null
-                    if (playerA !== outgoingPlayer) {
-                        _activeAudioSessionId.value = playerA.audioSessionId
-                        onPlayerSwappedListeners.forEach { it(playerA) }
-                    }
-                    _standbyAudioSessionId.value = 0
-                    onTransitionFinishedListeners.forEach { it() }
-                }
+                transitionRunning = false
+                _standbyAudioSessionId.value = 0
+                pendingTransitionTarget = null
+                onTransitionFinishedListeners.forEach { it() }
             }
         }
     }
@@ -3261,15 +3210,13 @@ class DualPlayerEngine @Inject constructor(
             return
         }
 
-        if (!outgoingPlayer.playWhenReady) {
-            abortTransition(outgoingPlayer, incomingPlayer)
-            return
+        if (!outgoingPlayer.isPlaying && outgoingPlayer.playbackState == Player.STATE_READY) {
+            outgoingPlayer.play()
         }
 
         val outgoingStartVolume = outgoingPlayer.volume.coerceIn(0.1f, 1f)
         transitionOutgoingRestVolume = if (isDucked) preDuckVolumeA else outgoingStartVolume
-        val incomingTargetVolume = (incomingTrackReplayGainVolume ?: transitionOutgoingRestVolume ?: 1f)
-            .coerceIn(0.01f, 1f)
+        val incomingTargetVolume = incomingTrackReplayGainVolume ?: 1f
         val incomingBeforeStart = incomingPlayer.currentPosition
 
         incomingPlayer.volume = 0f
@@ -3304,34 +3251,22 @@ class DualPlayerEngine @Inject constructor(
         onTransitionDisplayPlayerListeners.forEach { runCatching { it(playerB) } }
 
         val duration = settings.durationMs.toLong().coerceAtLeast(500L)
-        var startedAtMs = SystemClock.elapsedRealtime()
+        val startedAtMs = SystemClock.elapsedRealtime()
         var incomingStallStartedMs = 0L
 
         while (scope.isActive) {
             currentCoroutineContext().ensureActive()
-            if (!outgoingPlayer.playWhenReady && outgoingPlayer.playbackState != Player.STATE_ENDED) {
-                abortTransition(outgoingPlayer, incomingPlayer)
-                return
-            }
 
             // If incoming player buffers or stalls, hold curve; if prolonged (>2000ms), abort cleanly.
-            if (!incomingPlayer.isPlaying) {
+            if (outgoingPlayer.isPlaying && incomingPlayer.playWhenReady && !incomingPlayer.isPlaying) {
                 if (incomingStallStartedMs == 0L) {
                     incomingStallStartedMs = SystemClock.elapsedRealtime()
-                }
-                if (!incomingPlayer.playWhenReady || !outgoingPlayer.isPlaying ||
-                    SystemClock.elapsedRealtime() - incomingStallStartedMs >= 2_000L ||
-                    (outgoingPlayer.duration > 0L && outgoingPlayer.duration - outgoingPlayer.currentPosition <= 150L)
-                ) {
+                } else if (SystemClock.elapsedRealtime() - incomingStallStartedMs >= 2000L) {
                     Timber.tag("TransitionDebug").w("Incoming player stalled mid-fade; aborting overlap")
                     abortTransition(outgoingPlayer, incomingPlayer)
                     return
                 }
-                delay(16L)
-                continue
-            }
-            if (incomingStallStartedMs != 0L) {
-                startedAtMs += SystemClock.elapsedRealtime() - incomingStallStartedMs
+            } else {
                 incomingStallStartedMs = 0L
             }
 
@@ -3371,6 +3306,8 @@ class DualPlayerEngine @Inject constructor(
             incomingPlayer.volume = incomingTargetVolume
         }
         incomingTrackReplayGainVolume = null
+        transitionOutgoingRestVolume = null
+
         val targetIdx = pendingTransitionTarget?.absoluteIndex ?: outgoingPlayer.nextMediaItemIndex
         if (targetIdx in 0 until outgoingPlayer.mediaItemCount) {
             val before = ArrayList<MediaItem>(targetIdx.coerceAtLeast(0))
@@ -3409,12 +3346,14 @@ class DualPlayerEngine @Inject constructor(
         }
         if (playerA.playWhenReady) requestAudioFocus()
 
+        onPlayerSwappedListeners.forEach { it(playerA) }
+        _activeAudioSessionId.value = playerA.audioSessionId
+
         // Safely retire outgoing player
         playerB.pause()
         playerB.stop()
         playerB.clearMediaItems()
         playerB.volume = 0f
-        transitionOutgoingRestVolume = null
 
         setPauseAtEndOfMediaItems(false)
         pendingTransitionTarget = null
@@ -3571,7 +3510,6 @@ class DualPlayerEngine @Inject constructor(
     }
 
     fun release() {
-        clearQueueHistoryContext()
         cancelSkipFade()
         transitionJob?.cancel()
         preResolutionJob?.cancel()

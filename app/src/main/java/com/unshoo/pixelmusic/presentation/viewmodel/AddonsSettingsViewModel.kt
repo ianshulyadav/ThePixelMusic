@@ -100,7 +100,7 @@ class AddonsSettingsViewModel @Inject constructor(
                     },
                     badge = addon.protocol.badge,
                     isBuiltIn = false,
-                    enabled = losslessMaster && addonsMaster && addon.enabled,
+                    enabled = addonsMaster && addon.enabled,
                     addon = addon,
                     builtInType = null,
                 )
@@ -258,7 +258,7 @@ class AddonsSettingsViewModel @Inject constructor(
                         AudioSourceType.APPLE,
                     )
                 ) {
-                    dataStore.edit { if (it[LosslessStreamingEnabledKey] == null) it[LosslessStreamingEnabledKey] = true }
+                    dataStore.edit { it[LosslessStreamingEnabledKey] = true }
                 }
                 AddonManager.setBuiltInEnabled(context, entry.builtInType, enabled)
             }

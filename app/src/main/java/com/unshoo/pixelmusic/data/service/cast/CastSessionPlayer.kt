@@ -4,9 +4,7 @@ import androidx.media3.common.C
 import androidx.media3.common.DeviceInfo
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
-import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
-import androidx.media3.common.FlagSet
 import androidx.media3.common.util.UnstableApi
 import com.unshoo.pixelmusic.data.service.player.PlaybackNavigationHistory
 import java.util.concurrent.CopyOnWriteArraySet
@@ -41,35 +39,6 @@ internal class CastSessionPlayer(
      */
     var skipTransition: ((change: () -> Unit) -> Unit)? = null
 
-    var beforeQueueReplacement: ((Player, List<MediaItem>) -> Unit)? = null
-
-    override fun setMediaItems(mediaItems: List<MediaItem>) {
-        beforeQueueReplacement?.invoke(wrappedPlayer, mediaItems)
-        super.setMediaItems(mediaItems)
-    }
-
-    override fun setMediaItems(mediaItems: List<MediaItem>, resetPosition: Boolean) {
-        beforeQueueReplacement?.invoke(wrappedPlayer, mediaItems)
-        super.setMediaItems(mediaItems, resetPosition)
-    }
-
-    override fun setMediaItems(mediaItems: List<MediaItem>, startIndex: Int, startPositionMs: Long) {
-        beforeQueueReplacement?.invoke(wrappedPlayer, mediaItems)
-        super.setMediaItems(mediaItems, startIndex, startPositionMs)
-    }
-
-    override fun setMediaItem(mediaItem: MediaItem) {
-        setMediaItems(listOf(mediaItem))
-    }
-
-    override fun setMediaItem(mediaItem: MediaItem, resetPosition: Boolean) {
-        setMediaItems(listOf(mediaItem), resetPosition)
-    }
-
-    override fun setMediaItem(mediaItem: MediaItem, startPositionMs: Long) {
-        setMediaItems(listOf(mediaItem), 0, startPositionMs)
-    }
-
     private inline fun skipWithFade(crossinline change: () -> Unit) {
         val fade = skipTransition
         if (fade == null || cast.active) change() else fade { change() }
@@ -81,29 +50,6 @@ internal class CastSessionPlayer(
      * is paused, and as far as it knows nothing is happening.
      */
     private val listeners = CopyOnWriteArraySet<Player.Listener>()
-    private var artworkItem: MediaItem? = null
-    private var artworkData: ByteArray? = null
-
-    override fun getMediaMetadata(): MediaMetadata {
-        val metadata = super.getMediaMetadata()
-        val data = artworkData
-        if (data == null || metadata.artworkData != null || artworkItem != currentMediaItem) return metadata
-        return metadata.buildUpon()
-            .setArtworkData(data, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
-            .build()
-    }
-
-    fun publishCurrentArtwork(item: MediaItem, data: ByteArray) {
-        if (item != currentMediaItem || super.getMediaMetadata().artworkData != null) return
-        artworkItem = item
-        artworkData = data
-        val metadata = getMediaMetadata()
-        val events = Player.Events(FlagSet.Builder().add(Player.EVENT_MEDIA_METADATA_CHANGED).build())
-        listeners.forEach {
-            it.onMediaMetadataChanged(metadata)
-            it.onEvents(this, events)
-        }
-    }
 
     private var reportedPlayWhenReady = false
     private var reportedPlaybackState = Player.STATE_IDLE
@@ -112,10 +58,6 @@ internal class CastSessionPlayer(
     /** Tracks local queue changes and keeps the cast receiver's window in sync. */
     private val queueWatcher = object : Player.Listener {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-            if (artworkItem != mediaItem) {
-                artworkItem = null
-                artworkData = null
-            }
             navigationHistory.recordCurrent(wrappedPlayer)
             cast.onLocalTransition(mediaItem, reason)
         }

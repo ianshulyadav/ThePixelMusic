@@ -131,10 +131,6 @@ object QueuePreloadManager {
                     youtubeId = videoId,
                     title = mediaItem.mediaMetadata.title?.toString() ?: "",
                     artist = mediaItem.mediaMetadata.artist?.toString() ?: "",
-                    duration = mediaItem.mediaMetadata.extras
-                        ?.getLong(com.unshoo.pixelmusic.utils.MediaItemBuilder.EXTERNAL_EXTRA_DURATION)
-                        ?.takeIf { it > 0L }
-                        ?.let { com.unshoo.pixelmusic.utils.formatDuration(it) }.orEmpty(),
                     album = mediaItem.mediaMetadata.albumTitle?.toString(),
                     thumbnailHref = upgradeThumbnailUrlToHighQuality(mediaItem.mediaMetadata.artworkUri?.toString()).orEmpty()
                 )
