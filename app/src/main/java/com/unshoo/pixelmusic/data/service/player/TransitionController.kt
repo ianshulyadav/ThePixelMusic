@@ -15,7 +15,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
@@ -62,7 +62,6 @@ class TransitionController @Inject constructor(
      */
     fun initialize() {
         if (transitionListener != null) return // Already initialized
-        ensureSettingsCache()
 
         Timber.tag("TransitionDebug").d("Initializing TransitionController...")
 
@@ -73,6 +72,13 @@ class TransitionController @Inject constructor(
                 engine.setPauseAtEndOfMediaItems(shouldPause = false)
 
                 mediaItem?.let { scheduleTransitionFor(it) }
+            }
+
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                if (!playWhenReady && reason != Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM) {
+                    transitionSchedulerJob?.cancel()
+                    transitionSchedulerJob = null
+                }
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -123,24 +129,13 @@ class TransitionController @Inject constructor(
         engine.addPlayerSwapListener(swapListener)
     }
 
-    @Volatile private var crossfadeEnabledCached = false
-    @Volatile private var globalSettingsCached: com.unshoo.pixelmusic.data.model.TransitionSettings? = null
-    private var settingsCacheJob: kotlinx.coroutines.Job? = null
-
-    private fun ensureSettingsCache() {
-        if (settingsCacheJob != null) return
-        settingsCacheJob = scope.launch {
-            launch { userPreferencesRepository.isCrossfadeEnabledFlow.collect { crossfadeEnabledCached = it } }
-            launch { transitionRepository.getGlobalSettings().collect { globalSettingsCached = it } }
-        }
-    }
-
     private fun scheduleTransitionFor(currentMediaItem: MediaItem) {
         // Cancel any existing job first and reset pauseAtEnd so a stale `true`
         // from the previous job doesn't cause an unexpected pause.
         transitionSchedulerJob?.cancel()
         engine.setPauseAtEndOfMediaItems(shouldPause = false)
 
+        if (!engine.masterPlayer.playWhenReady) return
         transitionSchedulerJob = scope.launch {
             // If a transition is currently running, cancel it immediately.
             // We are on a new track (or starting fresh), so the old crossfade is stale.
@@ -318,7 +313,8 @@ class TransitionController @Inject constructor(
         transitionListener?.let { currentObservedPlayer?.removeListener(it) }
         transitionListener = null
         currentObservedPlayer = null
-        scope.cancel()
+        scope.coroutineContext.cancelChildren()
+        transitionSchedulerJob = null
     }
 
     private companion object {

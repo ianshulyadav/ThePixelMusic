@@ -72,6 +72,7 @@
     <string name="artist_picker_primary_label">Primary artist</string>
     <string name="artist_picker_shortcut_label">Artist page</string>
     <string name="external_queue_label">Quick play</string>
+    <string name="playback_no_playable_audio">This song has no playable audio track.</string>
     <string name="external_playback_error">Unable to open that audio file.</string>
     <string name="open_full_player">Open full player</string>
     <string name="close_external_player">Close floating player</string>

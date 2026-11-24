@@ -180,8 +180,8 @@ class MusicService : MediaLibraryService() {
     private var replayGainRequestToken = 0L
     private var userSelectedVolume = 1f
     private var expectedReplayGainVolume: Float? = null
-    private var pendingReplayGainVolume: Float? = null
-    // Last successfully applied RG volume — used to avoid a full-volume spike
+    private var pendingReplayGainVolume: Pair<String, Float>? = null
+    // Last successfully applied RG volume â€” used to avoid a full-volume spike
     // during the IO read for the next track (Repeat/Shuffle/Queue changes).
     private var lastAppliedReplayGainVolume: Float? = null
     // MediaId for which lastAppliedReplayGainVolume was computed.
@@ -192,7 +192,7 @@ class MusicService : MediaLibraryService() {
     @Volatile
     private var isServiceDestroyed = false
     private val controllerLastBrowsedParent = mutableMapOf<String, String>()
-    // BUGFIX (lag — service was serialised with the UI): the previous
+    // BUGFIX (lag â€” service was serialised with the UI): the previous
     // `Dispatchers.Main` made every coroutine this service spawned compete
     // with the main thread for the very same looper the foreground
     // notification, the Media3 session callbacks, and the Compose UI all
@@ -205,8 +205,8 @@ class MusicService : MediaLibraryService() {
     // live as long as the service. Audio-engine mutations still hop to
     // Main with explicit `withContext(Dispatchers.Main)` at the call site
     // (see e.g. the auto-queue re-seed path), but the *bulk* of the
-    // service's work — snapshot writes, queue re-seeds, MediaLibrary
-    // callbacks, telemetry — now runs off the UI thread.
+    // service's work â€” snapshot writes, queue re-seeds, MediaLibrary
+    // callbacks, telemetry â€” now runs off the UI thread.
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var keepPlayingInBackground = true
     private var isManualShuffleEnabled = false
@@ -227,7 +227,7 @@ class MusicService : MediaLibraryService() {
      * Everything that happens on a Cast receiver. See [CastPlayback].
      *
      * There is exactly one of these for the life of the service, and exactly one
-     * [CastSessionPlayer] wrapping whichever local player the engine is using —
+     * [CastSessionPlayer] wrapping whichever local player the engine is using â€”
      * the MediaSession is never swapped out from under the receiver, which is
      * what used to make the notification, Android Auto and the app disagree.
      */
@@ -354,9 +354,7 @@ class MusicService : MediaLibraryService() {
         if (incomingItem != null) {
             prefetchReplayGain(incomingItem)
             val cachedVolume = getCachedReplayGainVolume(incomingItem)
-            if (cachedVolume != null) {
-                engine.incomingTrackReplayGainVolume = cachedVolume
-            }
+            engine.incomingTrackReplayGainVolume = cachedVolume
         }
     }
 
@@ -479,8 +477,8 @@ class MusicService : MediaLibraryService() {
             Timber.tag(TAG).w(e, "Failed to self-start service")
         }
 
-        // Media3's Cast SDK callback path (MediaSessionImpl$$ExternalSyntheticLambda →
-        // Util.postOrRun → MediaNotificationManager.updateNotificationInternal) calls
+        // Media3's Cast SDK callback path (MediaSessionImpl$$ExternalSyntheticLambda â†’
+        // Util.postOrRun â†’ MediaNotificationManager.updateNotificationInternal) calls
         // Service.startForeground() directly, bypassing onUpdateNotification() entirely.
         // Since startForeground() is final we cannot override it. Instead we intercept
         // ForegroundServiceStartNotAllowedException on the main thread before it reaches
@@ -523,7 +521,7 @@ class MusicService : MediaLibraryService() {
 
         // A MEDIA_BUTTON broadcast starts the 5-second foreground-service timeout
         // BEFORE MusicService is created. Promote to foreground before super.onCreate()
-        // — Hilt injection plus MediaLibraryService.onCreate() can otherwise consume
+        // â€” Hilt injection plus MediaLibraryService.onCreate() can otherwise consume
         // most of the budget on a slow cold-start. The temporary notification only uses
         // Context/resources, no injected fields, so it is safe before super.onCreate().
         temporaryForegroundStartedInOnCreate = consumePendingMediaButtonForegroundStart()
@@ -559,10 +557,6 @@ class MusicService : MediaLibraryService() {
 
         engine.masterPlayer.addListener(playerListener)
 
-        // Adopted from PixelMusic: force a PARTIAL_WAKE_LOCK so aggressive OEM skins
-        // (Funtouch OS etc.) don't sleep the CPU when the app is swiped from Recents.
-        (engine.masterPlayer as? androidx.media3.exoplayer.ExoPlayer)?.setWakeMode(C.WAKE_MODE_LOCAL)
-
         // Handle player swaps (crossfade) to keep MediaSession in sync
         engine.addPlayerSwapListener(playerSwapListener)
         engine.beforeQueueReplacement = ::archiveReplacedQueue
@@ -574,9 +568,9 @@ class MusicService : MediaLibraryService() {
         startTelemetryWatchdog()
 
         // BUGFIX (was: all on main thread, in onCreate): the calls below
-        // — `AutoQueueManager.attach`, `QueuePreloadManager.attach`,
+        // â€” `AutoQueueManager.attach`, `QueuePreloadManager.attach`,
         // `controller.initialize()`, `initializeCastWearSync()`,
-        // `registerHeadsetReconnectMonitor()` — used to run synchronously
+        // `registerHeadsetReconnectMonitor()` â€” used to run synchronously
         // here, eating into the foreground-service startup budget.
         // The runtime log shows the service takes 500-1500ms to start
         // before the foreground promotion is acknowledged, which is
@@ -590,14 +584,14 @@ class MusicService : MediaLibraryService() {
         // the Cast SDK and AudioManager both require their setup calls
         // (CastContext.getSharedInstance, addSessionManagerListener,
         // audioManager.registerAudioDeviceCallback) to run on the main
-        // thread — running them on a background dispatcher will throw
+        // thread â€” running them on a background dispatcher will throw
         // IllegalStateException. The safe split is:
         //   - on the background dispatcher: AutoQueueManager.attach,
         //     QueuePreloadManager.attach, controller.initialize() (all
         //     pure network/DB work).
         //   - on the main thread: initializeCastWearSync() and
         //     registerHeadsetReconnectMonitor() (must be Main, but
-        //     each is fast — they just register callbacks).
+        //     each is fast â€” they just register callbacks).
 
         // Attach YouTube radio-mode auto-queue and stream-URL preloader immediately
         AutoQueueManager.attach({ engine.masterPlayer }, this@MusicService, youtubeDatastoreRepository, serviceScope, musicDao, engagementDao, engine::forceRefreshQueueSnapshot, userPreferencesRepository)
@@ -946,7 +940,7 @@ class MusicService : MediaLibraryService() {
             //
             // The car browses CarLibraryTree. Every playable row carries the
             // folder it was found in, so tapping a song queues the album, the
-            // playlist or the artist it belongs to rather than one track — which
+            // playlist or the artist it belongs to rather than one track â€” which
             // is what makes a car behave like the app, and what gives the
             // auto-queue something to extend when the folder runs out.
 
@@ -1195,8 +1189,8 @@ class MusicService : MediaLibraryService() {
             }
         }
 
-        // The player the session hands out. It *is* the phone's player — the
-        // queue, the timeline and the rows in it — except that while a Cast
+        // The player the session hands out. It *is* the phone's player â€” the
+        // queue, the timeline and the rows in it â€” except that while a Cast
         // receiver is the speaker its clock and play state come from the
         // receiver. Building the wrapper once and keeping it means no surface
         // ever sees the local player paused while music is coming out of the
@@ -1648,11 +1642,11 @@ class MusicService : MediaLibraryService() {
      *
      * BUGFIX (history stops recording mid-session): `lastTelemetryVideoId` used to be latched
      * unconditionally, even when YouTubeTelemetryManager refused to start a session (telemetry
-     * disabled, or no login cookie yet — very common on a cold start, where the player begins
+     * disabled, or no login cookie yet â€” very common on a cold start, where the player begins
      * before the cookie jar has been restored). Once latched, this method never called
      * onSongChanged() for that track again, so the song played to completion with no session at
      * all and nothing reached YouTube. onSongChanged() now reports whether it actually started,
-     * and we only latch on success — so the very next 1s tick retries.
+     * and we only latch on success â€” so the very next 1s tick retries.
      */
     private fun ensureTelemetrySessionForCurrentItem(player: Player) {
         if (!unshoo.ianshulyadav.pixelmusic.innertube.YouTube.hasLoginCookie()) return
@@ -1757,8 +1751,8 @@ class MusicService : MediaLibraryService() {
      * Supervises [telemetryJob].
      *
      * BUGFIX (the reported "after playing some songs no history is recorded, only songs play"):
-     * every driver of history — local listening accumulation, YouTube watchtime heartbeats, and
-     * the state=ended ping that commits a play — hung off a single 1s coroutine that was created
+     * every driver of history â€” local listening accumulation, YouTube watchtime heartbeats, and
+     * the state=ended ping that commits a play â€” hung off a single 1s coroutine that was created
      * only on an `isPlaying -> true` edge and destroyed on the opposite edge. Any path that
      * cancelled it without a matching restart (a cancelled serviceScope child, a crossfade
      * player swap arriving between the two edges, a throwing tick, a queue that never dips to
@@ -1776,7 +1770,7 @@ class MusicService : MediaLibraryService() {
                 try {
                     val player = mediaSession?.player ?: engine.masterPlayer
                     if (player.isPlaying && telemetryJob?.isActive != true) {
-                        Timber.tag(TAG).w("Telemetry reporting loop was dead while playing — restarting")
+                        Timber.tag(TAG).w("Telemetry reporting loop was dead while playing â€” restarting")
                         startTelemetryReporting()
                     }
                 } catch (ce: CancellationException) {
@@ -1791,9 +1785,36 @@ class MusicService : MediaLibraryService() {
     // Prevent infinite re-resolve loops on permanent stream failures.
     private var streamRecoveryAttempts = 0
     private var lastStreamRecoveryMediaId: String? = null
-    private var lastStreamRecoveryAtMs = 0L
+    private var playbackStartedAtMs = 0L
 
     private val playerListener = object : Player.Listener {
+        override fun onEvents(player: Player, events: Player.Events) {
+            if (isServiceDestroyed || castPlayback?.active == true) return
+            if (!events.containsAny(
+                    Player.EVENT_TRACKS_CHANGED,
+                    Player.EVENT_IS_PLAYING_CHANGED,
+                    Player.EVENT_MEDIA_ITEM_TRANSITION
+                )
+            ) return
+            val master = engine.masterPlayer
+            if (!master.isPlaying || master.currentTracks.isTypeSelected(C.TRACK_TYPE_AUDIO)) return
+            val item = master.currentMediaItem ?: return
+            Timber.tag(TAG).w("Playing without selected audio: id=%s positionMs=%d groups=%d",
+                item.mediaId, master.currentPosition, master.currentTracks.groups.size)
+            val fallback = engine.youtubeFallbackForLocalError(item)
+            if (fallback != null) {
+                val position = master.currentPosition
+                val index = master.currentMediaItemIndex
+                master.replaceMediaItem(index, fallback)
+                master.seekTo(index, position)
+                master.prepare()
+            } else {
+                master.pause()
+                mediaSession?.sendError(SessionError(SessionError.ERROR_NOT_SUPPORTED,
+                    getString(R.string.playback_no_playable_audio)))
+            }
+        }
+
         override fun onVolumeChanged(volume: Float) {
             // Fade frames are output levels, not changes to the user's volume.
             if (engine.isTransitionRunning() || engine.isSkipFadeActive() || engine.isVolumeDucked()) return
@@ -1809,6 +1830,11 @@ class MusicService : MediaLibraryService() {
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
+            val now = android.os.SystemClock.elapsedRealtime()
+            if (!isPlaying && playbackStartedAtMs > 0 && now - playbackStartedAtMs >= 30_000L) {
+                lastStreamRecoveryMediaId = null
+            }
+            playbackStartedAtMs = if (isPlaying) now else 0L
             PlaybackActivityTracker.setPlaybackActive(isPlaying)
             val player = mediaSession?.player ?: engine.masterPlayer
             Timber.tag(TAG).d("onIsPlayingChanged: $isPlaying. Duration: ${player.duration}, Seekable: ${player.isCurrentMediaItemSeekable}")
@@ -1927,13 +1953,13 @@ class MusicService : MediaLibraryService() {
                 val oldMediaId = oldPosition.mediaItem?.mediaId
                 val newMediaId = newPosition.mediaItem?.mediaId
                 if (oldMediaId != null && oldMediaId == newMediaId) {
-                    // Same track (e.g. repeat, seek) — no IO needed, apply last known RG volume
+                    // Same track (e.g. repeat, seek) â€” no IO needed, apply last known RG volume
                     // immediately to avoid a spike while the coroutine reads tags again.
                     lastAppliedReplayGainVolume?.let {
                         if (!engine.isTransitionRunning()) setPlayerVolume(engine.masterPlayer, it)
                     }
                 } else {
-                    // Different track — full recompute needed
+                    // Different track â€” full recompute needed
                     applyReplayGain(currentItem)
                 }
             }
@@ -1950,7 +1976,7 @@ class MusicService : MediaLibraryService() {
             requestWidgetFullUpdate(force = true)
             mediaSession?.let { refreshMediaSessionUiWithFollowUp(it) }
             grantArtworkPermissionsForCurrentSong()
-            // Only recompute RG if the track actually changed — onMediaMetadataChanged
+            // Only recompute RG if the track actually changed â€” onMediaMetadataChanged
             // also fires on queue edits (add/remove) without a track change, which would
             // launch a redundant IO coroutine and cause a brief volume spike.
             val currentMediaId = mediaSession?.player?.currentMediaItem?.mediaId
@@ -1990,6 +2016,11 @@ class MusicService : MediaLibraryService() {
             val currentItem = player.currentMediaItem
             val master = engine.masterPlayer
             val localIndex = master.currentMediaItemIndex
+            fun stillRecoveringCurrentItem(): Boolean =
+                !isServiceDestroyed && engine.masterPlayer === master && castPlayback?.active != true &&
+                    localIndex in 0 until master.mediaItemCount && master.currentMediaItemIndex == localIndex &&
+                    master.currentMediaItem == currentItem && master.playerError === error
+
             if (currentItem != null && localIndex in 0 until master.mediaItemCount &&
                 master.currentMediaItem?.mediaId == currentItem.mediaId
             ) {
@@ -2017,11 +2048,14 @@ class MusicService : MediaLibraryService() {
 
             val mediaId = currentItem?.mediaId
             val now = android.os.SystemClock.elapsedRealtime()
-            // BUGFIX: widened window from 15s to 30s. A recovery slower than 15s used to
-            // reset streamRecoveryAttempts to 0 forever, so the escalation path was never reached.
-            val isRepeatFailure = mediaId != null && mediaId == lastStreamRecoveryMediaId &&
-                now - lastStreamRecoveryAtMs < 30_000L
-            val effectiveAttempt = if (isRepeatFailure) streamRecoveryAttempts + 1 else 0
+            // Time spent resolving a URL doesn't count as successful playback.
+            val hadStablePlayback = playbackStartedAtMs > 0 && now - playbackStartedAtMs >= 30_000L
+            playbackStartedAtMs = 0L
+            val effectiveAttempt = if (mediaId == lastStreamRecoveryMediaId && !hadStablePlayback) {
+                streamRecoveryAttempts + 1
+            } else 0
+            streamRecoveryAttempts = effectiveAttempt
+            lastStreamRecoveryMediaId = mediaId
 
             // Invalidate any stale resolved stream so the next attempt re-fetches a fresh URL.
             if (!currentUri.isNullOrBlank()) {
@@ -2029,11 +2063,7 @@ class MusicService : MediaLibraryService() {
                 val youtubeVideoId: String? = when {
                     currentUri.startsWith("youtube://") -> currentUri.removePrefix("youtube://")
                     currentUri.contains("googlevideo.com") || currentUri.contains("saavncdn.com") || currentUri.contains("jiosaavn.com") || isLosslessStream -> {
-                        val fromPrefix = currentItem.mediaId
-                            .takeIf { it.startsWith("youtube_") }
-                            ?.removePrefix("youtube_")
-                        // Fallback: if mediaId is a bare 11-char video ID, use it directly
-                        val id = fromPrefix ?: currentItem.mediaId.takeIf { it.length == 11 && !it.contains("_") }
+                        val id = engine.youtubeIdOf(currentItem)
                         id?.also { engine.invalidateResolvedUri("youtube://$it") }
                     }
                     else -> null
@@ -2083,16 +2113,9 @@ class MusicService : MediaLibraryService() {
                 (error.cause is java.io.IOException)
 
             if (isYoutube || isNetworkish) {
-                if (isRepeatFailure) {
-                    streamRecoveryAttempts += 1
-                } else {
-                    streamRecoveryAttempts = 0
-                    lastStreamRecoveryMediaId = mediaId
-                }
-                lastStreamRecoveryAtMs = now
-
                 serviceScope.launch {
                     try {
+                        if (!stillRecoveringCurrentItem()) return@launch
                         val position = player.currentPosition.coerceAtLeast(0L)
                         val isMidTrack = position > 3_000L
                         val maxAttempts = if (isMidTrack) 6 else 3
@@ -2102,15 +2125,14 @@ class MusicService : MediaLibraryService() {
                             withContext(Dispatchers.Main.immediate) {
                                 streamRecoveryAttempts = 0
                                 lastStreamRecoveryMediaId = null
-                                if (!isMidTrack && player.hasNextMediaItem()) {
+                                if (player.playWhenReady && !isMidTrack && player.hasNextMediaItem()) {
                                     // Only skip if track failed to start from position 0
                                     player.seekToNextMediaItem()
                                     player.prepare()
                                     player.play()
                                 } else {
                                     // Mid-track: Keep player at current position, do not discard user's song
-                                    player.playWhenReady = false
-                                    player.prepare()
+                                    player.pause()
                                 }
                             }
                             return@launch
@@ -2163,28 +2185,19 @@ class MusicService : MediaLibraryService() {
                             rawItem
                         }
                         val resolved = engine.preResolveForPlayback(item)
+                        if (!stillRecoveringCurrentItem()) return@launch
                         withContext(Dispatchers.Main.immediate) {
-                            val master = engine.masterPlayer
                             val wasPlaying = master.playWhenReady
-                            val index = master.currentMediaItemIndex
-                            if (index != androidx.media3.common.C.INDEX_UNSET) {
-                                master.replaceMediaItem(index, resolved)
-                                master.seekTo(index, position)
-                            } else if (master.mediaItemCount > 0) {
-                                val matchIndex = (0 until master.mediaItemCount).firstOrNull { master.getMediaItemAt(it).mediaId == resolved.mediaId } ?: 0
-                                master.replaceMediaItem(matchIndex, resolved)
-                                master.seekTo(matchIndex, position)
-                            } else {
-                                master.setMediaItem(resolved, position)
-                            }
+                            master.replaceMediaItem(localIndex, resolved)
+                            master.seekTo(localIndex, position)
                             master.prepare()
                             master.playWhenReady = wasPlaying
-                            if (wasPlaying) {
-                                master.play()
-                            }
                         }
                         Timber.tag(TAG).i("Recovered from player error by re-resolving stream at position %d ms", position)
+                    } catch (cancel: CancellationException) {
+                        throw cancel
                     } catch (recover: Exception) {
+                        if (!stillRecoveringCurrentItem()) return@launch
                         Timber.tag(TAG).e(recover, "In-place stream recovery failed (attempt $streamRecoveryAttempts)")
                         withContext(Dispatchers.Main.immediate) {
                             try {
@@ -2195,18 +2208,16 @@ class MusicService : MediaLibraryService() {
                                     Timber.tag(TAG).w("Recovery exhausted after $streamRecoveryAttempts attempts (midTrack=%b); handling gracefully", isMidTrack)
                                     streamRecoveryAttempts = 0
                                     lastStreamRecoveryMediaId = null
-                                    if (!isMidTrack && player.hasNextMediaItem()) {
+                                    if (player.playWhenReady && !isMidTrack && player.hasNextMediaItem()) {
                                         player.seekToNextMediaItem()
                                         player.prepare()
                                         player.play()
                                     } else {
-                                        player.playWhenReady = false
-                                        player.prepare()
+                                        player.pause()
                                     }
                                 } else {
                                     Timber.tag(TAG).w("Recovery attempt $streamRecoveryAttempts failed; preparing for retry (midTrack=%b)", isMidTrack)
                                     player.prepare()
-                                    player.playWhenReady = true
                                 }
                             } catch (skipErr: Exception) {
                                 Timber.tag(TAG).e(skipErr, "Skip-after-error also failed")
@@ -2215,18 +2226,13 @@ class MusicService : MediaLibraryService() {
                     }
                 }
             } else {
-                // BUGFIX: non-youtube/non-network errors were a silent halt — no recovery
-                // attempted at all. At minimum, try prepare() so the user can tap play again.
-                Timber.tag(TAG).w("Non-network error (code=%s); attempting prepare() recovery", error.errorCode)
-                serviceScope.launch {
-                    withContext(Dispatchers.Main.immediate) {
-                        try {
-                            player.prepare()
-                            player.playWhenReady = true
-                        } catch (e: Exception) {
-                            Timber.tag(TAG).e(e, "prepare() recovery for non-network error also failed")
-                        }
-                    }
+                if (!stillRecoveringCurrentItem()) return
+                if (effectiveAttempt == 0 && player.playWhenReady) {
+                    player.prepare()
+                } else {
+                    Timber.tag(TAG).w("Playback recovery stopped for %s (code=%s)", mediaId, error.errorCode)
+                    player.pause()
+                    lastStreamRecoveryMediaId = null
                 }
             }
         }
@@ -2236,9 +2242,10 @@ class MusicService : MediaLibraryService() {
         val player = mediaSession?.player ?: engine.masterPlayer
         syncLocalListeningStatsFromPlayer(player, forceNewSession = true)
         grantArtworkPermissionsForCurrentSong(mediaItem)
-        // Reset recovery counters — a successful transition clears any per-song blacklist.
-        streamRecoveryAttempts = 0
-        lastStreamRecoveryMediaId = null
+        if (mediaItem?.mediaId != lastStreamRecoveryMediaId) {
+            streamRecoveryAttempts = 0
+            lastStreamRecoveryMediaId = null
+        }
         
         val durationMs = if (player.duration != androidx.media3.common.C.TIME_UNSET && player.duration > 0) {
             player.duration
@@ -2367,7 +2374,7 @@ class MusicService : MediaLibraryService() {
                 // Store for application after transition completes.
                 // Also pass to engine so the crossfade loop ends at the correct RG
                 // volume instead of hard-coding 1f, preventing the audible jump.
-                pendingReplayGainVolume = volume
+                pendingReplayGainVolume = mediaId to volume
                 engine.incomingTrackReplayGainVolume = volume
                 Timber.tag(TAG).d("ReplayGain: Stored pending volume=%.2f for %s (transition running)",
                     volume, mediaItem.mediaMetadata.title
@@ -2387,7 +2394,7 @@ class MusicService : MediaLibraryService() {
 
     /**
      * Returns the cached ReplayGain volume for a media item if already computed, or null.
-     * Does NOT trigger an IO read — only reads from the in-memory cache.
+     * Does NOT trigger an IO read â€” only reads from the in-memory cache.
      */
     private fun getCachedReplayGainVolume(mediaItem: MediaItem?): Float? {
         if (!replayGainEnabled || mediaItem == null) return null
@@ -2420,23 +2427,19 @@ class MusicService : MediaLibraryService() {
             volume.coerceIn(0.01f, 1f)
         }
         val clampedVolume = safeVolume.coerceIn(0.01f, 1f)
-        if (player === engine.masterPlayer && engine.isSkipFadeActive()) {
-            // A skip fade owns the volume right now; it ends at this level instead.
-            engine.updateSkipFadeRestVolume(clampedVolume)
-            return
-        }
         expectedReplayGainVolume = clampedVolume
-        player.volume = clampedVolume
+        if (player === engine.masterPlayer) engine.setMasterRestVolume(clampedVolume)
+        else player.volume = clampedVolume
     }
 
     private fun onTransitionFinished() {
         val player = engine.masterPlayer
-        val pending = pendingReplayGainVolume
+        val pending = pendingReplayGainVolume?.takeIf { it.first == player.currentMediaItem?.mediaId }?.second
         pendingReplayGainVolume = null
 
         if (!replayGainEnabled) {
             setPlayerVolume(player, userSelectedVolume)
-            Timber.tag(TAG).d("ReplayGain: Transition finished, RG disabled — restored userSelectedVolume=%.2f", userSelectedVolume)
+            Timber.tag(TAG).d("ReplayGain: Transition finished, RG disabled â€” restored userSelectedVolume=%.2f", userSelectedVolume)
             return
         }
 
@@ -2446,12 +2449,13 @@ class MusicService : MediaLibraryService() {
             // (REASON_AUTO_TRANSITION fires right after crossfade ends) uses this value
             // immediately instead of launching a new IO coroutine and causing a spike.
             lastAppliedReplayGainVolume = pending
+            lastReplayGainMediaId = player.currentMediaItem?.mediaId
             setPlayerVolume(player, pending)
             Timber.tag(TAG).d("ReplayGain: Transition finished, applied pending volume=%.2f", pending)
         } else {
             // No pending volume was computed during transition, trigger full computation
             applyReplayGain(mediaSession?.player?.currentMediaItem)
-            Timber.tag(TAG).d("ReplayGain: Transition finished, no pending volume — triggering full recomputation")
+            Timber.tag(TAG).d("ReplayGain: Transition finished, no pending volume â€” triggering full recomputation")
         }
     }
 
@@ -2460,7 +2464,7 @@ class MusicService : MediaLibraryService() {
      *
      * [CastController] owns route discovery and the session; [CastPlayback] owns
      * what plays on the receiver. Nothing else in the app touches a `CastSession`
-     * any more — the UI observes [CastMirror], the player layer is
+     * any more â€” the UI observes [CastMirror], the player layer is
      * [CastSessionPlayer]. That one-way ownership is the fix: the old code had
      * the screen, the ViewModel *and* the service loading the receiver's queue,
      * each overwriting the other.
@@ -2509,7 +2513,7 @@ class MusicService : MediaLibraryService() {
      * its own: an absolute URL and a content type.
      *
      * A Chromecast cannot resolve `youtube://` or `telegram://` and cannot read a
-     * file on this phone, so both are settled here first — the first through the
+     * file on this phone, so both are settled here first â€” the first through the
      * engine's own resolver, the second by handing the file out over the LAN
      * ([LanCastSource]). Tracks that cannot be settled are refused, and
      * [CastPlayback] says so, instead of being loaded and left silent.
@@ -2658,7 +2662,7 @@ class MusicService : MediaLibraryService() {
         // Release in-process bitmap caches when the system signals memory pressure.
         // MusicService holds up to ~220 KB in cachedWidgetArtBytes and another copy
         // inside lastWidgetPlayerInfo.albumArtBitmapData. Under moderate-to-critical
-        // pressure these are safe to drop — the next widget update cycle will reload them.
+        // pressure these are safe to drop â€” the next widget update cycle will reload them.
         //
         // Raw int value used instead of deprecated ComponentCallbacks2 constant:
         //   TRIM_MEMORY_RUNNING_LOW = 10
@@ -2943,7 +2947,7 @@ class MusicService : MediaLibraryService() {
         )
     }
 
-    // ── Resume after an OEM "clear from Recents" kill ─────────────────────────────────────
+    // â”€â”€ Resume after an OEM "clear from Recents" kill â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     private val resumeAfterKillPrefs by lazy {
         getSharedPreferences("playback_resume_after_kill", MODE_PRIVATE)
     }
@@ -3057,7 +3061,7 @@ class MusicService : MediaLibraryService() {
     }
 
     /**
-     * Queues saved by older builds can hold `youtube://-15…` (a hashed song id where the video id
+     * Queues saved by older builds can hold `youtube://-15â€¦` (a hashed song id where the video id
      * belongs). Look the real video id up in the library so those tracks play again; entries that
      * can't be repaired are left as they are and fail fast in the resolver instead of buffering.
      */
@@ -3095,8 +3099,8 @@ class MusicService : MediaLibraryService() {
         val uriStr = when {
             snapshotItem.mediaId.startsWith("youtube_") -> "youtube://${snapshotItem.mediaId.removePrefix("youtube_")}"
             snapshotItem.mediaId.length == 11 && !snapshotItem.mediaId.startsWith("external:") -> "youtube://${snapshotItem.mediaId}"
-            // "-15…" media ids are a one-way hash of the video id (YOUTUBE_SONG_ID_OFFSET), never a
-            // video id themselves. Turning them into youtube://-15… (as this used to) discarded the
+            // "-15â€¦" media ids are a one-way hash of the video id (YOUTUBE_SONG_ID_OFFSET), never a
+            // video id themselves. Turning them into youtube://-15â€¦ (as this used to) discarded the
             // real youtube:// uri saved right next to them and left the track unplayable forever.
             snapshotItem.uri.startsWith("youtube://") -> snapshotItem.uri
             snapshotItem.uri.isNotBlank() && !snapshotItem.uri.startsWith("http") -> snapshotItem.uri
@@ -3165,7 +3169,7 @@ class MusicService : MediaLibraryService() {
         )
     }
 
-    // --- LÓGICA PARA ACTUALIZACIÓN DE WIDGETS Y DATOS ---
+    // --- LÃ“GICA PARA ACTUALIZACIÃ“N DE WIDGETS Y DATOS ---
     private var debouncedWidgetUpdateJob: Job? = null
     private var followUpWidgetUpdateJob: Job? = null
     private var followUpMediaSessionUiRefreshJob: Job? = null
@@ -3204,7 +3208,7 @@ class MusicService : MediaLibraryService() {
         if (old.artistName != new.artistName) return true
         if (old.isPlaying != new.isPlaying) return true
         if (old.albumArtUri != new.albumArtUri) return true
-        // Detect when artwork bytes arrive (null → non-null) or are cleared
+        // Detect when artwork bytes arrive (null â†’ non-null) or are cleared
         if ((old.albumArtBitmapData == null) != (new.albumArtBitmapData == null)) return true
         if (old.isFavorite != new.isFavorite) return true
         if (old.queue != new.queue) return true
@@ -3231,7 +3235,7 @@ class MusicService : MediaLibraryService() {
 
     private suspend fun buildPlayerInfo(): PlayerInfo {
         val player = engine.masterPlayer
-        // Batch all main-thread reads into a single context switch (was 7 separate hops → 1)
+        // Batch all main-thread reads into a single context switch (was 7 separate hops â†’ 1)
         var currentItem: MediaItem? = null
         var isPlaying = false
         var repeatMode = Player.REPEAT_MODE_OFF
@@ -3359,14 +3363,14 @@ class MusicService : MediaLibraryService() {
         val isFavorite = isSongFavorite(mediaId)
 
         val queueItems = mutableListOf<com.unshoo.pixelmusic.data.model.QueueItem>()
-        // Reuse snapshotTimeline / snapshotWindowIndex captured at the top — no extra main-thread hop
+        // Reuse snapshotTimeline / snapshotWindowIndex captured at the top â€” no extra main-thread hop
         if (!snapshotTimeline.isEmpty) {
             val window = Timeline.Window()
 
-            // Empezar desde la siguiente canción en la cola
+            // Empezar desde la siguiente canciÃ³n en la cola
             val startIndex = if (snapshotWindowIndex + 1 < snapshotTimeline.windowCount) snapshotWindowIndex + 1 else 0
 
-            // Limitar el número de elementos de la cola a 4
+            // Limitar el nÃºmero de elementos de la cola a 4
             val endIndex = (startIndex + 4).coerceAtMost(snapshotTimeline.windowCount)
             for (i in startIndex until endIndex) {
                 snapshotTimeline.getWindow(i, window)
@@ -3443,7 +3447,7 @@ class MusicService : MediaLibraryService() {
         embeddedArt: ByteArray?,
         artUris: List<Uri>,
     ): Pair<ByteArray?, String?> = withContext(Dispatchers.IO) {
-        // Try embedded art first — but fall through to URI loading if sanitization fails
+        // Try embedded art first â€” but fall through to URI loading if sanitization fails
         val sanitizedFromEmbedded = embeddedArt?.takeIf { it.isNotEmpty() }?.let { bytes ->
             runCatching {
                 ArtworkTransportSanitizer.sanitizeEncodedBytes(
