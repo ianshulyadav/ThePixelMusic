@@ -152,7 +152,7 @@ fun ShareBottomSheet(
     val themeStateHolder = entryPoint.themeStateHolder()
     val albumColorSchemeState by themeStateHolder.getAlbumColorSchemeFlow(song.albumArtUriString.orEmpty()).collectAsStateWithLifecycle(initialValue = null)
     val userPreferencesRepository = remember(entryPoint) { entryPoint.userPreferencesRepository() }
-    val useBlurEffects by userPreferencesRepository.useBlurEffectsFlow.collectAsStateWithLifecycle(initialValue = false)
+    val useBlurEffects by userPreferencesRepository.effectiveBlurEffectsFlow.collectAsStateWithLifecycle(initialValue = false)
     val storyCardBlurEnabled by userPreferencesRepository.storyCardBlurEnabledFlow.collectAsStateWithLifecycle(initialValue = true)
     val isStoryCardBlurActive = useBlurEffects && storyCardBlurEnabled
     val bottomSheetBlurEnabled by userPreferencesRepository.bottomSheetBlurEnabledFlow.collectAsStateWithLifecycle(initialValue = true)

@@ -734,6 +734,27 @@ fun SettingsCategoryScreen(
                                     },
                                     valueText = { value -> "${value.toInt()} MB" }
                                 )
+                                SliderSettingsItem(
+                                    label = stringResource(R.string.setcat_music_storage_limit_title),
+                                    value = storageLimitDraft,
+                                    valueRange = 0f..20480f,
+                                    steps = 39,
+                                    onValueChange = { storageLimitDraft = it },
+                                    onValueChangeFinished = {
+                                        val selectedLimit = storageLimitDraft.toInt()
+                                        if (selectedLimit != uiState.storageLimitMb) {
+                                            settingsViewModel.setStorageLimitMb(selectedLimit)
+                                        }
+                                    },
+                                    valueText = { value ->
+                                        if (value.toInt() == 0) "Unlimited"
+                                        else if (value >= 1024) {
+                                            val gb = value / 1024f
+                                            if (gb % 1f == 0f) "${gb.toInt()} GB" else "%.1f GB".format(gb)
+                                        }
+                                        else "${value.toInt()} MB"
+                                    }
+                                )
                             }
 
                             SettingsSubsection(title = stringResource(R.string.setcat_sync_scanning)) {
@@ -821,30 +842,6 @@ fun SettingsCategoryScreen(
                                         settingsViewModel.setAlbumArtQualityMobile(AlbumArtQuality.valueOf(key))
                                     },
                                     leadingIcon = { Icon(painterResource(R.drawable.rounded_mobile_speaker_24), null, tint = MaterialTheme.colorScheme.secondary) }
-                                )
-                            }
-
-                            SettingsSubsection(title = stringResource(R.string.setcat_music_storage_limit_title)) {
-                                SliderSettingsItem(
-                                    label = stringResource(R.string.setcat_music_storage_limit_desc),
-                                    value = storageLimitDraft,
-                                    valueRange = 0f..20480f,
-                                    steps = 39,
-                                    onValueChange = { storageLimitDraft = it },
-                                    onValueChangeFinished = {
-                                        val selectedLimit = storageLimitDraft.toInt()
-                                        if (selectedLimit != uiState.storageLimitMb) {
-                                            settingsViewModel.setStorageLimitMb(selectedLimit)
-                                        }
-                                    },
-                                    valueText = { value ->
-                                        if (value.toInt() == 0) "Unlimited"
-                                        else if (value >= 1024) {
-                                            val gb = value / 1024f
-                                            if (gb % 1f == 0f) "${gb.toInt()} GB" else "%.1f GB".format(gb)
-                                        }
-                                        else "${value.toInt()} MB"
-                                    }
                                 )
                             }
                         }
@@ -1191,6 +1188,13 @@ fun SettingsCategoryScreen(
                         SettingsCategory.PLAYBACK -> {
                             SettingsSubsection(title = stringResource(R.string.settings_device_library_section)) {
                                 SwitchSettingItem(
+                                    title = stringResource(R.string.settings_local_mode_title),
+                                    subtitle = stringResource(R.string.settings_local_mode_desc),
+                                    checked = uiState.localModeEnabled,
+                                    onCheckedChange = { settingsViewModel.setLocalModeEnabled(it) },
+                                    leadingIcon = { Icon(Icons.Outlined.Folder, null, tint = MaterialTheme.colorScheme.secondary) }
+                                )
+                                SwitchSettingItem(
                                     title = stringResource(R.string.settings_use_device_library_matches_title),
                                     subtitle = stringResource(R.string.settings_use_device_library_matches_desc),
                                     // One switch for "play a copy you already have": phone files and Telegram.
@@ -1233,7 +1237,7 @@ fun SettingsCategoryScreen(
                                     },
                                     leadingIcon = { Icon(painterResource(R.drawable.rounded_all_inclusive_24), null, tint = MaterialTheme.colorScheme.secondary) }
                                 )
-                                if (com.unshoo.pixelmusic.utils.OemBackgroundSettings.isAggressiveRecentsKiller) {
+                                if (com.unshoo.pixelmusic.utils.OemBackgroundSettings.showBackgroundActivitySetting) {
                                     SettingsItem(
                                         title = stringResource(R.string.setcat_oem_background_title),
                                         subtitle = stringResource(R.string.setcat_oem_background_subtitle),
@@ -1460,13 +1464,6 @@ fun SettingsCategoryScreen(
                                     checked = uiState.pureYtMusicOnly,
                                     onCheckedChange = { settingsViewModel.setPureYtMusicOnly(it) },
                                     leadingIcon = { Icon(Icons.Rounded.MusicNote, null, tint = MaterialTheme.colorScheme.secondary) }
-                                )
-                                SwitchSettingItem(
-                                    title = stringResource(R.string.settings_local_mode_title),
-                                    subtitle = stringResource(R.string.settings_local_mode_desc),
-                                    checked = uiState.localModeEnabled,
-                                    onCheckedChange = { settingsViewModel.setLocalModeEnabled(it) },
-                                    leadingIcon = { Icon(Icons.Outlined.Folder, null, tint = MaterialTheme.colorScheme.secondary) }
                                 )
                             }
                         }

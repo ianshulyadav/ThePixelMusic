@@ -24,6 +24,9 @@ object OemBackgroundSettings {
     val isVivoFamily: Boolean
         get() = "vivo" in brand || "iqoo" in brand
 
+    val showBackgroundActivitySetting: Boolean
+        get() = isAggressiveRecentsKiller && !isVivoFamily
+
     private fun vendorIntents(context: Context): List<Intent> {
         val pkg = context.packageName
         return when {

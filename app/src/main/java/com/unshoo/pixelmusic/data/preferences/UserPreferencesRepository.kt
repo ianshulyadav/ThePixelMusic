@@ -489,6 +489,12 @@ constructor(
             preferences[PreferencesKeys.USE_BLUR_EFFECTS] ?: false
         }.distinctUntilChanged()
 
+    val effectiveBlurEffectsFlow: Flow<Boolean> =
+        dataStore.data.map { preferences ->
+            preferences[PreferencesKeys.USE_BLUR_EFFECTS] == true &&
+                preferences[PreferencesKeys.PERFORMANCE_MODE_ENABLED] != true
+        }.distinctUntilChanged()
+
     suspend fun setUseBlurEffects(enabled: Boolean) {
         dataStore.edit { preferences ->
             preferences[PreferencesKeys.USE_BLUR_EFFECTS] = enabled
@@ -1420,11 +1426,11 @@ constructor(
 
     /**
      * Storage limit in MB for downloaded songs and album art.
-     * 0 = unlimited. Default: 1536 MB (1.5 GB).
+     * 0 = unlimited. Default: 2560 MB (2.5 GB).
      */
     val storageLimitMbFlow: Flow<Int> =
         dataStore.data.map { preferences ->
-            (preferences[PreferencesKeys.STORAGE_LIMIT_MB] ?: 1536).coerceIn(0, 20480)
+            (preferences[PreferencesKeys.STORAGE_LIMIT_MB] ?: DEFAULT_STORAGE_LIMIT_MB).coerceIn(0, 20480)
         }
 
     suspend fun setStorageLimitMb(limitMb: Int) {
@@ -1916,6 +1922,7 @@ constructor(
     }
 
     companion object {
+        const val DEFAULT_STORAGE_LIMIT_MB = 2560
         /** Default character delimiters for splitting multi-artist tags */
         val DEFAULT_ARTIST_DELIMITERS = listOf("/", ";", ",", "+", "&")
         /** Default word-based delimiters (matched case-insensitively with whitespace boundaries) */

@@ -150,7 +150,7 @@ data class SettingsUiState(
     val albumArtQualityMobile: AlbumArtQuality = AlbumArtQuality.LOW,
     val cacheLikedSongsOffline: Boolean = false,
     val cacheMostPlayedSongsOffline: Boolean = false,
-    val storageLimitMb: Int = 1536,
+    val storageLimitMb: Int = UserPreferencesRepository.DEFAULT_STORAGE_LIMIT_MB,
     val preloadQueueEnabled: Boolean = true,
     val preloadQueueSize: Int = 5,
     val autoQueueEnabled: Boolean = true,

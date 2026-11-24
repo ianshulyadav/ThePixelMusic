@@ -36,7 +36,7 @@ object SettingsSearchIndex {
         SettingsSearchEntry(SettingsCategory.LIBRARY, R.string.setcat_reset_imported_lyrics_title, R.string.setcat_reset_imported_lyrics_subtitle),
         SettingsSearchEntry(SettingsCategory.LIBRARY, R.string.setcat_album_art_quality_wifi_title, R.string.setcat_album_art_quality_wifi_desc),
         SettingsSearchEntry(SettingsCategory.LIBRARY, R.string.setcat_album_art_quality_mobile_title, R.string.setcat_album_art_quality_mobile_desc),
-        SettingsSearchEntry(SettingsCategory.LIBRARY, R.string.setcat_music_storage_limit_desc, null),
+        SettingsSearchEntry(SettingsCategory.LIBRARY, R.string.setcat_music_storage_limit_title, null),
         SettingsSearchEntry(SettingsCategory.APPEARANCE, R.string.setcat_language_label, R.string.setcat_language_desc),
         SettingsSearchEntry(SettingsCategory.APPEARANCE, R.string.setcat_app_theme_label, R.string.setcat_app_theme_desc),
         SettingsSearchEntry(SettingsCategory.APPEARANCE, R.string.settings_pitch_black_title, R.string.settings_pitch_black_desc),

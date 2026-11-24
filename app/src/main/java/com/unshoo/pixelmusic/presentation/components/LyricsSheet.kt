@@ -344,12 +344,14 @@ fun LyricsSheet(
     val useAnimatedLyricsFlow = remember(context) {
         context.dataStore.data.map { it[booleanPreferencesKey("use_animated_lyrics")] ?: false }
     }
-    val useAnimatedLyrics by useAnimatedLyricsFlow.collectAsStateWithLifecycle(initialValue = false)
+    val animatedLyricsPreference by useAnimatedLyricsFlow.collectAsStateWithLifecycle(initialValue = false)
 
     val performanceModeEnabledFlow = remember(context) {
         context.dataStore.data.map { it[booleanPreferencesKey("performance_mode_enabled")] ?: false }
     }
     val performanceModeEnabled by performanceModeEnabledFlow.collectAsStateWithLifecycle(initialValue = false)
+
+    val useAnimatedLyrics = animatedLyricsPreference && !performanceModeEnabled
 
     val animatedLyricsBlurEnabledFlow = remember(context) {
         context.dataStore.data.map { it[booleanPreferencesKey("animated_lyrics_blur_enabled")] ?: true }

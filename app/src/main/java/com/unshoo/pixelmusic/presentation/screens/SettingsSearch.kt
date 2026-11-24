@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import com.unshoo.pixelmusic.R
 import com.unshoo.pixelmusic.presentation.model.SettingsCategory
 import com.unshoo.pixelmusic.presentation.model.SettingsSearchIndex
+import com.unshoo.pixelmusic.utils.OemBackgroundSettings
 
 /** One row in the Settings search results. */
 data class SettingsSearchResult(
@@ -134,7 +135,10 @@ fun rememberSettingsSearchResults(query: String, localModeEnabled: Boolean): Lis
                 categoryTitle = res.getString(R.string.settings_top_bar_title),
             )
         }
-        val settingRows = SettingsSearchIndex.entries.map { entry ->
+        val settingRows = SettingsSearchIndex.entries.filter { entry ->
+            entry.titleRes != R.string.setcat_oem_background_title ||
+                OemBackgroundSettings.showBackgroundActivitySetting
+        }.map { entry ->
             SettingsSearchResult(
                 category = entry.category,
                 title = res.getString(entry.titleRes),

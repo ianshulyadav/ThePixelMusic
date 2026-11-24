@@ -1,9 +1,7 @@
 package com.unshoo.pixelmusic.presentation.components
 
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -48,6 +46,9 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.MaterialShapes
+import androidx.compose.material3.toShape
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -516,59 +517,43 @@ private fun WishSentStep(
 // Building blocks
 // ---------------------------------------------------------------------------
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun CelebrationBadge(icon: ImageVector = Icons.Rounded.Cake) {
-    val transition = rememberInfiniteTransition(label = "badge")
-    val pulse by transition.animateFloat(
-        initialValue = 1f,
-        targetValue = 1.08f,
-        animationSpec = infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-        label = "pulse",
-    )
-    val wobble by transition.animateFloat(
-        initialValue = -6f,
-        targetValue = 6f,
-        animationSpec = infiniteRepeatable(tween(1400, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-        label = "wobble",
-    )
-    val ringShape = AbsoluteSmoothCornerShape(34.dp, 60)
+    val performanceMode = SmartImageCache.performanceModeEnabled
+    val rotation = if (performanceMode) null else {
+        rememberInfiniteTransition(label = "birthday badge").animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec = infiniteRepeatable(tween(24_000, easing = LinearEasing)),
+            label = "shape rotation",
+        )
+    }
+    val outerShape = MaterialShapes.Cookie12Sided.toShape()
+    val innerShape = MaterialShapes.Cookie9Sided.toShape()
 
-    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(104.dp)) {
+    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(112.dp)) {
         Box(
             modifier = Modifier
-                .size(104.dp)
-                .graphicsLayer { scaleX = pulse; scaleY = pulse; rotationZ = wobble * 2f }
+                .size(108.dp)
+                .graphicsLayer { rotationZ = rotation?.value ?: 0f }
                 .background(
-                    // Fixed festive hues so the badge stays celebratory even on
-                    // monochrome / low-chroma dynamic themes.
-                    Brush.sweepGradient(
-                        listOf(
-                            FestivePink,
-                            FestiveGold,
-                            FestiveViolet,
-                            MaterialTheme.colorScheme.primary,
-                            FestivePink,
-                        ),
-                    ),
-                    ringShape,
+                    Brush.sweepGradient(listOf(FestivePink, FestiveGold, FestiveViolet, FestivePink)),
+                    outerShape,
                 ),
         )
-        Surface(
-            shape = ringShape,
-            color = MaterialTheme.colorScheme.surfaceContainerHighest,
-            modifier = Modifier.size(90.dp),
-        ) {
-            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = FestivePink,
-                    modifier = Modifier
-                        .size(48.dp)
-                        .graphicsLayer { rotationZ = wobble },
-                )
-            }
-        }
+        Box(
+            modifier = Modifier
+                .size(82.dp)
+                .graphicsLayer { rotationZ = -(rotation?.value ?: 0f) }
+                .background(MaterialTheme.colorScheme.surfaceContainerHighest, innerShape),
+        )
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = FestivePink,
+            modifier = Modifier.size(48.dp),
+        )
     }
 }
 
@@ -714,6 +699,7 @@ private data class ConfettiPiece(
 
 @Composable
 private fun ConfettiLayer(modifier: Modifier = Modifier) {
+    if (SmartImageCache.performanceModeEnabled) return
     val pieces = remember {
         val rnd = Random(1214)
         List(34) {

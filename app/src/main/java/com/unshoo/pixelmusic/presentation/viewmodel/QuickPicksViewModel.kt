@@ -38,7 +38,7 @@ import unshoo.ianshulyadav.pixelmusic.innertube.models.ArtistItem
 private const val PREFS_NAME = "quick_picks_cache"
 private const val KEY_SONGS = "songs_json"
 private const val KEY_CATEGORIES = "categories_json"
-private const val KEY_CACHE_TIMESTAMP = "cache_timestamp"
+private const val KEY_CACHE_TIMESTAMP = "cache_timestamp_v2"
 // Cache valid for 4 hours (shorter than before so new releases appear faster)
 private const val CACHE_MAX_AGE_MS = 4 * 60 * 60 * 1000L
 
@@ -132,7 +132,7 @@ class QuickPicksViewModel @Inject constructor(
             for (i in 0 until songsArray.length()) {
                 songs.add(songFromJson(songsArray.getJSONObject(i)))
             }
-            if (songs.isNotEmpty()) _quickPicks.value = songs.shuffled().toImmutableList()
+            if (songs.isNotEmpty()) _quickPicks.value = songs.toImmutableList()
 
             if (categoriesJson != null) {
                 val catArray = JSONArray(categoriesJson)
@@ -227,9 +227,7 @@ class QuickPicksViewModel @Inject constructor(
                             _quickPicks.value = persistentListOf()
                         }
                         QuickPicks.QUICK_PICKS -> {
-                            // YT Music's own "Quick picks" shelf, in random order; the 5-bucket
-                            // mix is only a fallback (signed out / shelf missing).
-                            val songs = loadYtMusicHomeQuickPicks().ifEmpty { applyContentFilters(loadEnhancedQuickPicks()) }
+                            val songs = applyContentFilters(loadEnhancedQuickPicks())
                             if (songs.isNotEmpty()) {
                                 _quickPicks.value = songs.toImmutableList()
                                 saveToCache(songs, _categories.value)
@@ -267,37 +265,6 @@ class QuickPicksViewModel @Inject constructor(
             } finally {
                 _isLoading.value = false
             }
-        }
-    }
-
-    /**
-     * Songs of the "Quick picks" shelf on the YouTube Music home page, shuffled, with the user's
-     * content rules applied: no videos when Pure YT Music / Hide videos is on, nothing matching
-     * the blocked keywords (or covers/lo-fi when that filter is on), nothing disliked.
-     */
-    private suspend fun loadYtMusicHomeQuickPicks(): List<Song> = withContext(Dispatchers.IO) {
-        try {
-            val homePage = YouTube.home().getOrNull() ?: return@withContext emptyList()
-            homePage.chips?.map { it.title }
-                ?.filterNot { com.unshoo.pixelmusic.utils.ContentFilterUtils.isBlockedExploreCategory(it) }
-                ?.let { chipTitles ->
-                    _categories.value = (listOf("All", "Local") + chipTitles).distinct().toImmutableList()
-                }
-            val shelf = homePage.sections.firstOrNull {
-                !com.unshoo.pixelmusic.utils.ContentFilterUtils.isBlockedExploreSection(it.title) &&
-                    it.title.contains("quick pick", ignoreCase = true)
-            } ?: homePage.sections.firstOrNull {
-                !com.unshoo.pixelmusic.utils.ContentFilterUtils.isBlockedExploreSection(it.title) &&
-                    it.title.contains("quick", ignoreCase = true)
-            } ?: return@withContext emptyList()
-            val hideVideos = userPreferencesRepository.pureYtMusicOnlyFlow.first() ||
-                userPreferencesRepository.hideVideoFlow.first()
-            // filterVideo drops YouTube music videos by their item type, which titles alone miss.
-            val songs = shelf.items.filterIsInstance<SongItem>().filterVideo(hideVideos).map { it.toNativeSong() }
-            applyContentFilters(songs).shuffled()
-        } catch (e: Exception) {
-            Timber.tag("QuickPicks").w(e, "YT Music home quick picks fetch failed")
-            emptyList()
         }
     }
 

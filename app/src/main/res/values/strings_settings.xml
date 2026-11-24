@@ -391,7 +391,7 @@
     <string name="setcat_album_art_quality_wifi_desc">Resolution for downloading and displaying album covers on WiFi.</string>
     <string name="setcat_album_art_quality_mobile_title">Mobile Album Art Quality</string>
     <string name="setcat_album_art_quality_mobile_desc">Resolution for downloading and displaying album covers on metered networks.</string>
-    <string name="setcat_music_storage_limit_title">Music Storage Limit</string>
+    <string name="setcat_music_storage_limit_title">Download Limit</string>
     <string name="setcat_music_storage_limit_desc">Maximum local storage allocated for downloaded YouTube music.</string>
     <string name="genre_local_music">Local Music</string>
     <string name="setcat_preload_queue_enabled_title">Queue Preloading</string>

@@ -1,5 +1,3 @@
-@file:OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
-
 package com.unshoo.pixelmusic.presentation.screens
 
 import androidx.compose.animation.AnimatedVisibility
@@ -37,7 +35,6 @@ import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ContainedLoadingIndicator
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
@@ -161,14 +158,14 @@ fun QuickPicksAllScreen(
                         modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        ContainedLoadingIndicator()
+                        CircularProgressIndicator()
                     }
                 }
             }
 
             // Songs
             if (!isLoading) {
-                items(songs.distinctBy { it.id }, key = { song -> song.id }) { song ->
+                itemsIndexed(songs, key = { index, song -> "${song.id}_$index" }) { _, song ->
                     EnhancedSongListItem(
                         modifier = Modifier.padding(horizontal = 16.dp),
                         song = song,

@@ -664,7 +664,7 @@ class PlayerViewModel @Inject constructor(
             initialValue = PlayerBackgroundStyle.GRADIENT
         )
 
-    val useBlurEffects: StateFlow<Boolean> = userPreferencesRepository.useBlurEffectsFlow
+    val useBlurEffects: StateFlow<Boolean> = userPreferencesRepository.effectiveBlurEffectsFlow
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),

@@ -869,7 +869,7 @@ object LosslessStreamResolver {
 
         val winner = AddonManager.executeOrderedCandidates(
             candidates = candidateChain,
-            fastConcurrent = !forDownload || settings.addonsFastConcurrent,
+            fastConcurrent = settings.addonsFastConcurrent,
             perSourceTimeoutMs = settings.addonTimeoutMs,
         ) { sourceId ->
             if (UnifiedSourceId.isAddon(sourceId)) {
