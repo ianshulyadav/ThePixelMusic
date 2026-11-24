@@ -29,7 +29,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.Icon
@@ -253,7 +252,7 @@ fun ExpressivePlayerControls(
                 }
             ) {
                 Icon(
-                    imageVector = Icons.Rounded.Menu,
+                    painter = painterResource(R.drawable.rounded_more_vert_24),
                     contentDescription = "More options",
                     tint = segmentInactiveContent,
                     modifier = Modifier.size(25.dp)
