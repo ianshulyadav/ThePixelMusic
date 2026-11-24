@@ -57,6 +57,7 @@ import com.unshoo.pixelmusic.R
 import com.unshoo.pixelmusic.data.model.PlayerInfo
 import com.unshoo.pixelmusic.data.model.PlaybackQueueItemSnapshot
 import com.unshoo.pixelmusic.data.model.PlaybackQueueSnapshot
+import com.unshoo.pixelmusic.data.model.PlaybackQueueHistoryEntry
 import com.unshoo.pixelmusic.data.preferences.EqualizerPreferencesRepository
 import com.unshoo.pixelmusic.data.preferences.ThemePreferencesRepository
 import com.unshoo.pixelmusic.data.preferences.UserPreferencesRepository
@@ -564,6 +565,7 @@ class MusicService : MediaLibraryService() {
 
         // Handle player swaps (crossfade) to keep MediaSession in sync
         engine.addPlayerSwapListener(playerSwapListener)
+        engine.beforeQueueReplacement = ::archiveReplacedQueue
         engine.addNextPlayerPreparedListener(nextPlayerPreparedListener)
         engine.addTransitionDisplayPlayerListener(transitionDisplayPlayerListener)
         engine.addTransitionFinishedListener(transitionFinishedListener)
@@ -1210,6 +1212,9 @@ class MusicService : MediaLibraryService() {
         ).also {
             castSessionPlayer = it
             it.skipTransition = engine::fadedSkip
+            it.beforeQueueReplacement = { player, items, startIndex ->
+                archiveReplacedQueue(player, items, startIndex, null)
+            }
         }
 
         mediaSession = MediaLibrarySession.Builder(this, sessionPlayer, callback)
@@ -2491,6 +2496,9 @@ class MusicService : MediaLibraryService() {
             localPlayer, playback, playbackNavigationHistory, engine::isSkipFadeActive
         )
         wrapper.skipTransition = engine::fadedSkip
+        wrapper.beforeQueueReplacement = { player, items, startIndex ->
+            archiveReplacedQueue(player, items, startIndex, null)
+        }
         castSessionPlayer = wrapper
         publishMediaSessionPlayer(wrapper, logMessage)
         if (previous !== wrapper) previous?.release()
@@ -2623,6 +2631,7 @@ class MusicService : MediaLibraryService() {
         QueuePreloadManager.detach(engine.masterPlayer)
 
         engine.removePlayerSwapListener(playerSwapListener)
+        engine.beforeQueueReplacement = null
         engine.removeNextPlayerPreparedListener(nextPlayerPreparedListener)
         engine.removeTransitionDisplayPlayerListener(transitionDisplayPlayerListener)
         engine.removeTransitionFinishedListener(transitionFinishedListener)
@@ -2851,6 +2860,38 @@ class MusicService : MediaLibraryService() {
         cachedSnapshotSources = sources
         cachedSnapshotItems = items
         return items
+    }
+
+    private var queueHistorySourceName: String? = null
+    private var queueHistoryStartMediaId: String? = null
+
+    private fun archiveReplacedQueue(
+        player: Player,
+        replacement: List<MediaItem>,
+        startIndex: Int,
+        sourceName: String?,
+    ) {
+        if (player.shouldArchiveQueueBeforeReplacing(replacement)) {
+            val items = snapshotItemsFor(player, player.mediaItemCount)
+            if (items.size >= 2) {
+                val entry = PlaybackQueueHistoryEntry(
+                    id = java.util.UUID.randomUUID().toString(),
+                    name = queueHistorySourceName,
+                    items = items,
+                    startIndex = items.indexOfFirst { it.mediaId == queueHistoryStartMediaId }.coerceAtLeast(0),
+                    savedAtEpochMs = System.currentTimeMillis(),
+                )
+                serviceScope.launch {
+                    try {
+                        userPreferencesRepository.recordQueueHistory(entry)
+                    } catch (error: java.io.IOException) {
+                        Timber.tag(TAG).w(error, "Could not save replaced queue")
+                    }
+                }
+            }
+        }
+        queueHistorySourceName = sourceName?.takeUnless { it.isBlank() || it == "None" }
+        queueHistoryStartMediaId = replacement.getOrNull(startIndex)?.mediaId
     }
 
     private fun capturePlaybackSnapshotFromPlayer(

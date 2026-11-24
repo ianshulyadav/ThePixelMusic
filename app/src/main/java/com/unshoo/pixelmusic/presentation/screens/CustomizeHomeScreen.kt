@@ -31,6 +31,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.BarChart
@@ -39,7 +40,6 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DragIndicator
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.LibraryAdd
-import androidx.compose.material.icons.rounded.NewReleases
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Settings
@@ -93,9 +93,9 @@ fun homeSectionLabel(section: HomeSectionId): String = stringResource(
         HomeSectionId.DAILY_MIX -> R.string.home_section_daily_mix
         HomeSectionId.RECENTLY_PLAYED -> R.string.home_section_recently_played
         HomeSectionId.RECENTLY_ADDED -> R.string.home_section_recently_added
-        HomeSectionId.ARTIST_RELEASES -> R.string.home_section_artist_releases
         HomeSectionId.MOST_LISTENED -> R.string.home_section_most_listened
         HomeSectionId.LISTENING_STATS -> R.string.home_section_listening_stats
+        HomeSectionId.QUEUE_HISTORY -> R.string.home_queue_history_title
     }
 )
 
@@ -105,9 +105,9 @@ fun homeSectionIcon(section: HomeSectionId): ImageVector = when (section) {
     HomeSectionId.DAILY_MIX -> Icons.Rounded.AutoAwesome
     HomeSectionId.RECENTLY_PLAYED -> Icons.Rounded.History
     HomeSectionId.RECENTLY_ADDED -> Icons.Rounded.LibraryAdd
-    HomeSectionId.ARTIST_RELEASES -> Icons.Rounded.NewReleases
     HomeSectionId.MOST_LISTENED -> Icons.Rounded.Album
     HomeSectionId.LISTENING_STATS -> Icons.Rounded.BarChart
+    HomeSectionId.QUEUE_HISTORY -> Icons.AutoMirrored.Rounded.QueueMusic
 }
 
 /** Sections that have settings on the Options tab. */

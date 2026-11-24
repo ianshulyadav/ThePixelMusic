@@ -2,6 +2,7 @@ package com.unshoo.pixelmusic.data.preferences
 
 import android.content.Context
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -14,16 +15,16 @@ enum class HomeSectionId(val storageKey: String) {
     DAILY_MIX("daily_mix"),
     RECENTLY_PLAYED("recently_played"),
     RECENTLY_ADDED("recently_added"),
-    ARTIST_RELEASES("artist_releases"),
     MOST_LISTENED("most_listened"),
-    LISTENING_STATS("listening_stats");
+    LISTENING_STATS("listening_stats"),
+    QUEUE_HISTORY("queue_history");
 
     companion object {
         fun fromKey(key: String): HomeSectionId? = entries.firstOrNull { it.storageKey == key }
 
         /** Shown on a fresh install (Recently added is opt-in, like the reference design). */
         val DEFAULT_ORDER: List<HomeSectionId> = listOf(
-            QUICK_PICKS, YOUR_MIX, DAILY_MIX, RECENTLY_PLAYED, ARTIST_RELEASES, MOST_LISTENED, LISTENING_STATS
+            QUICK_PICKS, YOUR_MIX, DAILY_MIX, RECENTLY_PLAYED, MOST_LISTENED, LISTENING_STATS, QUEUE_HISTORY
         )
     }
 }
@@ -62,6 +63,7 @@ data class HomeLayoutConfig(
  */
 object HomeLayoutPreferences {
     private val SECTIONS = stringPreferencesKey("home_layout_sections")
+    private val QUEUE_HISTORY_CUSTOMIZABLE = booleanPreferencesKey("home_queue_history_customizable")
     private val MOST_LISTENED_RANGE = stringPreferencesKey("home_most_listened_range")
     private val MOST_LISTENED_KIND = stringPreferencesKey("home_most_listened_kind")
     private val SHOW_GREETING = androidx.datastore.preferences.core.booleanPreferencesKey("home_show_greeting")
@@ -73,7 +75,15 @@ object HomeLayoutPreferences {
             val sections = if (raw == null) {
                 HomeSectionId.DEFAULT_ORDER
             } else {
-                raw.split(',').mapNotNull { HomeSectionId.fromKey(it.trim()) }.distinct()
+                val saved = raw.split(',').mapNotNull { HomeSectionId.fromKey(it.trim()) }.distinct()
+                if (prefs[QUEUE_HISTORY_CUSTOMIZABLE] == true || HomeSectionId.QUEUE_HISTORY in saved) {
+                    saved
+                } else {
+                    val afterStats = saved.indexOf(HomeSectionId.LISTENING_STATS)
+                    saved.toMutableList().apply {
+                        add(if (afterStats >= 0) afterStats + 1 else size, HomeSectionId.QUEUE_HISTORY)
+                    }
+                }
             }
             HomeLayoutConfig(
                 sections = sections,
@@ -87,6 +97,7 @@ object HomeLayoutPreferences {
     suspend fun setSections(context: Context, sections: List<HomeSectionId>) {
         context.applicationContext.dataStore.edit {
             it[SECTIONS] = sections.distinct().joinToString(",") { s -> s.storageKey }
+            it[QUEUE_HISTORY_CUSTOMIZABLE] = true
         }
     }
 

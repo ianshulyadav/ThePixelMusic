@@ -148,11 +148,11 @@ private fun QueueHistoryCard(
         shape = RoundedCornerShape(28.dp),
         colors = CardDefaults.cardColors(containerColor = colors.surfaceContainer),
     ) {
-        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             val tile = RoundedCornerShape(14.dp)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Box(
-                    modifier = Modifier.weight(1f).aspectRatio(0.9f)
+                    modifier = Modifier.weight(1f).aspectRatio(1f)
                         .clip(tile).background(colors.primaryContainer).padding(12.dp),
                 ) {
                     Icon(
@@ -178,7 +178,7 @@ private fun QueueHistoryCard(
                     }
                 }
                 Box(
-                    modifier = Modifier.weight(1f).aspectRatio(0.9f)
+                    modifier = Modifier.weight(1f).aspectRatio(1f)
                         .clip(tile).background(colors.secondaryContainer),
                     contentAlignment = Alignment.Center,
                 ) {

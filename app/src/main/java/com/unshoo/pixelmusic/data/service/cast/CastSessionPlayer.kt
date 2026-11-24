@@ -39,6 +39,35 @@ internal class CastSessionPlayer(
      */
     var skipTransition: ((change: () -> Unit) -> Unit)? = null
 
+    var beforeQueueReplacement: ((Player, List<MediaItem>, Int) -> Unit)? = null
+
+    override fun setMediaItems(mediaItems: List<MediaItem>) {
+        beforeQueueReplacement?.invoke(wrappedPlayer, mediaItems, 0)
+        super.setMediaItems(mediaItems)
+    }
+
+    override fun setMediaItems(mediaItems: List<MediaItem>, resetPosition: Boolean) {
+        beforeQueueReplacement?.invoke(wrappedPlayer, mediaItems, if (resetPosition) 0 else currentMediaItemIndex)
+        super.setMediaItems(mediaItems, resetPosition)
+    }
+
+    override fun setMediaItems(mediaItems: List<MediaItem>, startIndex: Int, startPositionMs: Long) {
+        beforeQueueReplacement?.invoke(wrappedPlayer, mediaItems, startIndex)
+        super.setMediaItems(mediaItems, startIndex, startPositionMs)
+    }
+
+    override fun setMediaItem(mediaItem: MediaItem) {
+        setMediaItems(listOf(mediaItem))
+    }
+
+    override fun setMediaItem(mediaItem: MediaItem, resetPosition: Boolean) {
+        setMediaItems(listOf(mediaItem), resetPosition)
+    }
+
+    override fun setMediaItem(mediaItem: MediaItem, startPositionMs: Long) {
+        setMediaItems(listOf(mediaItem), 0, startPositionMs)
+    }
+
     private inline fun skipWithFade(crossinline change: () -> Unit) {
         val fade = skipTransition
         if (fade == null || cast.active) change() else fade { change() }

@@ -120,9 +120,6 @@ import com.unshoo.pixelmusic.presentation.components.RecentlyPlayedSectionMinSon
 import com.unshoo.pixelmusic.presentation.viewmodel.QuickPicksViewModel
 import com.unshoo.pixelmusic.presentation.components.SmartImage
 import com.unshoo.pixelmusic.presentation.components.StatsOverviewCard
-import com.unshoo.pixelmusic.presentation.viewmodel.FavoriteArtistReleasesViewModel
-import com.unshoo.pixelmusic.presentation.components.FavoriteArtistReleasesSection
-import com.unshoo.pixelmusic.data.remote.youtube.toNativeSong
 import com.unshoo.pixelmusic.presentation.model.collectRecentlyPlayedSongIds
 import com.unshoo.pixelmusic.presentation.model.mapRecentlyPlayedSongs
 import com.unshoo.pixelmusic.presentation.components.subcomps.PlayingEqIcon
@@ -162,7 +159,6 @@ fun HomeScreen(
     settingsViewModel: SettingsViewModel = hiltViewModel(),
     statsViewModel: StatsViewModel = hiltViewModel(),
     quickPicksViewModel: QuickPicksViewModel = hiltViewModel(),
-    favoriteArtistReleasesViewModel: FavoriteArtistReleasesViewModel = hiltViewModel(),
     accountsViewModel: AccountsViewModel = hiltViewModel(),
     announcementsViewModel: com.unshoo.pixelmusic.presentation.viewmodel.BirthdaySurpriseViewModel = hiltViewModel(),
     exploreViewModel: ExploreViewModel = hiltViewModel(),
@@ -401,8 +397,6 @@ fun HomeScreen(
     ReportDrawnWhen {
         yourMixSongs.isNotEmpty() || quickPicks.isNotEmpty() || isBenchmarkMode
     }
-    val artistReleasesRaw by favoriteArtistReleasesViewModel.releases.collectAsStateWithLifecycle()
-    val artistReleases = if (isEffectivelyOnline) artistReleasesRaw else emptyList()
     var isManualRefreshing by remember { mutableStateOf(false) }
     val isQuickPicksLoading by quickPicksViewModel.isLoading.collectAsStateWithLifecycle()
     val isDailyMixUpdating by playerViewModel.isDailyMixUpdating.collectAsStateWithLifecycle()
@@ -792,30 +786,6 @@ fun HomeScreen(
                                             }
                                         }
                                     }
-                                    com.unshoo.pixelmusic.data.preferences.HomeSectionId.ARTIST_RELEASES -> {
-                                        if (isOnline && artistReleases.isNotEmpty()) {
-                                            item(
-                                                key = "favorite_artist_releases_section",
-                                                contentType = "favorite_artist_releases_section"
-                                            ) {
-                                                FavoriteArtistReleasesSection(
-                                                    releases = artistReleases,
-                                                    onSongClick = { songItem ->
-                                                        val nativeSong = songItem.toNativeSong()
-                                                        playerViewModel.showAndPlaySong(nativeSong)
-                                                    },
-                                                    onAlbumClick = { albumItem ->
-                                                        val routeId = albumItem.browseId.takeIf { it.isNotBlank() } ?: albumItem.playlistId
-                                                        if (routeId.startsWith("VL") || routeId.startsWith("PL") || routeId.startsWith("RD")) {
-                                                            navController.navigateSafely(Screen.FeedPlaylistDetail.createRoute(routeId))
-                                                        } else {
-                                                            navController.navigateSafely(Screen.AlbumDetail.createRoute(routeId))
-                                                        }
-                                                    }
-                                                )
-                                            }
-                                        }
-                                    }
                                     com.unshoo.pixelmusic.data.preferences.HomeSectionId.MOST_LISTENED -> {
                                         mostListenedOverview?.let { overview ->
                                             if (overview.topSongs.isNotEmpty() || overview.topArtists.isNotEmpty() || overview.topAlbums.isNotEmpty()) {
@@ -873,12 +843,9 @@ fun HomeScreen(
                                                 )
                                             }
                                         }
-                                        queueHistoryItem()
                                     }
+                                    com.unshoo.pixelmusic.data.preferences.HomeSectionId.QUEUE_HISTORY -> queueHistoryItem()
                                 }
-                            }
-                            if (com.unshoo.pixelmusic.data.preferences.HomeSectionId.LISTENING_STATS !in homeLayout.sections) {
-                                queueHistoryItem()
                             }
                         }
                     }
