@@ -2867,11 +2867,11 @@ class MusicService : MediaLibraryService() {
 
     private fun archiveReplacedQueue(
         player: Player,
-        replacement: List<MediaItem>,
+        replacement: List<MediaItem>?,
         startIndex: Int,
         sourceName: String?,
     ) {
-        if (player.shouldArchiveQueueBeforeReplacing(replacement)) {
+        if (replacement == null || player.shouldArchiveQueueBeforeReplacing(replacement)) {
             val items = snapshotItemsFor(player, player.mediaItemCount)
             if (items.size >= 2) {
                 val entry = PlaybackQueueHistoryEntry(
@@ -2891,7 +2891,7 @@ class MusicService : MediaLibraryService() {
             }
         }
         queueHistorySourceName = sourceName?.takeUnless { it.isBlank() || it == "None" }
-        queueHistoryStartMediaId = replacement.getOrNull(startIndex)?.mediaId
+        queueHistoryStartMediaId = replacement?.getOrNull(startIndex)?.mediaId
     }
 
     private fun capturePlaybackSnapshotFromPlayer(

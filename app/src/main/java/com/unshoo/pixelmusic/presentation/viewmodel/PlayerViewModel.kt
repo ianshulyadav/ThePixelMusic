@@ -7888,6 +7888,7 @@ class PlayerViewModel @Inject constructor(
             },
             clearPlayback = {
                 runOnMainImmediate {
+                    dualPlayerEngine.archiveQueueBeforeDiscard()
                     mediaController?.stop()
                     mediaController?.clearMediaItems()
                     dualPlayerEngine.cancelNext()

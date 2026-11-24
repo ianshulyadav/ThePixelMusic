@@ -220,7 +220,11 @@ class DualPlayerEngine @Inject constructor(
     }
 
     private val onPlayerSwappedListeners = mutableListOf<(Player) -> Unit>()
-    internal var beforeQueueReplacement: ((Player, List<MediaItem>, Int, String?) -> Unit)? = null
+    internal var beforeQueueReplacement: ((Player, List<MediaItem>?, Int, String?) -> Unit)? = null
+
+    internal fun archiveQueueBeforeDiscard() {
+        beforeQueueReplacement?.invoke(masterPlayer, null, 0, null)
+    }
 
     internal fun replacePlaybackQueue(items: List<MediaItem>, startIndex: Int, sourceName: String) {
         val player = masterPlayer
@@ -1657,7 +1661,7 @@ class DualPlayerEngine @Inject constructor(
         if (lastSeekAtMs > 0L && SystemClock.elapsedRealtime() - lastSeekAtMs < 2_000L) return
         val currentItem = player.currentMediaItem ?: return
         val currentUri = currentItem.localConfiguration?.uri?.toString() ?: return
-        if (!LosslessStreamResolver.isLosslessUri(currentUri)) return
+        if (!currentUri.startsWith("youtube://") && !LosslessStreamResolver.isLosslessUri(currentUri)) return
 
         val watchedMediaId = currentItem.mediaId
         val timeoutMs = LOSSLESS_STALL_FALLBACK_TIMEOUT_MS
@@ -1666,13 +1670,17 @@ class DualPlayerEngine @Inject constructor(
             if (transitionRunning || player !== playerA) return@launch
             if (player.currentMediaItem?.mediaId != watchedMediaId) return@launch
             if (player.playbackState != Player.STATE_BUFFERING || !player.playWhenReady || player.isPlaying) return@launch
+            val resolvedUri = activePlaybackResolvedUris[currentUri]?.toString() ?: currentUri
+            if (!LosslessStreamResolver.isLosslessUri(resolvedUri) ||
+                resolvedUri.contains("saavn", ignoreCase = true)
+            ) return@launch
 
             Timber.tag("DualPlayerEngine").w(
                 "Lossless stream stalled for >%ds on %s; triggering source failover",
                 timeoutMs / 1000,
                 watchedMediaId
             )
-            failoverLosslessToYoutube(currentItem, player, "Playback stall >${timeoutMs / 1000}s")
+            failoverLosslessToYoutube(currentItem, player, "Playback stall >${timeoutMs / 1000}s", youtubeOnly = true)
         }
     }
 
@@ -1684,12 +1692,14 @@ class DualPlayerEngine @Inject constructor(
     fun failoverLosslessToYoutube(
         mediaItem: MediaItem,
         targetPlayer: ExoPlayer? = null,
-        reason: String = "Lossless stream failed or stalled"
+        reason: String = "Lossless stream failed or stalled",
+        youtubeOnly: Boolean = false,
     ) {
         val player = targetPlayer ?: if (::playerA.isInitialized) playerA else return
         val rawUri = mediaItem.localConfiguration?.uri?.toString().orEmpty()
         // shortcut: only tracks with 11-char YouTube IDs can failover to YouTube; pure custom streams are unhandled, upgrade if custom streaming services get alternate fallback mirrors
-        val videoId = mediaItem.mediaId.removePrefix("youtube_").takeIf { it.isNotBlank() && it.length == 11 && !it.contains("_") }
+        val videoId = youtubeIdOf(mediaItem)
+            ?: mediaItem.mediaId.removePrefix("youtube_").takeIf { it.isNotBlank() && it.length == 11 && !it.contains("_") }
             ?: when {
                 rawUri.startsWith("youtube://") -> rawUri.removePrefix("youtube://")
                 else -> null
@@ -1725,7 +1735,8 @@ class DualPlayerEngine @Inject constructor(
                     context = context,
                     song = song,
                     allowLocal = true,
-                    allowLossless = shouldStepDown,
+                    allowLossless = !youtubeOnly && shouldStepDown,
+                    youtubeOnly = youtubeOnly,
                 )
                 if (ytUrl.isBlank()) {
                     Timber.tag("DualPlayerEngine").e("failoverLosslessToYoutube: fallback URL resolution returned blank for %s", videoId)
@@ -1744,8 +1755,11 @@ class DualPlayerEngine @Inject constructor(
                 val replacement = mediaItem.buildUpon()
                     .setUri(fallbackUri)
                     .apply {
-                        if (!isStillLossless) setCustomCacheKey(streamCacheKey(videoId, ytUrl))
-                        if (containerMime != null) setMimeType(containerMime)
+                        if (!isStillLossless) {
+                            setCustomCacheKey(streamCacheKey(videoId, ytUrl))
+                            setMimeType(null)
+                            setDrmConfiguration(null)
+                        } else if (containerMime != null) setMimeType(containerMime)
                     }
                     .build()
 
