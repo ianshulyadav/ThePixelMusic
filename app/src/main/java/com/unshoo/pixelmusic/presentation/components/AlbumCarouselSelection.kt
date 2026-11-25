@@ -110,37 +110,23 @@ fun AlbumCarouselSection(
     var programmaticScrollInProgress by remember { mutableStateOf(false) }
     var lastSettledSongId by remember { mutableStateOf(currentSong?.id) }
     LaunchedEffect(effectiveTargetIndex, requestedTargetIndex, queue) {
-        snapshotFlow { carouselState.pagerState.isScrollInProgress }
-            .first { !it }
-        
         val currentPage = carouselState.pagerState.currentPage
         if (currentPage != effectiveTargetIndex) {
-            val isShiftOnly = currentSong?.id != null && 
-                              currentSong.id == lastSettledSongId && 
-                              requestedTargetIndex == null
-            
-            if (isShiftOnly) {
-                // Same song moved to a new index: scroll instantly to maintain focus
-                // and avoid showing the wrong item for the duration of an animation.
-                carouselState.pagerState.scrollToPage(effectiveTargetIndex)
-            } else {
-                if (requestedTargetIndex != null) {
-                    ignoreNextSettledSelectionForPage = effectiveTargetIndex
+            val songChanged = currentSong?.id != lastSettledSongId
+            // Announce programmatic movement before the pager can emit an idle event.
+            // Otherwise the old page can be mistaken for a user selection mid-crossfade.
+            ignoreNextSettledSelectionForPage = effectiveTargetIndex
+            programmaticScrollInProgress = true
+            try {
+                if (songChanged || abs(currentPage - effectiveTargetIndex) > MAX_ANIMATED_CAROUSEL_JUMP) {
+                    // Playback has already changed: show its cover immediately, including
+                    // when the incoming crossfade deck becomes the displayed song.
+                    carouselState.scrollToItem(effectiveTargetIndex)
+                } else {
+                    carouselState.animateScrollToItem(effectiveTargetIndex)
                 }
-                programmaticScrollInProgress = true
-                try {
-                    val jumpDistance = abs(currentPage - effectiveTargetIndex)
-                    if (jumpDistance > MAX_ANIMATED_CAROUSEL_JUMP) {
-                        // Large queues can jump hundreds/thousands of items when shuffle or an
-                        // external command changes the media item. Animating that jump can keep
-                        // Pager busy long enough that swipe-to-change appears broken, so snap.
-                        carouselState.scrollToItem(effectiveTargetIndex)
-                    } else {
-                        carouselState.animateScrollToItem(effectiveTargetIndex)
-                    }
-                } finally {
-                    programmaticScrollInProgress = false
-                }
+            } finally {
+                programmaticScrollInProgress = false
             }
         }
         lastSettledSongId = currentSong?.id
@@ -149,10 +135,17 @@ fun AlbumCarouselSection(
     val hapticFeedback = LocalHapticFeedback.current
     // Carousel -> Player (cuando se detiene el scroll)
     LaunchedEffect(carouselState, currentSongIndex, queue) {
+        var observedScroll = false
         snapshotFlow { carouselState.pagerState.isScrollInProgress }
             .distinctUntilChanged()
-            .filter { !it }
-            .collect {
+            .collect { scrolling ->
+                if (scrolling) {
+                    observedScroll = true
+                    return@collect
+                }
+                // Initial idle and stale idle callbacks are not swipes.
+                if (!observedScroll) return@collect
+                observedScroll = false
                 if (programmaticScrollInProgress) return@collect // Prevent settled event races during transitions
                 val settled = carouselState.pagerState.currentPage
                 if (ignoreNextSettledSelectionForPage == settled) {

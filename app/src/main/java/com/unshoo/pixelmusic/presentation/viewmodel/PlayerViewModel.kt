@@ -1744,7 +1744,19 @@ class PlayerViewModel @Inject constructor(
     private fun isOutgoingCrossfadeItem(mediaId: String?): Boolean {
         val incomingId = transitionDisplayMediaId ?: return false
         if (mediaId == null) return false
+        // After a completed fade, keep rejecting cached outgoing controller events
+        // until playback actually moves away from the incoming song.
+        if (!dualPlayerEngine.isTransitionRunning()) {
+            val masterId = runCatching { dualPlayerEngine.masterPlayer.currentMediaItem?.mediaId }.getOrNull()
+            if (masterId?.removePrefix("song:") != incomingId.removePrefix("song:")) return false
+        }
         return mediaId.removePrefix("song:") != incomingId.removePrefix("song:")
+    }
+
+    private fun isStaleDisplayedItem(mediaId: String?): Boolean {
+        if (isOutgoingCrossfadeItem(mediaId)) return true
+        val preparingId = _playerUiState.value.preparingSongId ?: return false
+        return mediaId != null && mediaId.removePrefix("song:") != preparingId.removePrefix("song:")
     }
 
     private val mediaControllerListener = object : MediaController.Listener {
@@ -1753,8 +1765,17 @@ class PlayerViewModel @Inject constructor(
                 com.unshoo.pixelmusic.data.service.MusicService.SESSION_EXTRA_TRANSITION_DISPLAY_MEDIA_ID
             )
             runOnMainImmediate {
+                if (incomingId == null) {
+                    val displayedId = transitionDisplayMediaId
+                    val masterId = runCatching { dualPlayerEngine.masterPlayer.currentMediaItem?.mediaId }.getOrNull()
+                    // The session may still deliver the outgoing deck's last cached item
+                    // after the fade ends. Retain the incoming ID until the master changes.
+                    if (displayedId == null || masterId?.removePrefix("song:") != displayedId.removePrefix("song:")) {
+                        transitionDisplayMediaId = null
+                    }
+                    return@runOnMainImmediate
+                }
                 transitionDisplayMediaId = incomingId
-                if (incomingId == null) return@runOnMainImmediate
                 val song = resolveSongFromMediaItem(MediaItem.Builder().setMediaId(incomingId).build())
                     ?: return@runOnMainImmediate
                 // Show the song you can hear for the whole fade, not the outgoing one.
@@ -2884,7 +2905,7 @@ class PlayerViewModel @Inject constructor(
                 // the live controller instead of requiring a process restart to unfreeze the UI.
                 val stable = playbackStateHolder.stablePlayerState.value
                 val controllerMediaId = controller.currentMediaItem?.mediaId
-                val stateIsStale = (!isOutgoingCrossfadeItem(controllerMediaId) &&
+                val stateIsStale = (!isStaleDisplayedItem(controllerMediaId) &&
                     controllerMediaId != stable.currentSong?.id) ||
                     controller.isPlaying != stable.isPlaying ||
                     controller.playWhenReady != stable.playWhenReady
@@ -2918,7 +2939,7 @@ class PlayerViewModel @Inject constructor(
     private fun syncCurrentPlayerState(playerCtrl: MediaController) {
         val mediaItem = playerCtrl.currentMediaItem
         // Ignore a cached outgoing snapshot after the incoming song is published.
-        if (isOutgoingCrossfadeItem(mediaItem?.mediaId)) return
+        if (isStaleDisplayedItem(mediaItem?.mediaId)) return
         if (mediaItem != null) {
             val song = resolveSongFromMediaItem(mediaItem)
             val readyPosition = playerCtrl.currentPosition.coerceAtLeast(0L)
@@ -5473,7 +5494,7 @@ class PlayerViewModel @Inject constructor(
         if (isRemoteSessionControllingPlayback()) return
 
         val mediaItem = player.currentMediaItem ?: return
-        if (isOutgoingCrossfadeItem(mediaItem.mediaId)) return
+        if (isStaleDisplayedItem(mediaItem.mediaId)) return
         val rawMediaId = mediaItem.mediaId
         val bareMediaId = if (rawMediaId.startsWith("song:")) rawMediaId.removePrefix("song:") else rawMediaId
         val currentSongId = playbackStateHolder.stablePlayerState.value.currentSong?.id
@@ -5547,7 +5568,7 @@ class PlayerViewModel @Inject constructor(
 
         updateCurrentPlaybackQueueFromPlayer(playerCtrl)
 
-        playerCtrl.currentMediaItem?.takeUnless { isOutgoingCrossfadeItem(it.mediaId) }?.let { mediaItem ->
+        playerCtrl.currentMediaItem?.takeUnless { isStaleDisplayedItem(it.mediaId) }?.let { mediaItem ->
             playbackStateHolder.ensureCurrentPlaybackOccurrence(mediaItem.mediaId)
             val song = resolveSongFromMediaItem(mediaItem)
 
@@ -5646,7 +5667,7 @@ class PlayerViewModel @Inject constructor(
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 if (isRemoteSessionControllingPlayback()) return
                 val currentId = mediaItem?.mediaId
-                if (isOutgoingCrossfadeItem(currentId)) return
+                if (isStaleDisplayedItem(currentId)) return
                 playbackStateHolder.onPlaybackOccurrenceTransition(currentId)
                 preparePlaybackAudioMetadataForMedia(currentId)
                 if (currentId != null) {
@@ -5683,7 +5704,7 @@ class PlayerViewModel @Inject constructor(
                     mediaItem?.let { transitionedItem ->
                         // This coroutine can resume after the fade starts. Its old item must
                         // never restore the outgoing artwork over the incoming song.
-                        if (isOutgoingCrossfadeItem(transitionedItem.mediaId)) return@launch
+                        if (isStaleDisplayedItem(transitionedItem.mediaId)) return@launch
                         val song = resolveSongFromMediaItem(transitionedItem)
                         if (song != null && (song.id.startsWith("youtube_") || song.youtubeId != null)) {
                             viewModelScope.launch(Dispatchers.IO) {
@@ -5716,6 +5737,7 @@ class PlayerViewModel @Inject constructor(
                         } else {
                             0L
                         }
+                        if (isStaleDisplayedItem(transitionedItem.mediaId)) return@launch
                         resetLyricsSearchState()
                         playbackStateHolder.updateStablePlayerState {
                             it.copy(
@@ -8430,6 +8452,7 @@ class PlayerViewModel @Inject constructor(
 
         // Then, update the stable state
         playbackStateHolder.updateStablePlayerState { state ->
+            if (state.currentSong?.id != updatedSong.id) return@updateStablePlayerState state
             // Only update lyrics if they are explicitly passed
             val finalLyrics = newLyrics ?: state.lyrics
             state.copy(
