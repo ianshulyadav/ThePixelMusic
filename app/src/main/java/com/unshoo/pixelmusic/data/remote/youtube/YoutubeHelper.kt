@@ -661,6 +661,8 @@ object YoutubeHelper {
         val maxBitrateKbps: Int,
         /** When true, pick lowest bitrate first (Data Saver / weak nets). */
         val preferLowFirst: Boolean,
+        /** True when background queue preloads may attempt lossless (HIGH, or AUTO on Wi-Fi / force-high mobile). */
+        val allowLosslessPreload: Boolean,
     )
 
     private suspend fun resolveStreamQualityPlan(context: Context): StreamQualityPlan {
@@ -681,10 +683,12 @@ object YoutubeHelper {
                     quality = StreamingAudioQuality.LOW,
                     maxBitrateKbps = StreamingAudioQuality.LOW.maxBitrateKbps,
                     preferLowFirst = true,
+                    allowLosslessPreload = false,
                 )
             }
 
-            val targetQuality = if (isMetered && !forceHigh) {
+            val wifiOrForcedHigh = !isMetered || forceHigh
+            val targetQuality = if (!wifiOrForcedHigh) {
                 userPreferencesRepository.streamingAudioQualityMobileFlow.first()
             } else {
                 userPreferencesRepository.streamingAudioQualityWifiFlow.first()
@@ -692,13 +696,12 @@ object YoutubeHelper {
 
             when (targetQuality) {
                 StreamingAudioQuality.AUTO -> {
-                    val isWifi = !isMetered || forceHigh
                     val speed = connectivityStateHolder.linkDownstreamBandwidthKbps.value
                     val recentlyUnstable = connectivityStateHolder.isNetworkRecentlyUnstable.value
-                    val isConnectionFastAndStable = (!isMetered || forceHigh) && !recentlyUnstable && (speed >= 3_500 || (speed == 0 && isWifi))
+                    val isConnectionFastAndStable = wifiOrForcedHigh && !recentlyUnstable && (speed >= 3_500 || speed == 0)
 
                     val effectiveQuality = when {
-                        recentlyUnstable || (isMetered && !forceHigh) || (speed in 1..999) -> StreamingAudioQuality.LOW
+                        recentlyUnstable || !wifiOrForcedHigh || (speed in 1..999) -> StreamingAudioQuality.LOW
                         !isConnectionFastAndStable || (speed in 1000..3499) -> StreamingAudioQuality.MEDIUM
                         else -> StreamingAudioQuality.HIGH
                     }
@@ -707,17 +710,20 @@ object YoutubeHelper {
                         StreamingAudioQuality.LOW -> StreamQualityPlan(
                             quality = StreamingAudioQuality.LOW,
                             maxBitrateKbps = StreamingAudioQuality.LOW.maxBitrateKbps,
-                            preferLowFirst = true
+                            preferLowFirst = true,
+                            allowLosslessPreload = wifiOrForcedHigh,
                         )
                         StreamingAudioQuality.MEDIUM -> StreamQualityPlan(
                             quality = StreamingAudioQuality.MEDIUM,
                             maxBitrateKbps = 0,
-                            preferLowFirst = false
+                            preferLowFirst = false,
+                            allowLosslessPreload = wifiOrForcedHigh,
                         )
                         else -> StreamQualityPlan(
                             quality = StreamingAudioQuality.HIGH,
                             maxBitrateKbps = 0,
-                            preferLowFirst = false
+                            preferLowFirst = false,
+                            allowLosslessPreload = wifiOrForcedHigh,
                         )
                     }
                 }
@@ -725,16 +731,19 @@ object YoutubeHelper {
                     quality = StreamingAudioQuality.HIGH,
                     maxBitrateKbps = 0, // no ceiling → highest available
                     preferLowFirst = false,
+                    allowLosslessPreload = true,
                 )
                 StreamingAudioQuality.MEDIUM -> StreamQualityPlan(
                     quality = StreamingAudioQuality.MEDIUM,
                     maxBitrateKbps = 0, // YouTube high (or JioSaavn 320k HQ)
                     preferLowFirst = false,
+                    allowLosslessPreload = false,
                 )
                 StreamingAudioQuality.LOW -> StreamQualityPlan(
                     quality = StreamingAudioQuality.LOW,
                     maxBitrateKbps = StreamingAudioQuality.LOW.maxBitrateKbps,
                     preferLowFirst = true,
+                    allowLosslessPreload = false,
                 )
             }
         } catch (_: Exception) {
@@ -742,6 +751,7 @@ object YoutubeHelper {
                 quality = StreamingAudioQuality.HIGH,
                 maxBitrateKbps = 0,
                 preferLowFirst = false,
+                allowLosslessPreload = true,
             )
         }
     }
@@ -874,22 +884,20 @@ object YoutubeHelper {
             ytIdx >= 0 && saavnIdx >= 0 && ytIdx < saavnIdx
         }
 
-        // When quality is AUTO, avoid slow external scrapers so YouTube playback starts instantly
-        if (losslessEnabled && !fastPlaybackForAuto && (!LosslessStreamResolver.isFailedForTrack(videoId) || unifiedSongOverride != null)) {
-            // BUGFIX (lossless fallback): the lossless chain used to run inline with its own 10s
-            // budget, while DualPlayerEngine aborts the WHOLE resolve after ~5s, so a slow or
-            // unavailable addon never reached the YouTube step and the engine played the
-            // *lowest* quality emergency stream instead.
-            // Now it is a hedged race with no leftover background work: lossless gets a short head
-            // start; if it has not answered by then, the normal (Saavn/YouTube) resolve starts in
-            // parallel. Lossless wins if it answers within the budget, otherwise the already-running
-            // YouTube result is used at once and the lossless lookup is cancelled.
-            val lowDataMode = unifiedSongOverride == null &&
-                (plan.quality == StreamingAudioQuality.LOW || plan.quality == StreamingAudioQuality.MEDIUM)
+        val canTryLossless = losslessEnabled && (
+            unifiedSongOverride != null ||
+                if (isNextInQueue) plan.allowLosslessPreload else !fastPlaybackForAuto
+            )
+        if (canTryLossless && (!LosslessStreamResolver.isFailedForTrack(videoId) || unifiedSongOverride != null)) {
             val budgetMs = if (isNextInQueue || unifiedSongOverride != null) {
                 LOSSLESS_PRELOAD_BUDGET_MS
             } else {
                 LOSSLESS_INLINE_BUDGET_MS
+            }
+            val headStartMs = if (isNextInQueue || unifiedSongOverride != null) {
+                LOSSLESS_PRELOAD_HEAD_START_MS
+            } else {
+                LOSSLESS_HEDGE_HEAD_START_MS
             }
             val hedged: String? = kotlinx.coroutines.coroutineScope {
                 val lossless = async {
@@ -898,10 +906,10 @@ object YoutubeHelper {
                         song = song,
                         savedSong = savedSong,
                         cacheKeys = listOf(targetCacheKey, "${videoId}_high"),
-                        lowDataMode = lowDataMode,
+                        lowDataMode = false,
                     )
                 }
-                val headStart = withTimeoutOrNull(LOSSLESS_HEDGE_HEAD_START_MS) { lossless.await() }
+                val headStart = withTimeoutOrNull(headStartMs) { lossless.await() }
                 when {
                     !headStart.isNullOrBlank() -> headStart
                     lossless.isCompleted -> null // lossless answered "not available": continue inline
@@ -911,7 +919,7 @@ object YoutubeHelper {
                                 getSongPlayerUrl(context, song, allowLocal, allowLossless = false, isNextInQueue = isNextInQueue)
                             }
                         }
-                        val late = withTimeoutOrNull((budgetMs - LOSSLESS_HEDGE_HEAD_START_MS).coerceAtLeast(0L)) {
+                        val late = withTimeoutOrNull((budgetMs - headStartMs).coerceAtLeast(0L)) {
                             lossless.await()
                         }
                         if (!late.isNullOrBlank()) {
@@ -1313,8 +1321,13 @@ object YoutubeHelper {
             // Safety net: a lossless catalog can hand back a slowed / sped-up / extended upload
             // under the original title. Its real length gives it away, so for direct FLAC
             // streams read the header and refuse a track whose length doesn't match the song.
+            // Monochrome already validates candidate duration from search JSON; skip extra
+            // Range 0-511 request so tracks.monochrome.st doesn't rate-limit with HTTP 429.
             val expectedMs = effectiveDuration?.takeIf { it > 0 }?.let { it * 1000L }
-            if (expectedMs != null && isLengthMismatchedFlac(result.uri, result.headers, expectedMs)) {
+            if (expectedMs != null &&
+                result.source != com.unshoo.pixelmusic.data.lossless.constants.AudioSourceType.MONOCHROME &&
+                isLengthMismatchedFlac(result.uri, result.headers, expectedMs)
+            ) {
                 PixelMusicHelper.printe(
                     "$videoId : Lossless stream rejected (length differs from the song; likely a slowed/sped version), falling back"
                 )
@@ -1383,6 +1396,8 @@ object YoutubeHelper {
     const val LOSSLESS_INLINE_BUDGET_MS = 3_000L
     /** Lossless head start before the parallel YouTube resolve begins (fast answers pay nothing). */
     private const val LOSSLESS_HEDGE_HEAD_START_MS = 1_200L
+    /** Head start for upcoming queue preloads so YouTube isn't probed unless lossless takes >3s. */
+    private const val LOSSLESS_PRELOAD_HEAD_START_MS = 3_000L
     /** Budget for preloads / explicit per-song overrides, where nobody is waiting on audio yet. */
     private const val LOSSLESS_PRELOAD_BUDGET_MS = 9_000L
 
@@ -1499,7 +1514,7 @@ object YoutubeHelper {
         }
         val isAutoQuality = !forDownload && (targetQuality == StreamingAudioQuality.AUTO || saavnQuality == SaavnAudioQuality.AUTO)
         val speed = connectivityStateHolder.linkDownstreamBandwidthKbps.value
-        val isLowBandwidth = isMetered || (speed in 1..2_000) || connectivityStateHolder.isNetworkRecentlyUnstable.value
+        val isLowBandwidth = (isMetered && !forceHigh) || (!isMetered && speed in 1..2_000) || connectivityStateHolder.isNetworkRecentlyUnstable.value
 
         // Lossless sources gate (ArchiveTune source-pool port)
         // Downloads: only attempt Lossless (FLAC/ALAC) when user configured MAX quality and lossless is not bypassed.

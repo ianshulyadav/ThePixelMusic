@@ -478,23 +478,23 @@ class DualPlayerEngine @Inject constructor(
                 try {
                     val currentIndex = playerA.currentMediaItemIndex
                     if (currentIndex != C.INDEX_UNSET) {
-                        val itemsToPreResolve = mutableListOf<Uri>()
-                        
-                        if (currentIndex + 1 < playerA.mediaItemCount) {
-                            playerA.getMediaItemAt(currentIndex + 1).localConfiguration?.uri?.let { 
-                                itemsToPreResolve.add(it) 
-                            }
-                        }
-                        if (currentIndex - 1 >= 0) {
-                            playerA.getMediaItemAt(currentIndex - 1).localConfiguration?.uri?.let { 
-                                itemsToPreResolve.add(it) 
-                            }
-                        }
+                        val nextUri = if (currentIndex + 1 < playerA.mediaItemCount) {
+                            playerA.getMediaItemAt(currentIndex + 1).localConfiguration?.uri
+                        } else null
+                        val prevUri = if (currentIndex - 1 >= 0) {
+                            playerA.getMediaItemAt(currentIndex - 1).localConfiguration?.uri
+                        } else null
+                        val itemsToPreResolve = listOfNotNull(nextUri, prevUri)
 
                         for (uriToResolve in itemsToPreResolve) {
                             val scheme = uriToResolve.scheme
-                            if (scheme == "telegram" || scheme == "netease" || scheme == "qqmusic" || scheme == "gdrive" || scheme == "youtube") {
+                            if (scheme == "telegram" || scheme == "netease" || scheme == "qqmusic" || scheme == "gdrive") {
                                 resolveCloudUri(uriToResolve)
+                            } else if (scheme == "youtube" && uriToResolve == nextUri) {
+                                // Pre-resolve immediate next track outside activeResolutions with
+                                // isNextInQueue=true (9s lossless budget) so it never poisons the cache
+                                // with a 3s YouTube fallback and fast skips abort it immediately.
+                                preResolveNeighborYoutube(uriToResolve)
                             }
                         }
                     }
@@ -2636,7 +2636,24 @@ class DualPlayerEngine @Inject constructor(
         gdriveStreamProxy.resolveGDriveUri(uriString)?.let { Uri.parse(it) }
     }
 
-    private suspend fun resolveYoutubeUriAsync(uriString: String): Uri? = withContext(Dispatchers.IO) {
+    private suspend fun preResolveNeighborYoutube(uri: Uri) = withContext(Dispatchers.IO) {
+        val uriString = uri.toString()
+        if (resolveLocalDiskFile(uriString) != null) return@withContext
+        activePlaybackResolvedUris[uriString]?.let { if (isResolvedUriFresh(uriString, it)) return@withContext }
+        resolvedUriCache.get(uriString)?.let { if (isResolvedUriFresh(uriString, it)) return@withContext }
+        val outerTimeoutMs = if (connectivityStateHolder.isMeteredNetwork.value) 22_000L else 18_000L
+        val resolved = withTimeoutOrNull(outerTimeoutMs) {
+            resolveYoutubeUriAsync(uriString, isNextInQueue = true)
+        }
+        if (resolved != null && resolved.scheme != "file" && resolved.scheme != "content") {
+            resolvedUriCache.put(uriString, resolved)
+        }
+    }
+
+    private suspend fun resolveYoutubeUriAsync(
+        uriString: String,
+        isNextInQueue: Boolean = false,
+    ): Uri? = withContext(Dispatchers.IO) {
         val youtubeId = uriString.removePrefix("youtube://")
         val skipLocalAudio = failedLocalYoutubeSources.get(uriString) == true
         try {
@@ -2662,18 +2679,23 @@ class DualPlayerEngine @Inject constructor(
                 }
             }
 
+            val rawDurMs = matchingItem?.mediaMetadata?.extras
+                ?.getLong(com.unshoo.pixelmusic.utils.MediaItemBuilder.EXTERNAL_EXTRA_DURATION, 0L) ?: 0L
             val youtubeSong = com.unshoo.pixelmusic.data.model.youtube.Song(
                 youtubeId = youtubeId,
                 title = matchingItem?.mediaMetadata?.title?.toString().orEmpty(),
                 artist = matchingItem?.mediaMetadata?.artist?.toString().orEmpty(),
-                album = matchingItem?.mediaMetadata?.albumTitle?.toString().orEmpty()
+                album = matchingItem?.mediaMetadata?.albumTitle?.toString().orEmpty(),
+                duration = if (rawDurMs > 0L) (rawDurMs / 1_000L).toString() else ""
             )
 
             // Never retry the full quality-aware resolver without an outer timeout.
             // When lossless is on, YoutubeHelper spends up to LOSSLESS_INLINE_BUDGET_MS on the
             // lossless chain before the YouTube step; grant that time so the YouTube step is not
             // starved into the lowest-quality emergency path.
-            val losslessExtraMs = if (isLosslessEnabled) LOSSLESS_RESOLVE_EXTRA_MS else 0L
+            val losslessExtraMs = if (isLosslessEnabled) {
+                if (isNextInQueue) 9_500L else LOSSLESS_RESOLVE_EXTRA_MS
+            } else 0L
             val timeoutMs = losslessExtraMs + if (connectivityStateHolder.isMeteredNetwork.value) {
                 STREAM_RESOLVE_TIMEOUT_LOW_CONNECTIVITY_MS
             } else {
@@ -2687,7 +2709,11 @@ class DualPlayerEngine @Inject constructor(
                     com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper
                         .getLowestQualityStreamUrl(context, youtubeSong, skipLocalAudio = true)
                 } else {
-                    com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.getSongPlayerUrl(context, youtubeSong)
+                    com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.getSongPlayerUrl(
+                        context,
+                        youtubeSong,
+                        isNextInQueue = isNextInQueue,
+                    )
                 }
             }
 

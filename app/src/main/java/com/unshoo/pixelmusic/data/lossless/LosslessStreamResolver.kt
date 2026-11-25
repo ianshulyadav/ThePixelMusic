@@ -335,7 +335,7 @@ object LosslessStreamResolver {
         val masterEnabled = p[LosslessStreamingEnabledKey] ?: defaultEnabled()
         if (!masterEnabled) return false
 
-        val monochromeEnabled = p[MonochromeEnabledKey] ?: false
+        val monochromeEnabled = p[MonochromeEnabledKey] ?: masterEnabled
         val hasMonochrome = monochromeEnabled && isMonochromeUp()
 
         val hasBuildKey = com.unshoo.pixelmusic.BuildConfig.SOURCE_PROVIDER_KEY.isNotBlank()
@@ -615,15 +615,16 @@ object LosslessStreamResolver {
     suspend fun readSettings(context: Context): SourceSettings {
         val addons = AddonManager.ensureLoadedBlocking(context)
         val p = prefs(context)
+        val losslessMasterEnabled = p[LosslessStreamingEnabledKey] ?: defaultEnabled()
         return SourceSettings(
-            losslessMasterEnabled = p[LosslessStreamingEnabledKey] ?: defaultEnabled(),
+            losslessMasterEnabled = losslessMasterEnabled,
             addonsMasterEnabled = p[AddonsEnabledKey] ?: true,
             addonsFastConcurrent = p[AddonsFastConcurrentKey] ?: true,
             addonTimeoutMs = (p[AddonsTimeoutMsKey] ?: AddonManager.DEFAULT_PER_ADDON_TIMEOUT_MS).coerceIn(2_000L, 20_000L),
             installedAddons = addons,
             unifiedOrder = AddonManager.readUnifiedOrder(p, addons),
             saavnEnabled = p[SaavnEnabledPrefKey] ?: true,
-            monochromeEnabled = p[MonochromeEnabledKey] ?: false,
+            monochromeEnabled = p[MonochromeEnabledKey] ?: losslessMasterEnabled,
             monochromeInstances = parseMultiline(p[MonochromeInstancesKey]),
             tidalEnabled = p[TidalEnabledKey] ?: true,
             qobuzEnabled = p[QobuzEnabledKey] ?: false,
@@ -1509,7 +1510,15 @@ object LosslessStreamResolver {
 
         // ArchiveTune back-fills the byte length with a HEAD request so the bitrate shown in the
         // player is measured rather than guessed. Only meaningful for plain progressive HTTP(S) streams.
-        if (!fromCache && detectedContainerMime == null && knownContentLength == null && stream.uri.startsWith("http", ignoreCase = true)) {
+        // Skip extra HEAD probes on Monochrome (tracks.monochrome.st): Cloudflare rate-limits
+        // rapid secondary hits with HTTP 429 and fallback FLAC bitrate is already populated above.
+        if (!fromCache &&
+            detectedContainerMime == null &&
+            knownContentLength == null &&
+            stream.source != AudioSourceType.MONOCHROME &&
+            !stream.uri.contains("monochrome.st/track/", ignoreCase = true) &&
+            stream.uri.startsWith("http", ignoreCase = true)
+        ) {
             ioScope.launch {
                 runCatching {
                     val headRequest = okhttp3.Request.Builder().url(stream.uri).head().build()
@@ -1541,22 +1550,24 @@ object LosslessStreamResolver {
         return bitsPerSecond.takeIf { it in 1L..50_000_000L }?.toInt()
     }
 
-    private fun resolveMonochromeStream(
+    private suspend fun resolveMonochromeStream(
         request: Request,
         settings: SourceSettings,
         trusted: Boolean = false,
     ): DirectStream? {
         if (!settings.monochromeEnabled && !trusted) return null
         return try {
-            val stream = MonochromeInstancePool.resolve(
-                httpClient = httpClient,
-                title = request.title,
-                artists = request.artists,
-                album = request.album,
-                durationMs = request.durationMs,
-                customInstancesRaw = settings.monochromeInstances.joinToString("\n"),
-                trustedOverride = trusted,
-            )
+            val stream = kotlinx.coroutines.runInterruptible(Dispatchers.IO) {
+                MonochromeInstancePool.resolve(
+                    httpClient = httpClient,
+                    title = request.title,
+                    artists = request.artists,
+                    album = request.album,
+                    durationMs = request.durationMs,
+                    customInstancesRaw = settings.monochromeInstances.joinToString("\n"),
+                    trustedOverride = trusted,
+                )
+            }
             if (stream != null) {
                 markMonochromeUp()
                 // Detect DASH MPD vs HLS M3U8 returned by HiFi API v2 instances so ExoPlayer uses the right MediaSource
@@ -1578,6 +1589,8 @@ object LosslessStreamResolver {
                 }
             }
             stream
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             if (e is java.io.IOException) markMonochromeDown()
             Timber.tag(TAG).w(e, "Monochrome pool resolve failed for %s", request.title)

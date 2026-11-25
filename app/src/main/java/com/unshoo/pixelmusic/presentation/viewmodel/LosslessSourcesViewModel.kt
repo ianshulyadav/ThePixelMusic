@@ -12,6 +12,7 @@ import com.unshoo.pixelmusic.data.lossless.SourceCheckService
 import com.unshoo.pixelmusic.data.lossless.applemusic.AppleMusicAudioProvider
 import com.unshoo.pixelmusic.data.lossless.applemusic.AppleMusicProvider
 import com.unshoo.pixelmusic.data.lossless.audiosource.AudioSourceConfig
+import com.unshoo.pixelmusic.data.lossless.constants.AddonsEnabledKey
 import com.unshoo.pixelmusic.data.lossless.constants.AppleMusicDevTokenKey
 import com.unshoo.pixelmusic.data.lossless.constants.AppleMusicMediaUserTokenKey
 import com.unshoo.pixelmusic.data.lossless.constants.AppleMusicQuality
@@ -145,13 +146,14 @@ class LosslessSourcesViewModel @Inject constructor(
     val uiState: StateFlow<LosslessSourcesUiState> =
         dataStore.data
             .map { p ->
+                val losslessEnabled = p[LosslessStreamingEnabledKey] ?: LosslessStreamResolver.defaultEnabled()
                 LosslessSourcesUiState(
-                    losslessEnabled = p[LosslessStreamingEnabledKey] ?: LosslessStreamResolver.defaultEnabled(),
+                    losslessEnabled = losslessEnabled,
                     poolApiKey = p[PoolApiKeyKey].orEmpty(),
                     poolBaseUrl = p[PoolBaseUrlKey].orEmpty(),
                     poolEffectiveBaseUrl = PoolAccountManager.baseUrlOrNull.orEmpty(),
                     sourceOrder = AudioSourceConfig.parseOrder(p[AudioSourceOrderKey]?.ifBlank { null }).filter { it in LOSSLESS_TYPES },
-                    monochromeEnabled = p[MonochromeEnabledKey] ?: false,
+                    monochromeEnabled = p[MonochromeEnabledKey] ?: losslessEnabled,
                     tidalEnabled = p[TidalEnabledKey] ?: true,
                     tidalQuality = enumOrDefault(p[TidalAudioQualityKey], TidalAudioQuality.FLAC),
                     tidalAccountFirst = p[TidalAccountFirstKey] ?: true,
@@ -247,9 +249,20 @@ class LosslessSourcesViewModel @Inject constructor(
     fun setLosslessEnabled(enabled: Boolean) {
         // Download quality follows the master switch: turning lossless OFF falls back from
         // Max (Lossless) to High and remembers it; turning it back ON restores Max.
+        // Turning master ON auto-enables Monochrome; turning it OFF disables all sources and addons.
         viewModelScope.launch {
             dataStore.edit { prefs ->
                 prefs[LosslessStreamingEnabledKey] = enabled
+                if (enabled) {
+                    prefs[MonochromeEnabledKey] = true
+                } else {
+                    prefs[MonochromeEnabledKey] = false
+                    prefs[TidalEnabledKey] = false
+                    prefs[QobuzEnabledKey] = false
+                    prefs[DeezerEnabledKey] = false
+                    prefs[AppleMusicSourceEnabledKey] = false
+                    prefs[AddonsEnabledKey] = false
+                }
                 val downloadKey = androidx.datastore.preferences.core.stringPreferencesKey("download_audio_quality")
                 val restoreKey = androidx.datastore.preferences.core.booleanPreferencesKey("download_quality_was_lossless")
                 if (!enabled) {
@@ -262,8 +275,13 @@ class LosslessSourcesViewModel @Inject constructor(
                     prefs.remove(restoreKey)
                 }
             }
+            if (!enabled) {
+                withContext(Dispatchers.IO) {
+                    com.unshoo.pixelmusic.data.addons.AddonManager.setAllAddonsEnabled(context, false)
+                }
+                LosslessStreamResolver.clearAll()
+            }
         }
-        if (!enabled) LosslessStreamResolver.clearAll()
         if (enabled && (uiState.value.poolApiKey.isNotBlank() || com.unshoo.pixelmusic.BuildConfig.SOURCE_PROVIDER_KEY.isNotBlank() || PoolAccountManager.hasReadKey)) {
             refreshPool(force = true)
         }
@@ -530,7 +548,14 @@ class LosslessSourcesViewModel @Inject constructor(
 
     fun setAddonEnabled(addonId: String, enabled: Boolean) {
         viewModelScope.launch {
+            if (enabled) {
+                dataStore.edit { prefs ->
+                    prefs[AddonsEnabledKey] = true
+                    prefs[LosslessStreamingEnabledKey] = true
+                }
+            }
             com.unshoo.pixelmusic.data.addons.AddonManager.setAddonEnabled(context, addonId, enabled)
+            LosslessStreamResolver.clearAll()
         }
     }
 

@@ -13,6 +13,7 @@ import com.unshoo.pixelmusic.data.lossless.constants.AppleMusicSourceEnabledKey
 import com.unshoo.pixelmusic.data.lossless.constants.AudioSourceOrderKey
 import com.unshoo.pixelmusic.data.lossless.constants.AudioSourceType
 import com.unshoo.pixelmusic.data.lossless.constants.DeezerEnabledKey
+import com.unshoo.pixelmusic.data.lossless.constants.LosslessStreamingEnabledKey
 import com.unshoo.pixelmusic.data.lossless.constants.MonochromeEnabledKey
 import com.unshoo.pixelmusic.data.lossless.constants.QobuzEnabledKey
 import com.unshoo.pixelmusic.data.lossless.constants.SongSourceOverrideKey
@@ -235,7 +236,7 @@ object AddonManager {
     }
 
     fun isBuiltInEnabled(type: AudioSourceType, prefs: Preferences): Boolean = when (type) {
-        AudioSourceType.MONOCHROME -> prefs[MonochromeEnabledKey] ?: false
+        AudioSourceType.MONOCHROME -> prefs[MonochromeEnabledKey] ?: (prefs[LosslessStreamingEnabledKey] == true)
         AudioSourceType.TIDAL -> prefs[TidalEnabledKey] ?: true
         AudioSourceType.QOBUZ -> prefs[QobuzEnabledKey] ?: false
         AudioSourceType.DEEZER -> prefs[DeezerEnabledKey] ?: false
@@ -322,6 +323,19 @@ object AddonManager {
             }
             persistAddonsLocked(current)
             if (enabled) AddonHealthTracker.reset(UnifiedSourceId.forAddon(addonId))
+        }
+    }
+
+    suspend fun setAllAddonsEnabled(context: Context, enabled: Boolean) {
+        ensureLoadedBlocking(context)
+        diskMutex.withLock {
+            val current = _installedAddons.value.map { addon ->
+                if (addon.enabled == enabled) addon else addon.copy(enabled = enabled)
+            }
+            persistAddonsLocked(current)
+            if (enabled) {
+                current.forEach { AddonHealthTracker.reset(it.unifiedSourceId) }
+            }
         }
     }
 

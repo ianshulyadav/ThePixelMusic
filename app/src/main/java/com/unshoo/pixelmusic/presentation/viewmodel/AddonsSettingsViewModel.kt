@@ -240,6 +240,12 @@ class AddonsSettingsViewModel @Inject constructor(
 
     fun setAddonEnabled(addonId: String, enabled: Boolean) {
         viewModelScope.launch(Dispatchers.IO) {
+            if (enabled) {
+                dataStore.edit {
+                    it[AddonsEnabledKey] = true
+                    it[LosslessStreamingEnabledKey] = true
+                }
+            }
             AddonManager.setAddonEnabled(context, addonId, enabled)
             LosslessStreamResolver.clearAll()
         }
@@ -248,6 +254,12 @@ class AddonsSettingsViewModel @Inject constructor(
     fun toggleChainEntry(entry: UnifiedSourceEntry, enabled: Boolean) {
         viewModelScope.launch(Dispatchers.IO) {
             if (entry.isAddon && entry.addon != null) {
+                if (enabled) {
+                    dataStore.edit {
+                        it[AddonsEnabledKey] = true
+                        it[LosslessStreamingEnabledKey] = true
+                    }
+                }
                 AddonManager.setAddonEnabled(context, entry.addon.id, enabled)
             } else if (entry.builtInType != null) {
                 if (enabled && entry.builtInType in setOf(

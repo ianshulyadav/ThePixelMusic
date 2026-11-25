@@ -3,6 +3,7 @@ package com.unshoo.pixelmusic.data.addons
 import com.unshoo.pixelmusic.data.lossless.audiosource.DirectStream
 import com.unshoo.pixelmusic.data.lossless.audiosource.TitleMatch
 import com.unshoo.pixelmusic.data.lossless.constants.AudioSourceType
+import okhttp3.Call
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
@@ -12,6 +13,7 @@ import java.io.IOException
 import java.net.URLEncoder
 import java.util.Base64
 import java.util.Locale
+import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * Multi-instance Monochrome FLAC / Hi-Res resolver with automatic mirror failover.
@@ -77,11 +79,13 @@ object MonochromeInstancePool {
             .orEmpty()
         val combined = (custom + DEFAULT_INSTANCES).distinct()
         val now = System.currentTimeMillis()
-        val healthy = combined.filter { AddonHealthTracker.isAvailable("mono:$it", now) }
-            .sortedBy { instance ->
-                val st = AddonHealthTracker.stateOf("mono:$instance")
-                if (st.avgLatencyMs > 0L) st.avgLatencyMs else 600L
-            }
+        val healthy = combined.filter { instance ->
+            AddonHealthTracker.isAvailable("mono:$instance", now) &&
+                !AddonHealthTracker.isOriginRateLimited(instance, now)
+        }.sortedBy { instance ->
+            val st = AddonHealthTracker.stateOf("mono:$instance")
+            if (st.avgLatencyMs > 0L) st.avgLatencyMs else 600L
+        }
         return healthy.ifEmpty { combined.take(3) }
     }
 
@@ -101,19 +105,31 @@ object MonochromeInstancePool {
 
         val client = probeClient(httpClient)
         val instances = activeInstances(customInstancesRaw).take(PARALLEL_PROBES * MAX_WAVES)
+        val activeCalls = CopyOnWriteArrayList<Call>()
         for (wave in instances.chunked(PARALLEL_PROBES)) {
+            if (Thread.currentThread().isInterrupted) {
+                throw InterruptedException("Monochrome resolve interrupted")
+            }
             val completion = java.util.concurrent.ExecutorCompletionService<DirectStream?>(probeExecutor)
             val futures = wave.map { base ->
                 completion.submit {
-                    probeInstance(client, base, encoded, title, artists, album, durationMs, isrc, trustedOverride)
+                    probeInstance(client, base, encoded, title, artists, album, durationMs, isrc, trustedOverride, activeCalls)
                 }
             }
             try {
                 repeat(futures.size) {
-                    val result = runCatching { completion.take().get() }.getOrNull()
+                    val result = try {
+                        completion.take().get()
+                    } catch (interrupted: InterruptedException) {
+                        throw interrupted
+                    } catch (_: Exception) {
+                        null
+                    }
                     if (result != null) return result
                 }
             } finally {
+                activeCalls.forEach { runCatching { it.cancel() } }
+                activeCalls.clear()
                 futures.forEach { it.cancel(true) }
             }
         }
@@ -130,6 +146,7 @@ object MonochromeInstancePool {
         durationMs: Long?,
         isrc: String?,
         trustedOverride: Boolean,
+        activeCalls: CopyOnWriteArrayList<Call>,
     ): DirectStream? {
         val healthKey = "mono:$base"
         val startedAt = System.currentTimeMillis()
@@ -138,11 +155,11 @@ object MonochromeInstancePool {
             // the latency of every dead or non-matching host.
             when {
                 base.contains("monochrome.st", ignoreCase = true) ->
-                    tryStreamerProtocol(client, base, encoded, title, artists, album, durationMs, isrc, trustedOverride)
+                    tryStreamerProtocol(client, base, encoded, title, artists, album, durationMs, isrc, trustedOverride, activeCalls)
                 else ->
-                    tryHifiApiProtocol(client, base, encoded, title, artists, album, durationMs, isrc, trustedOverride)
+                    tryHifiApiProtocol(client, base, encoded, title, artists, album, durationMs, isrc, trustedOverride, activeCalls)
                         ?: if (base.contains("relay", ignoreCase = true)) {
-                            tryRelayProtocol(client, base, encoded, title, artists, album, durationMs, isrc, trustedOverride)
+                            tryRelayProtocol(client, base, encoded, title, artists, album, durationMs, isrc, trustedOverride, activeCalls)
                         } else null
             }
         }.onFailure { err ->
@@ -167,10 +184,14 @@ object MonochromeInstancePool {
         durationMs: Long?,
         isrc: String?,
         trustedOverride: Boolean,
+        activeCalls: CopyOnWriteArrayList<Call>,
     ): DirectStream? {
         val searchUrl = "$base/search/?s=$encodedQuery"
-        val body = getStringOrThrowOn5xx(httpClient, searchUrl, "mono:$base") ?: return null
-        val root = runCatching { JSONObject(body) }.getOrNull() ?: return null
+        val body = getStringOrThrowOn5xx(httpClient, searchUrl, "mono:$base", activeCalls) ?: return null
+        val root = runCatching { JSONObject(body) }.getOrNull() ?: run {
+            AddonHealthTracker.recordFailure("mono:$base", "Malformed JSON")
+            return null
+        }
         val items: JSONArray = root.optJSONObject("data")?.optJSONArray("items")
             ?: root.optJSONArray("items")
             ?: return null
@@ -215,6 +236,7 @@ object MonochromeInstancePool {
                 httpClient,
                 "$base/track/?id=${winner.id}&quality=$qualityTier",
                 "mono:$base",
+                activeCalls,
             ) ?: continue
             val parsedStream = parseHifiTrackManifest(trackBody, winner)
             if (parsedStream != null) return parsedStream
@@ -307,10 +329,14 @@ object MonochromeInstancePool {
         durationMs: Long?,
         isrc: String?,
         trustedOverride: Boolean,
+        activeCalls: CopyOnWriteArrayList<Call>,
     ): DirectStream? {
-        val body = getStringOrThrowOn5xx(httpClient, "$base/search/tracks?q=$encodedQuery&limit=6", "mono:$base")
+        val body = getStringOrThrowOn5xx(httpClient, "$base/search/tracks?q=$encodedQuery&limit=6", "mono:$base", activeCalls)
             ?: return null
-        val tracks = runCatching { JSONObject(body).optJSONArray("tracks") }.getOrNull() ?: return null
+        val tracks = runCatching { JSONObject(body).optJSONArray("tracks") }.getOrNull() ?: run {
+            AddonHealthTracker.recordFailure("mono:$base", "Malformed JSON")
+            return null
+        }
         val candidates = ArrayList<AddonTrackCandidate>()
         for (i in 0 until tracks.length()) {
             val item = tracks.optJSONObject(i) ?: continue
@@ -360,16 +386,15 @@ object MonochromeInstancePool {
         durationMs: Long?,
         isrc: String?,
         trustedOverride: Boolean,
+        activeCalls: CopyOnWriteArrayList<Call>,
     ): DirectStream? {
-        val req = Request.Builder()
-            .url("$base/search?q=$encodedQuery")
-            .header("User-Agent", BROWSER_UA)
-            .header("X-Relay-Client", "relay/2")
-            .build()
-        val body = httpClient.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) return null
-            resp.body?.string()
-        } ?: return null
+        val body = getStringOrThrowOn5xx(
+            httpClient = httpClient,
+            url = "$base/search?q=$encodedQuery",
+            healthKey = "mono:$base",
+            activeCalls = activeCalls,
+            extraHeaders = mapOf("X-Relay-Client" to "relay/2"),
+        ) ?: return null
 
         val candidates = HttpAddonClient(httpClient).parseTracksPayload(body)
         val winner = AddonTrackMatcher.rankCandidates(
@@ -423,24 +448,43 @@ object MonochromeInstancePool {
         bitDepth = bitDepth,
     )
 
-    private fun getStringOrThrowOn5xx(httpClient: OkHttpClient, url: String, healthKey: String): String? {
+    private fun getStringOrThrowOn5xx(
+        httpClient: OkHttpClient,
+        url: String,
+        healthKey: String,
+        activeCalls: CopyOnWriteArrayList<Call>? = null,
+        extraHeaders: Map<String, String> = emptyMap(),
+    ): String? {
         val req = Request.Builder()
             .url(url)
             .header("User-Agent", BROWSER_UA)
             .header("Accept", "application/json")
+            .apply { extraHeaders.forEach { (k, v) -> header(k, v) } }
             .build()
-        httpClient.newCall(req).execute().use { resp ->
-            if (resp.code == 429) {
-                AddonHealthTracker.noteOriginRateLimit(url, resp.header("Retry-After"))
-                AddonHealthTracker.recordFailure(healthKey, "HTTP 429")
-                return null
+        val call = httpClient.newCall(req)
+        activeCalls?.add(call)
+        try {
+            call.execute().use { resp ->
+                if (resp.code == 429) {
+                    AddonHealthTracker.noteOriginRateLimit(url, resp.header("Retry-After"))
+                    AddonHealthTracker.recordFailure(healthKey, "HTTP 429")
+                    return null
+                }
+                if (resp.code >= 500) {
+                    AddonHealthTracker.recordFailure(healthKey, "HTTP ${resp.code}")
+                    return null
+                }
+                if (!resp.isSuccessful) return null
+                val contentType = resp.header("Content-Type").orEmpty()
+                val text = resp.body?.string()?.takeIf { it.isNotBlank() } ?: return null
+                if (contentType.contains("html", ignoreCase = true) || text.trimStart().startsWith("<")) {
+                    AddonHealthTracker.recordFailure(healthKey, "Non-JSON HTML response", permanentHint = true)
+                    return null
+                }
+                return text
             }
-            if (resp.code >= 500) {
-                AddonHealthTracker.recordFailure(healthKey, "HTTP ${resp.code}")
-                return null
-            }
-            if (!resp.isSuccessful) return null
-            return resp.body?.string()?.takeIf { it.isNotBlank() }
+        } finally {
+            activeCalls?.remove(call)
         }
     }
 }

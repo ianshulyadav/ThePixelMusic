@@ -137,18 +137,29 @@ object QueuePreloadManager {
 
                 val videoId = resolveYoutubeVideoId(mediaItem) ?: continue
 
+                val durMs = mediaItem.mediaMetadata.extras
+                    ?.getLong(com.unshoo.pixelmusic.utils.MediaItemBuilder.EXTERNAL_EXTRA_DURATION, 0L) ?: 0L
                 val song = Song(
                     youtubeId = videoId,
                     title = mediaItem.mediaMetadata.title?.toString() ?: "",
                     artist = mediaItem.mediaMetadata.artist?.toString() ?: "",
                     album = mediaItem.mediaMetadata.albumTitle?.toString(),
+                    duration = if (durMs > 0L) (durMs / 1_000L).toString() else "",
                     thumbnailHref = upgradeThumbnailUrlToHighQuality(mediaItem.mediaMetadata.artworkUri?.toString()).orEmpty()
                 )
 
                 var streamUrl: String? = null
                 try {
-                    // Prefetch at the user's selected quality (HIGH → highest stream first).
-                    streamUrl = YoutubeHelper.getSongPlayerUrl(ctx, song, allowLocal = false, isNextInQueue = true)
+                    // Only allow lossless (9s preload budget) on the immediate next queue track so
+                    // deeper lookahead slots warm YouTube fast without causing Monochrome 429 bursts.
+                    val isImmediateNext = (i == nextIndex)
+                    streamUrl = YoutubeHelper.getSongPlayerUrl(
+                        ctx,
+                        song,
+                        allowLocal = false,
+                        allowLossless = isImmediateNext,
+                        isNextInQueue = isImmediateNext,
+                    )
                     if (!streamUrl.isNullOrBlank() && (streamUrl.startsWith("http") ||
                             com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver.isLosslessUri(streamUrl))) {
                         val ytUri = "youtube://$videoId"
