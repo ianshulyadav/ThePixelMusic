@@ -1863,8 +1863,9 @@ class MusicService : MediaLibraryService() {
             if (isPlaying) {
                 startTelemetryReporting()
                 // A pinned session can be known before its AudioTrack exists. Retry
-                // attaching once playback actually starts, including after route changes.
-                if (equalizerManager.hasAnyEnabledEffects && !equalizerManager.isAttached) {
+                // attaching once playback actually starts, including after route changes
+                // or if the active AudioTrack session ID changed.
+                if (equalizerManager.hasAnyEnabledEffects) {
                     serviceScope.launch {
                         equalizerManager.attachToAudioSessionIfNeeded(engine.getAudioSessionId())
                     }
