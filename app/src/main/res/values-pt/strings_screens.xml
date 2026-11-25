@@ -249,10 +249,11 @@ Mix</string>
     <string name="settings_kanji_dict_error">Falha no download: %1$s</string>
     <string name="settings_kanji_dict_default_desc">Transliteração de kana integrada ativa (0 MB). Baixe o dicionário de kanji completo sob demanda (~13 MB)</string>
     <string name="settings_perf_battery_section">Desempenho e Bateria</string>
-    <string name="settings_perf_mode_title">Modo de Desempenho (Econômico e Dispositivos Básicos)</string>
-    <string name="settings_perf_mode_desc">Reduz animações e efeitos para manter o app fluido e poupar bateria.</string>
+    <string name="settings_perf_mode_title">Modo Desempenho</string>
+    <string name="settings_perf_mode_desc">Desativa desfoques, animações pesadas e capas em alta resolução</string>
     <string name="settings_hardware_audio_offload_title">Descarga de Áudio por Hardware</string>
     <string name="settings_hardware_audio_offload_desc">Usa o DSP de hardware para decodificar áudio e economizar bateria.</string>
+    <string name="blur_settings_paused_perf_mode">Os efeitos de desfoque ficam pausados no Modo Desempenho.</string>
     <string name="settings_saavn_hq_title">Streaming JioSaavn de Alta Qualidade</string>
     <string name="settings_saavn_hq_desc">Transmita em até 320 kbps AAC pelo JioSaavn. Desativado, usa Lossless ou YouTube Opus.</string>
     <string name="settings_cache_liked_songs_title">Salvar em cache músicas curtidas</string>
@@ -268,7 +269,7 @@ Mix</string>
     <string name="settings_recommendations_section">Recomendações e Conteúdo do YouTube</string>
     <string name="settings_content_customization_section">Personalização de Conteúdo</string>
     <string name="settings_filter_cover_lofi_title">Ocultar covers e faixas lo-fi</string>
-    <string name="settings_filter_cover_lofi_desc">Ocultar covers e faixas lo-fi de recomendações e filas.</string>
+    <string name="settings_filter_cover_lofi_desc">Não mostrar em recomendações e filas</string>
     <string name="settings_lossless_audio_sources_title">Fontes de Áudio Lossless</string>
     <string name="settings_lossless_streaming_sources_title">Fontes de Streaming Lossless</string>
     <string name="settings_lossless_streaming_sources_desc">Tidal, Qobuz, Deezer, Apple Music via pool e contas do Archive</string>

@@ -268,10 +268,11 @@
     <string name="settings_kanji_dict_error">Download fehlgeschlagen: %1$s</string>
     <string name="settings_kanji_dict_default_desc">Integrierte 0-MB Kana-Transliteration aktiv. Vollständiges Kanji-Wörterbuch bei Bedarf herunterladen (~13 MB)</string>
     <string name="settings_perf_battery_section">Leistung &amp; Akku</string>
-    <string name="settings_perf_mode_title">Leistungsmodus (Geringe Leistung &amp; Energiesparen)</string>
-    <string name="settings_perf_mode_desc">Reduziert Animationen und Weichzeichner für mehr Leistung und Akkulaufzeit.</string>
+    <string name="settings_perf_mode_title">Leistungsmodus</string>
+    <string name="settings_perf_mode_desc">Deaktiviert Unschärfe, starke Animationen und HD-Cover</string>
     <string name="settings_hardware_audio_offload_title">Hardware-Audio-Offload</string>
     <string name="settings_hardware_audio_offload_desc">Hardware-DSP zur Audiodekodierung nutzen, um Akku zu sparen.</string>
+    <string name="blur_settings_paused_perf_mode">Unschärfeeffekte sind im Leistungsmodus pausiert.</string>
     <string name="settings_saavn_hq_title">JioSaavn HQ-Streaming</string>
     <string name="settings_saavn_hq_desc">Bis zu 320 kbps AAC über JioSaavn streamen. Ausgeschaltet: Lossless oder YouTube Opus.</string>
     <string name="settings_cache_liked_songs_title">Gelikete Titel manuell zwischenspeichern</string>
@@ -287,7 +288,7 @@
     <string name="settings_recommendations_section">Empfehlungen &amp; YouTube-Inhalte</string>
     <string name="settings_content_customization_section">Inhaltsanpassung</string>
     <string name="settings_filter_cover_lofi_title">Cover- und Lo-Fi-Titel ausblenden</string>
-    <string name="settings_filter_cover_lofi_desc">Cover und Lo-Fi-Titel aus Empfehlungen und Warteschlange ausblenden.</string>
+    <string name="settings_filter_cover_lofi_desc">Aus Empfehlungen und Warteschlange ausschließen</string>
     <string name="settings_lossless_audio_sources_title">Lossless-Audioquellen</string>
     <string name="settings_lossless_streaming_sources_title">Lossless-Streaming-Quellen</string>
     <string name="settings_lossless_streaming_sources_desc">Tidal, Qobuz, Deezer, Apple Music über Archive-Pool und Konten</string>

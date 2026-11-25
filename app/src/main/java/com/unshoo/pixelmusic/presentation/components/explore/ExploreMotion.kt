@@ -365,6 +365,14 @@ fun ShimmerBox(
     baseColor: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
     highlightColor: Color = MaterialTheme.colorScheme.surfaceContainerHighest
 ) {
+    if (com.unshoo.pixelmusic.ui.theme.LocalPerformanceModeEnabled.current) {
+        Box(
+            modifier = modifier
+                .clip(shape)
+                .background(baseColor)
+        )
+        return
+    }
     val transition = rememberInfiniteTransition(label = "shimmer")
     val sweep: State<Float> = transition.animateFloat(
         initialValue = -1.2f,

@@ -59,6 +59,7 @@ fun OptimizedAlbumArt(
     loadHighQuality: Boolean = true,
 ) {
     val context = LocalContext.current
+    val performanceModeEnabled = com.unshoo.pixelmusic.ui.theme.LocalPerformanceModeEnabled.current || SmartImageCache.performanceModeEnabled
     // Progressive remote art: a small preview (fast, usually already cached from lists) is drawn
     // first and the full-resolution cover fades in over it once loaded. If the full-size image
     // does not exist (e.g. YouTube "maxresdefault" 404s), the preview simply stays.
@@ -82,7 +83,7 @@ fun OptimizedAlbumArt(
                 placeholder = painterResource(R.drawable.ic_music_placeholder),
                 error = painterResource(R.drawable.ic_music_placeholder)
             )
-            if (loadHighQuality) {
+            if (loadHighQuality && !performanceModeEnabled) {
                 val highSize = remember(targetSize) {
                     val safe = safeAlbumArtTargetSize(targetSize)
                     val w = (safe.width as? Dimension.Pixels)?.px?.coerceAtMost(MaxSafeAlbumArtDimensionPx)
@@ -107,20 +108,14 @@ fun OptimizedAlbumArt(
         return
     }
     // `density` is deliberately no longer read here: targetSize is already in pixels.
-    val requestTargetSize = remember(targetSize) {
+    val requestTargetSize = remember(targetSize, performanceModeEnabled) {
         val safeSize = safeAlbumArtTargetSize(targetSize)
         val w = (safeSize.width as? Dimension.Pixels)?.px
         val h = (safeSize.height as? Dimension.Pixels)?.px
         if (w != null && h != null) {
-            // PERF/BUGFIX: `targetSize` is already expressed in PIXELS by callers
-            // (e.g. AlbumArtQuality.maxSize is 512px for Medium, 800px for High;
-            // SafeOriginalAlbumArtSize is 1280px). Multiplying by density a second time
-            // forced all sizes above LOW to clamp to 1280px, allocating 6.55MB ARGB_8888
-            // bitmaps in ART Large Object Space and dropping HWUI image decodes.
-            // Treating targetSize as pixels also re-aligns this request with
-            // PrefetchAlbumNeighbors, making memory cache lookups hit as intended.
-            val scaledW = w.coerceAtMost(MaxSafeAlbumArtDimensionPx)
-            val scaledH = h.coerceAtMost(MaxSafeAlbumArtDimensionPx)
+            val maxDim = if (performanceModeEnabled) 256 else MaxSafeAlbumArtDimensionPx
+            val scaledW = w.coerceAtMost(maxDim)
+            val scaledH = h.coerceAtMost(maxDim)
             Size(scaledW, scaledH)
         } else {
             safeSize
@@ -159,10 +154,11 @@ fun OptimizedAlbumArt(
             else -> memoryCacheKey?.let { MemoryCache.Key(it) }
         }
     }
-    val requestModel = remember(context, uri, requestTargetSize) {
+    val requestModel = remember(context, uri, requestTargetSize, performanceModeEnabled) {
         when (uri) {
             is ImageRequest -> uri.newBuilder(context).apply {
                 size(requestTargetSize)
+                if (performanceModeEnabled) crossfade(0)
                 if (uri.memoryCacheKey == null) {
                     memoryCacheKey(memoryCacheKey)
                 }
@@ -170,7 +166,7 @@ fun OptimizedAlbumArt(
             }.build()
             else -> ImageRequest.Builder(context)
                 .data(uri)
-                .crossfade(350) // Use Coil's native crossfade
+                .crossfade(if (performanceModeEnabled) 0 else 350) // Use Coil's native crossfade unless Performance Mode is active
                 .error(R.drawable.ic_music_placeholder)
                 .placeholder(R.drawable.ic_music_placeholder)
                 .size(requestTargetSize)

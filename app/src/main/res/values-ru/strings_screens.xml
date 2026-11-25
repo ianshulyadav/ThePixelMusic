@@ -270,10 +270,11 @@
     <string name="settings_kanji_dict_error">Ошибка загрузки: %1$s</string>
     <string name="settings_kanji_dict_default_desc">Встроенная транслитерация кана (0 МБ) активна. Загрузить полный словарь кандзи по запросу (~13 МБ)</string>
     <string name="settings_perf_battery_section">Производительность и батарея</string>
-    <string name="settings_perf_mode_title">Режим производительности (Для слабых устройств и экономии батареи)</string>
-    <string name="settings_perf_mode_desc">Уменьшает анимации и размытия для плавной работы и экономии заряда.</string>
+    <string name="settings_perf_mode_title">Режим производительности</string>
+    <string name="settings_perf_mode_desc">Отключает размытия, тяжёлую анимацию и обложки в HD</string>
     <string name="settings_hardware_audio_offload_title">Аппаратная разгрузка аудио</string>
     <string name="settings_hardware_audio_offload_desc">Декодировать аудио на аппаратном DSP для экономии заряда батареи.</string>
+    <string name="blur_settings_paused_perf_mode">Размытие приостановлено, пока включён режим производительности.</string>
     <string name="settings_saavn_hq_title">HQ-стриминг JioSaavn</string>
     <string name="settings_saavn_hq_desc">Поток до 320 кбит/с AAC через JioSaavn. Выключено: Lossless или YouTube Opus.</string>
     <string name="settings_cache_liked_songs_title">Кэшировать понравившиеся песни</string>
@@ -289,7 +290,7 @@
     <string name="settings_recommendations_section">Рекомендации и контент YouTube</string>
     <string name="settings_content_customization_section">Настройка контента</string>
     <string name="settings_filter_cover_lofi_title">Скрывать каверы и lo-fi треки</string>
-    <string name="settings_filter_cover_lofi_desc">Скрывать каверы и lo-fi треки из рекомендаций и очередей.</string>
+    <string name="settings_filter_cover_lofi_desc">Исключать из рекомендаций и очередей</string>
     <string name="settings_lossless_audio_sources_title">Источники Lossless-аудио</string>
     <string name="settings_lossless_streaming_sources_title">Источники потокового Lossless</string>
     <string name="settings_lossless_streaming_sources_desc">Tidal, Qobuz, Deezer, Apple Music через пул Archive и аккаунты</string>

@@ -408,4 +408,40 @@ class DevicePerformanceUtilsTest {
         )
         assertEquals(120f, enabledRate, 0.01f)
     }
+
+    @Test
+    fun resolveTargetRate_whenPerformanceModeEnabled_capsAt60HzAndRecoversOnDisable() {
+        val policy = AdaptiveRefreshRatePolicy(minModeDwellMillis = 8_000L)
+        val supportedRates = listOf(60f, 90f, 120f)
+
+        val perfRateWithHighRefresh = policy.resolveTargetRate(
+            snapshot = ThermalSnapshot(thermalStatus = PowerManager.THERMAL_STATUS_NONE),
+            supportedRates = supportedRates,
+            currentDisplayRate = 120f,
+            highRefreshRateEnabled = true,
+            performanceModeEnabled = true,
+            nowMillis = 0L
+        )
+        assertEquals(60f, perfRateWithHighRefresh, 0.01f)
+
+        val perfRateWithoutHighRefresh = policy.resolveTargetRate(
+            snapshot = ThermalSnapshot(thermalStatus = PowerManager.THERMAL_STATUS_NONE),
+            supportedRates = supportedRates,
+            currentDisplayRate = 120f,
+            highRefreshRateEnabled = false,
+            performanceModeEnabled = true,
+            nowMillis = 500L
+        )
+        assertEquals(60f, perfRateWithoutHighRefresh, 0.01f)
+
+        val restoredRate = policy.resolveTargetRate(
+            snapshot = ThermalSnapshot(thermalStatus = PowerManager.THERMAL_STATUS_NONE),
+            supportedRates = supportedRates,
+            currentDisplayRate = 60f,
+            highRefreshRateEnabled = true,
+            performanceModeEnabled = false,
+            nowMillis = 10_000L
+        )
+        assertEquals(120f, restoredRate, 0.01f)
+    }
 }

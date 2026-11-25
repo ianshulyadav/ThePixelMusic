@@ -91,6 +91,10 @@ class MorphingExpressiveShape(private val phase: Float) : Shape {
 
 @Composable
 fun rememberShimmerBrush(): Brush {
+    val colors = MaterialTheme.colorScheme
+    if (com.unshoo.pixelmusic.ui.theme.LocalPerformanceModeEnabled.current) {
+        return androidx.compose.ui.graphics.SolidColor(colors.onSurface.copy(alpha = 0.10f))
+    }
     val transition = rememberInfiniteTransition(label = "shimmer_transition")
     val translateAnim = transition.animateFloat(
         initialValue = -300f,
@@ -101,7 +105,6 @@ fun rememberShimmerBrush(): Brush {
         ),
         label = "shimmer_translation"
     )
-    val colors = MaterialTheme.colorScheme
     val baseColor = colors.onSurface.copy(alpha = 0.08f)
     val highlightColor = colors.onSurface.copy(alpha = 0.22f)
     return Brush.linearGradient(
@@ -121,16 +124,22 @@ fun ShapeShiftingPlaceholder(
     modifier: Modifier = Modifier,
     shimmerBrush: Brush = rememberShimmerBrush()
 ) {
-    val transition = rememberInfiniteTransition(label = "morphing_transition")
-    val phase by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 4f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(6000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "morphing_phase"
-    )
+    val performanceModeEnabled = com.unshoo.pixelmusic.ui.theme.LocalPerformanceModeEnabled.current
+    val phase = if (performanceModeEnabled) {
+        0f
+    } else {
+        val transition = rememberInfiniteTransition(label = "morphing_transition")
+        val animPhase by transition.animateFloat(
+            initialValue = 0f,
+            targetValue = 4f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(6000, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart
+            ),
+            label = "morphing_phase"
+        )
+        animPhase
+    }
     // BUGFIX (was: remember(phase) → invalidates every frame because the
     // animation is continuous): the new MorphingExpressiveShape only
     // has 4 discrete states (state 0-3) plus the fractional blend

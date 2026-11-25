@@ -81,6 +81,7 @@ fun AutoScrollingText(
     // long as it is on screen - e.g. the mini player title, even while paused. Low-end
     // devices scroll a couple of times and then settle so the UI can go idle.
     val context = LocalContext.current
+    val performanceModeEnabled = com.unshoo.pixelmusic.ui.theme.LocalPerformanceModeEnabled.current
     val marqueeIterations = remember {
         if (com.unshoo.pixelmusic.utils.DevicePerformanceUtils.isLowEndDevice(context)) {
             LOW_END_MARQUEE_ITERATIONS
@@ -119,7 +120,7 @@ fun AutoScrollingText(
             modifier = Modifier
                 .fillMaxWidth()
                 .then(
-                    if (canScroll) {
+                    if (canScroll && !performanceModeEnabled) {
                         Modifier.basicMarquee(
                             iterations = marqueeIterations,
                             spacing = MarqueeSpacing(gradientWidth + 6.dp),

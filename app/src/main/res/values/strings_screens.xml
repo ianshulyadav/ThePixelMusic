@@ -285,9 +285,10 @@
     <string name="settings_kanji_dict_default_desc">Built-in 0-MB Kana transliteration active. Download full Kanji dictionary on-demand (~13 MB)</string>
     <string name="settings_perf_battery_section">Performance &amp; Battery</string>
     <string name="settings_perf_mode_title">Performance Mode</string>
-    <string name="settings_perf_mode_desc">Reduce motion and blur.</string>
+    <string name="settings_perf_mode_desc">Disables blurs, heavy animations, and high-res art</string>
     <string name="settings_hardware_audio_offload_title">Audio Offload</string>
     <string name="settings_hardware_audio_offload_desc">Save battery on supported audio.</string>
+    <string name="blur_settings_paused_perf_mode">Blur effects are paused while Performance Mode is enabled.</string>
     <string name="settings_saavn_hq_title">JioSaavn HQ Streaming</string>
     <string name="settings_saavn_hq_desc">Stream up to 320 kbps AAC via JioSaavn. When off, uses Lossless or YouTube Opus.</string>
     <string name="settings_cache_liked_songs_title">Cache liked songs manually</string>
@@ -303,7 +304,7 @@
     <string name="settings_recommendations_section">Recommendations &amp; YouTube Content</string>
     <string name="settings_content_customization_section">Content Customization</string>
     <string name="settings_filter_cover_lofi_title">Hide Covers &amp; Lo-fi</string>
-    <string name="settings_filter_cover_lofi_desc">Filter suggestions and queues.</string>
+    <string name="settings_filter_cover_lofi_desc">Exclude from recommendations and queues</string>
     <string name="settings_lossless_audio_sources_title">Lossless Music &amp; Sources</string>
     <string name="settings_lossless_streaming_sources_title">Lossless Streaming Sources</string>
     <string name="settings_lossless_streaming_sources_desc">Lossless music sources, addons, Apple Music, and streaming pools</string>

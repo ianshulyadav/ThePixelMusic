@@ -520,7 +520,7 @@ private fun WishSentStep(
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun CelebrationBadge(icon: ImageVector = Icons.Rounded.Cake) {
-    val performanceMode = SmartImageCache.performanceModeEnabled
+    val performanceMode = com.unshoo.pixelmusic.ui.theme.LocalPerformanceModeEnabled.current || SmartImageCache.performanceModeEnabled
     val rotation = if (performanceMode) null else {
         rememberInfiniteTransition(label = "birthday badge").animateFloat(
             initialValue = 0f,

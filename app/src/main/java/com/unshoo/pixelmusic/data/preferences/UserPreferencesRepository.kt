@@ -641,25 +641,6 @@ constructor(
     suspend fun setPerformanceModeEnabled(enabled: Boolean) {
         dataStore.edit { preferences ->
             preferences[PreferencesKeys.PERFORMANCE_MODE_ENABLED] = enabled
-            if (enabled) {
-                // Make the low-end toggle actually aggressive: reduce decoding, cache,
-                // full-player composition work, and background player CPU usage in one switch.
-                preferences[PreferencesKeys.AUDIO_OFFLOAD_ENABLED] = true
-                preferences[PreferencesKeys.ALBUM_ART_QUALITY] = AlbumArtQuality.LOW.name
-                preferences[PreferencesKeys.ALBUM_ART_QUALITY_MOBILE] = AlbumArtQuality.LOW.name
-                preferences[PreferencesKeys.ALBUM_ART_CACHE_LIMIT_MB] = 50
-                preferences[PreferencesKeys.FULL_PLAYER_SHOW_FILE_INFO] = false
-                preferences[PreferencesKeys.FULL_PLAYER_DELAY_ALBUM] = true
-                preferences[PreferencesKeys.FULL_PLAYER_DELAY_METADATA] = true
-                preferences[PreferencesKeys.FULL_PLAYER_DELAY_PROGRESS] = true
-                preferences[PreferencesKeys.FULL_PLAYER_DELAY_CONTROLS] = true
-                preferences[PreferencesKeys.FULL_PLAYER_PLACEHOLDERS] = true
-                preferences[PreferencesKeys.FULL_PLAYER_PLACEHOLDER_TRANSPARENT] = true
-                preferences[PreferencesKeys.FULL_PLAYER_PLACEHOLDERS_ON_CLOSE] = true
-                preferences[PreferencesKeys.FULL_PLAYER_SWITCH_ON_DRAG_RELEASE] = true
-                preferences[PreferencesKeys.FULL_PLAYER_DELAY_THRESHOLD] = 100
-                preferences[PreferencesKeys.FULL_PLAYER_CLOSE_THRESHOLD] = 10
-            }
         }
     }
 
@@ -1524,26 +1505,42 @@ constructor(
 
     val fullPlayerLoadingTweaksFlow: Flow<FullPlayerLoadingTweaks> = dataStore.data
         .map { preferences ->
+            val performanceMode = preferences[PreferencesKeys.PERFORMANCE_MODE_ENABLED] ?: false
             val delayAlbum = preferences[PreferencesKeys.FULL_PLAYER_DELAY_ALBUM] ?: true
             val delayMetadata = preferences[PreferencesKeys.FULL_PLAYER_DELAY_METADATA] ?: true
             val delayProgress = preferences[PreferencesKeys.FULL_PLAYER_DELAY_PROGRESS] ?: true
             val delayControls = preferences[PreferencesKeys.FULL_PLAYER_DELAY_CONTROLS] ?: true
 
-            val delayAll = delayAlbum && delayMetadata && delayProgress && delayControls
-
-            FullPlayerLoadingTweaks(
-                delayAll = delayAll,
-                delayAlbumCarousel = delayAlbum,
-                delaySongMetadata = delayMetadata,
-                delayProgressBar = delayProgress,
-                delayControls = delayControls,
-                showPlaceholders = preferences[PreferencesKeys.FULL_PLAYER_PLACEHOLDERS] ?: true,
-                transparentPlaceholders = preferences[PreferencesKeys.FULL_PLAYER_PLACEHOLDER_TRANSPARENT] ?: false,
-                applyPlaceholdersOnClose = preferences[PreferencesKeys.FULL_PLAYER_PLACEHOLDERS_ON_CLOSE] ?: false,
-                switchOnDragRelease = preferences[PreferencesKeys.FULL_PLAYER_SWITCH_ON_DRAG_RELEASE] ?: true,
-                contentAppearThresholdPercent = preferences[PreferencesKeys.FULL_PLAYER_DELAY_THRESHOLD] ?: 98,
-                contentCloseThresholdPercent = preferences[PreferencesKeys.FULL_PLAYER_CLOSE_THRESHOLD] ?: 0
-            )
+            if (performanceMode) {
+                FullPlayerLoadingTweaks(
+                    delayAll = true,
+                    delayAlbumCarousel = true,
+                    delaySongMetadata = true,
+                    delayProgressBar = true,
+                    delayControls = true,
+                    showPlaceholders = true,
+                    transparentPlaceholders = true,
+                    applyPlaceholdersOnClose = true,
+                    switchOnDragRelease = true,
+                    contentAppearThresholdPercent = 100,
+                    contentCloseThresholdPercent = 10
+                )
+            } else {
+                val delayAll = delayAlbum && delayMetadata && delayProgress && delayControls
+                FullPlayerLoadingTweaks(
+                    delayAll = delayAll,
+                    delayAlbumCarousel = delayAlbum,
+                    delaySongMetadata = delayMetadata,
+                    delayProgressBar = delayProgress,
+                    delayControls = delayControls,
+                    showPlaceholders = preferences[PreferencesKeys.FULL_PLAYER_PLACEHOLDERS] ?: true,
+                    transparentPlaceholders = preferences[PreferencesKeys.FULL_PLAYER_PLACEHOLDER_TRANSPARENT] ?: false,
+                    applyPlaceholdersOnClose = preferences[PreferencesKeys.FULL_PLAYER_PLACEHOLDERS_ON_CLOSE] ?: false,
+                    switchOnDragRelease = preferences[PreferencesKeys.FULL_PLAYER_SWITCH_ON_DRAG_RELEASE] ?: true,
+                    contentAppearThresholdPercent = preferences[PreferencesKeys.FULL_PLAYER_DELAY_THRESHOLD] ?: 98,
+                    contentCloseThresholdPercent = preferences[PreferencesKeys.FULL_PLAYER_CLOSE_THRESHOLD] ?: 0
+                )
+            }
         }
 
     val favoriteSongIdsFlow: Flow<Set<String>> =

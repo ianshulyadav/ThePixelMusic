@@ -268,10 +268,11 @@
     <string name="settings_kanji_dict_error">Nedlasting mislyktes: %1$s</string>
     <string name="settings_kanji_dict_default_desc">Innebygd 0-MB kana-translitterasjon aktiv. Last ned full kanji-ordbok ved behov (~13 MB)</string>
     <string name="settings_perf_battery_section">Ytelse og batteri</string>
-    <string name="settings_perf_mode_title">Ytelsesmodus (Lav ytelse og batterisparing)</string>
-    <string name="settings_perf_mode_desc">Reduserer animasjoner og uskarphet for å spare strøm og holde appen rask.</string>
+    <string name="settings_perf_mode_title">Ytelsesmodus</string>
+    <string name="settings_perf_mode_desc">Slår av uskarphet, tunge animasjoner og HD-omslag</string>
     <string name="settings_hardware_audio_offload_title">Maskinvare-lydavlastning</string>
     <string name="settings_hardware_audio_offload_desc">Bruk maskinvare-DSP til lyddekoding for å spare batteri under avspilling.</string>
+    <string name="blur_settings_paused_perf_mode">Uskarphetseffekter er satt på pause i ytelsesmodus.</string>
     <string name="settings_saavn_hq_title">JioSaavn HQ-strømming</string>
     <string name="settings_saavn_hq_desc">Strøm opptil 320 kbps AAC via JioSaavn. Avslått bruker Lossless eller YouTube Opus.</string>
     <string name="settings_cache_liked_songs_title">Mellomlagre likte sanger manuelt</string>
@@ -287,7 +288,7 @@
     <string name="settings_recommendations_section">Anbefalinger og YouTube-innhold</string>
     <string name="settings_content_customization_section">Tilpassing av innhold</string>
     <string name="settings_filter_cover_lofi_title">Skjul cover- og lo-fi-sanger</string>
-    <string name="settings_filter_cover_lofi_desc">Skjul covere og lo-fi-spor fra anbefalinger og køer.</string>
+    <string name="settings_filter_cover_lofi_desc">Utelat fra anbefalinger og køer</string>
     <string name="settings_lossless_audio_sources_title">Tapsfrie lydkilder</string>
     <string name="settings_lossless_streaming_sources_title">Tapsfrie strømmekilder</string>
     <string name="settings_lossless_streaming_sources_desc">Tidal, Qobuz, Deezer, Apple Music via Archive-pool og kontoer</string>

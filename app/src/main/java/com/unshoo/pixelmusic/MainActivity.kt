@@ -28,10 +28,13 @@ import androidx.annotation.DrawableRes
 import androidx.annotation.CallSuper
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -313,6 +316,10 @@ class MainActivity : ComponentActivity() {
             val playerThemePreference by themePreferencesRepository.playerThemePreferenceFlow.collectAsStateWithLifecycle(initialValue = ThemePreference.ALBUM_ART)
             val colorPalette by themePreferencesRepository.colorPalettePreferenceFlow.collectAsStateWithLifecycle(initialValue = "SAGE")
             val appFontMode by themePreferencesRepository.appFontModeFlow.collectAsStateWithLifecycle(initialValue = AppFontMode.APP_DEFAULT)
+            val performanceModeEnabled by userPreferencesRepository.performanceModeEnabledFlow.collectAsStateWithLifecycle(initialValue = false)
+            LaunchedEffect(performanceModeEnabled) {
+                com.unshoo.pixelmusic.presentation.components.SmartImageCache.performanceModeEnabled = performanceModeEnabled
+            }
             val dynamicColorEnabled = colorPalette == "DYNAMIC" || playerThemePreference == ThemePreference.DYNAMIC
             val isSetupComplete by mainViewModel.isSetupComplete.collectAsStateWithLifecycle()
             
@@ -373,12 +380,13 @@ class MainActivity : ComponentActivity() {
                 dynamicColor = dynamicColorEnabled,
                 colorPalette = colorPalette,
                 useSystemFont = (appFontMode == AppFontMode.SYSTEM),
-                pitchBlack = (useDarkTheme && pitchBlackEnabled)
+                pitchBlack = (useDarkTheme && pitchBlackEnabled),
+                performanceMode = performanceModeEnabled
             ) {
                 var contentVisible by remember { mutableStateOf(false) }
                 val contentAlpha by animateFloatAsState(
                     targetValue = if (contentVisible) 1f else 0f,
-                    animationSpec = tween(150, easing = LinearOutSlowInEasing),
+                    animationSpec = if (performanceModeEnabled) snap() else tween(150, easing = LinearOutSlowInEasing),
                     label = "AppContentAlpha"
                 )
 
@@ -410,7 +418,9 @@ class MainActivity : ComponentActivity() {
                         AnimatedContent(
                             targetState = showSetupScreen,
                             transitionSpec = {
-                                if (targetState) {
+                                if (performanceModeEnabled) {
+                                    EnterTransition.None togetherWith ExitTransition.None
+                                } else if (targetState) {
                                     // Transition to Setup
                                     fadeIn(animationSpec = tween(400)) togetherWith fadeOut(animationSpec = tween(400))
                                 } else {
@@ -919,9 +929,10 @@ class MainActivity : ComponentActivity() {
         val navBarCornerRadius = sanitizeNavBarCornerRadius(navBarCornerRadiusRaw)
         val isMiniPlayerDismissing by playerViewModel.isMiniPlayerDismissing.collectAsStateWithLifecycle()
         val hapticsEnabled by playerViewModel.hapticsEnabled.collectAsStateWithLifecycle()
+        val performanceModeEnabled = com.unshoo.pixelmusic.ui.theme.LocalPerformanceModeEnabled.current
         val useBlurEffects by playerViewModel.useBlurEffects.collectAsStateWithLifecycle()
         val playerExpansionBlurEnabled by playerViewModel.playerExpansionBlurEnabled.collectAsStateWithLifecycle(initialValue = true)
-        val isPlayerExpansionBlurActive = useBlurEffects && playerExpansionBlurEnabled
+        val isPlayerExpansionBlurActive = !performanceModeEnabled && useBlurEffects && playerExpansionBlurEnabled
         val rootView = LocalView.current
         // Jank diagnostics: JankStats (wired up in onResume, below) already flags dropped
         // frames but had no way to say *where* — every log line just said "frame drop
@@ -963,7 +974,7 @@ class MainActivity : ComponentActivity() {
         }
         val animatedBottomBarPadding by animateDpAsState(
             targetValue = targetBottomBarPadding,
-            animationSpec = tween(400),
+            animationSpec = if (performanceModeEnabled) snap() else tween(400),
             label = "BottomBarPadding"
         )
         val bottomBarPadding = animatedBottomBarPadding
@@ -986,13 +997,13 @@ class MainActivity : ComponentActivity() {
         val navBarTargetVisible = isNavBarMounted && !shouldHideNavigationBar
         val navBarVisibilityProgress by animateFloatAsState(
             targetValue = if (navBarTargetVisible) 1f else 0f,
-            animationSpec = if (navBarTargetVisible) {
-                spring(
+            animationSpec = when {
+                performanceModeEnabled -> snap()
+                navBarTargetVisible -> spring(
                     dampingRatio = Spring.DampingRatioNoBouncy,
                     stiffness = Spring.StiffnessMediumLow
                 )
-            } else {
-                tween(durationMillis = 150, easing = LinearOutSlowInEasing)
+                else -> tween(durationMillis = 150, easing = LinearOutSlowInEasing)
             },
             label = "NavBarVisibilityProgress"
         )
@@ -1082,7 +1093,7 @@ class MainActivity : ComponentActivity() {
             key = com.unshoo.pixelmusic.presentation.components.UiEffectPreferenceKeys.NAV_BAR_FROSTED_BLUR,
             default = false
         )
-        val navBarFrostedBlur = useBlurEffects && navBarFrostedBlurPreference
+        val navBarFrostedBlur = !performanceModeEnabled && useBlurEffects && navBarFrostedBlurPreference
         val mainBackdropSource = com.unshoo.pixelmusic.presentation.components.rememberBackdropSource()
 
         CompositionLocalProvider(

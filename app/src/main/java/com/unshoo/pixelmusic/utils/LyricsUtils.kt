@@ -1230,17 +1230,23 @@ fun BubblesLine(
 ) {
     val position by positionFlow.collectAsStateWithLifecycle(initialValue = 0L)
     val isCurrent = position in time until nextTime
-    val transition = rememberInfiniteTransition(label = "bubbles_transition")
+    val performanceModeEnabled = com.unshoo.pixelmusic.ui.theme.LocalPerformanceModeEnabled.current
+    val animatedValue = if (performanceModeEnabled) {
+        0.125f
+    } else {
+        val transition = rememberInfiniteTransition(label = "bubbles_transition")
 
-    // Animación ralentizada para apreciar mejor el efecto.
-    val animatedValue by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 3500, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ), label = "bubble_animation_progress"
-    )
+        // Animación ralentizada para apreciar mejor el efecto.
+        val animated by transition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 3500, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart
+            ), label = "bubble_animation_progress"
+        )
+        animated
+    }
 
     var show by remember { mutableStateOf(false) }
     LaunchedEffect(isCurrent) {

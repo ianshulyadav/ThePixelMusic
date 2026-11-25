@@ -268,10 +268,11 @@
     <string name="settings_kanji_dict_error">下载失败：%1$s</string>
     <string name="settings_kanji_dict_default_desc">内置 0-MB 假名音译已启用。按需下载完整汉字词典 (~13 MB)</string>
     <string name="settings_perf_battery_section">性能与电池</string>
-    <string name="settings_perf_mode_title">性能模式（低配设备与省电）</string>
-    <string name="settings_perf_mode_desc">减少动画和模糊效果，以保持应用流畅并节省电量。</string>
+    <string name="settings_perf_mode_title">性能模式</string>
+    <string name="settings_perf_mode_desc">关闭模糊效果、高负载动画与高清封面</string>
     <string name="settings_hardware_audio_offload_title">硬件音频卸载</string>
     <string name="settings_hardware_audio_offload_desc">使用硬件 DSP 进行音频解码以在播放时节省电量。</string>
+    <string name="blur_settings_paused_perf_mode">开启性能模式期间将暂停模糊效果。</string>
     <string name="settings_saavn_hq_title">JioSaavn 高品质流媒体</string>
     <string name="settings_saavn_hq_desc">通过 JioSaavn 流式播放高达 320 kbps AAC。关闭时使用无损或 YouTube Opus。</string>
     <string name="settings_cache_liked_songs_title">手动缓存喜欢的歌曲</string>
@@ -287,7 +288,7 @@
     <string name="settings_recommendations_section">推荐与 YouTube 内容</string>
     <string name="settings_content_customization_section">内容自定义</string>
     <string name="settings_filter_cover_lofi_title">隐藏翻唱和 Lo-Fi 曲目</string>
-    <string name="settings_filter_cover_lofi_desc">从推荐和队列中隐藏翻唱和低保真 (Lo-Fi) 歌曲。</string>
+    <string name="settings_filter_cover_lofi_desc">从推荐和队列中排除</string>
     <string name="settings_lossless_audio_sources_title">无损音频源</string>
     <string name="settings_lossless_streaming_sources_title">无损流媒体源</string>
     <string name="settings_lossless_streaming_sources_desc">通过 Archive 共享池和账户使用 Tidal、Qobuz、Deezer、Apple Music</string>

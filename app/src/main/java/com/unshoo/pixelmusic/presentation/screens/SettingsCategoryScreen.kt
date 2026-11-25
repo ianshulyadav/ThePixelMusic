@@ -97,8 +97,6 @@ import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ChevronRight
-import androidx.compose.material.icons.rounded.Cake
-import androidx.compose.material.icons.rounded.Campaign
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.Delete
@@ -264,27 +262,6 @@ fun SettingsCategoryScreen(
     var showClearLyricsDialog by remember(categoryId) { mutableStateOf(false) }
     var showRebuildDatabaseWarning by remember(categoryId) { mutableStateOf(false) }
     var showRegenerateDailyMixDialog by remember(categoryId) { mutableStateOf(false) }
-    var showBirthdaySurprisePreview by remember(categoryId) { mutableStateOf(false) }
-    if (showBirthdaySurprisePreview) {
-        com.unshoo.pixelmusic.presentation.components.BirthdaySurpriseDialog(
-            onDismiss = { showBirthdaySurprisePreview = false },
-        )
-    }
-    var showAnnouncementPreview by remember(categoryId) { mutableStateOf(false) }
-    if (showAnnouncementPreview) {
-        com.unshoo.pixelmusic.presentation.components.AppAnnouncementDialog(
-            announcement = com.unshoo.pixelmusic.data.github.AppAnnouncement(
-                id = "preview",
-                title = stringResource(R.string.setcat_announcement_preview_sample_title),
-                message = stringResource(R.string.setcat_announcement_preview_sample_message),
-                buttonLabel = stringResource(R.string.setcat_announcement_preview_sample_button),
-                buttonUrl = "https://www.pixelmusic.me",
-                until = null,
-                publishedAt = System.currentTimeMillis() - 2 * 60 * 60 * 1000L,
-            ),
-            onDismiss = { showAnnouncementPreview = false },
-        )
-    }
     var showRegenerateStatsDialog by remember(categoryId) { mutableStateOf(false) }
     var showProxyDialog by remember(categoryId) { mutableStateOf(false) }
     var editProxyEnabled by remember(categoryId, showProxyDialog) { mutableStateOf(uiState.proxyEnabled) }
@@ -1237,18 +1214,6 @@ fun SettingsCategoryScreen(
                                     },
                                     leadingIcon = { Icon(painterResource(R.drawable.rounded_all_inclusive_24), null, tint = MaterialTheme.colorScheme.secondary) }
                                 )
-                                if (com.unshoo.pixelmusic.utils.OemBackgroundSettings.showBackgroundActivitySetting) {
-                                    SettingsItem(
-                                        title = stringResource(R.string.setcat_oem_background_title),
-                                        subtitle = stringResource(R.string.setcat_oem_background_subtitle),
-                                        onClick = {
-                                            if (!com.unshoo.pixelmusic.utils.OemBackgroundSettings.open(context)) {
-                                                Toast.makeText(context, context.getString(R.string.toast_oem_background_unavailable), Toast.LENGTH_LONG).show()
-                                            }
-                                        },
-                                        leadingIcon = { Icon(Icons.Outlined.BatteryChargingFull, null, tint = MaterialTheme.colorScheme.secondary) }
-                                    )
-                                }
                             }
 
                             SettingsSubsection(title = stringResource(R.string.setcat_replaygain_section)) {
@@ -1844,26 +1809,6 @@ fun SettingsCategoryScreen(
                                     leadingIcon = { Icon(Icons.Rounded.Science, null, tint = MaterialTheme.colorScheme.tertiary) },
                                     onClick = {
                                         settingsViewModel.resetSetupFlow()
-                                    }
-                                )
-                                SettingsItem(
-                                    title = stringResource(R.string.setcat_birthday_preview_title),
-                                    subtitle = stringResource(R.string.setcat_birthday_preview_subtitle),
-                                    leadingIcon = { Icon(Icons.Rounded.Cake, null, tint = MaterialTheme.colorScheme.tertiary) },
-                                    onClick = { showBirthdaySurprisePreview = true }
-                                )
-                                SettingsItem(
-                                    title = stringResource(R.string.setcat_announcement_preview_title),
-                                    subtitle = stringResource(R.string.setcat_announcement_preview_subtitle),
-                                    leadingIcon = { Icon(Icons.Rounded.Campaign, null, tint = MaterialTheme.colorScheme.primary) },
-                                    onClick = { showAnnouncementPreview = true }
-                                )
-                                SettingsItem(
-                                    title = stringResource(R.string.setcat_announcement_check_title),
-                                    subtitle = stringResource(R.string.setcat_announcement_check_subtitle),
-                                    leadingIcon = { Icon(Icons.Rounded.Campaign, null, tint = MaterialTheme.colorScheme.tertiary) },
-                                    onClick = {
-                                        com.unshoo.pixelmusic.data.announcement.AnnouncementCheckWorker.runNowForTesting(context)
                                     }
                                 )
                             }

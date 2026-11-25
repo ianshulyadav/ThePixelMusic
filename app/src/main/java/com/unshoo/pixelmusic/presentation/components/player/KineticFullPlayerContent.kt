@@ -291,10 +291,13 @@ private fun KineticIconButton(
 @Composable
 private fun KineticArtwork(song: Song, isPlaying: Boolean, modifier: Modifier = Modifier) {
     val scheme = LocalMaterialTheme.current
+    val performanceModeEnabled = com.unshoo.pixelmusic.ui.theme.LocalPerformanceModeEnabled.current
     val shapeColor = scheme.secondaryContainer
     val rotation = remember { Animatable(0f) }
-    LaunchedEffect(isPlaying) {
-        if (isPlaying) {
+    LaunchedEffect(isPlaying, performanceModeEnabled) {
+        if (performanceModeEnabled) {
+            rotation.stop()
+        } else if (isPlaying) {
             while (true) {
                 val start = rotation.value % 360f
                 rotation.snapTo(start)
@@ -318,14 +321,18 @@ private fun KineticArtwork(song: Song, isPlaying: Boolean, modifier: Modifier = 
     var artFailed by remember(currentArt) { mutableStateOf(currentArt.isNullOrBlank()) }
     val firstReveal = settledArt == null
     val fadeIn = remember(currentArt) { Animatable(if (currentArt != null && currentArt == settledArt) 1f else 0f) }
-    LaunchedEffect(currentArt, artLoaded, artFailed) {
+    LaunchedEffect(currentArt, artLoaded, artFailed, performanceModeEnabled) {
         when {
             artLoaded -> {
-                fadeIn.animateTo(
-                    1f,
-                    if (firstReveal) spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessLow)
-                    else tween(durationMillis = 320, easing = LinearEasing)
-                )
+                if (performanceModeEnabled) {
+                    fadeIn.snapTo(1f)
+                } else {
+                    fadeIn.animateTo(
+                        1f,
+                        if (firstReveal) spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessLow)
+                        else tween(durationMillis = 320, easing = LinearEasing)
+                    )
+                }
                 settledArt = currentArt
             }
             artFailed -> settledArt = null
@@ -333,7 +340,7 @@ private fun KineticArtwork(song: Song, isPlaying: Boolean, modifier: Modifier = 
     }
     val playScale by animateFloatAsState(
         targetValue = if (isPlaying) 1f else 0.95f,
-        animationSpec = tween(420),
+        animationSpec = if (performanceModeEnabled) androidx.compose.animation.core.snap() else tween(420),
         label = "kineticArtScale"
     )
     val artShape = RoundedCornerShape(28.dp)

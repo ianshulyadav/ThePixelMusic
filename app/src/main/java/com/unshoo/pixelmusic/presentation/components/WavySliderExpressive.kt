@@ -120,7 +120,7 @@ fun WavySliderExpressive(
         label = "ThumbInteractionAnim"
     )
     val animatedAmplitude by animateFloatAsState(
-        targetValue = if (enabled && isPlaying && !isInteracting) 1f else 0f,
+        targetValue = if (enabled && isPlaying && !isInteracting && !performanceModeEnabled) 1f else 0f,
         animationSpec = ProgressIndicatorDefaults.ProgressAnimationSpec,
         label = "amplitude"
     )
@@ -130,9 +130,9 @@ fun WavySliderExpressive(
     // This preserves smooth visuals while avoiding high-frequency recompositions.
     val renderedNormalizedProgress = remember { mutableFloatStateOf(normalizedValue) }
     var lastProgressUpdateNanos by remember { mutableLongStateOf(0L) }
-    LaunchedEffect(normalizedValue, isInteracting, enabled) {
+    LaunchedEffect(normalizedValue, isInteracting, enabled, performanceModeEnabled) {
         val target = normalizedValue.coerceIn(0f, 1f)
-        if (!enabled || isInteracting) {
+        if (!enabled || isInteracting || performanceModeEnabled) {
             renderedNormalizedProgress.floatValue = target
             lastProgressUpdateNanos = System.nanoTime()
             return@LaunchedEffect

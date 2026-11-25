@@ -1817,6 +1817,12 @@ class PlayerViewModel @Inject constructor(
 
     private val _playbackAudioMetadata = MutableStateFlow(PlaybackAudioMetadata())
     val playbackAudioMetadata: StateFlow<PlaybackAudioMetadata> = _playbackAudioMetadata.asStateFlow()
+    val performanceModeEnabled: StateFlow<Boolean> = userPreferencesRepository.performanceModeEnabledFlow
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = false
+        )
     val activeDecoderInfo: StateFlow<ActiveDecoderInfo?> = dualPlayerEngine.activeDecoderInfo
     val hiFiModeEnabled: StateFlow<Boolean> = dualPlayerEngine.hiFiModeEnabledState
 
@@ -2017,7 +2023,8 @@ class PlayerViewModel @Inject constructor(
         val playerThemePreference: String = ThemePreference.ALBUM_ART,
         val playerBackgroundStyle: String = PlayerBackgroundStyle.GRADIENT,
         val useBlurEffects: Boolean = false,
-        val nowPlayingBlurEnabled: Boolean = false
+        val nowPlayingBlurEnabled: Boolean = false,
+        val performanceModeEnabled: Boolean = false
     )
 
     private val playerConfigSlicePart1 = combine(
@@ -2042,8 +2049,9 @@ class PlayerViewModel @Inject constructor(
         playerConfigSlicePart1,
         useSmoothCorners,
         playerThemePreference,
-        combine(playerBackgroundStyle, useBlurEffects, nowPlayingBlurEnabled) { bg, blur, npBlur -> Triple(bg, blur, npBlur) }
-    ) { p1, smoothCorners, themePref, blurConfig ->
+        combine(playerBackgroundStyle, useBlurEffects, nowPlayingBlurEnabled) { bg, blur, npBlur -> Triple(bg, blur, npBlur) },
+        performanceModeEnabled
+    ) { p1, smoothCorners, themePref, blurConfig, perfMode ->
         PlayerConfigSlice(
             navBarCornerRadius = p1.navBarCornerRadius,
             navBarStyle = p1.navBarStyle,
@@ -2053,8 +2061,9 @@ class PlayerViewModel @Inject constructor(
             useSmoothCorners = smoothCorners,
             playerThemePreference = themePref,
             playerBackgroundStyle = blurConfig.first,
-            useBlurEffects = blurConfig.second,
-            nowPlayingBlurEnabled = blurConfig.third
+            useBlurEffects = blurConfig.second && !perfMode,
+            nowPlayingBlurEnabled = blurConfig.third && !perfMode,
+            performanceModeEnabled = perfMode
         )
     }
         .distinctUntilChanged()

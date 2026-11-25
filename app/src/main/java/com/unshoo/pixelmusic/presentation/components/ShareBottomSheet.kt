@@ -153,10 +153,11 @@ fun ShareBottomSheet(
     val albumColorSchemeState by themeStateHolder.getAlbumColorSchemeFlow(song.albumArtUriString.orEmpty()).collectAsStateWithLifecycle(initialValue = null)
     val userPreferencesRepository = remember(entryPoint) { entryPoint.userPreferencesRepository() }
     val useBlurEffects by userPreferencesRepository.effectiveBlurEffectsFlow.collectAsStateWithLifecycle(initialValue = false)
+    val performanceModeEnabled = com.unshoo.pixelmusic.ui.theme.LocalPerformanceModeEnabled.current
     val storyCardBlurEnabled by userPreferencesRepository.storyCardBlurEnabledFlow.collectAsStateWithLifecycle(initialValue = true)
-    val isStoryCardBlurActive = useBlurEffects && storyCardBlurEnabled
+    val isStoryCardBlurActive = !performanceModeEnabled && useBlurEffects && storyCardBlurEnabled
     val bottomSheetBlurEnabled by userPreferencesRepository.bottomSheetBlurEnabledFlow.collectAsStateWithLifecycle(initialValue = true)
-    val isBottomSheetBlurActive = useBlurEffects && bottomSheetBlurEnabled
+    val isBottomSheetBlurActive = !performanceModeEnabled && useBlurEffects && bottomSheetBlurEnabled
 
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
@@ -658,7 +659,7 @@ fun ShareBottomSheet(
                                                 modifier = Modifier
                                                     .fillMaxSize()
                                                     .then(
-                                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                                        if (!performanceModeEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                                                             Modifier.blur(10.dp)
                                                         } else Modifier
                                                     )
@@ -1052,7 +1053,7 @@ private fun ShareableCard(
                                 alpha = 0.90f
                             }
                             .then(
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                if (!com.unshoo.pixelmusic.ui.theme.LocalPerformanceModeEnabled.current && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                                     Modifier.blur(14.dp)
                                 } else {
                                     Modifier

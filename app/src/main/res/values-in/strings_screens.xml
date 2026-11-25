@@ -266,10 +266,11 @@
     <string name="settings_kanji_dict_error">Pengunduhan gagal: %1$s</string>
     <string name="settings_kanji_dict_default_desc">Transliterasi Kana bawaan 0-MB aktif. Unduh kamus Kanji lengkap sesuai permintaan (~13 MB)</string>
     <string name="settings_perf_battery_section">Performa &amp; Baterai</string>
-    <string name="settings_perf_mode_title">Mode Performa (Hemat Baterai &amp; Perangkat Spesifikasi Rendah)</string>
-    <string name="settings_perf_mode_desc">Kurangi animasi dan blur agar aplikasi tetap lancar dan hemat baterai.</string>
+    <string name="settings_perf_mode_title">Mode Performa</string>
+    <string name="settings_perf_mode_desc">Menonaktifkan blur, animasi berat, dan sampul resolusi tinggi</string>
     <string name="settings_hardware_audio_offload_title">Offload Audio Perangkat Keras</string>
     <string name="settings_hardware_audio_offload_desc">Gunakan DSP perangkat keras untuk dekode audio demi menghemat baterai.</string>
+    <string name="blur_settings_paused_perf_mode">Efek blur dijeda saat Mode Performa aktif.</string>
     <string name="settings_saavn_hq_title">Streaming JioSaavn Kualitas Tinggi</string>
     <string name="settings_saavn_hq_desc">Stream hingga 320 kbps AAC via JioSaavn. Jika mati, pakai Lossless atau YouTube Opus.</string>
     <string name="settings_cache_liked_songs_title">Cache lagu yang disukai secara manual</string>
@@ -285,7 +286,7 @@
     <string name="settings_recommendations_section">Rekomendasi &amp; Konten YouTube</string>
     <string name="settings_content_customization_section">Kustomisasi Konten</string>
     <string name="settings_filter_cover_lofi_title">Sembunyikan lagu cover dan lo-fi</string>
-    <string name="settings_filter_cover_lofi_desc">Sembunyikan lagu cover dan lo-fi dari rekomendasi dan antrean.</string>
+    <string name="settings_filter_cover_lofi_desc">Kecualikan dari rekomendasi dan antrean</string>
     <string name="settings_lossless_audio_sources_title">Sumber Audio Lossless</string>
     <string name="settings_lossless_streaming_sources_title">Sumber Streaming Lossless</string>
     <string name="settings_lossless_streaming_sources_desc">Tidal, Qobuz, Deezer, Apple Music melalui pool &amp; akun Archive</string>

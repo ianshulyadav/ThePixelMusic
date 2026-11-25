@@ -6,6 +6,10 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.os.Build
+import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.SpringSpec
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -30,6 +34,30 @@ import androidx.core.graphics.ColorUtils
 import com.unshoo.pixelmusic.presentation.viewmodel.ColorSchemePair
 
 val LocalPixelMusicDarkTheme = staticCompositionLocalOf { false }
+val LocalPerformanceModeEnabled = staticCompositionLocalOf { false }
+
+/**
+ * Critically-damped ultra-stiff SpringSpec motion scheme for Performance Mode.
+ * Uses [SpringSpec] (never SnapSpec) because Material3 1.5 expressive components
+ * such as FloatingActionButtonMenu cast motionScheme specs to SpringSpec.
+ */
+@ExperimentalMaterial3ExpressiveApi
+private object PerformanceMotionScheme : MotionScheme {
+    private val settledSpring: SpringSpec<Any> = spring(
+        dampingRatio = Spring.DampingRatioNoBouncy,
+        stiffness = 50_000f
+    )
+
+    @Suppress("UNCHECKED_CAST")
+    private fun <T> settledSpec(): FiniteAnimationSpec<T> = settledSpring as FiniteAnimationSpec<T>
+
+    override fun <T> defaultSpatialSpec(): FiniteAnimationSpec<T> = settledSpec()
+    override fun <T> fastSpatialSpec(): FiniteAnimationSpec<T> = settledSpec()
+    override fun <T> slowSpatialSpec(): FiniteAnimationSpec<T> = settledSpec()
+    override fun <T> defaultEffectsSpec(): FiniteAnimationSpec<T> = settledSpec()
+    override fun <T> fastEffectsSpec(): FiniteAnimationSpec<T> = settledSpec()
+    override fun <T> slowEffectsSpec(): FiniteAnimationSpec<T> = settledSpec()
+}
 
 internal tailrec fun Context.findActivity(): Activity? = when (this) {
     is Activity -> this
@@ -628,6 +656,7 @@ fun PixelMusicTheme(
     colorPalette: String = "SAGE",
     useSystemFont: Boolean = false,
     pitchBlack: Boolean = false,
+    performanceMode: Boolean = false,
     content: @Composable () -> Unit
 ) {
     // BUGFIX (was: side-effect on every recomposition): the previous code
@@ -698,12 +727,15 @@ fun PixelMusicTheme(
         navigationColor = finalColorScheme.background
     )
 
-    CompositionLocalProvider(LocalPixelMusicDarkTheme provides darkTheme) {
+    CompositionLocalProvider(
+        LocalPixelMusicDarkTheme provides darkTheme,
+        LocalPerformanceModeEnabled provides performanceMode
+    ) {
         androidx.compose.material3.MaterialExpressiveTheme(
             colorScheme = finalColorScheme,
             typography = Typography,
             shapes = Shapes,
-            motionScheme = MotionScheme.expressive(),
+            motionScheme = if (performanceMode) PerformanceMotionScheme else MotionScheme.expressive(),
             content = content
         )
     }
@@ -744,6 +776,7 @@ fun MaterialExpressiveTheme(
     colorPalette: String = "SAGE",
     useSystemFont: Boolean = false,
     pitchBlack: Boolean = false,
+    performanceMode: Boolean = false,
     content: @Composable () -> Unit
 ) {
     PixelMusicTheme(

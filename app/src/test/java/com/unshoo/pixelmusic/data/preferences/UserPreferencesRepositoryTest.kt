@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
@@ -97,6 +98,52 @@ class UserPreferencesRepositoryTest {
                 clearExisting = false
             )
             assertEquals(MIN_NAV_BAR_CORNER_RADIUS, repository.navBarCornerRadiusFlow.first())
+        } finally {
+            tempDir.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `setPerformanceModeEnabled preserves unrelated preferences and dynamically overrides loading tweaks`() = runTest {
+        val tempDir = Files.createTempDirectory("user-preferences-repository-test")
+        try {
+            val repository = UserPreferencesRepository(
+                dataStore = PreferenceDataStoreFactory.create(
+                    scope = backgroundScope,
+                    produceFile = { tempDir.resolve("settings.preferences_pb").toFile() }
+                ),
+                json = Json
+            )
+
+            repository.setAudioOffloadEnabled(false)
+            repository.setAlbumArtQuality(AlbumArtQuality.HIGH)
+            repository.setAlbumArtCacheLimitMb(300)
+            repository.setShowPlayerFileInfo(true)
+
+            val baselineTweaks = repository.fullPlayerLoadingTweaksFlow.first()
+            assertEquals(98, baselineTweaks.contentAppearThresholdPercent)
+            assertEquals(0, baselineTweaks.contentCloseThresholdPercent)
+
+            repository.setPerformanceModeEnabled(true)
+
+            assertTrue(repository.performanceModeEnabledFlow.first())
+            // User's unrelated saved preferences stay untouched
+            assertFalse(repository.audioOffloadEnabledFlow.first())
+            assertEquals(AlbumArtQuality.HIGH, repository.albumArtQualityFlow.first())
+            assertEquals(300, repository.albumArtCacheLimitMbFlow.first())
+            assertTrue(repository.showPlayerFileInfoFlow.first())
+
+            // Deferred loading tweaks dynamically engage while Performance Mode is on
+            val perfTweaks = repository.fullPlayerLoadingTweaksFlow.first()
+            assertTrue(perfTweaks.delayAll)
+            assertTrue(perfTweaks.transparentPlaceholders)
+            assertEquals(100, perfTweaks.contentAppearThresholdPercent)
+            assertEquals(10, perfTweaks.contentCloseThresholdPercent)
+
+            // Disabling restores the user's saved baseline tweaks cleanly
+            repository.setPerformanceModeEnabled(false)
+            assertFalse(repository.performanceModeEnabledFlow.first())
+            assertEquals(baselineTweaks, repository.fullPlayerLoadingTweaksFlow.first())
         } finally {
             tempDir.toFile().deleteRecursively()
         }

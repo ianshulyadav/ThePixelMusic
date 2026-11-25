@@ -290,11 +290,15 @@ class PixelMusicApplication : Application(), ImageLoaderFactory, Configuration.P
             }
 
             AlbumArtUtils.migrateLegacyCacheLocation(this@PixelMusicApplication)
-            val savedLimit = runCatching {
-                prefs.albumArtCacheLimitMbFlow.first()
-            }.getOrNull()
-            if (savedLimit != null) {
-                AlbumArtCacheManager.configuredCacheLimitMb = savedLimit.toLong()
+            startupScope.launch {
+                kotlinx.coroutines.flow.combine(
+                    prefs.albumArtCacheLimitMbFlow,
+                    prefs.performanceModeEnabledFlow
+                ) { savedLimit, performanceMode ->
+                    if (performanceMode) minOf(savedLimit, 50).toLong() else savedLimit.toLong()
+                }.collect { effectiveLimitMb ->
+                    AlbumArtCacheManager.configuredCacheLimitMb = effectiveLimitMb
+                }
             }
 
             com.unshoo.pixelmusic.utils.JapaneseDictionaryManager.initAtAppStart(this@PixelMusicApplication)

@@ -50,17 +50,19 @@ fun AlbumArtCollage(
     onSongClick: (Song) -> Unit,
 ) {
     val context = LocalContext.current
+    val performanceModeEnabled = com.unshoo.pixelmusic.ui.theme.LocalPerformanceModeEnabled.current || SmartImageCache.performanceModeEnabled
     val songsToShow = remember(songs) {
         (songs.take(6) + List(6 - songs.size.coerceAtMost(6)) { null }).toImmutableList()
     }
 
-    val requests = remember(songsToShow) {
+    val requests = remember(songsToShow, performanceModeEnabled) {
         songsToShow.map { song ->
             song?.albumArtUriString?.let {
                 ImageRequest.Builder(context)
                     .data(it)
                     .dispatcher(Dispatchers.IO)
-                    .crossfade(true)
+                    .crossfade(!performanceModeEnabled)
+                    .apply { if (performanceModeEnabled) size(256, 256) }
                     //.placeholder(R.drawable.ic_music_placeholder)
                     .error(R.drawable.ic_music_placeholder)
                     .build()

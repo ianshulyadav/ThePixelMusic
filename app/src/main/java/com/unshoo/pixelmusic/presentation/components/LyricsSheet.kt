@@ -349,7 +349,8 @@ fun LyricsSheet(
     val performanceModeEnabledFlow = remember(context) {
         context.dataStore.data.map { it[booleanPreferencesKey("performance_mode_enabled")] ?: false }
     }
-    val performanceModeEnabled by performanceModeEnabledFlow.collectAsStateWithLifecycle(initialValue = false)
+    val performanceModeEnabledByPref by performanceModeEnabledFlow.collectAsStateWithLifecycle(initialValue = false)
+    val performanceModeEnabled = performanceModeEnabledByPref || com.unshoo.pixelmusic.ui.theme.LocalPerformanceModeEnabled.current
 
     val useAnimatedLyrics = animatedLyricsPreference && !performanceModeEnabled
 

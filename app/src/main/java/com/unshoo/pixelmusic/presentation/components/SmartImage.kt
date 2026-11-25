@@ -276,7 +276,7 @@ fun SmartImage(
             false
         }
 
-        val effectiveCrossfade = if (isThumbnail || isInMemoryCache || crossfadeDurationMillis <= 0) {
+        val effectiveCrossfade = if (performanceModeEnabled || isThumbnail || isInMemoryCache || crossfadeDurationMillis <= 0) {
             0
         } else {
             crossfadeDurationMillis

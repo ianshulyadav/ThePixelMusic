@@ -133,6 +133,21 @@ fun BlurSettingsScreen(
         ) {
             Spacer(modifier = Modifier.height(4.dp))
 
+            if (uiState.performanceModeEnabled) {
+                Surface(
+                    shape = RoundedCornerShape(18.dp),
+                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = stringResource(R.string.blur_settings_paused_perf_mode),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+                    )
+                }
+            }
+
             // ── 1. Master Switch Card (Use blur effects) ──────────────────────
             Surface(
                 shape = RoundedCornerShape(24.dp),
@@ -185,7 +200,7 @@ fun BlurSettingsScreen(
 
             // ── 3. Grouped Toggles ───────────────────────────────────────────
             val blurContentAlpha by animateFloatAsState(
-                targetValue = if (uiState.useBlurEffects) 1.0f else 0.45f,
+                targetValue = if (uiState.useBlurEffects && !uiState.performanceModeEnabled) 1.0f else 0.45f,
                 animationSpec = spring(),
                 label = "blur_content_alpha"
             )

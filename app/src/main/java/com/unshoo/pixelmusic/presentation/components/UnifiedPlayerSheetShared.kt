@@ -98,14 +98,19 @@ internal fun MiniPlayerContentInternal(
     // Album art with clean rounded corners
     val artShape = remember(cornerRadiusAlb) { RoundedCornerShape(cornerRadiusAlb) }
 
+    val performanceModeEnabled = com.unshoo.pixelmusic.ui.theme.LocalPerformanceModeEnabled.current
     // Hero Play/Pause button shape morphing:
     // Morphs between squircle (12dp) when playing and circle (18dp) when paused for 36dp button.
     val playPauseCornerRadius by animateDpAsState(
         targetValue = if (isPlaying) 12.dp else 18.dp,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioNoBouncy,
-            stiffness = Spring.StiffnessMediumLow
-        ),
+        animationSpec = if (performanceModeEnabled) {
+            androidx.compose.animation.core.snap()
+        } else {
+            spring(
+                dampingRatio = Spring.DampingRatioNoBouncy,
+                stiffness = Spring.StiffnessMediumLow
+            )
+        },
         label = "miniPlayPauseCorner"
     )
     val playPauseShape = remember(playPauseCornerRadius) { RoundedCornerShape(playPauseCornerRadius) }

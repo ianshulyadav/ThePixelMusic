@@ -18,6 +18,7 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import com.unshoo.pixelmusic.data.preferences.UserPreferencesRepository
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
 /**
@@ -90,8 +91,13 @@ class AdaptiveRefreshRatePolicy(
         supportedRates: List<Float>?,
         currentDisplayRate: Float,
         highRefreshRateEnabled: Boolean,
+        performanceModeEnabled: Boolean = false,
         nowMillis: Long = System.currentTimeMillis()
     ): Float {
+        if (performanceModeEnabled) {
+            moveToTier(1, nowMillis)
+            return 60f
+        }
         if (!highRefreshRateEnabled) {
             currentTier = 0
             lastTierChangeMillis = null
@@ -428,6 +434,7 @@ class AdaptiveRefreshRateManager(
 ) : DefaultLifecycleObserver {
 
     private var highRefreshRateEnabled: Boolean = false
+    private var performanceModeEnabled: Boolean = false
     private var currentThermalStatus: Int = PowerManager.THERMAL_STATUS_NONE
     private var isPowerSaveMode: Boolean = false
     private var thermalListener: PowerManager.OnThermalStatusChangedListener? = null
@@ -472,7 +479,8 @@ class AdaptiveRefreshRateManager(
             snapshot = snapshot,
             supportedRates = supportedRates,
             currentDisplayRate = currentRate,
-            highRefreshRateEnabled = highRefreshRateEnabled
+            highRefreshRateEnabled = highRefreshRateEnabled,
+            performanceModeEnabled = performanceModeEnabled
         )
 
         DevicePerformanceUtils.applyAdaptiveRefreshRate(
@@ -521,8 +529,14 @@ class AdaptiveRefreshRateManager(
         //    toggling the setting takes effect without waiting for the
         //    thermal coalescing window.
         preferenceJob = activity.lifecycleScope.launch {
-            userPreferencesRepository.highRefreshRateFlow.collect { enabled ->
-                highRefreshRateEnabled = enabled
+            combine(
+                userPreferencesRepository.highRefreshRateFlow,
+                userPreferencesRepository.performanceModeEnabledFlow
+            ) { highRefresh, perfMode ->
+                highRefresh to perfMode
+            }.collect { (highRefresh, perfMode) ->
+                highRefreshRateEnabled = highRefresh
+                performanceModeEnabled = perfMode
                 mainHandler.removeCallbacks(coalescedReevaluate)
                 reevaluateRefreshRate()
             }
