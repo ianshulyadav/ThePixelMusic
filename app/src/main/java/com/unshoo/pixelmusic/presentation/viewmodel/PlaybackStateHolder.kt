@@ -99,7 +99,6 @@ class PlaybackStateHolder @Inject constructor(
     private var pausedPositionOverrideToken: Long? = null
     private var pausedPositionOverrideMs: Long? = null
     private var pausedPositionOverrideSetAtMs: Long = 0L
-    private var consecutiveMediaMismatchProgressSkips = 0
     private var coldStartSnapshotMediaId: String? = null
     private var coldStartSnapshotToken: Long? = null
     private var coldStartSnapshotPositionMs: Long? = null
@@ -769,7 +768,7 @@ class PlaybackStateHolder @Inject constructor(
                              val currentMediaId = controller.currentMediaItem?.mediaId
                              val hasMediaMismatch = visibleSong?.id != null &&
                                  currentMediaId != null &&
-                                 visibleSong.id != currentMediaId
+                                 visibleSong.id.removePrefix("song:") != currentMediaId.removePrefix("song:")
 
                              if (hasMediaMismatch) {
                                 Timber.tag(TAG).v(
@@ -778,8 +777,6 @@ class PlaybackStateHolder @Inject constructor(
                                 )
                                 delay(tickMs)
                                 continue
-                            } else {
-                                consecutiveMediaMismatchProgressSkips = 0
                             }
 
                               val currentPosition = controller.currentPosition.coerceAtLeast(0L)
