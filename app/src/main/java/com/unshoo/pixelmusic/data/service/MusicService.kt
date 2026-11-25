@@ -342,6 +342,10 @@ class MusicService : MediaLibraryService() {
     }
 
     private val playerSwapListener: (Player) -> Unit = { newPlayer ->
+        // The incoming deck already has its own effects during the overlap. Keep those
+        // instances when it becomes master; recreating EQ on the same live session can
+        // briefly play flat and releasing the companion can silence that session.
+        equalizerManager.promoteCompanionSession(newPlayer.audioSessionId)
         // The engine crossfades by swapping player instances. The casting
         // wrapper has to follow, or the session would be left pointing at the
         // retired player while the receiver kept playing the new one.
@@ -563,6 +567,10 @@ class MusicService : MediaLibraryService() {
         engine.addNextPlayerPreparedListener(nextPlayerPreparedListener)
         engine.addTransitionDisplayPlayerListener(transitionDisplayPlayerListener)
         engine.addTransitionFinishedListener(transitionFinishedListener)
+        engine.onStandbyAudioSessionChanged = { sessionId ->
+            if (sessionId != 0) equalizerManager.attachCompanionSession(sessionId)
+            else equalizerManager.releaseCompanion()
+        }
 
         // Self-healing supervisor for history/telemetry.
         startTelemetryWatchdog()
@@ -657,9 +665,6 @@ class MusicService : MediaLibraryService() {
                     if (standbySessionId != 0) {
                         equalizerManager.attachCompanionSession(standbySessionId)
                     } else {
-                        // Transition over: the primary re-attaches to the new master session
-                        // (with its own retries); keep the companion until that has happened.
-                        kotlinx.coroutines.delay(3_000L)
                         equalizerManager.releaseCompanion()
                     }
                 }
@@ -2639,6 +2644,7 @@ class MusicService : MediaLibraryService() {
         engine.removeNextPlayerPreparedListener(nextPlayerPreparedListener)
         engine.removeTransitionDisplayPlayerListener(transitionDisplayPlayerListener)
         engine.removeTransitionFinishedListener(transitionFinishedListener)
+        engine.onStandbyAudioSessionChanged = null
         discordPresenceListener?.let { mediaSession?.player?.removeListener(it) }
         discordPresenceListener = null
         mediaSession?.player?.removeListener(playerListener)

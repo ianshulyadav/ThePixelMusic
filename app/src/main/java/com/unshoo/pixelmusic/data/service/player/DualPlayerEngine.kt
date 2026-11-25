@@ -253,6 +253,13 @@ class DualPlayerEngine @Inject constructor(
     /** Audio session of the incoming player while a crossfade runs; 0 otherwise. */
     private val _standbyAudioSessionId = MutableStateFlow(0)
     val standbyAudioSessionId: StateFlow<Int> = _standbyAudioSessionId.asStateFlow()
+    var onStandbyAudioSessionChanged: ((Int) -> Unit)? = null
+
+    private fun publishStandbyAudioSession(audioSessionId: Int) {
+        if (_standbyAudioSessionId.value == audioSessionId) return
+        _standbyAudioSessionId.value = audioSessionId
+        onStandbyAudioSessionChanged?.invoke(audioSessionId)
+    }
 
     private val _activeDecoderInfo = MutableStateFlow<ActiveDecoderInfo?>(null)
     val activeDecoderInfo: StateFlow<ActiveDecoderInfo?> = _activeDecoderInfo.asStateFlow()
@@ -551,9 +558,10 @@ class DualPlayerEngine @Inject constructor(
     // Reusable listener for standby / preloading player errors (Fix 3)
     private val standbyPlayerListener = object : Player.Listener {
         override fun onAudioSessionIdChanged(audioSessionId: Int) {
-            // The incoming player's AudioTrack opens when it starts playing in the fade.
-            if (transitionRunning && audioSessionId != 0 && audioSessionId != C.AUDIO_SESSION_ID_UNSET) {
-                _standbyAudioSessionId.value = audioSessionId
+            // Preparation may open the AudioTrack before the fade begins. Publish that
+            // session now so its effects are ready before the first audible fade frame.
+            if (audioSessionId != 0 && audioSessionId != C.AUDIO_SESSION_ID_UNSET) {
+                publishStandbyAudioSession(audioSessionId)
             }
         }
 
@@ -2926,6 +2934,10 @@ class DualPlayerEngine @Inject constructor(
             standby.removeListener(standbyPlayerListener)
             standby.addListener(standbyPlayerListener)
             standby.prepare()
+            val standbySession = standby.audioSessionId
+            if (standbySession != 0 && standbySession != C.AUDIO_SESSION_ID_UNSET) {
+                publishStandbyAudioSession(standbySession)
+            }
             onNextPlayerPreparedListeners.forEach { it(standby) }
         } catch (cancel: kotlinx.coroutines.CancellationException) {
             throw cancel
@@ -2951,7 +2963,7 @@ class DualPlayerEngine @Inject constructor(
         preparationGeneration++
         transitionJob?.cancel()
         transitionJob = null
-        _standbyAudioSessionId.value = 0
+        publishStandbyAudioSession(0)
         resetPreparedWindowState()
         if (::playerB.isInitialized && !playerBReleased) {
             try {
@@ -2983,7 +2995,7 @@ class DualPlayerEngine @Inject constructor(
         transitionRunning = true
         if (::playerB.isInitialized && !playerBReleased) {
             val sid = playerB.audioSessionId
-            if (sid != 0 && sid != C.AUDIO_SESSION_ID_UNSET) _standbyAudioSessionId.value = sid
+            if (sid != 0 && sid != C.AUDIO_SESSION_ID_UNSET) publishStandbyAudioSession(sid)
         }
         transitionJob = scope.launch {
             try {
@@ -2998,7 +3010,7 @@ class DualPlayerEngine @Inject constructor(
                 if (transitionJob === currentCoroutineContext()[Job]) {
                     transitionJob = null
                     transitionRunning = false
-                    _standbyAudioSessionId.value = 0
+                    publishStandbyAudioSession(0)
                     incomingTrackReplayGainVolume = null
                     onTransitionFinishedListeners.forEach { it() }
                 }

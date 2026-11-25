@@ -133,6 +133,10 @@ class EqualizerManager @Inject constructor() {
             Timber.tag(TAG).d("Already attached to session $audioSessionId")
             return
         }
+        if (companionSessionId == audioSessionId) {
+            promoteCompanionSession(audioSessionId)
+            return
+        }
         
         Timber.tag(TAG).d("Attaching to audio session: $audioSessionId")
         release()
@@ -244,12 +248,13 @@ class EqualizerManager @Inject constructor() {
     private var companionSessionId: Int = 0
     private var companionEqualizer: Equalizer? = null
     private var companionBassBoost: BassBoost? = null
+    private var companionVirtualizer: Virtualizer? = null
     private var companionLoudness: android.media.audiofx.LoudnessEnhancer? = null
 
     fun attachCompanionSession(audioSessionId: Int) {
         if (effectsDisabledForProcess || !hasAnyEnabledEffects) return
         if (audioSessionId == 0 || audioSessionId == currentAudioSessionId) return
-        if (audioSessionId == companionSessionId && companionEqualizer != null) return
+        if (audioSessionId == companionSessionId) return
         releaseCompanion()
         val primary = equalizer
         try {
@@ -261,11 +266,35 @@ class EqualizerManager @Inject constructor() {
                     }
                     enabled = true
                 }
+            } else if (_isEnabled.value) {
+                // The first deck can start before its AudioTrack reports a session.
+                // Apply saved bands directly instead of fading the next song in flat.
+                companionEqualizer = Equalizer(0, audioSessionId).apply {
+                    val levels = _bandLevels.value
+                    val range = bandLevelRange
+                    val count = numberOfBands.toInt()
+                    for (band in 0 until count) {
+                        val start = band * levels.size / count
+                        val end = ((band + 1) * levels.size / count).coerceAtLeast(start + 1)
+                        val level = levels.subList(start, end).average().toInt().coerceIn(MIN_LEVEL, MAX_LEVEL)
+                        val millibels = range[0] + (level - MIN_LEVEL) * (range[1] - range[0]) / (MAX_LEVEL - MIN_LEVEL)
+                        runCatching { setBandLevel(band.toShort(), millibels.toShort()) }
+                    }
+                    enabled = true
+                }
             }
             if (_bassBoostEnabled.value) {
                 companionBassBoost = runCatching {
                     BassBoost(0, audioSessionId).apply {
                         if (strengthSupported) setStrength(_bassBoostStrength.value.coerceIn(0, 1000).toShort())
+                        enabled = true
+                    }
+                }.getOrNull()
+            }
+            if (_virtualizerEnabled.value) {
+                companionVirtualizer = runCatching {
+                    Virtualizer(0, audioSessionId).apply {
+                        if (strengthSupported) setStrength(_virtualizerStrength.value.coerceIn(0, 1000).toShort())
                         enabled = true
                     }
                 }.getOrNull()
@@ -289,11 +318,31 @@ class EqualizerManager @Inject constructor() {
     fun releaseCompanion() {
         companionEqualizer?.runCatching { release() }
         companionBassBoost?.runCatching { release() }
+        companionVirtualizer?.runCatching { release() }
         companionLoudness?.runCatching { release() }
         companionEqualizer = null
         companionBassBoost = null
+        companionVirtualizer = null
         companionLoudness = null
         companionSessionId = 0
+    }
+
+    /** Move the already audible incoming effects into the primary slot at the deck swap. */
+    fun promoteCompanionSession(audioSessionId: Int): Boolean {
+        if (audioSessionId == 0 || audioSessionId != companionSessionId) return false
+        release()
+        equalizer = companionEqualizer
+        bassBoost = companionBassBoost
+        virtualizer = companionVirtualizer
+        loudnessEnhancer = companionLoudness
+        companionEqualizer = null
+        companionBassBoost = null
+        companionVirtualizer = null
+        companionLoudness = null
+        companionSessionId = 0
+        currentAudioSessionId = audioSessionId
+        applyCurrentEffectStateToAttachedEffects()
+        return true
     }
 
     suspend fun attachToAudioSessionIfNeeded(audioSessionId: Int) {
@@ -502,9 +551,10 @@ class EqualizerManager @Inject constructor() {
     }
 
     private fun releaseIfUnused() {
-        if (!hasAnyEnabledEffects && isAttached) {
+        if (!hasAnyEnabledEffects) {
             Timber.tag(TAG).d("Releasing audio effects because all effect toggles are disabled")
             release()
+            releaseCompanion()
         }
     }
 
