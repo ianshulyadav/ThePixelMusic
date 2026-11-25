@@ -258,6 +258,8 @@ class PlaybackStateHolder @Inject constructor(
     }
 
     fun syncCurrentPositionFromPlayer(mediaId: String?, reportedPositionMs: Long) {
+        val displayedId = _stablePlayerState.value.currentSong?.id?.removePrefix("song:")
+        if (displayedId != null && mediaId?.removePrefix("song:") != displayedId) return
         val guardId = skippedFromSongId
         if (guardId != null && SystemClock.uptimeMillis() < skipGuardUntilMs &&
             mediaId != null && (mediaId == guardId || mediaId.removePrefix("song:") == guardId) &&
@@ -770,16 +772,12 @@ class PlaybackStateHolder @Inject constructor(
                                  visibleSong.id != currentMediaId
 
                              if (hasMediaMismatch) {
-                                consecutiveMediaMismatchProgressSkips++
-                                if (consecutiveMediaMismatchProgressSkips <= 2) {
-                                    Timber.tag(TAG).v(
-                                         "Skipping local progress tick due media mismatch (visible=%s, player=%s)",
-                                         visibleSong?.id,
-                                         currentMediaId
-                                     )
-                                    delay(tickMs)
-                                    continue
-                                }
+                                Timber.tag(TAG).v(
+                                    "Skipping local progress tick due media mismatch (visible=%s, player=%s)",
+                                    visibleSong?.id, currentMediaId
+                                )
+                                delay(tickMs)
+                                continue
                             } else {
                                 consecutiveMediaMismatchProgressSkips = 0
                             }

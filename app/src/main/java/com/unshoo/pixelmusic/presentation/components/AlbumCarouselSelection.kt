@@ -4,6 +4,8 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.*
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.ui.Modifier
@@ -53,39 +55,44 @@ fun AlbumCarouselSection(
     /** True once the current song is audibly playing; full-resolution art waits for it. */
     playbackStartedProvider: () -> Boolean = { true },
 ) {
-    if (queue.isEmpty()) return
+    val targetSize = remember(albumArtQuality) {
+        if (albumArtQuality.maxSize == 0) SafeOriginalAlbumArtSize
+        else Size(albumArtQuality.maxSize, albumArtQuality.maxSize)
+    }
+    val currentSongIndex = remember(currentSong?.id, currentMediaItemIndex, queue) {
+        resolveCurrentQueueIndex(currentSong, currentMediaItemIndex, queue)
+    }
+    if (currentSongIndex < 0) {
+        // The MediaSession can expose the incoming crossfade song before its queue
+        // snapshot catches up. Never show queue[0] as a stand-in for its cover.
+        currentSong?.let { song ->
+            val artModel = remember(song.id, song.albumArtUriString, song.youtubeId) {
+                com.unshoo.pixelmusic.utils.MediaItemBuilder.resolveArtworkUri(
+                    song.albumArtUriString, song.id, song.youtubeId
+                ) ?: song.albumArtUriString
+            }
+            OptimizedAlbumArt(
+                uri = artModel,
+                title = song.title,
+                modifier = modifier.clip(RoundedCornerShape(18.dp)),
+                targetSize = targetSize
+            )
+        }
+        return
+    }
 
     // Keep the carousel state stable when queue contents refresh. Keying the whole
     // subtree by the queue object recreates pager state and can leave horizontal
     // swipes feeling dead after large library/queue updates.
     // Mantiene compatibilidad con tu llamada actual
-    val initialIndex = remember(currentSong?.id, currentMediaItemIndex, queue) {
-        resolveCurrentQueueIndex(
-            currentSong = currentSong,
-            currentMediaItemIndex = currentMediaItemIndex,
-            queue = queue
-        )
-    }
+    val initialIndex = currentSongIndex
 
     val carouselState = rememberRoundedParallaxCarouselState(
         initialPage = initialIndex,
         pageCount = { queue.size }
     )
 
-    // Calculate target size based on quality
-    val targetSize = remember(albumArtQuality) {
-        if (albumArtQuality.maxSize == 0) SafeOriginalAlbumArtSize
-        else Size(albumArtQuality.maxSize, albumArtQuality.maxSize)
-    }
-
     // Player -> Carousel
-    val currentSongIndex = remember(currentSong?.id, currentMediaItemIndex, queue) {
-        resolveCurrentQueueIndex(
-            currentSong = currentSong,
-            currentMediaItemIndex = currentMediaItemIndex,
-            queue = queue
-        )
-    }
     val requestedTargetIndex = remember(requestedScrollIndex, queue) {
         requestedScrollIndex?.takeIf { it in queue.indices }
     }
@@ -174,7 +181,15 @@ fun AlbumCarouselSection(
             carouselWidth = availableWidth, // Pass the full width for layout calculations
             itemKey = carouselItemKey,
             content = { index ->
-                val song = queue[index]
+                // During an automatic transition the displayed song changes before the
+                // pager settles. Render that song on the focused page so the old page
+                // (often queue index 0) cannot flash its artwork for a frame.
+                val queuedSong = queue[index]
+                val song = if (index == carouselState.pagerState.currentPage &&
+                    !carouselState.pagerState.isScrollInProgress &&
+                    currentSong != null &&
+                    queuedSong.id.removePrefix("song:") != currentSong.id.removePrefix("song:")
+                ) currentSong else queuedSong
                 val isFocusedItem = carouselState.pagerState.currentPage == index
                 Box(
                     Modifier
@@ -227,8 +242,8 @@ private fun resolveCurrentQueueIndex(
     currentMediaItemIndex: Int,
     queue: ImmutableList<Song>
 ): Int {
-    val songId = currentSong?.id ?: return 0
-    if (currentMediaItemIndex in queue.indices && queue[currentMediaItemIndex].id == songId) {
+    val songId = currentSong?.id?.removePrefix("song:") ?: return -1
+    if (currentMediaItemIndex in queue.indices && queue[currentMediaItemIndex].id.removePrefix("song:") == songId) {
         return currentMediaItemIndex
     }
 
@@ -238,15 +253,11 @@ private fun resolveCurrentQueueIndex(
         val from = (currentMediaItemIndex - 6).coerceAtLeast(0)
         val to = (currentMediaItemIndex + 6).coerceAtMost(queue.lastIndex)
         for (index in from..to) {
-            if (queue[index].id == songId) return index
+            if (queue[index].id.removePrefix("song:") == songId) return index
         }
     }
 
-    return queue.indexOfFirst { it.id == songId }
-        .takeIf { it >= 0 }
-        ?: queue.indexOf(currentSong)
-            .takeIf { it >= 0 }
-        ?: 0
+    return queue.indexOfFirst { it.id.removePrefix("song:") == songId }
 }
 
 /** How long the focused cover stays low-quality when playback has not started yet. */

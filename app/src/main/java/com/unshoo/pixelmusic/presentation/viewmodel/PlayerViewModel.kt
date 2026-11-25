@@ -1779,7 +1779,10 @@ class PlayerViewModel @Inject constructor(
                 val song = resolveSongFromMediaItem(MediaItem.Builder().setMediaId(incomingId).build())
                     ?: return@runOnMainImmediate
                 // Show the song you can hear for the whole fade, not the outgoing one.
-                playbackStateHolder.updateStablePlayerState { it.copy(currentSong = song) }
+                playbackStateHolder.updateStablePlayerState {
+                    it.copy(currentSong = song, totalDuration = song.duration.coerceAtLeast(0L))
+                }
+                playbackStateHolder.setCurrentPosition(0L)
             }
         }
 
@@ -4738,6 +4741,10 @@ class PlayerViewModel @Inject constructor(
     private var lastQueueUpdateJob: Job? = null
 
     private fun updateCurrentPlaybackQueueFromPlayer(playerCtrl: MediaController?) {
+        // During a crossfade the controller may briefly expose the outgoing deck's
+        // timeline after the incoming song is already displayed. Publishing that
+        // snapshot removes the incoming song from the UI queue and resets the cover.
+        if (playerCtrl != null && isStaleDisplayedItem(playerCtrl.currentMediaItem?.mediaId)) return
         val currentMediaController: androidx.media3.common.Player = playerCtrl ?: mediaController ?: dualPlayerEngine.masterPlayer
         val requestId = ++lastQueueUpdateRequestId
         lastQueueUpdateJob?.cancel()
@@ -4800,7 +4807,8 @@ class PlayerViewModel @Inject constructor(
                 firstMediaId = firstMediaId,
                 lastMediaId = lastMediaId
             )
-            if (requestId != lastQueueUpdateRequestId) return@launch
+            if (requestId != lastQueueUpdateRequestId ||
+                (playerCtrl != null && isStaleDisplayedItem(playerCtrl.currentMediaItem?.mediaId))) return@launch
             if (signature == lastQueueSignature) return@launch
 
             val allSongsById = libraryStateHolder.allSongsById.value
@@ -4811,7 +4819,8 @@ class PlayerViewModel @Inject constructor(
                 }
             }
 
-            if (requestId != lastQueueUpdateRequestId) return@launch
+            if (requestId != lastQueueUpdateRequestId ||
+                (playerCtrl != null && isStaleDisplayedItem(playerCtrl.currentMediaItem?.mediaId))) return@launch
 
             lastQueueSignature = signature
             if (queue.isNotEmpty() || count == 0) {
