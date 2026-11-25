@@ -358,15 +358,15 @@ class MusicService : MediaLibraryService() {
         if (incomingItem != null) {
             prefetchReplayGain(incomingItem)
             val cachedVolume = getCachedReplayGainVolume(incomingItem)
-            engine.incomingTrackReplayGainVolume = cachedVolume
+            engine.incomingTrackReplayGainVolume = cachedVolume ?: userSelectedVolume
         }
     }
 
     private val transitionDisplayPlayerListener: (Player) -> Unit = { displayPlayer ->
+        // Publish the audible incoming deck as soon as its clock starts. This updates
+        // artwork, title and artist in the full player for the entire fade.
+        bindSessionPlayer(displayPlayer, "Published incoming crossfade player to MediaSession.")
         prepareReplayGainForTransitionPlayer(displayPlayer)
-        // The session player stays on the OUTGOING track until the swap at the end of the fade,
-        // so the app kept re-reading the old item (old cover flashing back over the new one).
-        // Announce the now-audible incoming track so the UI can show it for the whole fade.
         displayPlayer.currentMediaItem?.mediaId?.let { incomingId ->
             mediaSession?.setSessionExtras(
                 Bundle().apply { putString(SESSION_EXTRA_TRANSITION_DISPLAY_MEDIA_ID, incomingId) }
@@ -375,6 +375,15 @@ class MusicService : MediaLibraryService() {
     }
 
     private val transitionFinishedListener: () -> Unit = {
+        // A failed or cancelled fade leaves the outgoing deck as master. Restore the
+        // session to that deck if we exposed the incoming one at fade start.
+        val master = engine.masterPlayer
+        val boundToMaster = if (castPlayback == null) {
+            mediaSession?.player === master
+        } else {
+            castSessionPlayer?.wraps(master) == true
+        }
+        if (!boundToMaster) bindSessionPlayer(master, "Restored MediaSession player after transition.")
         mediaSession?.setSessionExtras(Bundle.EMPTY)
         onTransitionFinished()
     }
@@ -411,9 +420,7 @@ class MusicService : MediaLibraryService() {
         // fade loop can use the correct final volume even before the IO coroutine finishes.
         val incomingItem = player.currentMediaItem
         val cachedVolume = getCachedReplayGainVolume(incomingItem)
-        if (cachedVolume != null) {
-            engine.incomingTrackReplayGainVolume = cachedVolume
-        }
+        engine.incomingTrackReplayGainVolume = cachedVolume ?: userSelectedVolume
         applyReplayGain(incomingItem)
     }
 
@@ -2501,6 +2508,10 @@ class MusicService : MediaLibraryService() {
             return
         }
         val previous = castSessionPlayer
+        if (previous?.wraps(localPlayer) == true) {
+            publishMediaSessionPlayer(previous, logMessage)
+            return
+        }
         val wrapper = CastSessionPlayer(
             localPlayer, playback, playbackNavigationHistory, engine::isSkipFadeActive
         )

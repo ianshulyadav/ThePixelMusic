@@ -33,6 +33,8 @@ internal class CastSessionPlayer(
     private val isSkipFadeActive: () -> Boolean,
 ) : ForwardingPlayer(player), CastSink {
 
+    fun wraps(player: Player): Boolean = wrappedPlayer === player
+
     /**
      * Wraps a manual song change (next / previous / queue tap) in a short fade on the phone's
      * player. Null, or while casting, the change happens at once.

@@ -245,7 +245,7 @@ class DualPlayerEngine @Inject constructor(
         onPlayerAboutToBeReleasedListener = listener
     }
     
-    // Active Audio Session ID Flow - pinned across both players to prevent DSP mute/reattach on swap
+    // Both decks share this session so Android applies the same effects during the overlap.
     @Volatile private var pinnedAudioSessionId: Int = C.AUDIO_SESSION_ID_UNSET
     private val _activeAudioSessionId = MutableStateFlow(0)
     val activeAudioSessionId: StateFlow<Int> = _activeAudioSessionId.asStateFlow()
@@ -431,11 +431,8 @@ class DualPlayerEngine @Inject constructor(
         }
 
         override fun onAudioSessionIdChanged(audioSessionId: Int) {
-            // BUGFIX (equalizer silent): the session reported here is the one the audio sink
-            // actually opened its AudioTrack with. It used to be "pinned" and forced onto every
-            // player, but with Media3 1.10 an externally assigned session never reaches the
-            // AudioTrack (each track got a fresh session), so the Equalizer/BassBoost were
-            // attached to a session with no audio. Follow the reported session instead, like v1.5.
+            // Follow the session reported by the actual AudioTrack. A device may override
+            // the requested shared session; the standby listener then enables its own effects.
             if (audioSessionId != 0 && audioSessionId != C.AUDIO_SESSION_ID_UNSET) {
                 if (_activeAudioSessionId.value != audioSessionId) {
                     _activeAudioSessionId.value = audioSessionId
@@ -1460,15 +1457,17 @@ class DualPlayerEngine @Inject constructor(
         }
         releaseStandbyPlayer()
 
-        // No pinned session: see onAudioSessionIdChanged (Media3 1.10 ignores it for the AudioTrack).
+        // Android's insert effects process every player in the same audio session. Allocate
+        // one session before either deck prepares, so the incoming deck is equalized from
+        // its first audible frame instead of waiting for a second effect engine.
+        pinnedAudioSessionId = runCatching { audioManager.generateAudioSessionId() }
+            .getOrDefault(C.AUDIO_SESSION_ID_UNSET)
+            .takeIf { it > 0 } ?: C.AUDIO_SESSION_ID_UNSET
 
         playerA = buildPlayer().also { applyAudioOffload(it, audioOffloadEnabled) }
 
         if (pinnedAudioSessionId != C.AUDIO_SESSION_ID_UNSET && pinnedAudioSessionId != 0) {
             try { playerA.audioSessionId = pinnedAudioSessionId } catch (_: Exception) {}
-            if (::playerB.isInitialized) {
-                try { playerB.audioSessionId = pinnedAudioSessionId } catch (_: Exception) {}
-            }
             _activeAudioSessionId.value = pinnedAudioSessionId
         } else {
             _activeAudioSessionId.value = playerA.audioSessionId
@@ -1740,6 +1739,9 @@ class DualPlayerEngine @Inject constructor(
         releaseStandbyPlayer()
 
         playerA = buildPlayer().also { applyAudioOffload(it, audioOffloadEnabled) }
+        if (pinnedAudioSessionId != C.AUDIO_SESSION_ID_UNSET && pinnedAudioSessionId != 0) {
+            try { playerA.audioSessionId = pinnedAudioSessionId } catch (_: Exception) {}
+        }
 
         playerA.addListener(masterPlayerListener)
         playerA.addAnalyticsListener(masterPlayerListener)
@@ -1756,10 +1758,6 @@ class DualPlayerEngine @Inject constructor(
         }
 
         if (pinnedAudioSessionId != C.AUDIO_SESSION_ID_UNSET && pinnedAudioSessionId != 0) {
-            try { playerA.audioSessionId = pinnedAudioSessionId } catch (_: Exception) {}
-            if (::playerB.isInitialized) {
-                try { playerB.audioSessionId = pinnedAudioSessionId } catch (_: Exception) {}
-            }
             _activeAudioSessionId.value = pinnedAudioSessionId
         } else {
             _activeAudioSessionId.value = playerA.audioSessionId
@@ -3090,7 +3088,7 @@ class DualPlayerEngine @Inject constructor(
 
         val outgoingStartVolume = if (isDucked) preDuckVolumeA else outgoingPlayer.volume
         transitionOutgoingRestVolume = outgoingStartVolume
-        val incomingTargetVolume = incomingTrackReplayGainVolume ?: outgoingStartVolume
+        var incomingTargetVolume = (incomingTrackReplayGainVolume ?: outgoingStartVolume).coerceIn(0f, 1f)
         val incomingBeforeStart = incomingPlayer.currentPosition
 
         incomingPlayer.volume = 0f
@@ -3117,13 +3115,17 @@ class DualPlayerEngine @Inject constructor(
             return
         }
 
-        // Fire onTransitionDisplayPlayerListeners immediately once incoming player clock starts advancing
-        onTransitionDisplayPlayerListeners.forEach { runCatching { it(playerB) } }
+        // Expose the incoming song only after its audio clock starts advancing.
+        onTransitionDisplayPlayerListeners.forEach { listener ->
+            runCatching { listener(incomingPlayer) }
+                .onFailure { Timber.tag("TransitionDebug").e(it, "Could not publish incoming track") }
+        }
 
         val duration = settings.durationMs.toLong().coerceAtLeast(500L)
-        val fadeStartPosition = incomingPlayer.currentPosition
-        var lastPosition = fadeStartPosition
-        var lastProgressAt = SystemClock.elapsedRealtime()
+        var lastPosition = incomingPlayer.currentPosition
+        var lastTickAt = SystemClock.elapsedRealtime()
+        var lastProgressAt = lastTickAt
+        var fadeElapsedMs = 0L
 
         while (true) {
             currentCoroutineContext().ensureActive()
@@ -3143,29 +3145,29 @@ class DualPlayerEngine @Inject constructor(
                     abortTransition(outgoingPlayer, incomingPlayer)
                     return
                 }
+                lastTickAt = now
                 delay(16L)
                 continue
             }
             lastPosition = position
             lastProgressAt = now
-            val elapsed = (position - fadeStartPosition).coerceIn(0L, duration)
-            val t = (elapsed.toFloat() / duration).coerceIn(0f, 1f)
+            fadeElapsedMs = (fadeElapsedMs + now - lastTickAt).coerceAtMost(duration)
+            lastTickAt = now
+            val t = (fadeElapsedMs.toFloat() / duration).coerceIn(0f, 1f)
 
-            // Equal-Power Sine/Cosine Curve:
-            // cos^2(theta) + sin^2(theta) = 1.0 -> constant acoustic energy across transition!
-            val angle = t * (Math.PI.toFloat() / 2f)
-            val volOut = kotlin.math.cos(angle)
-            val volIn = kotlin.math.sin(angle)
+            val (volOut, volIn) = crossfadeGains(t, settings)
 
             // Keep honouring an active duck while the curve runs; the 16ms loop used to overwrite
             // the ducked level so notifications played over a full-volume incoming track.
             val duck = if (isDucked) DUCK_FACTOR else 1f
+            // ReplayGain can finish reading while the fade runs. Ease its new target in
+            // instead of changing the incoming song's level in a single audio frame.
+            val resolvedTarget = (incomingTrackReplayGainVolume ?: incomingTargetVolume).coerceIn(0f, 1f)
+            incomingTargetVolume += (resolvedTarget - incomingTargetVolume) * 0.1f
             outgoingPlayer.volume = (volOut * outgoingStartVolume * duck).coerceIn(0f, 1f)
             incomingPlayer.volume = (volIn * incomingTargetVolume * duck).coerceIn(0f, 1f)
 
             if (t >= 1f) break
-            if (outgoingPlayer.playbackState == Player.STATE_ENDED) break
-            if (outgoingPlayer.duration > 0 && outgoingPlayer.duration - outgoingPlayer.currentPosition <= 150L) break
             delay(16L)
         }
 
@@ -3177,6 +3179,7 @@ class DualPlayerEngine @Inject constructor(
         }
 
         // Complete Swap & Live Timeline Queue Splicing:
+        incomingTargetVolume = (incomingTrackReplayGainVolume ?: incomingTargetVolume).coerceIn(0f, 1f)
         outgoingPlayer.volume = 0f
         if (isDucked) {
             preDuckVolumeA = incomingTargetVolume
