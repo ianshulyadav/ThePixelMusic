@@ -345,7 +345,15 @@ class MusicService : MediaLibraryService() {
         // The incoming deck already has its own effects during the overlap. Keep those
         // instances when it becomes master; recreating EQ on the same live session can
         // briefly play flat and releasing the companion can silence that session.
-        equalizerManager.promoteCompanionSession(newPlayer.audioSessionId)
+        val promoted = equalizerManager.promoteCompanionSession(newPlayer.audioSessionId)
+        if (!promoted && equalizerManager.hasAnyEnabledEffects) {
+            val sessionId = newPlayer.audioSessionId
+            if (sessionId != 0 && sessionId != C.AUDIO_SESSION_ID_UNSET) {
+                serviceScope.launch {
+                    equalizerManager.attachToAudioSessionIfNeeded(sessionId, fromLiveAudioTrack = true)
+                }
+            }
+        }
         // The engine crossfades by swapping player instances. The casting
         // wrapper has to follow, or the session would be left pointing at the
         // retired player while the receiver kept playing the new one.
@@ -578,6 +586,22 @@ class MusicService : MediaLibraryService() {
             if (sessionId != 0) equalizerManager.attachCompanionSession(sessionId)
             else equalizerManager.releaseCompanion()
         }
+        engine.onStandbyAudioTrackInitialized = { sessionId, offload ->
+            if (!offload && sessionId != 0) {
+                equalizerManager.attachCompanionSession(sessionId, forceReattach = true)
+            }
+        }
+        engine.onMasterAudioTrackInitialized = { sessionId, offload ->
+            if (equalizerManager.hasAnyEnabledEffects) {
+                if (offload) {
+                    engine.setAudioEffectsEnabled(true)
+                } else {
+                    serviceScope.launch {
+                        equalizerManager.attachToAudioSessionIfNeeded(sessionId, fromLiveAudioTrack = true)
+                    }
+                }
+            }
+        }
 
         // Self-healing supervisor for history/telemetry.
         startTelemetryWatchdog()
@@ -663,8 +687,8 @@ class MusicService : MediaLibraryService() {
             engine.setAudioEffectsEnabled(equalizerManager.hasAnyEnabledEffects)
 
             val sessionId = engine.getAudioSessionId()
-            if (sessionId != 0) {
-                equalizerManager.attachToAudioSessionIfNeeded(sessionId)
+            if (sessionId != 0 && engine.hasActiveMasterAudioTrack()) {
+                equalizerManager.attachToAudioSessionIfNeeded(sessionId, fromLiveAudioTrack = true)
             }
 
             // Crossfade: mirror the effects onto the incoming player's session while both play.
@@ -681,7 +705,10 @@ class MusicService : MediaLibraryService() {
             // Re-attach equalizer whenever the active audio session changes (e.g. crossfade)
             engine.activeAudioSessionId.collect { newSessionId ->
                 if (newSessionId != 0) {
-                    equalizerManager.attachToAudioSessionIfNeeded(newSessionId)
+                    equalizerManager.attachToAudioSessionIfNeeded(
+                        newSessionId,
+                        fromLiveAudioTrack = engine.hasActiveMasterAudioTrack()
+                    )
                 }
             }
         }
@@ -1862,11 +1889,15 @@ class MusicService : MediaLibraryService() {
             
             if (isPlaying) {
                 startTelemetryReporting()
-                // A pinned session can be known before its AudioTrack exists. Retry
-                // attaching once playback actually starts, including after route changes.
-                if (equalizerManager.hasAnyEnabledEffects && !equalizerManager.isAttached) {
+                // Retry attaching or recover lost effect control once playback is active.
+                if (equalizerManager.hasAnyEnabledEffects &&
+                    (!equalizerManager.isAttached || !equalizerManager.hasEffectControl())
+                ) {
                     serviceScope.launch {
-                        equalizerManager.attachToAudioSessionIfNeeded(engine.getAudioSessionId())
+                        equalizerManager.attachToAudioSessionIfNeeded(
+                            engine.getAudioSessionId(),
+                            fromLiveAudioTrack = engine.hasActiveMasterAudioTrack()
+                        )
                     }
                 }
             } else {
@@ -2664,6 +2695,8 @@ class MusicService : MediaLibraryService() {
         engine.removeTransitionDisplayPlayerListener(transitionDisplayPlayerListener)
         engine.removeTransitionFinishedListener(transitionFinishedListener)
         engine.onStandbyAudioSessionChanged = null
+        engine.onStandbyAudioTrackInitialized = null
+        engine.onMasterAudioTrackInitialized = null
         discordPresenceListener?.let { mediaSession?.player?.removeListener(it) }
         discordPresenceListener = null
         mediaSession?.player?.removeListener(playerListener)
@@ -2709,13 +2742,34 @@ class MusicService : MediaLibraryService() {
     private fun registerHeadsetReconnectMonitor() {
         val callback = object : AudioDeviceCallback() {
             override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) {
+                verifyEqualizerOnRouteChange()
                 if (!addedDevices.any(::isReconnectableHeadsetOutput)) return
                 maybeResumeAfterHeadsetReconnect()
+            }
+
+            override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) {
+                verifyEqualizerOnRouteChange()
             }
         }
 
         audioManager.registerAudioDeviceCallback(callback, null)
         headsetReconnectCallback = callback
+    }
+
+    private fun verifyEqualizerOnRouteChange() {
+        if (!equalizerManager.hasAnyEnabledEffects) return
+        val player = engine.masterPlayer
+        if (!player.isPlaying && !player.playWhenReady) return
+        val sessionId = engine.getAudioSessionId()
+        if (sessionId != 0 && (!equalizerManager.isAttached || !equalizerManager.hasEffectControl())) {
+            serviceScope.launch {
+                equalizerManager.attachToAudioSessionIfNeeded(
+                    sessionId,
+                    fromLiveAudioTrack = engine.hasActiveMasterAudioTrack(),
+                    forceReattach = true
+                )
+            }
+        }
     }
 
     private fun unregisterHeadsetReconnectMonitor() {

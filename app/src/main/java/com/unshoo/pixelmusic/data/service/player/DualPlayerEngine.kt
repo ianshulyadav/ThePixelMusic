@@ -226,6 +226,7 @@ class DualPlayerEngine @Inject constructor(
         if (::playerB.isInitialized && !playerBReleased) {
             try {
                 playerB.removeListener(standbyPlayerListener)
+                playerB.removeAnalyticsListener(standbyPlayerListener)
                 playerB.release()
             } catch (_: Exception) { /* Ignore */ }
         }
@@ -254,10 +255,14 @@ class DualPlayerEngine @Inject constructor(
         onPlayerAboutToBeReleasedListener = listener
     }
     
-    // Both decks share this session so Android applies the same effects during the overlap.
-    @Volatile private var pinnedAudioSessionId: Int = C.AUDIO_SESSION_ID_UNSET
     private val _activeAudioSessionId = MutableStateFlow(0)
     val activeAudioSessionId: StateFlow<Int> = _activeAudioSessionId.asStateFlow()
+
+    @Volatile private var hasInitializedMasterAudioTrack = false
+    var onMasterAudioTrackInitialized: ((sessionId: Int, offload: Boolean) -> Unit)? = null
+    var onStandbyAudioTrackInitialized: ((sessionId: Int, offload: Boolean) -> Unit)? = null
+
+    fun hasActiveMasterAudioTrack(): Boolean = hasInitializedMasterAudioTrack
 
     /** Audio session of the incoming player while a crossfade runs; 0 otherwise. */
     private val _standbyAudioSessionId = MutableStateFlow(0)
@@ -423,6 +428,14 @@ class DualPlayerEngine @Inject constructor(
                 audioTrackConfig.sampleRate, audioTrackConfig.encoding, audioTrackConfig.offload,
                 lastAudioInputSampleRate
             )
+            hasInitializedMasterAudioTrack = true
+            val sessionId = if (::playerA.isInitialized) playerA.audioSessionId else 0
+            if (sessionId != 0 && sessionId != C.AUDIO_SESSION_ID_UNSET) {
+                if (_activeAudioSessionId.value != sessionId) {
+                    _activeAudioSessionId.value = sessionId
+                }
+                onMasterAudioTrackInitialized?.invoke(sessionId, audioTrackConfig.offload)
+            }
         }
 
         override fun onAudioDecoderInitialized(
@@ -562,12 +575,23 @@ class DualPlayerEngine @Inject constructor(
     }
 
     // Reusable listener for standby / preloading player errors (Fix 3)
-    private val standbyPlayerListener = object : Player.Listener {
+    private val standbyPlayerListener = object : Player.Listener, AnalyticsListener {
         override fun onAudioSessionIdChanged(audioSessionId: Int) {
             // Preparation may open the AudioTrack before the fade begins. Publish that
             // session now so its effects are ready before the first audible fade frame.
             if (audioSessionId != 0 && audioSessionId != C.AUDIO_SESSION_ID_UNSET) {
                 publishStandbyAudioSession(audioSessionId)
+            }
+        }
+
+        override fun onAudioTrackInitialized(
+            eventTime: AnalyticsListener.EventTime,
+            audioTrackConfig: androidx.media3.exoplayer.audio.AudioSink.AudioTrackConfig
+        ) {
+            val sessionId = if (::playerB.isInitialized) playerB.audioSessionId else 0
+            if (sessionId != 0 && sessionId != C.AUDIO_SESSION_ID_UNSET) {
+                publishStandbyAudioSession(sessionId)
+                onStandbyAudioTrackInitialized?.invoke(sessionId, audioTrackConfig.offload)
             }
         }
 
@@ -838,12 +862,8 @@ class DualPlayerEngine @Inject constructor(
 
     fun setAudioSessionId(sessionId: Int) {
         if (sessionId == 0 || sessionId == C.AUDIO_SESSION_ID_UNSET) return
-        pinnedAudioSessionId = sessionId
         if (::playerA.isInitialized) {
             try { playerA.audioSessionId = sessionId } catch (_: Exception) {}
-        }
-        if (::playerB.isInitialized) {
-            try { playerB.audioSessionId = sessionId } catch (_: Exception) {}
         }
         _activeAudioSessionId.value = sessionId
     }
@@ -1466,21 +1486,15 @@ class DualPlayerEngine @Inject constructor(
         }
         releaseStandbyPlayer()
 
-        // Android's insert effects process every player in the same audio session. Allocate
-        // one session before either deck prepares, so the incoming deck is equalized from
-        // its first audible frame instead of waiting for a second effect engine.
-        pinnedAudioSessionId = runCatching { audioManager.generateAudioSessionId() }
-            .getOrDefault(C.AUDIO_SESSION_ID_UNSET)
-            .takeIf { it > 0 } ?: C.AUDIO_SESSION_ID_UNSET
-
+        // Let ExoPlayer generate its own audio session ID on its playback thread (calling
+        // player.audioSessionId = ... right after build() races with ExoPlayerImpl's constructor
+        // background session generator in Media3 1.10 and leaves AudioTrack on a different ID).
+        hasInitializedMasterAudioTrack = false
         playerA = buildPlayer().also { applyAudioOffload(it, audioOffloadEnabled) }
 
-        if (pinnedAudioSessionId != C.AUDIO_SESSION_ID_UNSET && pinnedAudioSessionId != 0) {
-            try { playerA.audioSessionId = pinnedAudioSessionId } catch (_: Exception) {}
-            _activeAudioSessionId.value = pinnedAudioSessionId
-        } else {
-            _activeAudioSessionId.value = playerA.audioSessionId
-        }
+        val initialSessionId = playerA.audioSessionId
+        _activeAudioSessionId.value =
+            if (initialSessionId != C.AUDIO_SESSION_ID_UNSET) initialSessionId else 0
 
         playerA.addListener(masterPlayerListener)
         playerA.addAnalyticsListener(masterPlayerListener)
@@ -1747,10 +1761,8 @@ class DualPlayerEngine @Inject constructor(
         playerA.release()
         releaseStandbyPlayer()
 
+        hasInitializedMasterAudioTrack = false
         playerA = buildPlayer().also { applyAudioOffload(it, audioOffloadEnabled) }
-        if (pinnedAudioSessionId != C.AUDIO_SESSION_ID_UNSET && pinnedAudioSessionId != 0) {
-            try { playerA.audioSessionId = pinnedAudioSessionId } catch (_: Exception) {}
-        }
 
         playerA.addListener(masterPlayerListener)
         playerA.addAnalyticsListener(masterPlayerListener)
@@ -1766,11 +1778,9 @@ class DualPlayerEngine @Inject constructor(
             playerA.playWhenReady = desiredPlayWhenReady
         }
 
-        if (pinnedAudioSessionId != C.AUDIO_SESSION_ID_UNSET && pinnedAudioSessionId != 0) {
-            _activeAudioSessionId.value = pinnedAudioSessionId
-        } else {
-            _activeAudioSessionId.value = playerA.audioSessionId
-        }
+        val rebuiltSessionId = playerA.audioSessionId
+        _activeAudioSessionId.value =
+            if (rebuiltSessionId != C.AUDIO_SESSION_ID_UNSET) rebuiltSessionId else 0
         onPlayerSwappedListeners.forEach { it(playerA) }
 
         Timber.tag("DualPlayerEngine").d(logMessage)
@@ -2905,11 +2915,8 @@ class DualPlayerEngine @Inject constructor(
                 // Errored standby: release it before replacing so its codecs/buffers are freed.
                 releaseStandbyPlayer()
             }
-            playerB = buildPlayer()
+            playerB = buildPlayer().also { applyAudioOffload(it, enabled = false) }
             playerBReleased = false
-            if (pinnedAudioSessionId != C.AUDIO_SESSION_ID_UNSET && pinnedAudioSessionId != 0) {
-                try { playerB.audioSessionId = pinnedAudioSessionId } catch (_: Exception) {}
-            }
         }
         return playerB
     }
@@ -2939,7 +2946,9 @@ class DualPlayerEngine @Inject constructor(
             standby.repeatMode = playerA.repeatMode
             standby.shuffleModeEnabled = playerA.shuffleModeEnabled
             standby.removeListener(standbyPlayerListener)
+            standby.removeAnalyticsListener(standbyPlayerListener)
             standby.addListener(standbyPlayerListener)
+            standby.addAnalyticsListener(standbyPlayerListener)
             standby.prepare()
             val standbySession = standby.audioSessionId
             if (standbySession != 0 && standbySession != C.AUDIO_SESSION_ID_UNSET) {
@@ -2975,6 +2984,7 @@ class DualPlayerEngine @Inject constructor(
         if (::playerB.isInitialized && !playerBReleased) {
             try {
                 playerB.removeListener(standbyPlayerListener)
+                playerB.removeAnalyticsListener(standbyPlayerListener)
                 if (playerB.mediaItemCount > 0) {
                     playerB.stop()
                     playerB.clearMediaItems()
@@ -3216,7 +3226,9 @@ class DualPlayerEngine @Inject constructor(
         incomingPlayer.shuffleModeEnabled = outgoingPlayer.shuffleModeEnabled
 
         incomingPlayer.removeListener(standbyPlayerListener)
+        incomingPlayer.removeAnalyticsListener(standbyPlayerListener)
         outgoingPlayer.removeListener(standbyPlayerListener)
+        outgoingPlayer.removeAnalyticsListener(standbyPlayerListener)
         outgoingPlayer.removeListener(masterPlayerListener)
         outgoingPlayer.removeAnalyticsListener(masterPlayerListener)
 
@@ -3224,6 +3236,7 @@ class DualPlayerEngine @Inject constructor(
         transitionOutgoingRestVolume = null
         playerA = incomingPlayer
         playerB = outgoingPlayer
+        hasInitializedMasterAudioTrack = true
         currentMasterYoutubeId = playerA.currentMediaItem?.let(::youtubeIdOf)
         _isPlaybackBufferingState.value = playerA.playbackState == Player.STATE_BUFFERING
 
@@ -3429,6 +3442,7 @@ class DualPlayerEngine @Inject constructor(
         localFilePathCache.evictAll()
         activeResolutions.clear()
         isReleased = true
+        hasInitializedMasterAudioTrack = false
         audioOffloadFailed = false
     }
 }
