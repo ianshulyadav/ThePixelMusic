@@ -1741,6 +1741,12 @@ class PlayerViewModel @Inject constructor(
     /** Incoming track announced by the service while an automatic crossfade is audible. */
     @Volatile private var transitionDisplayMediaId: String? = null
 
+    private fun isOutgoingCrossfadeItem(mediaId: String?): Boolean {
+        val incomingId = transitionDisplayMediaId ?: return false
+        if (mediaId == null) return false
+        return mediaId.removePrefix("song:") != incomingId.removePrefix("song:")
+    }
+
     private val mediaControllerListener = object : MediaController.Listener {
         override fun onExtrasChanged(controller: MediaController, extras: Bundle) {
             val incomingId = extras.getString(
@@ -2878,7 +2884,8 @@ class PlayerViewModel @Inject constructor(
                 // the live controller instead of requiring a process restart to unfreeze the UI.
                 val stable = playbackStateHolder.stablePlayerState.value
                 val controllerMediaId = controller.currentMediaItem?.mediaId
-                val stateIsStale = controllerMediaId != stable.currentSong?.id ||
+                val stateIsStale = (!isOutgoingCrossfadeItem(controllerMediaId) &&
+                    controllerMediaId != stable.currentSong?.id) ||
                     controller.isPlaying != stable.isPlaying ||
                     controller.playWhenReady != stable.playWhenReady
                 if (stateIsStale) {
@@ -2910,18 +2917,10 @@ class PlayerViewModel @Inject constructor(
 
     private fun syncCurrentPlayerState(playerCtrl: MediaController) {
         val mediaItem = playerCtrl.currentMediaItem
+        // Ignore a cached outgoing snapshot after the incoming song is published.
+        if (isOutgoingCrossfadeItem(mediaItem?.mediaId)) return
         if (mediaItem != null) {
-            val displayOverride = transitionDisplayMediaId
-            if (displayOverride != null && displayOverride == mediaItem.mediaId) {
-                transitionDisplayMediaId = null // the swap caught up
-            }
-            // While a crossfade is audible the controller still reports the outgoing item;
-            // keep showing the incoming song instead of flashing the old cover back.
-            val song = if (transitionDisplayMediaId != null) {
-                playbackStateHolder.stablePlayerState.value.currentSong ?: resolveSongFromMediaItem(mediaItem)
-            } else {
-                resolveSongFromMediaItem(mediaItem)
-            }
+            val song = resolveSongFromMediaItem(mediaItem)
             val readyPosition = playerCtrl.currentPosition.coerceAtLeast(0L)
             val songDurationHint = song?.duration?.coerceAtLeast(0L) ?: 0L
             val resolvedDuration = playbackStateHolder.resolveDurationForPlaybackState(
@@ -5474,6 +5473,7 @@ class PlayerViewModel @Inject constructor(
         if (isRemoteSessionControllingPlayback()) return
 
         val mediaItem = player.currentMediaItem ?: return
+        if (isOutgoingCrossfadeItem(mediaItem.mediaId)) return
         val rawMediaId = mediaItem.mediaId
         val bareMediaId = if (rawMediaId.startsWith("song:")) rawMediaId.removePrefix("song:") else rawMediaId
         val currentSongId = playbackStateHolder.stablePlayerState.value.currentSong?.id
@@ -5547,7 +5547,7 @@ class PlayerViewModel @Inject constructor(
 
         updateCurrentPlaybackQueueFromPlayer(playerCtrl)
 
-        playerCtrl.currentMediaItem?.let { mediaItem ->
+        playerCtrl.currentMediaItem?.takeUnless { isOutgoingCrossfadeItem(it.mediaId) }?.let { mediaItem ->
             playbackStateHolder.ensureCurrentPlaybackOccurrence(mediaItem.mediaId)
             val song = resolveSongFromMediaItem(mediaItem)
 
@@ -5646,6 +5646,7 @@ class PlayerViewModel @Inject constructor(
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 if (isRemoteSessionControllingPlayback()) return
                 val currentId = mediaItem?.mediaId
+                if (isOutgoingCrossfadeItem(currentId)) return
                 playbackStateHolder.onPlaybackOccurrenceTransition(currentId)
                 preparePlaybackAudioMetadataForMedia(currentId)
                 if (currentId != null) {
@@ -5680,6 +5681,9 @@ class PlayerViewModel @Inject constructor(
                     }
 
                     mediaItem?.let { transitionedItem ->
+                        // This coroutine can resume after the fade starts. Its old item must
+                        // never restore the outgoing artwork over the incoming song.
+                        if (isOutgoingCrossfadeItem(transitionedItem.mediaId)) return@launch
                         val song = resolveSongFromMediaItem(transitionedItem)
                         if (song != null && (song.id.startsWith("youtube_") || song.youtubeId != null)) {
                             viewModelScope.launch(Dispatchers.IO) {

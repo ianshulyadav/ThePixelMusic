@@ -660,6 +660,7 @@ class MusicService : MediaLibraryService() {
                 virtualizerEnabled, virtualizerStrength,
                 loudnessEnabled, loudnessStrength
             )
+            engine.setAudioEffectsEnabled(equalizerManager.hasAnyEnabledEffects)
 
             val sessionId = engine.getAudioSessionId()
             if (sessionId != 0) {
@@ -1861,6 +1862,13 @@ class MusicService : MediaLibraryService() {
             
             if (isPlaying) {
                 startTelemetryReporting()
+                // A pinned session can be known before its AudioTrack exists. Retry
+                // attaching once playback actually starts, including after route changes.
+                if (equalizerManager.hasAnyEnabledEffects && !equalizerManager.isAttached) {
+                    serviceScope.launch {
+                        equalizerManager.attachToAudioSessionIfNeeded(engine.getAudioSessionId())
+                    }
+                }
             } else {
                 stopTelemetryReporting(isPause = true)
             }

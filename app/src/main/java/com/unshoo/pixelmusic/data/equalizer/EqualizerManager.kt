@@ -81,8 +81,6 @@ class EqualizerManager @Inject constructor() {
     // Global device capabilities (Checking existence of effect UUIDs)
     private var isBassBoostSupportedGlobal = false
     private var isVirtualizerSupportedGlobal = false
-    private var effectsDisabledForProcess = false
-    private var effectsDisableReason: String? = null
     
     init {
         checkDeviceSupport()
@@ -116,15 +114,7 @@ class EqualizerManager @Inject constructor() {
      * Call this when the player is created or swapped during crossfade.
      */
     suspend fun attachToAudioSession(audioSessionId: Int) {
-        if (effectsDisabledForProcess) {
-            Timber.tag(TAG).d(
-                "Skipping attachToAudioSession($audioSessionId): audio effects disabled (%s)",
-                effectsDisableReason ?: "unknown reason"
-            )
-            return
-        }
-
-        if (audioSessionId == 0) {
+        if (audioSessionId <= 0) {
             Timber.tag(TAG).w("Invalid audio session ID: 0")
             return
         }
@@ -150,16 +140,12 @@ class EqualizerManager @Inject constructor() {
                     enabled = _isEnabled.value
                 }
             } catch (e: Exception) {
-                // Some OEM/route combinations do not expose an effect engine for this session.
-                effectsDisabledForProcess = true
-                effectsDisableReason = "${e.javaClass.simpleName}: ${e.message ?: "unknown"}"
-                _isEnabled.value = false
-                _bassBoostEnabled.value = false
-                _virtualizerEnabled.value = false
-                _loudnessEnhancerEnabled.value = false
+                // A session can be published before AudioTrack exists. Keep the user's
+                // settings intact so playback can retry after the sink starts.
                 Timber.tag(TAG).w(
                     e,
-                    "Audio effects unavailable on this device/audio route. Disabling EQ stack for this process."
+                    "Audio effects unavailable for session %d; will retry during playback.",
+                    audioSessionId
                 )
                 release()
                 return
@@ -252,7 +238,7 @@ class EqualizerManager @Inject constructor() {
     private var companionLoudness: android.media.audiofx.LoudnessEnhancer? = null
 
     fun attachCompanionSession(audioSessionId: Int) {
-        if (effectsDisabledForProcess || !hasAnyEnabledEffects) return
+        if (!hasAnyEnabledEffects) return
         if (audioSessionId == 0 || audioSessionId == currentAudioSessionId) return
         if (audioSessionId == companionSessionId) return
         releaseCompanion()

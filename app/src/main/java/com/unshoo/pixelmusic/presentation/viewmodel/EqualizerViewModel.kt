@@ -153,6 +153,7 @@ class EqualizerViewModel @Inject constructor(
             } else {
                 Timber.tag(TAG).d("Equalizer already attached by service, skipping restore.")
             }
+            dualPlayerEngine.setAudioEffectsEnabled(equalizerManager.hasAnyEnabledEffects)
             
             // Update UI state with device capabilities
             _uiState.update {
@@ -267,6 +268,7 @@ class EqualizerViewModel @Inject constructor(
     
     fun setEnabled(enabled: Boolean) {
         equalizerManager.setEnabled(enabled)
+        dualPlayerEngine.setAudioEffectsEnabled(equalizerManager.hasAnyEnabledEffects)
         _uiState.update { current ->
             current.copy(isEnabled = enabled)
         }
@@ -364,6 +366,7 @@ class EqualizerViewModel @Inject constructor(
 
     fun setBassBoostEnabled(enabled: Boolean) {
         equalizerManager.setBassBoostEnabled(enabled)
+        dualPlayerEngine.setAudioEffectsEnabled(equalizerManager.hasAnyEnabledEffects)
         _uiState.update { current ->
             current.copy(bassBoostEnabled = enabled)
         }
@@ -389,6 +392,7 @@ class EqualizerViewModel @Inject constructor(
 
     fun setVirtualizerEnabled(enabled: Boolean) {
         equalizerManager.setVirtualizerEnabled(enabled)
+        dualPlayerEngine.setAudioEffectsEnabled(equalizerManager.hasAnyEnabledEffects)
         _uiState.update { current ->
             current.copy(virtualizerEnabled = enabled)
         }
@@ -414,6 +418,7 @@ class EqualizerViewModel @Inject constructor(
 
     fun setLoudnessEnhancerEnabled(enabled: Boolean) {
         equalizerManager.setLoudnessEnhancerEnabled(enabled)
+        dualPlayerEngine.setAudioEffectsEnabled(equalizerManager.hasAnyEnabledEffects)
         _uiState.update { current ->
             current.copy(loudnessEnhancerEnabled = enabled)
         }

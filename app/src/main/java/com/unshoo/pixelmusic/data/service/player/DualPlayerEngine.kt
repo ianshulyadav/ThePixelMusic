@@ -188,8 +188,17 @@ class DualPlayerEngine @Inject constructor(
         private set
     private var audioOffloadRequested = false
     private var audioOffloadFailed = false
+    private var audioEffectsEnabled = false
     private val audioOffloadEnabled: Boolean
-        get() = audioOffloadRequested && !audioOffloadFailed && !hiFiModeEnabled
+        get() = audioOffloadRequested && !audioOffloadFailed && !hiFiModeEnabled && !audioEffectsEnabled
+
+    fun setAudioEffectsEnabled(enabled: Boolean) {
+        if (audioEffectsEnabled == enabled) return
+        audioEffectsEnabled = enabled
+        if (!isReleased && ::playerA.isInitialized) {
+            applyAudioOffload(playerA, audioOffloadEnabled)
+        }
+    }
     private var transitionJob: Job? = null
     private var preparationGeneration = 0L
     private var bufferingFallbackJob: Job? = null
