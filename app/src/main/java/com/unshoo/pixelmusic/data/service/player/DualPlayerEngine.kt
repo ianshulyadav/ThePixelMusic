@@ -291,8 +291,12 @@ class DualPlayerEngine @Inject constructor(
                 Timber.tag("TransitionDebug").d("AudioFocus LOSS_TRANSIENT_CAN_DUCK. Ducking.")
                 if (!isDucked) {
                     isDucked = true
-                    preDuckVolumeA = if (skipFadeActive) skipFadeRestVolume else playerA.volume
-                    if (!skipFadeActive) playerA.volume *= DUCK_FACTOR
+                    preDuckVolumeA = when {
+                        skipFadeActive -> skipFadeRestVolume
+                        transitionRunning -> transitionOutgoingRestVolume ?: playerA.volume
+                        else -> playerA.volume
+                    }.coerceIn(0.01f, 1f)
+                    if (!skipFadeActive && !transitionRunning) playerA.volume *= DUCK_FACTOR
                 }
             }
             AudioManager.AUDIOFOCUS_GAIN -> {
@@ -689,6 +693,7 @@ class DualPlayerEngine @Inject constructor(
                 if (!wasFading) {
                     runSkipVolumeFade(player, from = 1f, to = 0f, lengthMs = SKIP_FADE_OUT_MS)
                 }
+                if (transitionRunning) return@launch
                 player.volume = 0f
                 interrupted?.invoke()
                 pendingSkipChange = null
@@ -2895,6 +2900,35 @@ class DualPlayerEngine @Inject constructor(
         return playerB?.takeIf { it.mediaItemCount > 0 }?.currentMediaItem?.mediaId
     }
 
+    @Volatile private var transitionOutgoingRestVolume: Float? = null
+
+    private fun restoreOutgoingRestVolume() {
+        val restVolume = (transitionOutgoingRestVolume ?: 1f).coerceIn(0.01f, 1f)
+        transitionOutgoingRestVolume = null
+        if (::playerA.isInitialized) {
+            if (!skipFadeActive) {
+                playerA.volume = if (isDucked) preDuckVolumeA * DUCK_FACTOR else restVolume
+            }
+            val masterSessionId = playerA.audioSessionId
+            if (masterSessionId != 0 && masterSessionId != C.AUDIO_SESSION_ID_UNSET &&
+                _activeAudioSessionId.value != masterSessionId
+            ) {
+                _activeAudioSessionId.value = masterSessionId
+            }
+        }
+    }
+
+    private fun retireAuxiliaryPlayer(player: ExoPlayer?) {
+        player ?: return
+        runCatching {
+            player.pause()
+            player.stop()
+            player.clearMediaItems()
+            player.volume = 0f
+            player.pauseAtEndOfMediaItems = false
+        }
+    }
+
     fun cancelNext() {
         if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
             android.os.Handler(android.os.Looper.getMainLooper()).post { cancelNext() }
@@ -2905,20 +2939,10 @@ class DualPlayerEngine @Inject constructor(
         transitionJob = null
         transitionRunning = false
         resetPreparedWindowState()
-        playerB?.takeIf { it.mediaItemCount > 0 }?.let { auxiliaryPlayer ->
-            try {
-                auxiliaryPlayer.stop()
-                auxiliaryPlayer.clearMediaItems()
-                auxiliaryPlayer.volume = 0f
-            } catch (e: Exception) { /* Ignore */ }
-        }
-        if (::playerA.isInitialized) {
-            if (!skipFadeActive) {
-                playerA.volume = if (isDucked) preDuckVolumeA * DUCK_FACTOR else 1f
-            }
-            if (shouldPublishMasterPlayer) {
-                onPlayerSwappedListeners.forEach { it(playerA) }
-            }
+        playerB?.takeIf { it.mediaItemCount > 0 }?.let(::retireAuxiliaryPlayer)
+        restoreOutgoingRestVolume()
+        if (::playerA.isInitialized && shouldPublishMasterPlayer) {
+            onPlayerSwappedListeners.forEach { it(playerA) }
         }
         incomingTrackReplayGainVolume = null
         setPauseAtEndOfMediaItems(false)
@@ -2926,6 +2950,7 @@ class DualPlayerEngine @Inject constructor(
     }
 
     fun performTransition(settings: TransitionSettings) {
+        cancelSkipFade()
         transitionJob?.cancel()
         transitionRunning = true
         transitionJob = scope.launch {
@@ -2934,9 +2959,7 @@ class DualPlayerEngine @Inject constructor(
             } catch (e: Exception) {
                 if (e !is kotlinx.coroutines.CancellationException) {
                     Timber.tag("TransitionDebug").e(e, "Error performing transition")
-                    if (::playerA.isInitialized && !skipFadeActive) {
-                        playerA.volume = if (isDucked) preDuckVolumeA * DUCK_FACTOR else 1f
-                    }
+                    restoreOutgoingRestVolume()
                     setPauseAtEndOfMediaItems(false)
                     playerB?.stop()
                 }
@@ -2944,6 +2967,7 @@ class DualPlayerEngine @Inject constructor(
                 if (transitionJob === currentCoroutineContext()[Job]) {
                     transitionJob = null
                     transitionRunning = false
+                    transitionOutgoingRestVolume = null
                     incomingTrackReplayGainVolume = null
                     onTransitionFinishedListeners.forEach { it() }
                 }
@@ -2954,9 +2978,7 @@ class DualPlayerEngine @Inject constructor(
     private suspend fun performOverlapTransition(settings: TransitionSettings) {
         val auxiliaryPlayer = playerB
         if (auxiliaryPlayer == null || auxiliaryPlayer.mediaItemCount == 0) {
-            if (::playerA.isInitialized && !skipFadeActive) {
-                playerA.volume = if (isDucked) preDuckVolumeA * DUCK_FACTOR else 1f
-            }
+            restoreOutgoingRestVolume()
             setPauseAtEndOfMediaItems(false)
             return
         }
@@ -3006,9 +3028,8 @@ class DualPlayerEngine @Inject constructor(
             }
             if (!isReady) {
                 Timber.tag("TransitionDebug").w("playerB not ready for transition (state=%d). Aborting and falling back to playerA.", auxiliaryPlayer.playbackState)
-                if (!skipFadeActive) {
-                    playerA.volume = if (isDucked) preDuckVolumeA * DUCK_FACTOR else 1f
-                }
+                retireAuxiliaryPlayer(auxiliaryPlayer)
+                restoreOutgoingRestVolume()
                 setPauseAtEndOfMediaItems(false)
 
                 val isOutgoingStalled = playerA.playbackState == Player.STATE_ENDED ||
@@ -3023,9 +3044,11 @@ class DualPlayerEngine @Inject constructor(
             }
         }
 
-        val outgoingStartVolume = (if (isDucked) preDuckVolumeA else playerA.volume).coerceIn(0f, 1f)
+        val outgoingStartVolume = (if (isDucked) preDuckVolumeA else playerA.volume).coerceIn(0.01f, 1f)
+        transitionOutgoingRestVolume = outgoingStartVolume
         auxiliaryPlayer.volume = 0f
         if (!playerA.isPlaying && playerA.playbackState == Player.STATE_READY) playerA.play()
+        val incomingStartPosMs = auxiliaryPlayer.currentPosition
         auxiliaryPlayer.playWhenReady = true
         auxiliaryPlayer.play()
 
@@ -3041,31 +3064,101 @@ class DualPlayerEngine @Inject constructor(
                 .onFailure { Timber.tag("TransitionDebug").e(it, "Could not publish incoming track") }
         }
 
-        val duration = settings.durationMs.toLong().coerceAtLeast(500L)
-        val stepMs = 32L
-        val startedAtMs = SystemClock.elapsedRealtime()
+        // Position-driven fade: outgoing ends cleanly at track end, incoming follows audible
+        // playback, and a user pause freezes both without drifting.
+        val requestedDuration = settings.durationMs.toLong().coerceAtLeast(500L)
+        val outgoingStartPosMs = outgoingPlayer.currentPosition
+        val outgoingDurationMs = outgoingPlayer.duration
+        val outgoingEndPosMs = if (outgoingDurationMs != C.TIME_UNSET && outgoingDurationMs > outgoingStartPosMs) {
+            outgoingDurationMs
+        } else {
+            outgoingStartPosMs + requestedDuration
+        }
+        val fadeMs = requestedDuration
+            .coerceAtMost(outgoingEndPosMs - outgoingStartPosMs)
+            .coerceAtLeast(200L)
+        val fadeOutStartPosMs = outgoingEndPosMs - fadeMs
+        val handoffMs = (fadeMs * 0.70f).toLong().coerceAtMost(4_000L).coerceAtLeast(150L)
+        val handoffFrac = (handoffMs.toFloat() / fadeMs).coerceIn(0.10f, 0.90f)
+        val stepMs = 16L
+        val hardTimeoutMs = fadeMs + 5_000L
+        var playingMs = 0L
+        var lastTickMs = SystemClock.elapsedRealtime()
+        var eqHandedOff = false
+
+        Timber.tag("TransitionDebug").d(
+            "Crossfade: fade=%dms (handoff=%.0f%%), outgoing %d->%d ms, incoming starts at %d ms",
+            fadeMs, handoffFrac * 100f, outgoingStartPosMs, outgoingEndPosMs, incomingStartPosMs
+        )
 
         while (true) {
             currentCoroutineContext().ensureActive()
-            val elapsed = (SystemClock.elapsedRealtime() - startedAtMs).coerceAtMost(duration)
-            val progress = (elapsed.toFloat() / duration).coerceIn(0f, 1f)
-            val volIn = envelope(progress, settings.curveIn)
-            val volOut = 1f - envelope(progress, settings.curveOut)
-            val incomingTarget = (incomingTrackReplayGainVolume ?: 1f).coerceIn(0f, 1f)
+            val outPos = outgoingPlayer.currentPosition
+            val outgoingDone = outgoingPlayer.playbackState == Player.STATE_ENDED ||
+                outgoingPlayer.playbackState == Player.STATE_IDLE ||
+                outPos >= outgoingEndPosMs - 20L
+            val progressOut = if (outgoingDone) 1f
+            else ((outPos - fadeOutStartPosMs).toFloat() / fadeMs).coerceIn(0f, 1f)
+            val progressIn = ((incomingPlayer.currentPosition - incomingStartPosMs).toFloat() / fadeMs)
+                .coerceIn(0f, 1f)
+
+            if (!eqHandedOff && progressOut >= handoffFrac) {
+                eqHandedOff = true
+                val incomingSessionId = incomingPlayer.audioSessionId
+                if (incomingSessionId != 0 && incomingSessionId != C.AUDIO_SESSION_ID_UNSET &&
+                    _activeAudioSessionId.value != incomingSessionId
+                ) {
+                    _activeAudioSessionId.value = incomingSessionId
+                    Timber.tag("TransitionDebug").d(
+                        "Mid-crossfade EQ handoff (progressOut=%.2f, progressIn=%.2f) -> session=%d",
+                        progressOut, progressIn, incomingSessionId
+                    )
+                }
+            }
+
+            val volOut = if (progressOut <= handoffFrac) {
+                val p1 = (progressOut / handoffFrac).coerceIn(0f, 1f)
+                1f - 0.80f * envelope(p1, settings.curveOut)
+            } else {
+                val p2 = ((progressOut - handoffFrac) / (1f - handoffFrac).coerceAtLeast(0.01f)).coerceIn(0f, 1f)
+                0.20f * (1f - envelope(p2, settings.curveOut))
+            }
+
+            val volIn = if (progressIn <= handoffFrac) {
+                val p1 = (progressIn / handoffFrac).coerceIn(0f, 1f)
+                0.10f * envelope(p1, settings.curveIn)
+            } else {
+                val p2 = ((progressIn - handoffFrac) / (1f - handoffFrac).coerceAtLeast(0.01f)).coerceIn(0f, 1f)
+                0.10f + 0.90f * envelope(p2, settings.curveIn)
+            }
+
+            val incomingTarget = (incomingTrackReplayGainVolume ?: 1f).coerceIn(0.01f, 1f)
             val duck = if (isDucked) DUCK_FACTOR else 1f
             incomingPlayer.volume = (volIn * incomingTarget * duck).coerceIn(0f, 1f)
             outgoingPlayer.volume = (volOut * outgoingStartVolume * duck).coerceIn(0f, 1f)
 
-            if (elapsed >= duration) break
+            if (progressIn >= 1f && progressOut >= 1f) break
+            val nowMs = SystemClock.elapsedRealtime()
+            if (incomingPlayer.playWhenReady || outgoingPlayer.isPlaying) playingMs += nowMs - lastTickMs
+            lastTickMs = nowMs
+            if (playingMs >= hardTimeoutMs) {
+                Timber.tag("TransitionDebug").w(
+                    "Crossfade timed out (in=%.2f, out=%.2f); finishing swap", progressIn, progressOut
+                )
+                break
+            }
             delay(stepMs)
         }
 
-        val finalTarget = (incomingTrackReplayGainVolume ?: 1f).coerceIn(0f, 1f)
+        val finalTarget = (incomingTrackReplayGainVolume ?: 1f).coerceIn(0.01f, 1f)
         if (isDucked) {
             preDuckVolumeA = finalTarget
         }
         outgoingPlayer.volume = 0f
+        outgoingPlayer.pause()
+
         incomingPlayer.volume = if (isDucked) finalTarget * DUCK_FACTOR else finalTarget
+        transitionOutgoingRestVolume = null
         incomingTrackReplayGainVolume = null
 
         outgoingPlayer.removeListener(masterPlayerListener)
@@ -3080,7 +3173,6 @@ class DualPlayerEngine @Inject constructor(
         _isPlaybackBufferingState.value = playerA.playbackState == Player.STATE_BUFFERING
 
         playerA.pauseAtEndOfMediaItems = false
-        playerB?.pauseAtEndOfMediaItems = false
         playerA.addListener(masterPlayerListener)
         playerA.addAnalyticsListener(masterPlayerListener)
         if (playerA.playWhenReady) requestAudioFocus()
@@ -3090,11 +3182,7 @@ class DualPlayerEngine @Inject constructor(
         _activeAudioSessionId.value =
             if (swappedSessionId != C.AUDIO_SESSION_ID_UNSET) swappedSessionId else 0
 
-        playerB?.pause()
-        playerB?.stop()
-        playerB?.clearMediaItems()
-        playerB?.volume = 0f
-
+        retireAuxiliaryPlayer(playerB)
         setPauseAtEndOfMediaItems(false)
     }
 

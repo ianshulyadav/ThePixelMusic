@@ -2665,16 +2665,26 @@ class MusicService : MediaLibraryService() {
         }
     }
 
+    private var routeChangeEqJob: Job? = null
+
     private fun registerHeadsetReconnectMonitor() {
         val callback = object : AudioDeviceCallback() {
+            // registerAudioDeviceCallback reports every already-connected device once right away;
+            // that is not a route change, so it must not rebuild the effects.
+            private var primed = false
+
             override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) {
-                verifyEqualizerOnRouteChange()
+                if (!primed) {
+                    primed = true
+                    return
+                }
+                if (addedDevices.any { it.isSink }) verifyEqualizerOnRouteChange()
                 if (!addedDevices.any(::isReconnectableHeadsetOutput)) return
                 maybeResumeAfterHeadsetReconnect()
             }
 
             override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) {
-                verifyEqualizerOnRouteChange()
+                if (removedDevices.any { it.isSink }) verifyEqualizerOnRouteChange()
             }
         }
 
@@ -2687,8 +2697,12 @@ class MusicService : MediaLibraryService() {
         val player = engine.masterPlayer
         if (!player.isPlaying && !player.playWhenReady) return
         val sessionId = engine.getAudioSessionId()
-        if (sessionId != 0 && !equalizerManager.isAttached) {
-            serviceScope.launch {
+        if (sessionId == 0) return
+
+        routeChangeEqJob?.cancel()
+        routeChangeEqJob = serviceScope.launch {
+            delay(800L)
+            if (!equalizerManager.isAttached) {
                 equalizerManager.attachToAudioSessionIfNeeded(sessionId)
             }
         }

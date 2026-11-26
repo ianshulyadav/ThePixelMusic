@@ -96,6 +96,7 @@ class TransitionController @Inject constructor(
 
             override fun onTimelineChanged(timeline: Timeline, reason: Int) {
                 if (reason == Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED) {
+                    if (engine.isTransitionRunning()) return
                     // The queue has changed (e.g., reordered, item removed).
                     Timber.tag("TransitionDebug").d("Timeline changed (reason=%d). Cancelling pending transition.", reason)
                     transitionSchedulerJob?.cancel()
