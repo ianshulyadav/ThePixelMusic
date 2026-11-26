@@ -59,6 +59,7 @@ class YouTubeRadioQueue(
 
                 endpoint = nextResult.endpoint
                 continuation = nextResult.continuation
+                exhausted = continuation == null
                 retryCount = 0
                 return@withContext Queue.Status(
                     title = nextResult.title,
@@ -97,14 +98,10 @@ class YouTubeRadioQueue(
 
                 val items = nextResult.items.map { MediaItemBuilder.build(it.toNativeSong()) }
 
-                if (continuation == null) {
-                    if (items.isNotEmpty()) {
-                        val lastId = nextResult.items.last().id
-                        endpoint = WatchEndpoint(videoId = lastId, playlistId = "RDAMVM$lastId")
-                    } else {
-                        exhausted = true
-                    }
-                }
+                // The outer autoplay queue chooses the next radio from songs it actually
+                // handed to the player. Re-seeding here from the final API row can repeat
+                // an already-played station or pick a filtered-out track.
+                exhausted = continuation == null
 
                 return@withContext items
             } catch (e: CancellationException) {

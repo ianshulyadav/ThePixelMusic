@@ -23,6 +23,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import timber.log.Timber
 import kotlin.math.absoluteValue
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.ConcurrentHashMap
 import com.unshoo.pixelmusic.utils.YouTubeIdUtils
 
 import unshoo.ianshulyadav.pixelmusic.innertube.models.WatchEndpoint
@@ -35,14 +37,15 @@ import com.unshoo.pixelmusic.utils.MediaItemBuilder
 
 object AutoQueueManager {
     private const val TAG = "AutoQueueMgr"
-    private const val REFILL_THRESHOLD = 5
-    private const val TARGET_UPCOMING_COUNT = 25
-    private const val MAX_REFILL_BATCH_ATTEMPTS = 5
+    private const val REFILL_THRESHOLD = 15
+    private const val TARGET_UPCOMING_COUNT = 20
+    private const val MAX_REFILL_BATCH_ATTEMPTS = 4
     private const val STARTUP_SAFETY_CHECK_DELAY_MS = 2_500L
     private const val SETTINGS_READ_TIMEOUT_MS = 2_000L
 
     @Volatile private var currentQueue: Queue = EmptyQueue
-    private val sessionQueuedIds = LinkedHashSet<String>()
+    private val queueGeneration = AtomicLong()
+    private val sessionQueuedIds = ConcurrentHashMap.newKeySet<String>()
 
     private val refillMutex = Mutex()
     @Volatile private var refillRequestedAgain = false
@@ -220,12 +223,9 @@ object AutoQueueManager {
 
     fun reset() {
         Timber.tag(TAG).d("reset() called")
+        queueGeneration.incrementAndGet()
         currentQueue = EmptyQueue
-        if (sessionQueuedIds.size > 100) {
-            val keep = sessionQueuedIds.toList().takeLast(30)
-            sessionQueuedIds.clear()
-            sessionQueuedIds.addAll(keep)
-        }
+        sessionQueuedIds.clear()
     }
 
     fun disableAndTrimQueue() {
@@ -274,6 +274,7 @@ object AutoQueueManager {
 
     fun seed(endpoint: WatchEndpoint, continuation: String?, videoId: String) {
         val dao = musicDaoRef ?: return
+        queueGeneration.incrementAndGet()
         currentQueue = ResilientRadioQueue.resumed(
             endpoint = endpoint,
             continuation = continuation,
@@ -373,7 +374,7 @@ object AutoQueueManager {
 
                 val (remaining, isPlaying) = withContext(Dispatchers.Main) {
                     val p = livePlayer() ?: return@withContext Pair(-1, false)
-                    Pair(computeRemainingUpcoming(p), p.isPlaying || p.playWhenReady)
+                    Pair(computeRemainingUpcoming(p), (p.isPlaying || p.playWhenReady) && p.repeatMode == Player.REPEAT_MODE_OFF)
                 }
                 if (remaining < 0 || !isPlaying) return@launch
 
@@ -409,7 +410,7 @@ object AutoQueueManager {
 
         var (remaining, isPlaying) = withContext(Dispatchers.Main) {
             val p = livePlayer() ?: return@withContext Pair(-1, false)
-            Pair(computeRemainingUpcoming(p), p.isPlaying || p.playWhenReady)
+            Pair(computeRemainingUpcoming(p), (p.isPlaying || p.playWhenReady) && p.repeatMode == Player.REPEAT_MODE_OFF)
         }
         if (remaining < 0 || !isPlaying || remaining > REFILL_THRESHOLD) return
 
@@ -422,6 +423,9 @@ object AutoQueueManager {
         var totalAdded = 0
         var consecutiveEmptyFetches = 0
         val batchedItems = mutableListOf<MediaItem>()
+        val bufferedIds = HashSet<String>()
+        val bufferedVideoIds = HashSet<String>()
+        val bufferedSignatures = HashSet<String>()
         var firstBatchAdded = false
 
         while (remaining < TARGET_UPCOMING_COUNT && batchAttempts < MAX_REFILL_BATCH_ATTEMPTS) {
@@ -471,14 +475,17 @@ object AutoQueueManager {
                 QueueFilterSnapshot(ids, vIds, sig, curVid, sigs)
             }
 
+            val generationAtFetch = queueGeneration.get()
+            val sourceQueue = currentQueue
             val fetched = try {
-                currentQueue.nextPage()
+                sourceQueue.nextPage()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 Timber.tag(TAG).e(e, "nextPage() failed on batch %d", batchAttempts)
                 emptyList()
             }
+            if (generationAtFetch != queueGeneration.get() || sourceQueue !== currentQueue) return
 
             val filterCoverLofi = runCatching { userPreferencesRepository?.filterCoverAndLofiFlow?.first() }.getOrNull() ?: true
             val filterKeywords = runCatching { userPreferencesRepository?.filterKeywordsFlow?.first() }.getOrNull() ?: ContentFilterUtils.DEFAULT_FILTER_KEYWORDS
@@ -514,9 +521,10 @@ object AutoQueueManager {
                 val itemSig = if (!itemTitle.isNullOrBlank() && !itemArtist.isNullOrBlank()) "$itemTitle|$itemArtist" else null
 
                 item.mediaId in existingIds ||
+                item.mediaId in bufferedIds ||
                 item.mediaId.removePrefix("youtube_") in existingIds ||
-                (ytId.isNotBlank() && (ytId in existingVideoIds || ytId == currentVideoId)) ||
-                (itemSig != null && (itemSig == currentTrackSignature || itemSig in existingSignatures)) ||
+                (ytId.isNotBlank() && (ytId in existingVideoIds || ytId in bufferedVideoIds || ytId == currentVideoId)) ||
+                (itemSig != null && (itemSig == currentTrackSignature || itemSig in existingSignatures || itemSig in bufferedSignatures)) ||
                 item.mediaId in dislikedSongIds ||
                 (ytId.isNotBlank() && ytId in dislikedYtIds) ||
                 item.mediaId in notInterestedIds ||
@@ -543,21 +551,36 @@ object AutoQueueManager {
                         ContentFilterUtils.isVideoTitle(title)
                     }
                 }
-                filtered
+                filtered.distinctBy { item ->
+                    YouTubeIdUtils.extractVideoId(item.mediaId).takeIf { it.length == 11 } ?: item.mediaId
+                }.distinctBy { item ->
+                    val title = item.mediaMetadata.title?.toString()?.trim()?.lowercase().orEmpty()
+                    val artist = item.mediaMetadata.artist?.toString()?.trim()?.lowercase().orEmpty()
+                    if (title.isNotBlank() && artist.isNotBlank()) "$title|$artist" else item.mediaId
+                }
             }
 
             if (newItems.isNotEmpty()) {
+                if (generationAtFetch != queueGeneration.get() || sourceQueue !== currentQueue) return
                 consecutiveEmptyFetches = 0
                 for (item in newItems) {
                     val yt = YouTubeIdUtils.extractVideoId(item.mediaId)
                     if (yt.isNotBlank()) sessionQueuedIds.add(yt)
                     sessionQueuedIds.add(item.mediaId)
+                    bufferedIds.add(item.mediaId)
+                    if (yt.isNotBlank()) bufferedVideoIds.add(yt)
+                    val title = item.mediaMetadata.title?.toString()?.trim()?.lowercase().orEmpty()
+                    val artist = item.mediaMetadata.artist?.toString()?.trim()?.lowercase().orEmpty()
+                    if (title.isNotBlank() && artist.isNotBlank()) bufferedSignatures.add("$title|$artist")
                 }
+                (sourceQueue as? ResilientRadioQueue)?.recordAccepted(newItems)
                 if (!firstBatchAdded && remaining <= 1) {
                     withContext(Dispatchers.Main) {
+                        if (generationAtFetch != queueGeneration.get() || sourceQueue !== currentQueue) return@withContext
                         livePlayer()?.addMediaItems(newItems)
                         onQueueItemsAddedCallback?.invoke()
                     }
+                    if (generationAtFetch != queueGeneration.get()) return
                     firstBatchAdded = true
                 } else {
                     batchedItems.addAll(newItems)
@@ -571,27 +594,18 @@ object AutoQueueManager {
                     batchAttempts, fetched.size, existingIds.size, consecutiveEmptyFetches)
 
                 if (consecutiveEmptyFetches >= 2) {
-                    // Try reseeding from current playing track or the last track in the player queue
-                    val reseedId = withContext(Dispatchers.Main) {
-                        val p = livePlayer() ?: return@withContext null
-                        p.currentMediaItem?.mediaId
-                            ?: if (p.mediaItemCount > 0) p.getMediaItemAt(p.mediaItemCount - 1).mediaId else null
-                    }
-                    if (reseedId != null) {
-                        Timber.tag(TAG).d("Reseeding AutoQueue from song: %s", reseedId)
-                        seedFromMediaId(reseedId)
-                    } else {
-                        break
-                    }
-                }
-                if (consecutiveEmptyFetches >= 4) {
+                    // The radio already tried each delivered song once. Repeating the
+                    // current seed here just reloads the same exhausted station.
                     break
                 }
             }
         }
 
         if (batchedItems.isNotEmpty()) {
+            if (currentQueue === EmptyQueue) return
+            val generationAtCommit = queueGeneration.get()
             withContext(Dispatchers.Main) {
+                if (generationAtCommit != queueGeneration.get()) return@withContext
                 livePlayer()?.addMediaItems(batchedItems)
                 onQueueItemsAddedCallback?.invoke()
             }
@@ -610,6 +624,7 @@ object AutoQueueManager {
     private suspend fun seedFromMediaId(mediaId: String) {
         val dao = musicDaoRef ?: return
         val videoId = resolveVideoId(mediaId)
+        queueGeneration.incrementAndGet()
         if (videoId == null) {
             currentQueue = ResilientRadioQueue.radio(videoId = null, musicDao = dao, isOnline = ::hasInternet)
             ensureLocalSeed(mediaId)

@@ -5,6 +5,7 @@ import com.unshoo.pixelmusic.data.database.MusicDao
 import com.unshoo.pixelmusic.data.database.SongEntity
 import com.unshoo.pixelmusic.data.database.toSong
 import com.unshoo.pixelmusic.utils.MediaItemBuilder
+import com.unshoo.pixelmusic.utils.YouTubeIdUtils
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -17,9 +18,9 @@ class ResilientRadioQueue(
     private var localSeed: SongEntity? = null,
 ) : Queue {
 
-    private var onlineExhausted = online == null
-    private var lastKnownVideoId: String? = online?.currentVideoId
-    private var hasAttemptedReseedAfterFailure = false
+    private val radioHistory = RadioAutoplayHistory(online?.currentVideoId)
+    private val pendingOnline = ArrayDeque<MediaItem>()
+    private val returnedVideoIds = HashSet<String>()
     private val usedLocalIds = mutableSetOf<Long>()
 
     override val preloadItem: MediaItem? = null
@@ -29,63 +30,68 @@ class ResilientRadioQueue(
         if (onlineQueue != null && isOnline()) {
             try {
                 val status = onlineQueue.getInitialStatus()
-                onlineQueue.currentVideoId?.let { lastKnownVideoId = it }
                 if (status.items.isNotEmpty()) return status
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {
             }
         }
-        onlineExhausted = true
         return Queue.Status(title = null, items = emptyList(), mediaItemIndex = -1)
     }
 
     override fun hasNextPage(): Boolean = true
 
     override suspend fun nextPage(): List<MediaItem> {
-        if (!onlineExhausted && online != null && isOnline() && online?.hasNextPage() == true) {
-            try {
-                val items = online!!.nextPage()
-                online?.currentVideoId?.let { lastKnownVideoId = it }
-                if (items.isNotEmpty()) {
-                    hasAttemptedReseedAfterFailure = false
-                    return items
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Exception) {
-            }
-        }
+        if (isOnline()) {
+            val batch = mutableListOf<MediaItem>()
+            drainPending(batch)
+            if (batch.size >= RADIO_BATCH_SIZE) return batch
 
-        if (online == null || online?.hasNextPage() == false || onlineExhausted) {
-            val seedId = lastKnownVideoId
-            if (isOnline() && seedId != null && !hasAttemptedReseedAfterFailure) {
-                hasAttemptedReseedAfterFailure = true
-                val newOnline = YouTubeRadioQueue.radio(seedId)
-                online = newOnline
-                try {
-                    val items = newOnline.nextPage()
-                    if (items.isNotEmpty()) {
-                        newOnline.currentVideoId?.let { lastKnownVideoId = it }
-                        onlineExhausted = false
-                        hasAttemptedReseedAfterFailure = false
-                        return items
-                    }
+            if (online?.hasNextPage() != true) {
+                radioHistory.nextSeed()?.let { online = YouTubeRadioQueue.radio(it) }
+            }
+            if (online?.hasNextPage() == true) {
+                val page = try {
+                    online?.nextPage().orEmpty()
                 } catch (e: CancellationException) {
                     throw e
                 } catch (_: Exception) {
+                    // A failed station yields to the next delivered seed.
+                    online = null
+                    emptyList()
                 }
+                pendingOnline.addAll(page)
             }
-            onlineExhausted = true
+            drainPending(batch)
+            if (batch.isNotEmpty()) return batch
         }
         return fetchLocalFallback()
     }
 
+    private fun drainPending(batch: MutableList<MediaItem>) {
+        while (pendingOnline.isNotEmpty() && batch.size < RADIO_BATCH_SIZE) {
+            val item = pendingOnline.removeFirst()
+            val videoId = YouTubeIdUtils.extractVideoId(item.mediaId)
+            if (videoId.length == 11 && returnedVideoIds.add(videoId)) batch += item
+            if (returnedVideoIds.size > MAX_RETURNED_IDS) {
+                returnedVideoIds.clear()
+                returnedVideoIds.addAll(radioHistory.recentVideoIds())
+            }
+        }
+    }
+
+    /** Only songs accepted by the player become seeds for later stations. */
+    fun recordAccepted(items: List<MediaItem>) {
+        items.filter { it.mediaId.startsWith("youtube_") }.forEach {
+            radioHistory.record(YouTubeIdUtils.extractVideoId(it.mediaId))
+        }
+    }
+
     fun reseedOnline(videoId: String) {
-        lastKnownVideoId = videoId
+        pendingOnline.clear()
+        returnedVideoIds.clear()
+        radioHistory.reset(videoId)
         online = YouTubeRadioQueue.radio(videoId)
-        onlineExhausted = false
-        hasAttemptedReseedAfterFailure = false
     }
 
     fun updateLocalSeed(entity: SongEntity?) {
@@ -118,11 +124,7 @@ class ResilientRadioQueue(
                 return@withContext emptyList()
             }
 
-            var fresh = candidates.distinctBy { it.id }.filter { it.id !in usedLocalIds }
-            if (fresh.isEmpty() && candidates.isNotEmpty()) {
-                usedLocalIds.clear()
-                fresh = candidates.distinctBy { it.id }
-            }
+            val fresh = candidates.distinctBy { it.id }.filter { it.id !in usedLocalIds }
 
             val picked = fresh.shuffled().take(15)
             picked.forEach { usedLocalIds += it.id }
@@ -135,6 +137,8 @@ class ResilientRadioQueue(
     }
 
     companion object {
+        private const val RADIO_BATCH_SIZE = 20
+        private const val MAX_RETURNED_IDS = 6_000
         fun radio(
             videoId: String?,
             musicDao: MusicDao,
