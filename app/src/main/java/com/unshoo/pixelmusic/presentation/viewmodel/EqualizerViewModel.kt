@@ -129,7 +129,7 @@ class EqualizerViewModel @Inject constructor(
         viewModelScope.launch {
             Timber.tag(TAG).d("Initializing equalizer...")
             
-            if (!equalizerManager.hasRestoredState) {
+            if (!equalizerManager.isAttached) {
                 val enabled = equalizerPreferencesRepository.equalizerEnabledFlow.first()
                 val presetName = equalizerPreferencesRepository.equalizerPresetFlow.first()
                 val customBands = equalizerPreferencesRepository.equalizerCustomBandsFlow.first()
@@ -146,13 +146,13 @@ class EqualizerViewModel @Inject constructor(
                     virtualizerEnabled, virtualizer,
                     loudnessEnabled, loudnessStrength
                 )
+                
+                val initialSessionId = dualPlayerEngine.getAudioSessionId()
+                if (initialSessionId != 0) {
+                    equalizerManager.attachToAudioSessionIfNeeded(initialSessionId)
+                }
             } else {
-                Timber.tag(TAG).d("Equalizer state already restored, skipping preference reload.")
-            }
-            dualPlayerEngine.setAudioEffectsEnabled(equalizerManager.hasAnyEnabledEffects)
-            val initialSessionId = dualPlayerEngine.getAudioSessionId()
-            if (initialSessionId != 0 && dualPlayerEngine.hasActiveMasterAudioTrack()) {
-                equalizerManager.attachToAudioSessionIfNeeded(initialSessionId, fromLiveAudioTrack = true)
+                Timber.tag(TAG).d("Equalizer already attached by service, skipping restore.")
             }
             
             // Update UI state with device capabilities
@@ -269,15 +269,11 @@ class EqualizerViewModel @Inject constructor(
     
     fun setEnabled(enabled: Boolean) {
         equalizerManager.setEnabled(enabled)
-        dualPlayerEngine.setAudioEffectsEnabled(equalizerManager.hasAnyEnabledEffects)
         _uiState.update { current ->
             current.copy(isEnabled = enabled)
         }
         viewModelScope.launch {
-            equalizerManager.attachToAudioSessionIfNeeded(
-                dualPlayerEngine.getAudioSessionId(),
-                fromLiveAudioTrack = dualPlayerEngine.hasActiveMasterAudioTrack()
-            )
+            equalizerManager.attachToAudioSessionIfNeeded(dualPlayerEngine.getAudioSessionId())
             equalizerPreferencesRepository.setEqualizerEnabled(enabled)
         }
     }
@@ -370,15 +366,11 @@ class EqualizerViewModel @Inject constructor(
 
     fun setBassBoostEnabled(enabled: Boolean) {
         equalizerManager.setBassBoostEnabled(enabled)
-        dualPlayerEngine.setAudioEffectsEnabled(equalizerManager.hasAnyEnabledEffects)
         _uiState.update { current ->
             current.copy(bassBoostEnabled = enabled)
         }
         viewModelScope.launch {
-            equalizerManager.attachToAudioSessionIfNeeded(
-                dualPlayerEngine.getAudioSessionId(),
-                fromLiveAudioTrack = dualPlayerEngine.hasActiveMasterAudioTrack()
-            )
+            equalizerManager.attachToAudioSessionIfNeeded(dualPlayerEngine.getAudioSessionId())
             equalizerPreferencesRepository.setBassBoostEnabled(enabled)
         }
     }
@@ -399,15 +391,11 @@ class EqualizerViewModel @Inject constructor(
 
     fun setVirtualizerEnabled(enabled: Boolean) {
         equalizerManager.setVirtualizerEnabled(enabled)
-        dualPlayerEngine.setAudioEffectsEnabled(equalizerManager.hasAnyEnabledEffects)
         _uiState.update { current ->
             current.copy(virtualizerEnabled = enabled)
         }
         viewModelScope.launch {
-            equalizerManager.attachToAudioSessionIfNeeded(
-                dualPlayerEngine.getAudioSessionId(),
-                fromLiveAudioTrack = dualPlayerEngine.hasActiveMasterAudioTrack()
-            )
+            equalizerManager.attachToAudioSessionIfNeeded(dualPlayerEngine.getAudioSessionId())
             equalizerPreferencesRepository.setVirtualizerEnabled(enabled)
         }
     }
@@ -428,15 +416,11 @@ class EqualizerViewModel @Inject constructor(
 
     fun setLoudnessEnhancerEnabled(enabled: Boolean) {
         equalizerManager.setLoudnessEnhancerEnabled(enabled)
-        dualPlayerEngine.setAudioEffectsEnabled(equalizerManager.hasAnyEnabledEffects)
         _uiState.update { current ->
             current.copy(loudnessEnhancerEnabled = enabled)
         }
         viewModelScope.launch {
-            equalizerManager.attachToAudioSessionIfNeeded(
-                dualPlayerEngine.getAudioSessionId(),
-                fromLiveAudioTrack = dualPlayerEngine.hasActiveMasterAudioTrack()
-            )
+            equalizerManager.attachToAudioSessionIfNeeded(dualPlayerEngine.getAudioSessionId())
             equalizerPreferencesRepository.setLoudnessEnhancerEnabled(enabled)
         }
     }
@@ -507,11 +491,7 @@ class EqualizerViewModel @Inject constructor(
         viewModelScope.launch {
             val audioSessionId = dualPlayerEngine.getAudioSessionId()
             Timber.tag(TAG).d("Reattaching equalizer to new audio session: $audioSessionId")
-            equalizerManager.attachToAudioSessionIfNeeded(
-                audioSessionId,
-                fromLiveAudioTrack = dualPlayerEngine.hasActiveMasterAudioTrack(),
-                forceReattach = true
-            )
+            equalizerManager.attachToAudioSessionIfNeeded(audioSessionId)
         }
     }
 

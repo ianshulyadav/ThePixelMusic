@@ -186,24 +186,10 @@ class DualPlayerEngine @Inject constructor(
     private var scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     var hiFiModeEnabled: Boolean = false
         private set
-    private var audioOffloadRequested = false
-    private var audioOffloadFailed = false
-    private var audioEffectsEnabled = false
-    private val audioOffloadEnabled: Boolean
-        get() = audioOffloadRequested && !audioOffloadFailed && !hiFiModeEnabled && !audioEffectsEnabled
-
-    fun setAudioEffectsEnabled(enabled: Boolean) {
-        if (audioEffectsEnabled == enabled) return
-        audioEffectsEnabled = enabled
-        if (!isReleased && ::playerA.isInitialized) {
-            applyAudioOffload(playerA, audioOffloadEnabled)
-        }
-    }
+    private var audioOffloadEnabled = false
     private var transitionJob: Job? = null
-    private var preparationGeneration = 0L
     private var bufferingFallbackJob: Job? = null
     private var transitionRunning = false
-    private var pausedAtOverlapBoundary = false
     private var preResolutionJob: Job? = null
     private var queueSnapshot: List<MediaItem> = emptyList()
     private var activeWindowStartIndex = 0
@@ -212,26 +198,7 @@ class DualPlayerEngine @Inject constructor(
     private var preparedPlayerUsesWindowedQueue = false
 
     private lateinit var playerA: ExoPlayer
-    private lateinit var playerB: ExoPlayer
-    /**
-     * BUGFIX: a released ExoPlayer keeps STATE_IDLE with a null playerError and its application
-     * looper (main) stays alive, so ensurePlayerB() could not tell a released standby player from
-     * a healthy one. After any rebuild (Hi-Fi toggle, offload fallback, service re-create) the
-     * crossfade standby was a dead instance: prepare() no-oped, awaitPlayerReady() timed out and
-     * every crossfade silently aborted. Track the release explicitly instead.
-     */
-    private var playerBReleased = true
-
-    private fun releaseStandbyPlayer() {
-        if (::playerB.isInitialized && !playerBReleased) {
-            try {
-                playerB.removeListener(standbyPlayerListener)
-                playerB.removeAnalyticsListener(standbyPlayerListener)
-                playerB.release()
-            } catch (_: Exception) { /* Ignore */ }
-        }
-        playerBReleased = true
-    }
+    private var playerB: ExoPlayer? = null
 
     private val onPlayerSwappedListeners = mutableListOf<(Player) -> Unit>()
     internal var beforeQueueReplacement: ((Player, List<MediaItem>?, Int, String?) -> Boolean)? = null
@@ -257,23 +224,6 @@ class DualPlayerEngine @Inject constructor(
     
     private val _activeAudioSessionId = MutableStateFlow(0)
     val activeAudioSessionId: StateFlow<Int> = _activeAudioSessionId.asStateFlow()
-
-    @Volatile private var hasInitializedMasterAudioTrack = false
-    var onMasterAudioTrackInitialized: ((sessionId: Int, offload: Boolean) -> Unit)? = null
-    var onStandbyAudioTrackInitialized: ((sessionId: Int, offload: Boolean) -> Unit)? = null
-
-    fun hasActiveMasterAudioTrack(): Boolean = hasInitializedMasterAudioTrack
-
-    /** Audio session of the incoming player while a crossfade runs; 0 otherwise. */
-    private val _standbyAudioSessionId = MutableStateFlow(0)
-    val standbyAudioSessionId: StateFlow<Int> = _standbyAudioSessionId.asStateFlow()
-    var onStandbyAudioSessionChanged: ((Int) -> Unit)? = null
-
-    private fun publishStandbyAudioSession(audioSessionId: Int) {
-        if (_standbyAudioSessionId.value == audioSessionId) return
-        _standbyAudioSessionId.value = audioSessionId
-        onStandbyAudioSessionChanged?.invoke(audioSessionId)
-    }
 
     private val _activeDecoderInfo = MutableStateFlow<ActiveDecoderInfo?>(null)
     val activeDecoderInfo: StateFlow<ActiveDecoderInfo?> = _activeDecoderInfo.asStateFlow()
@@ -323,29 +273,25 @@ class DualPlayerEngine @Inject constructor(
             AudioManager.AUDIOFOCUS_LOSS -> {
                 Timber.tag("TransitionDebug").d("AudioFocus LOSS. Pausing.")
                 isFocusLossPause = false
-                if (transitionRunning) cancelNext()
-                playerA.pause()
+                playerA.playWhenReady = false
+                playerB?.playWhenReady = false
                 clearDucking()
                 abandonAudioFocus()
             }
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
                 Timber.tag("TransitionDebug").d("AudioFocus LOSS_TRANSIENT (%d). Pausing.", focusChange)
-                // Only latch "resume on GAIN" from the first transient loss; a second
-                // LOSS_TRANSIENT while already paused must not clear the flag.
+                val auxiliaryPlayer = playerB
                 isFocusLossPause = isFocusLossPause ||
                     (::playerA.isInitialized && (playerA.playWhenReady || playerA.isPlaying)) ||
-                    (transitionRunning && ::playerB.isInitialized && (playerB.playWhenReady || playerB.isPlaying))
-                if (transitionRunning) cancelNext()
-                playerA.pause()
+                    (transitionRunning && auxiliaryPlayer != null && (auxiliaryPlayer.playWhenReady || auxiliaryPlayer.isPlaying))
+                playerA.playWhenReady = false
+                auxiliaryPlayer?.playWhenReady = false
             }
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
                 Timber.tag("TransitionDebug").d("AudioFocus LOSS_TRANSIENT_CAN_DUCK. Ducking.")
-                // BUGFIX: repeated CAN_DUCK callbacks compounded the attenuation (20% -> 4% -> ...)
-                // and overwrote the saved pre-duck level with an already-ducked value.
                 if (!isDucked) {
                     isDucked = true
-                    preDuckVolumeA = transitionOutgoingRestVolume
-                        ?: if (skipFadeActive) skipFadeRestVolume else playerA.volume
+                    preDuckVolumeA = if (skipFadeActive) skipFadeRestVolume else playerA.volume
                     if (!skipFadeActive) playerA.volume *= DUCK_FACTOR
                 }
             }
@@ -357,7 +303,8 @@ class DualPlayerEngine @Inject constructor(
                     if (playerA.playbackState == Player.STATE_IDLE || playerA.playbackState == Player.STATE_ENDED) {
                         playerA.prepare()
                     }
-                    playerA.play()
+                    playerA.playWhenReady = true
+                    if (transitionRunning) playerB?.playWhenReady = true
                 }
             }
         }
@@ -365,7 +312,9 @@ class DualPlayerEngine @Inject constructor(
 
     private fun clearDucking() {
         if (!isDucked) return
-        if (!skipFadeActive && transitionOutgoingRestVolume == null) playerA.volume = preDuckVolumeA
+        if (!skipFadeActive && !transitionRunning) {
+            playerA.volume = preDuckVolumeA
+        }
         isDucked = false
     }
 
@@ -381,21 +330,12 @@ class DualPlayerEngine @Inject constructor(
 
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
             if (playWhenReady) {
-                pausedAtOverlapBoundary = false
                 lastPlayWhenReadyAtMs = SystemClock.elapsedRealtime()
                 requestAudioFocus()
                 checkAndRecoverStalePlaybackOnResume()
             } else {
-                if (transitionRunning) {
-                    pausedAtOverlapBoundary = reason == Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM
-                    if (!pausedAtOverlapBoundary) cancelNext()
-                }
                 lastPausedAtMs = SystemClock.elapsedRealtime()
                 cancelAudioOffloadFallback()
-                // Keep focus across user pauses so a quick resume doesn't have to re-acquire it.
-                // Focus is abandoned explicitly on AUDIOFOCUS_LOSS and on release(); anything in
-                // between (user pause/play) keeps the request alive to avoid contention races
-                // that occasionally caused press-play to auto-pause after a short wait.
             }
         }
 
@@ -428,14 +368,6 @@ class DualPlayerEngine @Inject constructor(
                 audioTrackConfig.sampleRate, audioTrackConfig.encoding, audioTrackConfig.offload,
                 lastAudioInputSampleRate
             )
-            hasInitializedMasterAudioTrack = true
-            val sessionId = if (::playerA.isInitialized) playerA.audioSessionId else 0
-            if (sessionId != 0 && sessionId != C.AUDIO_SESSION_ID_UNSET) {
-                if (_activeAudioSessionId.value != sessionId) {
-                    _activeAudioSessionId.value = sessionId
-                }
-                onMasterAudioTrackInitialized?.invoke(sessionId, audioTrackConfig.offload)
-            }
         }
 
         override fun onAudioDecoderInitialized(
@@ -453,13 +385,11 @@ class DualPlayerEngine @Inject constructor(
         }
 
         override fun onAudioSessionIdChanged(audioSessionId: Int) {
-            // Follow the session reported by the actual AudioTrack. A device may override
-            // the requested shared session; the standby listener then enables its own effects.
-            if (audioSessionId != 0 && audioSessionId != C.AUDIO_SESSION_ID_UNSET) {
-                if (_activeAudioSessionId.value != audioSessionId) {
-                    _activeAudioSessionId.value = audioSessionId
-                    Timber.tag("TransitionDebug").d("Master audio session changed: %d", audioSessionId)
-                }
+            if (audioSessionId != 0 && audioSessionId != C.AUDIO_SESSION_ID_UNSET &&
+                _activeAudioSessionId.value != audioSessionId
+            ) {
+                _activeAudioSessionId.value = audioSessionId
+                Timber.tag("TransitionDebug").d("Master audio session changed: %d", audioSessionId)
             }
         }
 
@@ -572,38 +502,6 @@ class DualPlayerEngine @Inject constructor(
 
     fun addPlayerSwapListener(listener: (Player) -> Unit) {
         onPlayerSwappedListeners.add(listener)
-    }
-
-    // Reusable listener for standby / preloading player errors (Fix 3)
-    private val standbyPlayerListener = object : Player.Listener, AnalyticsListener {
-        override fun onAudioSessionIdChanged(audioSessionId: Int) {
-            // Preparation may open the AudioTrack before the fade begins. Publish that
-            // session now so its effects are ready before the first audible fade frame.
-            if (audioSessionId != 0 && audioSessionId != C.AUDIO_SESSION_ID_UNSET) {
-                publishStandbyAudioSession(audioSessionId)
-            }
-        }
-
-        override fun onAudioTrackInitialized(
-            eventTime: AnalyticsListener.EventTime,
-            audioTrackConfig: androidx.media3.exoplayer.audio.AudioSink.AudioTrackConfig
-        ) {
-            val sessionId = if (::playerB.isInitialized) playerB.audioSessionId else 0
-            if (sessionId != 0 && sessionId != C.AUDIO_SESSION_ID_UNSET) {
-                publishStandbyAudioSession(sessionId)
-                onStandbyAudioTrackInitialized?.invoke(sessionId, audioTrackConfig.offload)
-            }
-        }
-
-        override fun onPlayerError(error: PlaybackException) {
-            if (!::playerB.isInitialized) return
-            val currentStandbyItem = playerB.currentMediaItem ?: return
-            val currentStandbyUri = currentStandbyItem.localConfiguration?.uri?.toString()
-            if (LosslessStreamResolver.isLosslessUri(currentStandbyUri)) {
-                Timber.tag("TransitionDebug").w("standbyPlayer error on lossless (%s); triggering source failover to YouTube", error.message)
-                failoverLosslessToYoutube(currentStandbyItem, playerB, "Standby player error: ${error.message}")
-            }
-        }
     }
 
     fun removePlayerSwapListener(listener: (Player) -> Unit) {
@@ -852,9 +750,10 @@ class DualPlayerEngine @Inject constructor(
 
     /** True when the standby player holds [expectedMediaId] fully buffered and ready to fade in. */
     fun isPreparedNextReady(expectedMediaId: String?): Boolean {
-        if (!::playerB.isInitialized || playerBReleased || playerB.mediaItemCount == 0) return false
-        if (playerB.playbackState != Player.STATE_READY || !playerB.currentTracks.isTypeSelected(C.TRACK_TYPE_AUDIO)) return false
-        return expectedMediaId == null || playerB.currentMediaItem?.mediaId == expectedMediaId
+        val aux = playerB ?: return false
+        if (aux.mediaItemCount == 0) return false
+        if (aux.playbackState != Player.STATE_READY || !aux.currentTracks.isTypeSelected(C.TRACK_TYPE_AUDIO)) return false
+        return expectedMediaId == null || aux.currentMediaItem?.mediaId == expectedMediaId
     }
 
     fun getAudioSessionId(): Int =
@@ -1400,7 +1299,8 @@ class DualPlayerEngine @Inject constructor(
         return null
     }
 
-    private fun applyAudioOffload(player: ExoPlayer, enabled: Boolean) {
+    private fun applyAudioOffload(player: ExoPlayer) {
+        val enabled = audioOffloadEnabled && !hiFiModeEnabled
         val mode = if (enabled) {
             TrackSelectionParameters.AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_ENABLED
         } else {
@@ -1408,25 +1308,30 @@ class DualPlayerEngine @Inject constructor(
         }
         val offloadPreferences = TrackSelectionParameters.AudioOffloadPreferences.Builder()
             .setAudioOffloadMode(mode)
-            .setIsGaplessSupportRequired(true)
             .build()
-        if (player.trackSelectionParameters.audioOffloadPreferences == offloadPreferences) return
-
-        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
-            .setAudioOffloadPreferences(offloadPreferences)
-            .build()
+        if (player.trackSelectionParameters.audioOffloadPreferences != offloadPreferences) {
+            player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+                .setAudioOffloadPreferences(offloadPreferences)
+                .build()
+        }
+        val schedulingEnabled = enabled && !transitionRunning
+        listOf("experimentalSetOffloadSchedulingEnabled", "setOffloadSchedulingEnabled", "setOffloadEnabled")
+            .firstNotNullOfOrNull { name ->
+                runCatching { player.javaClass.getMethod(name, Boolean::class.javaPrimitiveType) }.getOrNull()
+            }
+            ?.let { method -> runCatching { method.invoke(player, schedulingEnabled) } }
     }
 
     private fun startPreferenceCollectors() {
         scope.launch {
-            userPreferencesRepository.audioOffloadEnabledFlow.collect { requested ->
-                if (audioOffloadRequested != requested) {
-                    audioOffloadRequested = requested
-                    audioOffloadFailed = false
+            userPreferencesRepository.audioOffloadEnabledFlow.collect { enabled ->
+                if (audioOffloadEnabled != enabled) {
+                    audioOffloadEnabled = enabled
                     cancelAudioOffloadFallback()
                     if (!isReleased && ::playerA.isInitialized) {
-                        applyAudioOffload(playerA, audioOffloadEnabled)
+                        applyAudioOffload(playerA)
                     }
+                    playerB?.let { if (!isReleased) applyAudioOffload(it) }
                 }
             }
         }
@@ -1484,13 +1389,15 @@ class DualPlayerEngine @Inject constructor(
             onPlayerAboutToBeReleasedListener?.invoke(playerA)
             try { playerA.release() } catch (e: Exception) { /* Ignore */ }
         }
-        releaseStandbyPlayer()
+        playerB?.let {
+            try { it.release() } catch (e: Exception) { /* Ignore */ }
+        }
+        playerB = null
 
         // Let ExoPlayer generate its own audio session ID on its playback thread (calling
         // player.audioSessionId = ... right after build() races with ExoPlayerImpl's constructor
         // background session generator in Media3 1.10 and leaves AudioTrack on a different ID).
-        hasInitializedMasterAudioTrack = false
-        playerA = buildPlayer().also { applyAudioOffload(it, audioOffloadEnabled) }
+        playerA = buildPlayer()
 
         val initialSessionId = playerA.audioSessionId
         _activeAudioSessionId.value =
@@ -1532,7 +1439,7 @@ class DualPlayerEngine @Inject constructor(
                 audioFocusRequest = request
                 isFocusLossPause = true
                 if (::playerA.isInitialized) playerA.playWhenReady = false
-                if (transitionRunning && ::playerB.isInitialized) playerB.playWhenReady = false
+                if (transitionRunning) playerB?.playWhenReady = false
             }
             else -> {
                 Timber.tag("TransitionDebug").w("AudioFocus Request Failed: $result")
@@ -1729,7 +1636,7 @@ class DualPlayerEngine @Inject constructor(
             return
         }
 
-        audioOffloadFailed = true
+        audioOffloadEnabled = false
         rebuildPlayersPreservingMasterState(
             logMessage = "Audio offload disabled for current session. $reason"
         )
@@ -1759,10 +1666,12 @@ class DualPlayerEngine @Inject constructor(
         playerA.removeAnalyticsListener(masterPlayerListener)
         onPlayerAboutToBeReleasedListener?.invoke(playerA)
         playerA.release()
-        releaseStandbyPlayer()
+        playerB?.let {
+            try { it.release() } catch (e: Exception) { /* Ignore */ }
+        }
+        playerB = null
 
-        hasInitializedMasterAudioTrack = false
-        playerA = buildPlayer().also { applyAudioOffload(it, audioOffloadEnabled) }
+        playerA = buildPlayer()
 
         playerA.addListener(masterPlayerListener)
         playerA.addAnalyticsListener(masterPlayerListener)
@@ -2289,6 +2198,7 @@ class DualPlayerEngine @Inject constructor(
                         setWakeMode(if (isLikelyLocalMedia(mediaItem)) C.WAKE_MODE_LOCAL else C.WAKE_MODE_NETWORK)
                     }
                 })
+            applyAudioOffload(this)
             setAudioAttributes(audioAttributes, false)
             setHandleAudioBecomingNoisy(true)
             setWakeMode(C.WAKE_MODE_LOCAL)
@@ -2296,27 +2206,40 @@ class DualPlayerEngine @Inject constructor(
         }
     }
 
+    private fun getOrCreateAuxiliaryPlayer(): ExoPlayer {
+        playerB?.let { existing ->
+            val unusable = (existing.playbackState == Player.STATE_IDLE && existing.playerError != null) ||
+                !existing.applicationLooper.thread.isAlive
+            if (!unusable) return existing
+            try { existing.release() } catch (_: Exception) {}
+            playerB = null
+        }
+        return buildPlayer().also { playerB = it }
+    }
+
     fun setPauseAtEndOfMediaItems(shouldPause: Boolean) {
-        playerA.pauseAtEndOfMediaItems = shouldPause
+        if (::playerA.isInitialized) {
+            playerA.pauseAtEndOfMediaItems = shouldPause
+        }
     }
 
     fun getNextTransitionTarget(currentMediaItem: MediaItem, repeatMode: Int): TransitionTarget? {
-        if (!::playerA.isInitialized || playerA.currentMediaItem?.mediaId != currentMediaItem.mediaId) return null
-        val currentIdx = playerA.currentMediaItemIndex
-        if (currentIdx == C.INDEX_UNSET) return null
+        val snapshot = ensureQueueSnapshot()
+        if (snapshot.isEmpty()) return null
 
-        val targetIndex = if (repeatMode == Player.REPEAT_MODE_ONE) {
-            currentIdx
-        } else {
-            playerA.nextMediaItemIndex
+        val currentAbsoluteIndex = resolveCurrentAbsoluteIndex(currentMediaItem, snapshot)
+        if (currentAbsoluteIndex == C.INDEX_UNSET) return null
+
+        val targetIndex = when (repeatMode) {
+            Player.REPEAT_MODE_ONE -> currentAbsoluteIndex
+            else -> currentAbsoluteIndex + 1
         }
 
-        if (targetIndex == C.INDEX_UNSET || targetIndex !in 0 until playerA.mediaItemCount) return null
-        val targetItem = playerA.getMediaItemAt(targetIndex)
+        val targetItem = snapshot.getOrNull(targetIndex) ?: return null
         return TransitionTarget(
             mediaItem = targetItem,
             absoluteIndex = targetIndex,
-            queueSize = playerA.mediaItemCount
+            queueSize = snapshot.size
         )
     }
 
@@ -2696,7 +2619,7 @@ class DualPlayerEngine @Inject constructor(
                             item.requestMetadata.mediaUri?.toString() == uriString
                     )
                 val itemA = if (::playerA.isInitialized) playerA.currentMediaItem else null
-                val itemB = if (::playerB.isInitialized) playerB.currentMediaItem else null
+                val itemB = playerB?.currentMediaItem
                 when {
                     matches(itemA) -> itemA
                     matches(itemB) -> itemB
@@ -2905,68 +2828,71 @@ class DualPlayerEngine @Inject constructor(
         return builder.build()
     }
 
-    private fun ensurePlayerB(): ExoPlayer {
-        val needsNew = !::playerB.isInitialized ||
-            playerBReleased ||
-            (playerB.playbackState == Player.STATE_IDLE && playerB.playerError != null) ||
-            !playerB.applicationLooper.thread.isAlive
-        if (needsNew) {
-            if (::playerB.isInitialized && !playerBReleased) {
-                // Errored standby: release it before replacing so its codecs/buffers are freed.
-                releaseStandbyPlayer()
-            }
-            playerB = buildPlayer().also { applyAudioOffload(it, enabled = false) }
-            playerBReleased = false
-        }
-        return playerB
-    }
-
     suspend fun prepareNext(target: TransitionTarget, startPositionMs: Long = 0L) {
-        prepareStandby(target.mediaItem, startPositionMs)
+        prepareNext(target.mediaItem, target.absoluteIndex, startPositionMs)
     }
 
     suspend fun prepareNext(mediaItem: MediaItem, startPositionMs: Long = 0L) {
-        val target = getNextTransitionTarget(mediaItem, playerA.repeatMode)
-        prepareStandby(target?.mediaItem ?: mediaItem, startPositionMs)
+        val preferredIndex = findMediaItemIndex(
+            items = ensureQueueSnapshot(),
+            mediaId = mediaItem.mediaId,
+            preferAfterExclusive = resolveCurrentAbsoluteIndex(playerA.currentMediaItem ?: mediaItem, queueSnapshot)
+        )
+        prepareNext(mediaItem, preferredIndex, startPositionMs)
     }
 
-    private suspend fun prepareStandby(item: MediaItem, startPositionMs: Long) {
+    private suspend fun prepareNext(mediaItem: MediaItem, preferredAbsoluteIndex: Int, startPositionMs: Long = 0L) {
         if (transitionRunning || isReleased) return
-        val generation = ++preparationGeneration
         try {
-            val resolvedItem = resolveMediaItem(item)
-            currentCoroutineContext().ensureActive()
-            if (generation != preparationGeneration || transitionRunning || isReleased) return
-
-            val standby = ensurePlayerB()
-            standby.pause()
-            standby.stop()
-            standby.volume = 0f
-            standby.setMediaItem(resolvedItem, startPositionMs.coerceAtLeast(0L))
-            standby.repeatMode = playerA.repeatMode
-            standby.shuffleModeEnabled = playerA.shuffleModeEnabled
-            standby.removeListener(standbyPlayerListener)
-            standby.removeAnalyticsListener(standbyPlayerListener)
-            standby.addListener(standbyPlayerListener)
-            standby.addAnalyticsListener(standbyPlayerListener)
-            standby.prepare()
-            val standbySession = standby.audioSessionId
-            if (standbySession != 0 && standbySession != C.AUDIO_SESSION_ID_UNSET) {
-                publishStandbyAudioSession(standbySession)
+            val snapshot = ensureQueueSnapshot()
+            val currentAbsoluteIndex = resolveCurrentAbsoluteIndex(playerA.currentMediaItem ?: mediaItem, snapshot)
+            val targetIndex = when {
+                preferredAbsoluteIndex in snapshot.indices &&
+                    snapshot[preferredAbsoluteIndex].mediaId == mediaItem.mediaId -> preferredAbsoluteIndex
+                else -> findMediaItemIndex(snapshot, mediaItem.mediaId, currentAbsoluteIndex)
             }
-            onNextPlayerPreparedListeners.forEach { it(standby) }
+            val resolvedItem = resolveMediaItem(mediaItem)
+            currentCoroutineContext().ensureActive()
+            if (transitionRunning || isReleased) return
+
+            val auxiliaryPlayer = getOrCreateAuxiliaryPlayer()
+            auxiliaryPlayer.stop()
+            auxiliaryPlayer.clearMediaItems()
+
+            if (targetIndex != C.INDEX_UNSET && snapshot.isNotEmpty()) {
+                val count = snapshot.size
+                val (start, end) = auxiliaryWindowBounds(targetIndex, count)
+                val windowItems = ArrayList<MediaItem>(end - start)
+                for (i in start until end) {
+                    val item = snapshot[i]
+                    windowItems.add(if (i == targetIndex) resolvedItem else item)
+                }
+                preparedWindowStartIndex = start
+                preparedPlayerUsesWindowedQueue = count > MAX_AUXILIARY_TIMELINE_ITEMS
+                auxiliaryPlayer.setMediaItems(windowItems, targetIndex - start, startPositionMs.coerceAtLeast(0L))
+            } else {
+                // Fallback for single item if not found in current timeline
+                resetPreparedWindowState()
+                auxiliaryPlayer.setMediaItem(resolvedItem)
+                auxiliaryPlayer.seekTo(startPositionMs.coerceAtLeast(0L))
+            }
+
+            auxiliaryPlayer.repeatMode = playerA.repeatMode
+            auxiliaryPlayer.shuffleModeEnabled = playerA.shuffleModeEnabled
+            auxiliaryPlayer.prepare()
+            auxiliaryPlayer.volume = 0f
+            auxiliaryPlayer.pause()
+            onNextPlayerPreparedListeners.forEach { it(auxiliaryPlayer) }
         } catch (cancel: kotlinx.coroutines.CancellationException) {
             throw cancel
-        } catch (error: Exception) {
-            Timber.tag("TransitionDebug").e(error, "Failed to prepare next item %s", item.mediaId)
+        } catch (e: Exception) {
+            resetPreparedWindowState()
+            Timber.tag("TransitionDebug").e(e, "Failed to prepare next player")
         }
     }
 
     fun getPreparedNextMediaId(): String? {
-        if (::playerB.isInitialized && !playerBReleased && playerB.mediaItemCount > 0) {
-            return playerB.currentMediaItem?.mediaId
-        }
-        return null
+        return playerB?.takeIf { it.mediaItemCount > 0 }?.currentMediaItem?.mediaId
     }
 
     fun cancelNext() {
@@ -2974,60 +2900,50 @@ class DualPlayerEngine @Inject constructor(
             android.os.Handler(android.os.Looper.getMainLooper()).post { cancelNext() }
             return
         }
-        val wasRunning = transitionRunning
-        pausedAtOverlapBoundary = false
-        preparationGeneration++
+        val shouldPublishMasterPlayer = transitionRunning
         transitionJob?.cancel()
         transitionJob = null
-        publishStandbyAudioSession(0)
+        transitionRunning = false
         resetPreparedWindowState()
-        if (::playerB.isInitialized && !playerBReleased) {
+        playerB?.takeIf { it.mediaItemCount > 0 }?.let { auxiliaryPlayer ->
             try {
-                playerB.removeListener(standbyPlayerListener)
-                playerB.removeAnalyticsListener(standbyPlayerListener)
-                if (playerB.mediaItemCount > 0) {
-                    playerB.stop()
-                    playerB.clearMediaItems()
-                    playerB.volume = 0f
-                }
+                auxiliaryPlayer.stop()
+                auxiliaryPlayer.clearMediaItems()
+                auxiliaryPlayer.volume = 0f
             } catch (e: Exception) { /* Ignore */ }
         }
         if (::playerA.isInitialized) {
-            restoreMasterRestVolume(playerA)
+            if (!skipFadeActive) {
+                playerA.volume = if (isDucked) preDuckVolumeA * DUCK_FACTOR else 1f
+            }
+            if (shouldPublishMasterPlayer) {
+                onPlayerSwappedListeners.forEach { it(playerA) }
+            }
         }
         incomingTrackReplayGainVolume = null
         setPauseAtEndOfMediaItems(false)
-        transitionRunning = false
-        if (wasRunning) onTransitionFinishedListeners.forEach { it() }
+        if (shouldPublishMasterPlayer) onTransitionFinishedListeners.forEach { it() }
     }
 
     fun performTransition(settings: TransitionSettings) {
-        if (transitionRunning) return
-        if (!playerA.playWhenReady || skipFadeActive || getPreparedNextMediaId() == null) {
-            setPauseAtEndOfMediaItems(false)
-            return
-        }
-        preparationGeneration++
-        pausedAtOverlapBoundary = false
+        transitionJob?.cancel()
         transitionRunning = true
-        if (::playerB.isInitialized && !playerBReleased) {
-            val sid = playerB.audioSessionId
-            if (sid != 0 && sid != C.AUDIO_SESSION_ID_UNSET) publishStandbyAudioSession(sid)
-        }
         transitionJob = scope.launch {
             try {
                 performOverlapTransition(settings)
-            } catch (cancel: kotlinx.coroutines.CancellationException) {
-                throw cancel
             } catch (e: Exception) {
-                Timber.tag("TransitionDebug").e(e, "Error performing transition")
-                if (::playerB.isInitialized && !playerBReleased) abortTransition(playerA, playerB)
-                else setPauseAtEndOfMediaItems(false)
+                if (e !is kotlinx.coroutines.CancellationException) {
+                    Timber.tag("TransitionDebug").e(e, "Error performing transition")
+                    if (::playerA.isInitialized && !skipFadeActive) {
+                        playerA.volume = if (isDucked) preDuckVolumeA * DUCK_FACTOR else 1f
+                    }
+                    setPauseAtEndOfMediaItems(false)
+                    playerB?.stop()
+                }
             } finally {
                 if (transitionJob === currentCoroutineContext()[Job]) {
                     transitionJob = null
                     transitionRunning = false
-                    publishStandbyAudioSession(0)
                     incomingTrackReplayGainVolume = null
                     onTransitionFinishedListeners.forEach { it() }
                 }
@@ -3036,14 +2952,17 @@ class DualPlayerEngine @Inject constructor(
     }
 
     private suspend fun performOverlapTransition(settings: TransitionSettings) {
-        if (!::playerB.isInitialized || playerBReleased || playerB.mediaItemCount == 0) {
-            if (::playerA.isInitialized) restoreMasterRestVolume(playerA)
+        val auxiliaryPlayer = playerB
+        if (auxiliaryPlayer == null || auxiliaryPlayer.mediaItemCount == 0) {
+            if (::playerA.isInitialized && !skipFadeActive) {
+                playerA.volume = if (isDucked) preDuckVolumeA * DUCK_FACTOR else 1f
+            }
             setPauseAtEndOfMediaItems(false)
             return
         }
 
-        // Ensure playerB's stream URI is still fresh before crossfading (e.g. if paused/idle for >15 min)
-        playerB.currentMediaItem?.let { bItem ->
+        // Ensure auxiliaryPlayer's stream URI is still fresh before crossfading (e.g. if paused/idle for >15 min)
+        auxiliaryPlayer.currentMediaItem?.let { bItem ->
             val bUri = bItem.localConfiguration?.uri
             if (bUri != null && (bUri.scheme == "http" || bUri.scheme == "https")) {
                 val origUriStr = bItem.mediaMetadata.extras?.getString("com.unshoo.pixelmusic.external.CONTENT_URI") ?: bUri.toString()
@@ -3063,11 +2982,11 @@ class DualPlayerEngine @Inject constructor(
                                 }
                                 resolved
                             }
-                            val bIdx = playerB.currentMediaItemIndex
-                            val bPos = playerB.currentPosition
-                            playerB.replaceMediaItem(bIdx, freshItem)
-                            playerB.seekTo(bIdx, bPos)
-                            playerB.prepare()
+                            val bIdx = auxiliaryPlayer.currentMediaItemIndex
+                            val bPos = auxiliaryPlayer.currentPosition
+                            auxiliaryPlayer.replaceMediaItem(bIdx, freshItem)
+                            auxiliaryPlayer.seekTo(bIdx, bPos)
+                            auxiliaryPlayer.prepare()
                         } catch (cancel: kotlinx.coroutines.CancellationException) {
                             throw cancel
                         } catch (e: Exception) {
@@ -3078,223 +2997,105 @@ class DualPlayerEngine @Inject constructor(
             }
         }
 
-        if (playerB.playbackState == Player.STATE_IDLE) playerB.prepare()
-        if (playerB.playbackState != Player.STATE_READY) {
-            val isReady = if (playerB.playbackState == Player.STATE_BUFFERING) {
-                awaitPlayerReady(playerB, 3000L)
+        if (auxiliaryPlayer.playbackState == Player.STATE_IDLE) auxiliaryPlayer.prepare()
+        if (auxiliaryPlayer.playbackState != Player.STATE_READY) {
+            val isReady = if (auxiliaryPlayer.playbackState == Player.STATE_BUFFERING) {
+                awaitPlayerReady(auxiliaryPlayer, 3000L)
             } else {
                 false
             }
             if (!isReady) {
-                Timber.tag("TransitionDebug").w("playerB not ready for transition (state=%d). Aborting and falling back to playerA.", playerB.playbackState)
-                abortTransition(playerA, playerB)
+                Timber.tag("TransitionDebug").w("playerB not ready for transition (state=%d). Aborting and falling back to playerA.", auxiliaryPlayer.playbackState)
+                if (!skipFadeActive) {
+                    playerA.volume = if (isDucked) preDuckVolumeA * DUCK_FACTOR else 1f
+                }
+                setPauseAtEndOfMediaItems(false)
+
+                val isOutgoingStalled = playerA.playbackState == Player.STATE_ENDED ||
+                    playerA.playbackState == Player.STATE_BUFFERING ||
+                    (!playerA.isPlaying && playerA.duration != C.TIME_UNSET && playerA.currentPosition >= playerA.duration - 40000L)
+                if (isOutgoingStalled && playerA.hasNextMediaItem()) {
+                    playerA.seekToNext()
+                    playerA.prepare()
+                    playerA.play()
+                }
                 return
             }
         }
 
+        val outgoingStartVolume = (if (isDucked) preDuckVolumeA else playerA.volume).coerceIn(0f, 1f)
+        auxiliaryPlayer.volume = 0f
+        if (!playerA.isPlaying && playerA.playbackState == Player.STATE_READY) playerA.play()
+        auxiliaryPlayer.playWhenReady = true
+        auxiliaryPlayer.play()
+
         val outgoingPlayer = playerA
-        val incomingPlayer = playerB
-        val target = outgoingPlayer.currentMediaItem?.let { getNextTransitionTarget(it, outgoingPlayer.repeatMode) }
-        if (target == null || target.mediaItem.mediaId != incomingPlayer.currentMediaItem?.mediaId ||
-            !incomingPlayer.currentTracks.isTypeSelected(C.TRACK_TYPE_AUDIO) || !outgoingPlayer.playWhenReady
-        ) {
-            Timber.tag("TransitionDebug").w("Aborting overlap: target=%s prepared=%s audioSelected=%b",
-                target?.mediaItem?.mediaId, incomingPlayer.currentMediaItem?.mediaId,
-                incomingPlayer.currentTracks.isTypeSelected(C.TRACK_TYPE_AUDIO))
-            abortTransition(outgoingPlayer, incomingPlayer)
-            return
-        }
+        val incomingPlayer = auxiliaryPlayer
 
-        val outgoingStartVolume = if (isDucked) preDuckVolumeA else outgoingPlayer.volume
-        transitionOutgoingRestVolume = outgoingStartVolume
-        var incomingTargetVolume = (incomingTrackReplayGainVolume ?: outgoingStartVolume).coerceIn(0f, 1f)
-        val incomingBeforeStart = incomingPlayer.currentPosition
-
-        incomingPlayer.volume = 0f
-        incomingPlayer.playWhenReady = true
-        incomingPlayer.play()
-
-        // Keep the outgoing level until the selected audio track starts advancing.
-        val clockStarted = withTimeoutOrNull(2500L) {
-            while (!incomingPlayer.isPlaying || incomingPlayer.currentPosition <= incomingBeforeStart + 10L) {
-                currentCoroutineContext().ensureActive()
-                if (!outgoingPlayer.isPlaying ||
-                    incomingPlayer.playerError != null ||
-                    incomingPlayer.playbackState == Player.STATE_IDLE ||
-                    incomingPlayer.playbackState == Player.STATE_ENDED
-                ) return@withTimeoutOrNull false
-                delay(16L)
-            }
-            true
-        } == true
-
-        if (!clockStarted) {
-            Timber.tag("TransitionDebug").w("Incoming playback sink clock did not start in time. Aborting transition.")
-            abortTransition(outgoingPlayer, incomingPlayer)
-            return
-        }
-
-        // Expose the incoming song only after its audio clock starts advancing.
+        incomingPlayer.repeatMode = outgoingPlayer.repeatMode
+        incomingPlayer.shuffleModeEnabled = outgoingPlayer.shuffleModeEnabled
+        outgoingPlayer.pauseAtEndOfMediaItems = true
+        incomingPlayer.pauseAtEndOfMediaItems = false
         onTransitionDisplayPlayerListeners.forEach { listener ->
             runCatching { listener(incomingPlayer) }
                 .onFailure { Timber.tag("TransitionDebug").e(it, "Could not publish incoming track") }
         }
 
         val duration = settings.durationMs.toLong().coerceAtLeast(500L)
-        var lastPosition = incomingPlayer.currentPosition
-        var lastTickAt = SystemClock.elapsedRealtime()
-        var lastProgressAt = lastTickAt
-        var fadeElapsedMs = 0L
+        val stepMs = 32L
+        val startedAtMs = SystemClock.elapsedRealtime()
 
         while (true) {
             currentCoroutineContext().ensureActive()
-            val position = incomingPlayer.currentPosition
-            val now = SystemClock.elapsedRealtime()
-            if (incomingPlayer.playbackState == Player.STATE_IDLE ||
-                incomingPlayer.playbackState == Player.STATE_ENDED ||
-                !incomingPlayer.playWhenReady ||
-                !incomingPlayer.currentTracks.isTypeSelected(C.TRACK_TYPE_AUDIO)
-            ) {
-                abortTransition(outgoingPlayer, incomingPlayer)
-                return
-            }
-            if (!incomingPlayer.isPlaying || position <= lastPosition) {
-                if (now - lastProgressAt >= 2_000L) {
-                    Timber.tag("TransitionDebug").w("Incoming playback stopped advancing mid-fade")
-                    abortTransition(outgoingPlayer, incomingPlayer)
-                    return
-                }
-                lastTickAt = now
-                delay(16L)
-                continue
-            }
-            lastPosition = position
-            lastProgressAt = now
-            fadeElapsedMs = (fadeElapsedMs + now - lastTickAt).coerceAtMost(duration)
-            lastTickAt = now
-            val t = (fadeElapsedMs.toFloat() / duration).coerceIn(0f, 1f)
-
-            val (volOut, volIn) = crossfadeGains(t, settings)
-
-            // Keep honouring an active duck while the curve runs; the 16ms loop used to overwrite
-            // the ducked level so notifications played over a full-volume incoming track.
+            val elapsed = (SystemClock.elapsedRealtime() - startedAtMs).coerceAtMost(duration)
+            val progress = (elapsed.toFloat() / duration).coerceIn(0f, 1f)
+            val volIn = envelope(progress, settings.curveIn)
+            val volOut = 1f - envelope(progress, settings.curveOut)
+            val incomingTarget = (incomingTrackReplayGainVolume ?: 1f).coerceIn(0f, 1f)
             val duck = if (isDucked) DUCK_FACTOR else 1f
-            // ReplayGain can finish reading while the fade runs. Ease its new target in
-            // instead of changing the incoming song's level in a single audio frame.
-            val resolvedTarget = (incomingTrackReplayGainVolume ?: incomingTargetVolume).coerceIn(0f, 1f)
-            incomingTargetVolume += (resolvedTarget - incomingTargetVolume) * 0.1f
+            incomingPlayer.volume = (volIn * incomingTarget * duck).coerceIn(0f, 1f)
             outgoingPlayer.volume = (volOut * outgoingStartVolume * duck).coerceIn(0f, 1f)
-            incomingPlayer.volume = (volIn * incomingTargetVolume * duck).coerceIn(0f, 1f)
 
-            if (t >= 1f) break
-            delay(16L)
+            if (elapsed >= duration) break
+            delay(stepMs)
         }
 
-        // Queue edits may have moved the destination while the fade was running.
-        val liveTarget = outgoingPlayer.currentMediaItem?.let { getNextTransitionTarget(it, outgoingPlayer.repeatMode) }
-        if (liveTarget == null || liveTarget.mediaItem != target.mediaItem) {
-            abortTransition(outgoingPlayer, incomingPlayer)
-            return
-        }
-
-        // Complete Swap & Live Timeline Queue Splicing:
-        incomingTargetVolume = (incomingTrackReplayGainVolume ?: incomingTargetVolume).coerceIn(0f, 1f)
-        outgoingPlayer.volume = 0f
+        val finalTarget = (incomingTrackReplayGainVolume ?: 1f).coerceIn(0f, 1f)
         if (isDucked) {
-            preDuckVolumeA = incomingTargetVolume
-            incomingPlayer.volume = incomingTargetVolume * DUCK_FACTOR
-        } else {
-            incomingPlayer.volume = incomingTargetVolume
+            preDuckVolumeA = finalTarget
         }
+        outgoingPlayer.volume = 0f
+        incomingPlayer.volume = if (isDucked) finalTarget * DUCK_FACTOR else finalTarget
         incomingTrackReplayGainVolume = null
 
-        val targetIdx = liveTarget.absoluteIndex
-        if (targetIdx in 0 until outgoingPlayer.mediaItemCount) {
-            val before = ArrayList<MediaItem>(targetIdx.coerceAtLeast(0))
-            for (i in 0 until targetIdx) {
-                before.add(outgoingPlayer.getMediaItemAt(i))
-            }
-            val after = ArrayList<MediaItem>()
-            for (i in (targetIdx + 1) until outgoingPlayer.mediaItemCount) {
-                after.add(outgoingPlayer.getMediaItemAt(i))
-            }
-            if (after.isNotEmpty()) incomingPlayer.addMediaItems(after)
-            if (before.isNotEmpty()) incomingPlayer.addMediaItems(0, before)
-        }
-
-        incomingPlayer.repeatMode = outgoingPlayer.repeatMode
-        incomingPlayer.shuffleModeEnabled = outgoingPlayer.shuffleModeEnabled
-
-        incomingPlayer.removeListener(standbyPlayerListener)
-        incomingPlayer.removeAnalyticsListener(standbyPlayerListener)
-        outgoingPlayer.removeListener(standbyPlayerListener)
-        outgoingPlayer.removeAnalyticsListener(standbyPlayerListener)
         outgoingPlayer.removeListener(masterPlayerListener)
         outgoingPlayer.removeAnalyticsListener(masterPlayerListener)
 
-        pausedAtOverlapBoundary = false
-        transitionOutgoingRestVolume = null
         playerA = incomingPlayer
         playerB = outgoingPlayer
-        hasInitializedMasterAudioTrack = true
+        activeWindowStartIndex = preparedWindowStartIndex
+        activePlayerUsesWindowedQueue = preparedPlayerUsesWindowedQueue
+        resetPreparedWindowState()
         currentMasterYoutubeId = playerA.currentMediaItem?.let(::youtubeIdOf)
         _isPlaybackBufferingState.value = playerA.playbackState == Player.STATE_BUFFERING
 
         playerA.pauseAtEndOfMediaItems = false
-        playerB.pauseAtEndOfMediaItems = false
-
+        playerB?.pauseAtEndOfMediaItems = false
         playerA.addListener(masterPlayerListener)
         playerA.addAnalyticsListener(masterPlayerListener)
-
-        if (playerA.volume <= 0.01f) {
-            playerA.volume = if (isDucked) incomingTargetVolume * DUCK_FACTOR else incomingTargetVolume
-        }
         if (playerA.playWhenReady) requestAudioFocus()
 
         onPlayerSwappedListeners.forEach { it(playerA) }
-        _activeAudioSessionId.value = playerA.audioSessionId
+        val swappedSessionId = playerA.audioSessionId
+        _activeAudioSessionId.value =
+            if (swappedSessionId != C.AUDIO_SESSION_ID_UNSET) swappedSessionId else 0
 
-        // Keep the standby deck on PCM during overlap and enable offload after the swap.
-        // Safely retire outgoing player
-        playerB.pause()
-        playerB.stop()
-        playerB.clearMediaItems()
-        playerB.volume = 0f
-        applyAudioOffload(playerB, enabled = false)
-        applyAudioOffload(playerA, audioOffloadEnabled)
+        playerB?.pause()
+        playerB?.stop()
+        playerB?.clearMediaItems()
+        playerB?.volume = 0f
 
         setPauseAtEndOfMediaItems(false)
-    }
-
-    private fun abortTransition(outgoing: ExoPlayer, incoming: ExoPlayer) {
-        runCatching {
-            incoming.stop()
-            incoming.clearMediaItems()
-            incoming.volume = 0f
-        }
-        // BUGFIX: was a hard `outgoing.volume = 1f`, which discarded the track's ReplayGain level
-        // and any active duck. Restore the level the outgoing track had before the fade began.
-        restoreMasterRestVolume(outgoing)
-        setPauseAtEndOfMediaItems(false)
-        if (pausedAtOverlapBoundary) {
-            pausedAtOverlapBoundary = false
-            outgoing.play()
-        }
-    }
-
-    /** Volume the master player had before a crossfade started; null when no fade touched it. */
-    private var transitionOutgoingRestVolume: Float? = null
-
-    private fun restoreMasterRestVolume(player: ExoPlayer) {
-        if (skipFadeActive && player === playerA) return
-        val base = transitionOutgoingRestVolume ?: return
-        transitionOutgoingRestVolume = null
-        if (isDucked) {
-            preDuckVolumeA = base
-            player.volume = base * DUCK_FACTOR
-        } else {
-            player.volume = base
-        }
     }
 
     private fun ensureQueueSnapshot(): List<MediaItem> {
@@ -3416,12 +3217,9 @@ class DualPlayerEngine @Inject constructor(
 
     fun release() {
         cancelSkipFade()
-        preparationGeneration++
         transitionJob?.cancel()
         transitionJob = null
         transitionRunning = false
-        pausedAtOverlapBoundary = false
-        transitionOutgoingRestVolume = null
         incomingTrackReplayGainVolume = null
         preResolutionJob?.cancel()
         cancelAudioOffloadFallback()
@@ -3436,14 +3234,13 @@ class DualPlayerEngine @Inject constructor(
             onPlayerAboutToBeReleasedListener?.invoke(playerA)
             playerA.release()
         }
-        releaseStandbyPlayer()
+        playerB?.release()
+        playerB = null
         resolvedUriCache.evictAll()
         activePlaybackResolvedUris.clear()
         localFilePathCache.evictAll()
         activeResolutions.clear()
         isReleased = true
-        hasInitializedMasterAudioTrack = false
-        audioOffloadFailed = false
     }
 }
 

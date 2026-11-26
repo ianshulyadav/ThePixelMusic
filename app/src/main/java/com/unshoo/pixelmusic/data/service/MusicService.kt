@@ -342,21 +342,6 @@ class MusicService : MediaLibraryService() {
     }
 
     private val playerSwapListener: (Player) -> Unit = { newPlayer ->
-        // The incoming deck already has its own effects during the overlap. Keep those
-        // instances when it becomes master; recreating EQ on the same live session can
-        // briefly play flat and releasing the companion can silence that session.
-        val promoted = equalizerManager.promoteCompanionSession(newPlayer.audioSessionId)
-        if (!promoted && equalizerManager.hasAnyEnabledEffects) {
-            val sessionId = newPlayer.audioSessionId
-            if (sessionId != 0 && sessionId != C.AUDIO_SESSION_ID_UNSET) {
-                serviceScope.launch {
-                    equalizerManager.attachToAudioSessionIfNeeded(sessionId, fromLiveAudioTrack = true)
-                }
-            }
-        }
-        // The engine crossfades by swapping player instances. The casting
-        // wrapper has to follow, or the session would be left pointing at the
-        // retired player while the receiver kept playing the new one.
         bindSessionPlayer(newPlayer, "Swapped MediaSession player to new instance.")
         prepareReplayGainForTransitionPlayer(newPlayer)
     }
@@ -371,27 +356,11 @@ class MusicService : MediaLibraryService() {
     }
 
     private val transitionDisplayPlayerListener: (Player) -> Unit = { displayPlayer ->
-        // Publish the audible incoming deck as soon as its clock starts. This updates
-        // artwork, title and artist in the full player for the entire fade.
         bindSessionPlayer(displayPlayer, "Published incoming crossfade player to MediaSession.")
         prepareReplayGainForTransitionPlayer(displayPlayer)
-        displayPlayer.currentMediaItem?.mediaId?.let { incomingId ->
-            mediaSession?.setSessionExtras(
-                Bundle().apply { putString(SESSION_EXTRA_TRANSITION_DISPLAY_MEDIA_ID, incomingId) }
-            )
-        }
     }
 
     private val transitionFinishedListener: () -> Unit = {
-        // A failed or cancelled fade leaves the outgoing deck as master. Restore the
-        // session to that deck if we exposed the incoming one at fade start.
-        val master = engine.masterPlayer
-        val boundToMaster = if (castPlayback == null) {
-            mediaSession?.player === master
-        } else {
-            castSessionPlayer?.wraps(master) == true
-        }
-        if (!boundToMaster) bindSessionPlayer(master, "Restored MediaSession player after transition.")
         mediaSession?.setSessionExtras(Bundle.EMPTY)
         onTransitionFinished()
     }
@@ -582,26 +551,6 @@ class MusicService : MediaLibraryService() {
         engine.addNextPlayerPreparedListener(nextPlayerPreparedListener)
         engine.addTransitionDisplayPlayerListener(transitionDisplayPlayerListener)
         engine.addTransitionFinishedListener(transitionFinishedListener)
-        engine.onStandbyAudioSessionChanged = { sessionId ->
-            if (sessionId != 0) equalizerManager.attachCompanionSession(sessionId)
-            else equalizerManager.releaseCompanion()
-        }
-        engine.onStandbyAudioTrackInitialized = { sessionId, offload ->
-            if (!offload && sessionId != 0) {
-                equalizerManager.attachCompanionSession(sessionId, forceReattach = true)
-            }
-        }
-        engine.onMasterAudioTrackInitialized = { sessionId, offload ->
-            if (equalizerManager.hasAnyEnabledEffects) {
-                if (offload) {
-                    engine.setAudioEffectsEnabled(true)
-                } else {
-                    serviceScope.launch {
-                        equalizerManager.attachToAudioSessionIfNeeded(sessionId, fromLiveAudioTrack = true)
-                    }
-                }
-            }
-        }
 
         // Self-healing supervisor for history/telemetry.
         startTelemetryWatchdog()
@@ -684,31 +633,16 @@ class MusicService : MediaLibraryService() {
                 virtualizerEnabled, virtualizerStrength,
                 loudnessEnabled, loudnessStrength
             )
-            engine.setAudioEffectsEnabled(equalizerManager.hasAnyEnabledEffects)
 
             val sessionId = engine.getAudioSessionId()
-            if (sessionId != 0 && engine.hasActiveMasterAudioTrack()) {
-                equalizerManager.attachToAudioSessionIfNeeded(sessionId, fromLiveAudioTrack = true)
-            }
-
-            // Crossfade: mirror the effects onto the incoming player's session while both play.
-            launch {
-                engine.standbyAudioSessionId.collectLatest { standbySessionId ->
-                    if (standbySessionId != 0) {
-                        equalizerManager.attachCompanionSession(standbySessionId)
-                    } else {
-                        equalizerManager.releaseCompanion()
-                    }
-                }
+            if (sessionId != 0) {
+                equalizerManager.attachToAudioSessionIfNeeded(sessionId)
             }
 
             // Re-attach equalizer whenever the active audio session changes (e.g. crossfade)
             engine.activeAudioSessionId.collect { newSessionId ->
                 if (newSessionId != 0) {
-                    equalizerManager.attachToAudioSessionIfNeeded(
-                        newSessionId,
-                        fromLiveAudioTrack = engine.hasActiveMasterAudioTrack()
-                    )
+                    equalizerManager.attachToAudioSessionIfNeeded(newSessionId)
                 }
             }
         }
@@ -1889,15 +1823,10 @@ class MusicService : MediaLibraryService() {
             
             if (isPlaying) {
                 startTelemetryReporting()
-                // Retry attaching or recover lost effect control once playback is active.
-                if (equalizerManager.hasAnyEnabledEffects &&
-                    (!equalizerManager.isAttached || !equalizerManager.hasEffectControl())
-                ) {
+                // Retry attaching once playback is active.
+                if (equalizerManager.hasAnyEnabledEffects && !equalizerManager.isAttached) {
                     serviceScope.launch {
-                        equalizerManager.attachToAudioSessionIfNeeded(
-                            engine.getAudioSessionId(),
-                            fromLiveAudioTrack = engine.hasActiveMasterAudioTrack()
-                        )
+                        equalizerManager.attachToAudioSessionIfNeeded(engine.getAudioSessionId())
                     }
                 }
             } else {
@@ -2694,9 +2623,6 @@ class MusicService : MediaLibraryService() {
         engine.removeNextPlayerPreparedListener(nextPlayerPreparedListener)
         engine.removeTransitionDisplayPlayerListener(transitionDisplayPlayerListener)
         engine.removeTransitionFinishedListener(transitionFinishedListener)
-        engine.onStandbyAudioSessionChanged = null
-        engine.onStandbyAudioTrackInitialized = null
-        engine.onMasterAudioTrackInitialized = null
         discordPresenceListener?.let { mediaSession?.player?.removeListener(it) }
         discordPresenceListener = null
         mediaSession?.player?.removeListener(playerListener)
@@ -2761,13 +2687,9 @@ class MusicService : MediaLibraryService() {
         val player = engine.masterPlayer
         if (!player.isPlaying && !player.playWhenReady) return
         val sessionId = engine.getAudioSessionId()
-        if (sessionId != 0 && (!equalizerManager.isAttached || !equalizerManager.hasEffectControl())) {
+        if (sessionId != 0 && !equalizerManager.isAttached) {
             serviceScope.launch {
-                equalizerManager.attachToAudioSessionIfNeeded(
-                    sessionId,
-                    fromLiveAudioTrack = engine.hasActiveMasterAudioTrack(),
-                    forceReattach = true
-                )
+                equalizerManager.attachToAudioSessionIfNeeded(sessionId)
             }
         }
     }
