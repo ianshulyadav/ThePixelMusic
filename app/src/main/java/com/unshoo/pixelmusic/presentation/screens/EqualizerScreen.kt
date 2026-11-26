@@ -367,6 +367,7 @@ fun EqualizerScreen(
             // Volume Control
             item(key = "volume_control") {
                 val volume by equalizerViewModel.systemVolume.collectAsStateWithLifecycle()
+                androidx.compose.runtime.LaunchedEffect(Unit) { equalizerViewModel.refreshSystemVolume() }
                 VolumeControlCard(
                     volume = volume,
                     onVolumeChange = { equalizerViewModel.setSystemVolume(it) }

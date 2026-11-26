@@ -225,6 +225,13 @@ class DualPlayerEngine @Inject constructor(
     private val _activeAudioSessionId = MutableStateFlow(0)
     val activeAudioSessionId: StateFlow<Int> = _activeAudioSessionId.asStateFlow()
 
+    /** The master deck's audio session (0 when unknown). */
+    private fun currentAudioSessionId(): Int {
+        if (!::playerA.isInitialized) return 0
+        val id = playerA.audioSessionId
+        return if (id != C.AUDIO_SESSION_ID_UNSET) id else 0
+    }
+
     private val _activeDecoderInfo = MutableStateFlow<ActiveDecoderInfo?>(null)
     val activeDecoderInfo: StateFlow<ActiveDecoderInfo?> = _activeDecoderInfo.asStateFlow()
 
@@ -756,11 +763,10 @@ class DualPlayerEngine @Inject constructor(
         return expectedMediaId == null || aux.currentMediaItem?.mediaId == expectedMediaId
     }
 
-    fun getAudioSessionId(): Int =
-        if (::playerA.isInitialized) playerA.audioSessionId else 0
+    fun getAudioSessionId(): Int = currentAudioSessionId()
 
     fun setAudioSessionId(sessionId: Int) {
-        if (sessionId == 0 || sessionId == C.AUDIO_SESSION_ID_UNSET) return
+        if (sessionId <= 0) return
         if (::playerA.isInitialized) {
             try { playerA.audioSessionId = sessionId } catch (_: Exception) {}
         }
@@ -1299,8 +1305,28 @@ class DualPlayerEngine @Inject constructor(
         return null
     }
 
+    /**
+     * Offloaded audio is decoded/mixed on the DSP and on most devices bypasses the session's
+     * effect chain, so the EQ (and the rest of the effects) would go silent. While any effect is
+     * enabled, both decks are kept off offload so the shared session's effects process them.
+     */
+    private var audioEffectsActive = false
+
+    fun setAudioEffectsActive(active: Boolean) {
+        if (audioEffectsActive == active) return
+        audioEffectsActive = active
+        if (isReleased || !::playerA.isInitialized) return
+        if (hiFiModeEnabled && HiFiCapabilityChecker.isSupported()) {
+            // Float output bypasses the in-app EQ processor; rebuild the decks with/without it.
+            rebuildPlayersPreservingMasterState("Audio effects active=$active (Hi-Fi float output toggled)")
+            return
+        }
+        applyAudioOffload(playerA)
+        playerB?.let { applyAudioOffload(it) }
+    }
+
     private fun applyAudioOffload(player: ExoPlayer) {
-        val enabled = audioOffloadEnabled && !hiFiModeEnabled
+        val enabled = audioOffloadEnabled && !hiFiModeEnabled && !audioEffectsActive
         val mode = if (enabled) {
             TrackSelectionParameters.AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_ENABLED
         } else {
@@ -1394,14 +1420,9 @@ class DualPlayerEngine @Inject constructor(
         }
         playerB = null
 
-        // Let ExoPlayer generate its own audio session ID on its playback thread (calling
-        // player.audioSessionId = ... right after build() races with ExoPlayerImpl's constructor
-        // background session generator in Media3 1.10 and leaves AudioTrack on a different ID).
         playerA = buildPlayer()
 
-        val initialSessionId = playerA.audioSessionId
-        _activeAudioSessionId.value =
-            if (initialSessionId != C.AUDIO_SESSION_ID_UNSET) initialSessionId else 0
+        _activeAudioSessionId.value = currentAudioSessionId()
 
         playerA.addListener(masterPlayerListener)
         playerA.addAnalyticsListener(masterPlayerListener)
@@ -1687,16 +1708,16 @@ class DualPlayerEngine @Inject constructor(
             playerA.playWhenReady = desiredPlayWhenReady
         }
 
-        val rebuiltSessionId = playerA.audioSessionId
-        _activeAudioSessionId.value =
-            if (rebuiltSessionId != C.AUDIO_SESSION_ID_UNSET) rebuiltSessionId else 0
+        _activeAudioSessionId.value = currentAudioSessionId()
         onPlayerSwappedListeners.forEach { it(playerA) }
 
         Timber.tag("DualPlayerEngine").d(logMessage)
     }
 
     private fun buildPlayer(): ExoPlayer {
-        val floatEnabled = hiFiModeEnabled && HiFiCapabilityChecker.isSupported()
+        // DefaultAudioSink skips custom audio processors (our EQ) on the float-output path, so
+        // Hi-Fi float output is only used while no effect is enabled.
+        val floatEnabled = hiFiModeEnabled && HiFiCapabilityChecker.isSupported() && !audioEffectsActive
         val mediaCodecSelector = MediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunnelingDecoder ->
             val decoderInfos = MediaCodecSelector.DEFAULT.getDecoderInfos(
                 mimeType,
@@ -1718,7 +1739,10 @@ class DualPlayerEngine @Inject constructor(
                     .setAudioProcessorChain(
                         DefaultAudioSink.DefaultAudioProcessorChain(
                             HiResSampleRateCapAudioProcessor(),
-                            SurroundDownmixProcessor()
+                            SurroundDownmixProcessor(),
+                            // In-app EQ: each deck processes its own audio, so the EQ covers
+                            // both during a crossfade without touching session volume.
+                            com.unshoo.pixelmusic.data.equalizer.EqualizerAudioProcessor()
                         )
                     )
                     .build()
@@ -3026,6 +3050,9 @@ class DualPlayerEngine @Inject constructor(
         val outgoingStartVolume = (if (isDucked) preDuckVolumeA else playerA.volume).coerceIn(0f, 1f)
         auxiliaryPlayer.volume = 0f
         if (!playerA.isPlaying && playerA.playbackState == Player.STATE_READY) playerA.play()
+        // Captured before play(): the fade-in is measured from here in the incoming player's own
+        // media time, so it only advances once its audio is actually being rendered.
+        val incomingStartPosMs = auxiliaryPlayer.currentPosition
         auxiliaryPlayer.playWhenReady = true
         auxiliaryPlayer.play()
 
@@ -3041,22 +3068,65 @@ class DualPlayerEngine @Inject constructor(
                 .onFailure { Timber.tag("TransitionDebug").e(it, "Could not publish incoming track") }
         }
 
-        val duration = settings.durationMs.toLong().coerceAtLeast(500L)
+        // Both envelopes are driven by each player's own playback position rather than a wall
+        // clock started here. A wall clock drifts from what is audible: the incoming deck only
+        // becomes audible some hundreds of ms after play() (AudioTrack start + buffer), and any
+        // delay before this point (late trigger, stream refresh, waiting for READY) made the
+        // outgoing track hit its end - and pause - while its fade was still running, i.e. a cut.
+        // Position-driven: the fade-out ends exactly at the outgoing track's end, the fade-in
+        // follows the incoming audio as it plays, and a pause freezes both.
+        val requestedDuration = settings.durationMs.toLong().coerceAtLeast(500L)
+        val outgoingStartPosMs = outgoingPlayer.currentPosition
+        val outgoingDurationMs = outgoingPlayer.duration
+        val outgoingEndPosMs = if (outgoingDurationMs != C.TIME_UNSET && outgoingDurationMs > outgoingStartPosMs) {
+            outgoingDurationMs
+        } else {
+            outgoingStartPosMs + requestedDuration
+        }
+        val fadeMs = requestedDuration
+            .coerceAtMost(outgoingEndPosMs - outgoingStartPosMs)
+            .coerceAtLeast(200L)
+        // The fade-out spans the last fadeMs of the outgoing track.
+        val fadeOutStartPosMs = outgoingEndPosMs - fadeMs
         val stepMs = 32L
-        val startedAtMs = SystemClock.elapsedRealtime()
+        // Safety net if a deck stalls (e.g. network buffering) so the swap still happens. Only
+        // time while something is playing counts, so a user pause mid-fade doesn't trip it.
+        val hardTimeoutMs = fadeMs + 5_000L
+        var playingMs = 0L
+        var lastTickMs = SystemClock.elapsedRealtime()
+        Timber.tag("TransitionDebug").d(
+            "Crossfade: fade=%dms, outgoing %d->%d ms, incoming starts at %d ms",
+            fadeMs, outgoingStartPosMs, outgoingEndPosMs, incomingStartPosMs
+        )
 
         while (true) {
             currentCoroutineContext().ensureActive()
-            val elapsed = (SystemClock.elapsedRealtime() - startedAtMs).coerceAtMost(duration)
-            val progress = (elapsed.toFloat() / duration).coerceIn(0f, 1f)
-            val volIn = envelope(progress, settings.curveIn)
-            val volOut = 1f - envelope(progress, settings.curveOut)
+            val outPos = outgoingPlayer.currentPosition
+            val outgoingDone = outgoingPlayer.playbackState == Player.STATE_ENDED ||
+                outgoingPlayer.playbackState == Player.STATE_IDLE ||
+                outPos >= outgoingEndPosMs - 20L
+            val progressOut = if (outgoingDone) 1f
+                else ((outPos - fadeOutStartPosMs).toFloat() / fadeMs).coerceIn(0f, 1f)
+            val progressIn = ((incomingPlayer.currentPosition - incomingStartPosMs).toFloat() / fadeMs)
+                .coerceIn(0f, 1f)
+
+            val volIn = envelope(progressIn, settings.curveIn)
+            val volOut = 1f - envelope(progressOut, settings.curveOut)
             val incomingTarget = (incomingTrackReplayGainVolume ?: 1f).coerceIn(0f, 1f)
             val duck = if (isDucked) DUCK_FACTOR else 1f
             incomingPlayer.volume = (volIn * incomingTarget * duck).coerceIn(0f, 1f)
             outgoingPlayer.volume = (volOut * outgoingStartVolume * duck).coerceIn(0f, 1f)
 
-            if (elapsed >= duration) break
+            if (progressIn >= 1f && progressOut >= 1f) break
+            val nowMs = SystemClock.elapsedRealtime()
+            if (incomingPlayer.playWhenReady || outgoingPlayer.isPlaying) playingMs += nowMs - lastTickMs
+            lastTickMs = nowMs
+            if (playingMs >= hardTimeoutMs) {
+                Timber.tag("TransitionDebug").w(
+                    "Crossfade timed out (in=%.2f, out=%.2f); finishing swap", progressIn, progressOut
+                )
+                break
+            }
             delay(stepMs)
         }
 
@@ -3086,9 +3156,7 @@ class DualPlayerEngine @Inject constructor(
         if (playerA.playWhenReady) requestAudioFocus()
 
         onPlayerSwappedListeners.forEach { it(playerA) }
-        val swappedSessionId = playerA.audioSessionId
-        _activeAudioSessionId.value =
-            if (swappedSessionId != C.AUDIO_SESSION_ID_UNSET) swappedSessionId else 0
+        _activeAudioSessionId.value = currentAudioSessionId()
 
         playerB?.pause()
         playerB?.stop()

@@ -250,6 +250,8 @@ class MusicService : MediaLibraryService() {
     private var temporaryForegroundStartedInOnCreate = false
 
     companion object {
+        /** Wait for an output-device switch to settle before rebuilding the audio effects. */
+        private const val ROUTE_CHANGE_EQ_SETTLE_MS = 800L
         private val YOUTUBE_VIDEO_ID_REGEX = Regex("^[A-Za-z0-9_-]{11}$")
         private val HASHED_YOUTUBE_URI_REGEX = Regex("^youtube://-[0-9]{12,}$")
         /** Session extra: mediaId of the incoming track while a crossfade is audible. */
@@ -633,6 +635,18 @@ class MusicService : MediaLibraryService() {
                 virtualizerEnabled, virtualizerStrength,
                 loudnessEnabled, loudnessStrength
             )
+
+            // Keep offload off while any effect is on: offloaded tracks skip session effects.
+            serviceScope.launch {
+                kotlinx.coroutines.flow.combine(
+                    equalizerManager.isEnabled,
+                    equalizerManager.bassBoostEnabled,
+                    equalizerManager.virtualizerEnabled,
+                    equalizerManager.loudnessEnhancerEnabled
+                ) { eq, bass, virt, loud -> eq || bass || virt || loud }
+                    .distinctUntilChanged()
+                    .collect { active -> engine.setAudioEffectsActive(active) }
+            }
 
             val sessionId = engine.getAudioSessionId()
             if (sessionId != 0) {
@@ -2667,14 +2681,22 @@ class MusicService : MediaLibraryService() {
 
     private fun registerHeadsetReconnectMonitor() {
         val callback = object : AudioDeviceCallback() {
+            // registerAudioDeviceCallback reports every already-connected device once right away;
+            // that is not a route change, so it must not rebuild the effects.
+            private var primed = false
+
             override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) {
-                verifyEqualizerOnRouteChange()
+                if (!primed) {
+                    primed = true
+                    return
+                }
+                if (addedDevices.any { it.isSink }) verifyEqualizerOnRouteChange()
                 if (!addedDevices.any(::isReconnectableHeadsetOutput)) return
                 maybeResumeAfterHeadsetReconnect()
             }
 
             override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) {
-                verifyEqualizerOnRouteChange()
+                if (removedDevices.any { it.isSink }) verifyEqualizerOnRouteChange()
             }
         }
 
@@ -2682,14 +2704,21 @@ class MusicService : MediaLibraryService() {
         headsetReconnectCallback = callback
     }
 
+    private var routeChangeEqJob: Job? = null
+
+    /**
+     * After an output-device change the effects can still look "attached" while the chain on the
+     * new output has lost its settings, so always rebuild them. Debounced: a switch usually
+     * reports a removal and an addition back to back, and the route needs a moment to settle.
+     */
     private fun verifyEqualizerOnRouteChange() {
         if (!equalizerManager.hasAnyEnabledEffects) return
-        val player = engine.masterPlayer
-        if (!player.isPlaying && !player.playWhenReady) return
-        val sessionId = engine.getAudioSessionId()
-        if (sessionId != 0 && !equalizerManager.isAttached) {
-            serviceScope.launch {
-                equalizerManager.attachToAudioSessionIfNeeded(sessionId)
+        routeChangeEqJob?.cancel()
+        routeChangeEqJob = serviceScope.launch {
+            delay(ROUTE_CHANGE_EQ_SETTLE_MS)
+            val sessionId = engine.getAudioSessionId()
+            if (sessionId != 0) {
+                equalizerManager.reattachAfterRouteChange(sessionId)
             }
         }
     }

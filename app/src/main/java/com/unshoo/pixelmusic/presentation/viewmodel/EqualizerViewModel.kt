@@ -90,6 +90,20 @@ class EqualizerViewModel @Inject constructor(
     private val _systemVolume = MutableStateFlow(0f)
     val systemVolume: StateFlow<Float> = _systemVolume.asStateFlow()
 
+    /**
+     * Keeps the slider in sync with the real media volume. It used to be read once when this
+     * ViewModel was created, so after the hardware keys (or anything else) changed the volume the
+     * slider showed a stale level - and touching it pushed that stale level back to the system.
+     * Volume changes are written to Settings.System, so observing it catches every source.
+     * Declared before init {} so it is non-null when init registers it.
+     */
+    private val systemVolumeObserver =
+        object : android.database.ContentObserver(android.os.Handler(android.os.Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean) {
+                loadSystemVolume()
+            }
+        }
+
     private var persistBandLevelsJob: Job? = null
     private var persistBassBoostJob: Job? = null
     private var persistVirtualizerJob: Job? = null
@@ -100,8 +114,22 @@ class EqualizerViewModel @Inject constructor(
         initializeEqualizer()
         observeEqualizerState()
         loadSystemVolume()
+        observeSystemVolume()
     }
     
+    private fun observeSystemVolume() {
+        try {
+            context.contentResolver.registerContentObserver(
+                android.provider.Settings.System.CONTENT_URI, true, systemVolumeObserver
+            )
+        } catch (e: Exception) {
+            Timber.tag(TAG).w(e, "Failed to observe system volume")
+        }
+    }
+
+    /** Re-reads the media volume; call when the Equalizer screen becomes visible. */
+    fun refreshSystemVolume() = loadSystemVolume()
+
     private fun loadSystemVolume() {
         try {
             val current = audioManager.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
@@ -113,15 +141,18 @@ class EqualizerViewModel @Inject constructor(
     }
 
     fun setSystemVolume(percent: Float) {
-        viewModelScope.launch {
-            try {
-                val max = audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
-                val target = (percent * max).roundToInt().coerceIn(0, max)
+        try {
+            val max = audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+            if (max <= 0) return
+            val target = (percent.coerceIn(0f, 1f) * max).roundToInt().coerceIn(0, max)
+            val current = audioManager.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
+            // Only touch the system volume when the slider actually lands on a different step.
+            if (target != current) {
                 audioManager.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, target, 0) // flag 0 to not show system UI
-                _systemVolume.value = percent
-            } catch (e: Exception) {
-                Timber.tag(TAG).e(e, "Failed to set system volume")
             }
+            _systemVolume.value = target.toFloat() / max.toFloat()
+        } catch (e: Exception) {
+            Timber.tag(TAG).e(e, "Failed to set system volume")
         }
     }
     
@@ -521,6 +552,7 @@ class EqualizerViewModel @Inject constructor(
         persistVirtualizerJob?.cancel()
         persistLoudnessJob?.cancel()
         persistLatestStateAsync()
+        try { context.contentResolver.unregisterContentObserver(systemVolumeObserver) } catch (_: Exception) {}
         super.onCleared()
         // Don't release equalizer here - it should persist across screen navigation
         Timber.tag(TAG).d("ViewModel cleared")
