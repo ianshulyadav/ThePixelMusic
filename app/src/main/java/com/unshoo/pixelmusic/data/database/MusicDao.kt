@@ -89,6 +89,64 @@ private const val SONG_LIST_QUALIFIED_PROJECTION = """
     songs.telegram_file_id, songs.artists_json, songs.source_type, songs.album_browse_id, songs.is_disliked
 """
 
+private const val LIBRARY_SONG_MEMBERSHIP_CONDITION = """(
+    source_type = 0
+    OR is_favorite = 1
+    OR (file_path IS NOT NULL AND file_path != '')
+    OR EXISTS (SELECT 1 FROM playlist_songs ps WHERE ps.song_id = CAST(id AS TEXT))
+    OR EXISTS (SELECT 1 FROM playlist_songs ps WHERE ps.song_id = REPLACE(content_uri_string, 'youtube://', 'youtube_'))
+    -- PERF: reads append-only library_membership via covering PK index probes instead of
+    -- song_engagements, stopping InvalidationTracker feedback loop on every track play
+    OR EXISTS (SELECT 1 FROM library_membership lm WHERE lm.song_key = CAST(id AS TEXT))
+    OR EXISTS (SELECT 1 FROM library_membership lm2 WHERE lm2.song_key = content_uri_string)
+    OR (
+        artist_id IN (SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != '')
+        AND id NOT IN (SELECT related_song_id FROM related_song_map)
+    )
+)"""
+
+private const val SONG_STORAGE_FILTER_CONDITION = """(
+    :filterMode = 0
+    OR (
+        :filterMode = 1
+        AND (source_type = 0 OR (file_path IS NOT NULL AND file_path != ''))
+    )
+    OR (
+        :filterMode = 2
+        AND source_type = 1
+    )
+    OR (
+        :filterMode = 3
+        AND source_type = 7
+    )
+    OR (
+        :filterMode = 4
+        AND source_type != 0
+    )
+)"""
+
+private const val JOINED_SONG_STORAGE_FILTER_CONDITION = """(
+    :filterMode = 0
+    OR (
+        :filterMode = 1
+        AND (songs.source_type = 0 OR (songs.file_path IS NOT NULL AND songs.file_path != ''))
+    )
+    OR (
+        :filterMode = 2
+        AND songs.source_type = 1
+    )
+    OR (
+        :filterMode = 3
+        AND songs.source_type = 7
+    )
+    OR (
+        :filterMode = 4
+        AND songs.source_type != 0
+    )
+)"""
+
+private const val NORMALIZED_ARTIST_GROUP_KEY = "REPLACE(LOWER(TRIM(REPLACE(artists.name, ' - Topic', ''))), '. ', '.')"
+
 
 data class DeviceCapabilitySongRow(
     val filePath: String,
@@ -581,13 +639,13 @@ interface MusicDao {
         }
     }
 
-    @Query("SELECT COUNT(*) FROM songs")
+    @Query("SELECT COUNT(*) FROM songs WHERE is_disliked = 0 AND " + LIBRARY_SONG_MEMBERSHIP_CONDITION)
     fun getSongCount(): Flow<Int>
 
-    @Query("SELECT COUNT(*) FROM songs WHERE source_type != 0")
+    @Query("SELECT COUNT(*) FROM songs WHERE is_disliked = 0 AND source_type != 0 AND " + LIBRARY_SONG_MEMBERSHIP_CONDITION)
     fun getCloudSongCount(): Flow<Int>
 
-    @Query("SELECT COUNT(*) FROM songs")
+    @Query("SELECT COUNT(*) FROM songs WHERE is_disliked = 0 AND " + LIBRARY_SONG_MEMBERSHIP_CONDITION)
     suspend fun getSongCountOnce(): Int
 
     @Query("""
@@ -634,6 +692,8 @@ interface MusicDao {
     @Query("""
         SELECT """ + SONG_LIST_PROJECTION + """ FROM songs
         WHERE (:applyDirectoryFilter = 0 OR id < 0 OR parent_directory_path IN (:allowedParentDirs))
+        AND is_disliked = 0
+        AND """ + LIBRARY_SONG_MEMBERSHIP_CONDITION + """
     """)
     fun getAllSongs(
         allowedParentDirs: List<String> = emptyList(),
@@ -674,21 +734,9 @@ interface MusicDao {
     @Query("""
         SELECT id, parent_directory_path, title, album_art_uri_string, date_added, file_path, source_type FROM songs
         WHERE (:applyDirectoryFilter = 0 OR id < 0 OR parent_directory_path IN (:allowedParentDirs))
-        AND (
-            :filterMode = 0
-            OR (
-                :filterMode = 1
-                AND (source_type = 0 OR (file_path IS NOT NULL AND file_path != ''))
-            )
-            OR (
-                :filterMode = 2
-                AND source_type = 1
-            )
-            OR (
-                :filterMode = 3
-                AND source_type = 7
-            )
-        )
+        AND is_disliked = 0
+        AND """ + LIBRARY_SONG_MEMBERSHIP_CONDITION + """
+        AND """ + SONG_STORAGE_FILTER_CONDITION + """
         ORDER BY parent_directory_path ASC, source_type ASC, title ASC
     """)
     fun getFolderSongs(
@@ -715,23 +763,10 @@ interface MusicDao {
 
     @Query("""
         SELECT id FROM songs
-        WHERE (:applyDirectoryFilter = 0 OR parent_directory_path IN (:allowedParentDirs))
+        WHERE (:applyDirectoryFilter = 0 OR id < 0 OR parent_directory_path IN (:allowedParentDirs))
         AND is_disliked = 0
-        AND (
-            :filterMode = 0
-            OR (
-                :filterMode = 1
-                AND (source_type = 0 OR (file_path IS NOT NULL AND file_path != ''))
-            )
-            OR (
-                :filterMode = 2
-                AND source_type = 1
-            )
-            OR (
-                :filterMode = 3
-                AND source_type = 7
-            )
-        )
+        AND """ + LIBRARY_SONG_MEMBERSHIP_CONDITION + """
+        AND """ + SONG_STORAGE_FILTER_CONDITION + """
         ORDER BY
             CASE WHEN :sortOrder = 'song_default_order' THEN track_number END ASC,
             CASE WHEN :sortOrder = 'song_title_az' THEN title END COLLATE NOCASE ASC,
@@ -757,22 +792,8 @@ interface MusicDao {
     @Query("""
         SELECT songs.id FROM songs
         INNER JOIN favorites ON songs.id = favorites.songId AND favorites.isFavorite = 1
-        WHERE (:applyDirectoryFilter = 0 OR songs.parent_directory_path IN (:allowedParentDirs))
-        AND (
-            :filterMode = 0
-            OR (
-                :filterMode = 1
-                AND (songs.source_type = 0 OR (songs.file_path IS NOT NULL AND songs.file_path != ''))
-            )
-            OR (
-                :filterMode = 2
-                AND songs.source_type = 1
-            )
-            OR (
-                :filterMode = 3
-                AND songs.source_type = 7
-            )
-        )
+        WHERE (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
+        AND """ + JOINED_SONG_STORAGE_FILTER_CONDITION + """
         ORDER BY
             CASE WHEN :sortOrder = 'liked_title_az' THEN songs.title END COLLATE NOCASE ASC,
             CASE WHEN :sortOrder = 'liked_title_za' THEN songs.title END COLLATE NOCASE DESC,
@@ -801,39 +822,8 @@ interface MusicDao {
         SELECT """ + SONG_LIST_PROJECTION + """ FROM songs
         WHERE (:applyDirectoryFilter = 0 OR id < 0 OR parent_directory_path IN (:allowedParentDirs))
         AND is_disliked = 0
-        AND (
-            (:filterMode = 1 AND (source_type = 0 OR (file_path IS NOT NULL AND file_path != '')))
-            OR (
-                :filterMode != 1
-                AND (
-                    source_type = 0
-                    OR is_favorite = 1
-                    OR (file_path IS NOT NULL AND file_path != '')
-                    OR EXISTS (SELECT 1 FROM playlist_songs ps WHERE ps.song_id = CAST(id AS TEXT))
-                    OR EXISTS (SELECT 1 FROM playlist_songs ps WHERE ps.song_id = REPLACE(content_uri_string, 'youtube://', 'youtube_'))
-                    -- PERF: reads append-only library_membership via covering PK index probes instead of
-                    -- song_engagements, stopping InvalidationTracker feedback loop on every track play
-                    OR EXISTS (SELECT 1 FROM library_membership lm WHERE lm.song_key = CAST(id AS TEXT))
-                    OR EXISTS (SELECT 1 FROM library_membership lm2 WHERE lm2.song_key = content_uri_string)
-                    OR (
-                        artist_id IN (SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != '')
-                        AND id NOT IN (SELECT related_song_id FROM related_song_map)
-                    )
-                )
-            )
-        )
-        AND (
-            :filterMode = 0
-            OR :filterMode = 1
-            OR (
-                :filterMode = 2
-                AND source_type = 1
-            )
-            OR (
-                :filterMode = 3
-                AND source_type = 7
-            )
-        )
+        AND """ + LIBRARY_SONG_MEMBERSHIP_CONDITION + """
+        AND """ + SONG_STORAGE_FILTER_CONDITION + """
         ORDER BY
             CASE WHEN :sortOrder = 'song_default_order' THEN track_number END ASC,
             CASE WHEN :sortOrder = 'song_title_az' THEN title END COLLATE NOCASE ASC,
@@ -862,36 +852,9 @@ interface MusicDao {
         SELECT """ + SONG_LIST_PROJECTION + """
         FROM songs
         WHERE (:applyDirectoryFilter = 0 OR id < 0 OR parent_directory_path IN (:allowedParentDirs))
-        AND (
-            source_type = 0
-            OR is_favorite = 1
-            OR (file_path IS NOT NULL AND file_path != '')
-            OR EXISTS (SELECT 1 FROM playlist_songs ps WHERE ps.song_id = CAST(id AS TEXT))
-            OR EXISTS (SELECT 1 FROM playlist_songs ps WHERE ps.song_id = REPLACE(content_uri_string, 'youtube://', 'youtube_'))
-            -- PERF: reads append-only library_membership via covering PK index probes instead of
-            -- song_engagements, stopping InvalidationTracker feedback loop on every track play
-            OR EXISTS (SELECT 1 FROM library_membership lm WHERE lm.song_key = CAST(id AS TEXT))
-            OR EXISTS (SELECT 1 FROM library_membership lm2 WHERE lm2.song_key = content_uri_string)
-            OR (
-                artist_id IN (SELECT id FROM artists WHERE channel_id IS NOT NULL AND channel_id != '')
-                AND id NOT IN (SELECT related_song_id FROM related_song_map)
-            )
-        )
-        AND (
-            :filterMode = 0
-            OR (
-                :filterMode = 1
-                AND (source_type = 0 OR (file_path IS NOT NULL AND file_path != ''))
-            )
-            OR (
-                :filterMode = 2
-                AND source_type != 0
-            )
-            OR (
-                :filterMode = 3
-                AND (file_path IS NOT NULL AND file_path != '')
-            )
-        )
+        AND is_disliked = 0
+        AND """ + LIBRARY_SONG_MEMBERSHIP_CONDITION + """
+        AND """ + SONG_STORAGE_FILTER_CONDITION + """
         ORDER BY
             CASE WHEN :sortOrder = 'song_default_order' THEN track_number END ASC,
             CASE WHEN :sortOrder = 'song_title_az' THEN title END COLLATE NOCASE ASC,
@@ -926,21 +889,7 @@ interface MusicDao {
         SELECT songs.* FROM songs
         INNER JOIN favorites ON songs.id = favorites.songId AND favorites.isFavorite = 1
         WHERE (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
-        AND (
-            :filterMode = 0
-            OR (
-                :filterMode = 1
-                AND (songs.source_type = 0 OR (songs.file_path IS NOT NULL AND songs.file_path != ''))
-            )
-            OR (
-                :filterMode = 2
-                AND songs.source_type = 1
-            )
-            OR (
-                :filterMode = 3
-                AND songs.source_type = 7
-            )
-        )
+        AND """ + JOINED_SONG_STORAGE_FILTER_CONDITION + """
         ORDER BY
             CASE WHEN :sortOrder = 'liked_title_az' THEN songs.title END COLLATE NOCASE ASC,
             CASE WHEN :sortOrder = 'liked_title_za' THEN songs.title END COLLATE NOCASE DESC,
@@ -967,21 +916,7 @@ interface MusicDao {
         SELECT songs.* FROM songs
         INNER JOIN favorites ON songs.id = favorites.songId AND favorites.isFavorite = 1
         WHERE (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
-        AND (
-            :filterMode = 0
-            OR (
-                :filterMode = 1
-                AND (songs.source_type = 0 OR (songs.file_path IS NOT NULL AND songs.file_path != ''))
-            )
-            OR (
-                :filterMode = 2
-                AND songs.source_type = 1
-            )
-            OR (
-                :filterMode = 3
-                AND songs.source_type = 7
-            )
-        )
+        AND """ + JOINED_SONG_STORAGE_FILTER_CONDITION + """
         ORDER BY songs.title COLLATE NOCASE ASC
     """)
     suspend fun getFavoriteSongsList(
@@ -995,21 +930,7 @@ interface MusicDao {
         FROM songs
         INNER JOIN favorites ON songs.id = favorites.songId AND favorites.isFavorite = 1
         WHERE (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
-        AND (
-            :filterMode = 0
-            OR (
-                :filterMode = 1
-                AND (songs.source_type = 0 OR (songs.file_path IS NOT NULL AND songs.file_path != ''))
-            )
-            OR (
-                :filterMode = 2
-                AND songs.source_type = 1
-            )
-            OR (
-                :filterMode = 3
-                AND songs.source_type = 7
-            )
-        )
+        AND """ + JOINED_SONG_STORAGE_FILTER_CONDITION + """
         ORDER BY
             CASE WHEN :sortOrder = 'liked_title_az' THEN songs.title END COLLATE NOCASE ASC,
             CASE WHEN :sortOrder = 'liked_title_za' THEN songs.title END COLLATE NOCASE DESC,
@@ -1039,21 +960,7 @@ interface MusicDao {
         SELECT COUNT(*) FROM songs
         INNER JOIN favorites ON songs.id = favorites.songId AND favorites.isFavorite = 1
         WHERE (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
-        AND (
-            :filterMode = 0
-            OR (
-                :filterMode = 1
-                AND (songs.source_type = 0 OR (songs.file_path IS NOT NULL AND songs.file_path != ''))
-            )
-            OR (
-                :filterMode = 2
-                AND songs.source_type = 1
-            )
-            OR (
-                :filterMode = 3
-                AND songs.source_type = 7
-            )
-        )
+        AND """ + JOINED_SONG_STORAGE_FILTER_CONDITION + """
     """)
     fun getFavoriteSongCount(
         allowedParentDirs: List<String>,
@@ -1287,21 +1194,7 @@ interface MusicDao {
             OR EXISTS (SELECT 1 FROM playlist_songs ps WHERE ps.song_id = REPLACE(songs.content_uri_string, 'youtube://', 'youtube_'))
             OR EXISTS (SELECT 1 FROM library_membership lm3 WHERE lm3.song_key = 'album_' || CAST(albums.id AS TEXT))
         )
-        AND (
-            :filterMode = 0
-            OR (
-                :filterMode = 1
-                AND (songs.source_type = 0 OR (songs.file_path IS NOT NULL AND songs.file_path != ''))
-            )
-            OR (
-                :filterMode = 2
-                AND songs.source_type = 1
-            )
-            OR (
-                :filterMode = 3
-                AND songs.source_type = 7
-            )
-        )
+        AND """ + JOINED_SONG_STORAGE_FILTER_CONDITION + """
         GROUP BY
             albums.id,
             albums.title,
@@ -1343,21 +1236,7 @@ interface MusicDao {
             OR EXISTS (SELECT 1 FROM playlist_songs ps WHERE ps.song_id = REPLACE(songs.content_uri_string, 'youtube://', 'youtube_'))
             OR EXISTS (SELECT 1 FROM library_membership lm3 WHERE lm3.song_key = 'album_' || CAST(albums.id AS TEXT))
         )
-        AND (
-            :filterMode = 0
-            OR (
-                :filterMode = 1
-                AND (songs.source_type = 0 OR (songs.file_path IS NOT NULL AND songs.file_path != ''))
-            )
-            OR (
-                :filterMode = 2
-                AND songs.source_type = 1
-            )
-            OR (
-                :filterMode = 3
-                AND songs.source_type = 7
-            )
-        )
+        AND """ + JOINED_SONG_STORAGE_FILTER_CONDITION + """
         GROUP BY
             albums.id,
             albums.title,
@@ -1412,21 +1291,7 @@ interface MusicDao {
             OR EXISTS (SELECT 1 FROM playlist_songs ps WHERE ps.song_id = REPLACE(songs.content_uri_string, 'youtube://', 'youtube_'))
             OR EXISTS (SELECT 1 FROM library_membership lm3 WHERE lm3.song_key = 'album_' || CAST(albums.id AS TEXT))
         )
-        AND (
-            :filterMode = 0
-            OR (
-                :filterMode = 1
-                AND (songs.source_type = 0 OR (songs.file_path IS NOT NULL AND songs.file_path != ''))
-            )
-            OR (
-                :filterMode = 2
-                AND songs.source_type = 1
-            )
-            OR (
-                :filterMode = 3
-                AND songs.source_type = 7
-            )
-        )
+        AND """ + JOINED_SONG_STORAGE_FILTER_CONDITION + """
         GROUP BY
             albums.id,
             albums.title,
@@ -1731,7 +1596,7 @@ interface MusicDao {
                 )
             )
         )
-        GROUP BY LOWER(TRIM(REPLACE(artists.name, ' - Topic', '')))
+        GROUP BY """ + NORMALIZED_ARTIST_GROUP_KEY + """
         HAVING track_count >= :minSongCount 
             OR (artists.channel_id IS NOT NULL AND artists.channel_id != '')
             OR EXISTS (SELECT 1 FROM library_membership lm_a WHERE lm_a.song_key = 'artist_' || CAST(artists.id AS TEXT))
@@ -1782,7 +1647,7 @@ interface MusicDao {
           AND TRIM(artists.name) != ''
           AND LOWER(TRIM(REPLACE(artists.name, ' - Topic', ''))) NOT IN ('unknown', 'unknown artist', '<unknown>', 'various artists', 'various', 'unknown artists')
           AND ((artists.channel_id IS NOT NULL AND artists.channel_id != '') OR songs.id IS NOT NULL)
-        GROUP BY LOWER(TRIM(REPLACE(artists.name, ' - Topic', '')))
+        GROUP BY """ + NORMALIZED_ARTIST_GROUP_KEY + """
         ORDER BY
             CASE WHEN :sortOrder = 'artist_name_az' THEN name END COLLATE NOCASE ASC,
             CASE WHEN :sortOrder = 'artist_name_za' THEN name END COLLATE NOCASE DESC,
@@ -1810,7 +1675,7 @@ interface MusicDao {
               artists.channel_id IN (:subscribedIds)
               OR CAST(artists.id AS TEXT) IN (:subscribedIds)
           )
-        GROUP BY LOWER(TRIM(REPLACE(artists.name, ' - Topic', '')))
+        GROUP BY """ + NORMALIZED_ARTIST_GROUP_KEY + """
         ORDER BY
             CASE WHEN :sortOrder = 'artist_name_az' THEN name END COLLATE NOCASE ASC,
             CASE WHEN :sortOrder = 'artist_name_za' THEN name END COLLATE NOCASE DESC,
@@ -1844,7 +1709,7 @@ interface MusicDao {
         )
         WHERE TRIM(artists.name) != ''
           AND LOWER(TRIM(REPLACE(artists.name, ' - Topic', ''))) NOT IN ('unknown', 'unknown artist', '<unknown>', 'various artists', 'various', 'unknown artists')
-        GROUP BY LOWER(TRIM(REPLACE(artists.name, ' - Topic', '')))
+        GROUP BY """ + NORMALIZED_ARTIST_GROUP_KEY + """
         HAVING track_count >= :minSongCount
         ORDER BY
             CASE WHEN :sortOrder = 'artist_name_az' THEN name END COLLATE NOCASE ASC,
@@ -1887,24 +1752,10 @@ interface MusicDao {
             OR (
                 songs.id IS NOT NULL 
                 AND (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
-                AND (
-                    :filterMode = 0
-                    OR (
-                        :filterMode = 1
-                        AND (songs.source_type = 0 OR (songs.file_path IS NOT NULL AND songs.file_path != ''))
-                    )
-                    OR (
-                        :filterMode = 2
-                        AND songs.source_type = 1
-                    )
-                    OR (
-                        :filterMode = 3
-                        AND songs.source_type = 7
-                    )
-                )
+                AND """ + JOINED_SONG_STORAGE_FILTER_CONDITION + """
             )
           )
-        GROUP BY LOWER(TRIM(REPLACE(artists.name, ' - Topic', '')))
+        GROUP BY """ + NORMALIZED_ARTIST_GROUP_KEY + """
         ORDER BY
             CASE WHEN :sortOrder = 'artist_name_az' THEN name END COLLATE NOCASE ASC,
             CASE WHEN :sortOrder = 'artist_name_za' THEN name END COLLATE NOCASE DESC,
@@ -2027,18 +1878,33 @@ interface MusicDao {
     @Query("SELECT image_url FROM artists WHERE id = :artistId")
     suspend fun getArtistImageUrl(artistId: Long): String?
 
-    @Query("SELECT image_url FROM artists WHERE LOWER(TRIM(name)) = LOWER(TRIM(:name)) LIMIT 1")
+    @Query("""
+        SELECT image_url FROM artists
+        WHERE REPLACE(LOWER(TRIM(REPLACE(name, ' - Topic', ''))), '. ', '.') = REPLACE(LOWER(TRIM(REPLACE(:name, ' - Topic', ''))), '. ', '.')
+        AND image_url IS NOT NULL AND image_url != ''
+        AND image_url NOT LIKE '%/images/artist//%'
+        ORDER BY
+            CASE WHEN channel_id IS NOT NULL AND channel_id != '' THEN 0 ELSE 1 END,
+            track_count DESC
+        LIMIT 1
+    """)
     suspend fun getArtistImageUrlByNormalizedName(name: String): String?
 
     @Query("UPDATE artists SET image_url = :imageUrl WHERE id = :artistId")
     suspend fun updateArtistImageUrl(artistId: Long, imageUrl: String)
+
+    @Query("UPDATE artists SET image_url = NULL WHERE id = :artistId")
+    suspend fun clearArtistImageUrl(artistId: Long)
+
+    @Query("UPDATE artists SET image_url = NULL WHERE image_url LIKE '%/images/artist//%' OR (image_url LIKE '%dzcdn.net%' AND custom_image_uri IS NULL)")
+    suspend fun clearStaleExternalArtistImages(): Int
 
     @Query("SELECT id FROM artists WHERE name = :name LIMIT 1")
     suspend fun getArtistIdByName(name: String): Long?
 
     @Query("""
         SELECT id FROM artists 
-        WHERE LOWER(TRIM(name)) = LOWER(TRIM(:name)) 
+        WHERE REPLACE(LOWER(TRIM(REPLACE(name, ' - Topic', ''))), '. ', '.') = REPLACE(LOWER(TRIM(REPLACE(:name, ' - Topic', ''))), '. ', '.')
         ORDER BY 
             CASE WHEN channel_id IS NOT NULL AND channel_id != '' THEN 0 ELSE 1 END,
             CASE WHEN id > 0 THEN 0 ELSE 1 END,
@@ -2321,9 +2187,15 @@ interface MusicDao {
      * Get all songs for a specific artist using the junction table.
      */
     @Query("""
-        SELECT songs.* FROM songs
+        SELECT DISTINCT songs.* FROM songs
         INNER JOIN song_artist_cross_ref ON songs.id = song_artist_cross_ref.song_id
-        WHERE song_artist_cross_ref.artist_id = :artistId
+        WHERE song_artist_cross_ref.artist_id IN (
+            SELECT a.id FROM artists a
+            WHERE REPLACE(LOWER(TRIM(REPLACE(a.name, ' - Topic', ''))), '. ', '.') = (
+                SELECT REPLACE(LOWER(TRIM(REPLACE(target.name, ' - Topic', ''))), '. ', '.')
+                FROM artists target WHERE target.id = :artistId
+            )
+        )
         ORDER BY songs.title ASC
     """)
     fun getSongsForArtist(artistId: Long): Flow<List<SongEntity>>
@@ -2332,9 +2204,15 @@ interface MusicDao {
      * Get all songs for a specific artist (one-shot).
      */
     @Query("""
-        SELECT songs.* FROM songs
+        SELECT DISTINCT songs.* FROM songs
         INNER JOIN song_artist_cross_ref ON songs.id = song_artist_cross_ref.song_id
-        WHERE song_artist_cross_ref.artist_id = :artistId
+        WHERE song_artist_cross_ref.artist_id IN (
+            SELECT a.id FROM artists a
+            WHERE REPLACE(LOWER(TRIM(REPLACE(a.name, ' - Topic', ''))), '. ', '.') = (
+                SELECT REPLACE(LOWER(TRIM(REPLACE(target.name, ' - Topic', ''))), '. ', '.')
+                FROM artists target WHERE target.id = :artistId
+            )
+        )
         ORDER BY songs.title ASC
     """)
     suspend fun getSongsForArtistList(artistId: Long): List<SongEntity>
@@ -2385,21 +2263,7 @@ interface MusicDao {
         INNER JOIN song_artist_cross_ref ON song_artist_cross_ref.song_id = songs.id
         INNER JOIN artists ON artists.id = song_artist_cross_ref.artist_id
         WHERE (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
-        AND (
-            :filterMode = 0
-            OR (
-                :filterMode = 1
-                AND (songs.source_type = 0 OR (songs.file_path IS NOT NULL AND songs.file_path != ''))
-            )
-            OR (
-                :filterMode = 2
-                AND songs.source_type = 1
-            )
-            OR (
-                :filterMode = 3
-                AND songs.source_type = 7
-            )
-        )
+        AND """ + JOINED_SONG_STORAGE_FILTER_CONDITION + """
         GROUP BY artists.id
         ORDER BY artists.name ASC
     """)

@@ -58,6 +58,9 @@ class MusicRepositoryImplTest {
         coEvery { mockUserPreferencesRepository.blockedDirectoriesFlow } returns flowOf(setOf("/dummy"))
         coEvery { mockUserPreferencesRepository.initialSetupDoneFlow } returns flowOf(true)
         coEvery { mockUserPreferencesRepository.isFolderFilterActiveFlow } returns flowOf(false)
+        coEvery { mockUserPreferencesRepository.artistImageCacheVersionFlow } returns flowOf(2)
+        coJustRun { mockUserPreferencesRepository.setArtistImageCacheVersion(any()) }
+        coEvery { mockMusicDao.clearStaleExternalArtistImages() } returns 0
         // Populate artists
         val dummyArtists = listOf(
             ArtistEntity(101L, "ArtistName1", 5, null),

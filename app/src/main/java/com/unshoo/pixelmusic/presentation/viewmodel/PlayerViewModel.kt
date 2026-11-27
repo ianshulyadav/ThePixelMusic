@@ -1095,7 +1095,7 @@ class PlayerViewModel @Inject constructor(
             failureMessage = "Failed to build full library queue for songId=%s"
         ) {
             val sortOption = playerUiState.value.currentSongSortOption
-            val storageFilter = playerUiState.value.currentStorageFilter
+            val storageFilter = libraryStateHolder.getEffectiveStorageFilter()
             musicRepository.getSongIdsSorted(sortOption, storageFilter)
         }
     }
@@ -1112,21 +1112,21 @@ class PlayerViewModel @Inject constructor(
             failureMessage = "Failed to build favorites queue for songId=%s"
         ) {
             val sortOption = playerUiState.value.currentFavoriteSortOption
-            val storageFilter = playerUiState.value.currentStorageFilter
+            val storageFilter = libraryStateHolder.getEffectiveStorageFilter()
             musicRepository.getFavoriteSongIdsSorted(sortOption, storageFilter)
         }
     }
 
     suspend fun getSongsForCurrentLibrarySelection(): List<Song> = withContext(Dispatchers.IO) {
         val sortOption = playerUiState.value.currentSongSortOption
-        val storageFilter = playerUiState.value.currentStorageFilter
+        val storageFilter = libraryStateHolder.getEffectiveStorageFilter()
         val sortedIds = musicRepository.getSongIdsSorted(sortOption, storageFilter)
         resolvePlaybackQueueFromSortedIds(sortedIds)
     }
 
     suspend fun getFavoriteSongsForCurrentSelection(): List<Song> = withContext(Dispatchers.IO) {
         val sortOption = playerUiState.value.currentFavoriteSortOption
-        val storageFilter = playerUiState.value.currentStorageFilter
+        val storageFilter = libraryStateHolder.getEffectiveStorageFilter()
         val sortedIds = musicRepository.getFavoriteSongIdsSorted(sortOption, storageFilter)
         resolvePlaybackQueueFromSortedIds(sortedIds)
     }

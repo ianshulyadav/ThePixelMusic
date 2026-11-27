@@ -324,6 +324,7 @@ constructor(
         val GROUP_BY_ALBUM_ARTIST = booleanPreferencesKey("group_by_album_artist")
         val ARTIST_SETTINGS_RESCAN_REQUIRED =
                 booleanPreferencesKey("artist_settings_rescan_required")
+        val ARTIST_IMAGE_CACHE_VERSION = intPreferencesKey("artist_image_cache_version")
 
         // Equalizer Settings
         val EQUALIZER_ENABLED = booleanPreferencesKey("equalizer_enabled")
@@ -936,6 +937,17 @@ constructor(
 
     suspend fun resetArtistWordDelimitersToDefault() {
         setArtistWordDelimiters(DEFAULT_ARTIST_WORD_DELIMITERS)
+    }
+
+    val artistImageCacheVersionFlow: Flow<Int> =
+        dataStore.data.map { preferences ->
+            preferences[PreferencesKeys.ARTIST_IMAGE_CACHE_VERSION] ?: 0
+        }.distinctUntilChanged()
+
+    suspend fun setArtistImageCacheVersion(version: Int) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.ARTIST_IMAGE_CACHE_VERSION] = version
+        }
     }
 
     val extractArtistsFromTitleFlow: Flow<Boolean> =

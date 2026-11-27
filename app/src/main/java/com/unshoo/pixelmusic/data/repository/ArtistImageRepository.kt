@@ -7,9 +7,15 @@ import android.net.Uri
 import android.util.Log
 import android.util.LruCache
 import com.unshoo.pixelmusic.data.database.MusicDao
+import com.unshoo.pixelmusic.data.feed.ArtworkNormalizer
 import com.unshoo.pixelmusic.data.network.deezer.DeezerApiService
+import com.unshoo.pixelmusic.data.network.deezer.DeezerArtist
+import com.unshoo.pixelmusic.data.remote.youtube.upgradeThumbnailUrlToHighQuality
 import com.unshoo.pixelmusic.utils.NetworkRetryUtils
 import com.unshoo.pixelmusic.utils.isRetryableNetworkError
+import unshoo.ianshulyadav.pixelmusic.innertube.YouTube
+import unshoo.ianshulyadav.pixelmusic.innertube.models.ArtistItem
+import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
@@ -41,7 +47,11 @@ class ArtistImageRepository @Inject constructor(
         private const val TAG = "ArtistImageRepository"
         private const val CACHE_SIZE = 100 // Number of artist images to cache in memory
         private const val PREFETCH_CONCURRENCY = 3 // Limit parallel API calls
+        private const val DEEZER_SEARCH_LIMIT = 10
+        private const val MIN_DEEZER_FAN_COUNT = 50
         private val deezerSizeRegex = Regex("/\\d{2,4}x\\d{2,4}([\\-.])")
+        private val trailingTopicRegex = Regex("\\s*-\\s*Topic$", RegexOption.IGNORE_CASE)
+        private val artistKeyStripRegex = Regex("[\\s\\-–—_.'’]+")
         private const val NETWORK_RETRY_ATTEMPTS = 3
         private const val NETWORK_RETRY_INITIAL_DELAY_MS = 500L
         private const val MAX_CUSTOM_IMAGE_SOURCE_BYTES = 24L * 1024L * 1024L
@@ -49,6 +59,41 @@ class ArtistImageRepository @Inject constructor(
         private const val MAX_CUSTOM_IMAGE_TOTAL_PIXELS = 80_000_000L
         private const val TARGET_CUSTOM_IMAGE_MAX_DIMENSION_PX = 2_048
         private const val TARGET_CUSTOM_IMAGE_MAX_PIXELS = 4_194_304L // 2048x2048
+
+        internal fun cleanArtistQueryName(name: String): String =
+            name.replace(trailingTopicRegex, "").trim()
+
+        internal fun normalizeArtistMatchKey(name: String): String =
+            cleanArtistQueryName(name)
+                .lowercase(Locale.ROOT)
+                .replace(artistKeyStripRegex, "")
+
+        internal fun isValidArtistImageUrl(url: String?): Boolean {
+            if (url.isNullOrBlank()) return false
+            if (url.contains("/images/artist//")) return false
+            return ArtworkNormalizer.isRealImage(url)
+        }
+
+        internal fun selectBestDeezerArtist(
+            targetName: String,
+            candidates: List<DeezerArtist>,
+            minFanCount: Int = MIN_DEEZER_FAN_COUNT
+        ): DeezerArtist? {
+            val targetKey = normalizeArtistMatchKey(targetName)
+            if (targetKey.isBlank()) return null
+            return candidates
+                .asSequence()
+                .filter { candidate ->
+                    normalizeArtistMatchKey(candidate.name) == targetKey &&
+                        candidate.fanCount >= minFanCount &&
+                        isValidArtistImageUrl(bestDeezerPictureUrl(candidate))
+                }
+                .maxByOrNull { it.fanCount }
+        }
+
+        internal fun bestDeezerPictureUrl(artist: DeezerArtist): String? =
+            listOf(artist.pictureXl, artist.pictureBig, artist.pictureMedium, artist.picture)
+                .firstOrNull(::isValidArtistImageUrl)
 
         internal fun calculateCustomImageSampleSize(width: Int, height: Int): Int {
             var sampleSize = 1
@@ -76,20 +121,28 @@ class ArtistImageRepository @Inject constructor(
     // Set to track artists for whom image fetching failed (e.g. not found), to avoid retrying in the same session
     private val failedFetches = mutableSetOf<String>()
 
+    internal var youtubeArtistLookup: suspend (String) -> String? = ::fetchYoutubeArtistChannelImage
+
     /**
-     * Get artist image URL, fetching from Deezer if not cached.
+     * Get artist image URL, fetching from verified Deezer / YouTube Music profiles if not cached.
      * @param artistName Name of the artist
      * @param artistId Room database ID of the artist (for caching)
      * @return Image URL or null if not found
      */
     suspend fun getArtistImageUrl(artistName: String, artistId: Long): String? {
-        if (artistName.isBlank()) return null
+        val cleanName = cleanArtistQueryName(artistName)
+        if (cleanName.isBlank()) return null
 
-        val normalizedName = artistName.trim().lowercase()
+        val normalizedName = normalizeArtistMatchKey(cleanName)
+        if (normalizedName.isBlank()) return null
 
         // Check memory cache first
         memoryCache.get(normalizedName)?.let { cachedUrl ->
-            return cachedUrl
+            if (isValidArtistImageUrl(cachedUrl)) {
+                return cachedUrl
+            } else {
+                memoryCache.remove(normalizedName)
+            }
         }
         
         // Check if previously failed
@@ -99,15 +152,20 @@ class ArtistImageRepository @Inject constructor(
 
         // Resolve canonical DB artist row by name to avoid MediaStore-ID/DB-ID mismatches.
         val (resolvedArtistId, dbCachedUrl) = withContext(Dispatchers.IO) {
-            val canonicalArtistId = musicDao.getArtistIdByNormalizedName(artistName) ?: artistId
-            val cachedUrl = musicDao.getArtistImageUrl(canonicalArtistId)
-                ?: musicDao.getArtistImageUrlByNormalizedName(artistName)
+            val canonicalArtistId = musicDao.getArtistIdByNormalizedName(cleanName) ?: artistId
+            val directUrl = musicDao.getArtistImageUrl(canonicalArtistId)
+            val cachedUrl = if (directUrl != null && !isValidArtistImageUrl(directUrl)) {
+                musicDao.clearArtistImageUrl(canonicalArtistId)
+                null
+            } else {
+                directUrl
+            } ?: musicDao.getArtistImageUrlByNormalizedName(cleanName)
             canonicalArtistId to cachedUrl
         }
-        if (!dbCachedUrl.isNullOrEmpty()) {
-            val upgradedDbUrl = upgradeToHighResDeezerUrl(dbCachedUrl)
+        if (isValidArtistImageUrl(dbCachedUrl)) {
+            val upgradedDbUrl = upgradeToHighResDeezerUrl(dbCachedUrl!!)
             memoryCache.put(normalizedName, upgradedDbUrl)
-            if (upgradedDbUrl != dbCachedUrl) {
+            if (upgradedDbUrl != dbCachedUrl || resolvedArtistId != artistId) {
                 withContext(Dispatchers.IO) {
                     musicDao.updateArtistImageUrl(resolvedArtistId, upgradedDbUrl)
                 }
@@ -115,8 +173,8 @@ class ArtistImageRepository @Inject constructor(
             return upgradedDbUrl
         }
 
-        // Fetch from Deezer API
-        return fetchAndCacheArtistImage(artistName, resolvedArtistId, normalizedName)
+        // Fetch verified artist portrait from Deezer or YouTube Music
+        return fetchAndCacheArtistImage(cleanName, resolvedArtistId, normalizedName)
     }
 
     /**
@@ -131,8 +189,11 @@ class ArtistImageRepository @Inject constructor(
             chunk.map { (artistId, artistName) ->
                 async {
                     try {
-                        val normalizedName = artistName.trim().lowercase()
-                        if (memoryCache.get(normalizedName) == null && !failedFetches.contains(normalizedName)) {
+                        val normalizedName = normalizeArtistMatchKey(artistName)
+                        if (normalizedName.isNotBlank() &&
+                            memoryCache.get(normalizedName) == null &&
+                            !failedFetches.contains(normalizedName)
+                        ) {
                             prefetchSemaphore.withPermit {
                                 getArtistImageUrl(artistName, artistId)
                             }
@@ -164,34 +225,31 @@ class ArtistImageRepository @Inject constructor(
 
         return try {
             withContext(Dispatchers.IO) {
-                val response = withNetworkRetry("deezer_search:$artistName") {
-                    deezerApiService.searchArtist(artistName, limit = 1)
-                }
-                val deezerArtist = response.data.firstOrNull()
-
-                if (deezerArtist != null) {
-                    val imageUrl = (
-                        deezerArtist.pictureXl
-                            ?: deezerArtist.pictureBig
-                            ?: deezerArtist.pictureMedium
-                            ?: deezerArtist.picture
-                        )?.let(::upgradeToHighResDeezerUrl)
-
-                    if (!imageUrl.isNullOrEmpty()) {
-                        // Cache in memory
-                        memoryCache.put(normalizedName, imageUrl)
-                        
-                        // Cache in database
-                        musicDao.updateArtistImageUrl(artistId, imageUrl)
-
-                        Timber.tag(TAG).d("Fetched and cached image for $artistName: $imageUrl")
-                        imageUrl
-                    } else {
-                        null
+                val deezerImageUrl = runCatching {
+                    val response = withNetworkRetry("deezer_search:$artistName") {
+                        deezerApiService.searchArtist(artistName, limit = DEEZER_SEARCH_LIMIT)
                     }
+                    selectBestDeezerArtist(artistName, response.data)
+                        ?.let(::bestDeezerPictureUrl)
+                        ?.let(::upgradeToHighResDeezerUrl)
+                        ?.takeIf(::isValidArtistImageUrl)
+                }.onFailure { throwable ->
+                    if (throwable is CancellationException) throw throwable
+                    Timber.tag(TAG).w("Deezer lookup failed for $artistName: ${throwable.message}")
+                }.getOrNull()
+
+                val resolvedImageUrl = deezerImageUrl ?: youtubeArtistLookup(artistName)
+                    ?.let { upgradeThumbnailUrlToHighQuality(it) ?: it }
+                    ?.takeIf(::isValidArtistImageUrl)
+
+                if (!resolvedImageUrl.isNullOrEmpty()) {
+                    memoryCache.put(normalizedName, resolvedImageUrl)
+                    musicDao.updateArtistImageUrl(artistId, resolvedImageUrl)
+                    Timber.tag(TAG).d("Fetched and cached verified image for $artistName: $resolvedImageUrl")
+                    resolvedImageUrl
                 } else {
-                    Timber.tag(TAG).d("No Deezer artist found for: $artistName")
-                    failedFetches.add(normalizedName) // Mark as failed
+                    Timber.tag(TAG).d("No verified artist portrait found for: $artistName")
+                    failedFetches.add(normalizedName)
                     null
                 }
             }
@@ -199,8 +257,7 @@ class ArtistImageRepository @Inject constructor(
             throw e
         } catch (e: Exception) {
             Timber.tag(TAG).e("Error fetching artist image for $artistName: ${e.message}")
-            // Consider transient errors? For now treating as failed to avoid spam.
-            if(e !is java.net.SocketTimeoutException) {
+            if (e !is java.net.SocketTimeoutException) {
                 failedFetches.add(normalizedName)
             }
             null
@@ -209,6 +266,26 @@ class ArtistImageRepository @Inject constructor(
                 pendingFetches.remove(normalizedName)
             }
         }
+    }
+
+    private suspend fun fetchYoutubeArtistChannelImage(cleanName: String): String? {
+        val targetKey = normalizeArtistMatchKey(cleanName)
+        if (targetKey.isBlank()) return null
+        return runCatching {
+            val page = YouTube.search(cleanName, YouTube.SearchFilter.FILTER_ARTIST).getOrNull()
+                ?: return null
+            page.items
+                .asSequence()
+                .filterIsInstance<ArtistItem>()
+                .firstOrNull { item ->
+                    normalizeArtistMatchKey(item.title) == targetKey &&
+                        isValidArtistImageUrl(item.thumbnail)
+                }
+                ?.thumbnail
+        }.onFailure { throwable ->
+            if (throwable is CancellationException) throw throwable
+            Timber.tag(TAG).w("YouTube Music artist search failed for $cleanName: ${throwable.message}")
+        }.getOrNull()
     }
 
     private suspend fun <T> withNetworkRetry(

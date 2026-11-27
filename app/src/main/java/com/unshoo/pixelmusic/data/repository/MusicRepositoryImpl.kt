@@ -133,6 +133,26 @@ class MusicRepositoryImpl @Inject constructor(
     @Volatile private var currentSongArtistPrefetchSongId: Long? = null
     @Volatile private var telegramDownloadSyncObserverStarted = false
     @Volatile private var hasCleanedStrayAlbums = false
+    @Volatile private var hasCleanedStaleArtistImages = false
+    private val staleArtistImageCleanupMutex = Mutex()
+
+    private suspend fun ensureStaleArtistImagesCleanedOnce() {
+        if (hasCleanedStaleArtistImages) return
+        staleArtistImageCleanupMutex.withLock {
+            if (hasCleanedStaleArtistImages) return@withLock
+            try {
+                val targetVersion = 2
+                if (userPreferencesRepository.artistImageCacheVersionFlow.first() < targetVersion) {
+                    musicDao.clearStaleExternalArtistImages()
+                    artistImageRepository.clearCache()
+                    userPreferencesRepository.setArtistImageCacheVersion(targetVersion)
+                }
+                hasCleanedStaleArtistImages = true
+            } catch (e: Exception) {
+                Timber.w(e, "Failed to cleanup stale artist images")
+            }
+        }
+    }
 
     private fun cleanupStrayExploredAlbumsOnce() {
         if (hasCleanedStrayAlbums) return
@@ -294,6 +314,7 @@ class MusicRepositoryImpl @Inject constructor(
         }.distinctUntilChanged()
         .flatMapLatest { (allowedDirs, blockedDirs, subscribedIds) ->
             flow {
+                ensureStaleArtistImagesCleanedOnce()
                 val (allowedParentDirs, applyDirectoryFilter) =
                     computeAllowedDirs(allowedDirs, blockedDirs)
                 val safeSubscribedIds = subscribedIds.filter { it.isNotBlank() }.ifEmpty { listOf("__none__") }
@@ -597,6 +618,7 @@ class MusicRepositoryImpl @Inject constructor(
         ) { allowedDirs, blockedDirs ->
             allowedDirs to blockedDirs
         }.flatMapLatest { (allowedDirs, blockedDirs) ->
+            ensureStaleArtistImagesCleanedOnce()
             val (allowedParentDirs, applyFilter) = computeAllowedDirs(allowedDirs, blockedDirs)
             musicDao.getArtistsWithSongCountsFiltered(
                 allowedParentDirs = allowedParentDirs,
@@ -1262,7 +1284,8 @@ class MusicRepositoryImpl @Inject constructor(
 
     private fun parseYoutubeArtistNames(rawArtist: String): List<String> {
         if (rawArtist.isBlank()) return listOf("Unknown Artist")
-        val parsed = rawArtist.split(Regex("\\s*[,/&;+、]\\s*"))
+        val parsed = rawArtist
+            .split(Regex("\\s*[,/&;+、•]\\s*|\\s+(?:feat\\.|ft\\.|vs|and)\\s+", RegexOption.IGNORE_CASE))
             .map { it.trim() }
             .filter { it.isNotBlank() }
             .distinct()

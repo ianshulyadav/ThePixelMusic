@@ -117,6 +117,8 @@ class LibraryStateHolder @Inject constructor(
             }
         }.distinctUntilChanged()
 
+    suspend fun getEffectiveStorageFilter(): StorageFilter = effectiveStorageFilter.first()
+
     // --- Paging flows wired to the local Room DB ---
 
     @OptIn(ExperimentalCoroutinesApi::class)

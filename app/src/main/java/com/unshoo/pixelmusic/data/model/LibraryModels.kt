@@ -51,9 +51,10 @@ data class Artist(
         )
     }
 
-    /** Returns the image URL/path to use, preferring the user's custom image. */
+    /** Returns the image URL/path to use, preferring the user's custom image and ignoring blank-hash placeholders. */
     val effectiveImageUrl: String?
-        get() = customImageUri?.takeIf { it.isNotBlank() } ?: imageUrl?.takeIf { it.isNotBlank() }
+        get() = customImageUri?.takeIf { it.isNotBlank() }
+            ?: imageUrl?.takeIf { it.isNotBlank() && !it.contains("/images/artist//") }
 }
 
 /**
