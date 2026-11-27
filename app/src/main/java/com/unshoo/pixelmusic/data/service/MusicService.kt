@@ -367,20 +367,34 @@ class MusicService : MediaLibraryService() {
         onTransitionFinished()
     }
 
+    private var observedMusicPlayer: Player? = null
+
+    private fun attachPlayerListenerTo(target: Player) {
+        val previous = observedMusicPlayer
+        if (previous === target) return
+        previous?.removeListener(playerListener)
+        observedMusicPlayer = target
+        target.addListener(playerListener)
+    }
+
     private fun publishMediaSessionPlayer(player: Player, logMessage: String) {
-        val session = mediaSession ?: return
+        val session = mediaSession ?: run {
+            attachPlayerListenerTo(player)
+            return
+        }
         val oldPlayer = session.player
         if (oldPlayer !== player) {
-            oldPlayer.removeListener(playerListener)
             discordPresenceListener?.let { oldPlayer.removeListener(it) }
             session.player = player
-            player.addListener(playerListener)
+            attachPlayerListenerTo(player)
             discordPresenceListener = com.unshoo.pixelmusic.data.discord.DiscordPresence.attach(player)
             AutoQueueManager.updatePlayer(player)
             QueuePreloadManager.updatePlayer(player)
 
             // Explicitly sync the new player's track transition state
             handleMediaItemTransition(player.currentMediaItem, Player.MEDIA_ITEM_TRANSITION_REASON_AUTO)
+        } else {
+            attachPlayerListenerTo(player)
         }
 
         Timber.tag("MusicService").d(logMessage)
@@ -541,11 +555,14 @@ class MusicService : MediaLibraryService() {
         engine.resolvedUriCache.evictAll()
         engine.setOnPlayerAboutToBeReleasedListener { oldPlayer ->
             oldPlayer.removeListener(playerListener)
+            if (observedMusicPlayer === oldPlayer) {
+                observedMusicPlayer = null
+            }
         }
         userSelectedVolume = engine.masterPlayer.volume.coerceIn(0f, 1f)
         syncLocalListeningStatsFromPlayer(engine.masterPlayer)
 
-        engine.masterPlayer.addListener(playerListener)
+        attachPlayerListenerTo(engine.masterPlayer)
 
         // Handle player swaps (crossfade) to keep MediaSession in sync
         engine.addPlayerSwapListener(playerSwapListener)
@@ -1205,6 +1222,7 @@ class MusicService : MediaLibraryService() {
             .setPeriodicPositionUpdateEnabled(false)
             .build()
 
+        attachPlayerListenerTo(sessionPlayer)
         discordPresenceListener = com.unshoo.pixelmusic.data.discord.DiscordPresence.attach(sessionPlayer)
 
         mediaSession?.let { session ->
@@ -2028,11 +2046,23 @@ class MusicService : MediaLibraryService() {
                     return
                 }
             }
+            val httpError = engine.findHttpResponseException(error)
+            val httpStatusCode = httpError?.responseCode
+            val httpFailingUri = httpError?.dataSpec?.uri?.toString()
             val currentUri = currentItem?.localConfiguration?.uri?.toString()
+            val effectiveResolvedUri = httpFailingUri
+                ?: currentUri?.let { engine.peekResolvedPlaybackUri(it) }
+                ?: currentUri
+            fun isLosslessOrMonochromeUri(uriStr: String?): Boolean =
+                uriStr != null && (com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver.isLosslessUri(uriStr) ||
+                    uriStr.contains("monochrome.st/track/", ignoreCase = true))
+            fun isMonochromeUri(uriStr: String?): Boolean =
+                uriStr != null && (uriStr.startsWith("monochrome://") ||
+                    uriStr.contains("monochrome.st/track/", ignoreCase = true))
             // Lossless-source streams (Tidal/Qobuz/Deezer CDN links, deezer://, tidal-dash://,
             // flattened Apple files) expire or get evicted; they recover through the same
             // youtube:// re-resolve path, with the resolver's cached decision dropped first.
-            val isLosslessStream = com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver.isLosslessUri(currentUri)
+            val isLosslessStream = isLosslessOrMonochromeUri(currentUri) || isLosslessOrMonochromeUri(effectiveResolvedUri)
             val isYoutube = currentUri?.startsWith("youtube://") == true ||
                 currentUri?.contains("googlevideo.com") == true ||
                 currentUri?.contains("saavncdn.com") == true ||
@@ -2052,22 +2082,25 @@ class MusicService : MediaLibraryService() {
             lastStreamRecoveryMediaId = mediaId
 
             // Invalidate any stale resolved stream so the next attempt re-fetches a fresh URL.
-            if (!currentUri.isNullOrBlank()) {
-                engine.invalidateResolvedUri(currentUri)
+            if (!currentUri.isNullOrBlank() || !httpFailingUri.isNullOrBlank()) {
+                if (!currentUri.isNullOrBlank()) engine.invalidateResolvedUri(currentUri)
                 val youtubeVideoId: String? = when {
-                    currentUri.startsWith("youtube://") -> currentUri.removePrefix("youtube://")
-                    currentUri.contains("googlevideo.com") || currentUri.contains("saavncdn.com") || currentUri.contains("jiosaavn.com") || isLosslessStream -> {
-                        val id = engine.youtubeIdOf(currentItem)
+                    currentUri?.startsWith("youtube://") == true -> currentUri.removePrefix("youtube://")
+                    currentUri?.contains("googlevideo.com") == true ||
+                        currentUri?.contains("saavncdn.com") == true ||
+                        currentUri?.contains("jiosaavn.com") == true ||
+                        isLosslessStream -> {
+                        val id = currentItem?.let { engine.youtubeIdOf(it) }
                         id?.also { engine.invalidateResolvedUri("youtube://$it") }
                     }
-                    else -> null
+                    else -> currentItem?.let { engine.youtubeIdOf(it) }
                 }
-                val isMonochrome = currentUri.startsWith("monochrome://") ||
-                    currentUri.contains("monochrome.st/track/") ||
+                val isMonochrome = isMonochromeUri(currentUri) ||
+                    isMonochromeUri(effectiveResolvedUri) ||
                     currentItem?.mediaId?.startsWith("monochrome_") == true
                 val monoTrackId = if (isMonochrome) {
-                    currentItem?.mediaId?.removePrefix("monochrome_")
-                        ?: currentUri.removePrefix("monochrome://").substringAfterLast("/")
+                    currentItem?.mediaId?.takeIf { it.startsWith("monochrome_") }?.removePrefix("monochrome_")
+                        ?: currentUri?.takeIf { it.startsWith("monochrome://") }?.removePrefix("monochrome://")?.substringAfterLast("/")
                 } else null
                 if (monoTrackId != null) {
                     com.unshoo.pixelmusic.data.service.player.StreamChoice.forget("monochrome_$monoTrackId")
@@ -2075,18 +2108,27 @@ class MusicService : MediaLibraryService() {
                     com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver.clearResolved(monoTrackId)
                     engine.invalidateResolvedUri("monochrome://$monoTrackId")
                 }
+                if (httpError != null && engine.isRefusedHttpCode(httpError.responseCode)) {
+                    engine.recordRefusedStreamFailure(
+                        failingUrl = httpFailingUri ?: effectiveResolvedUri.orEmpty(),
+                        responseCode = httpError.responseCode,
+                        videoId = youtubeVideoId,
+                    )
+                }
                 if (youtubeVideoId != null) {
                     com.unshoo.pixelmusic.data.service.player.StreamChoice.forget(youtubeVideoId)
                     // Always purge failing stream cache immediately so retry resolves a fresh working stream
                     com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.invalidateStreamCache(youtubeVideoId)
                     if (isLosslessStream) {
+                        val reasonSuffix = httpStatusCode?.let { " HTTP $it" }.orEmpty()
                         // Exclude ONLY the failing addon/source first so retry steps down the unified chain before falling back to YouTube
                         com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver.markCurrentSourceFailedForTrack(
-                            youtubeVideoId,
-                            "Playback error ${error.errorCodeName}",
+                            mediaId = youtubeVideoId,
+                            reason = "Playback error ${error.errorCodeName}$reasonSuffix",
+                            failingUri = effectiveResolvedUri,
                         )
                     }
-                    if (effectiveAttempt >= 1) {
+                    if (effectiveAttempt >= 1 && !isLosslessStream) {
                         serviceScope.launch {
                             try {
                                 com.unshoo.pixelmusic.utils.potoken.BotGuardTokenGenerator.invalidatePlayerToken(youtubeVideoId)
@@ -2134,11 +2176,13 @@ class MusicService : MediaLibraryService() {
 
                         val rawItem = currentItem ?: return@launch
                         val rawUriString = rawItem.localConfiguration?.uri?.toString().orEmpty()
+                        val failedUriForSource = effectiveResolvedUri ?: rawUriString
                         // BUGFIX: also handle bare 11-char mediaIds for googlevideo remap
-                        val rawIsLossless = com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver.isLosslessUri(rawUriString)
+                        val rawIsLossless = isLosslessStream || isLosslessOrMonochromeUri(rawUriString)
                         // BUGFIX: JioSaavn links were re-fed unchanged; their 2h freshness mark made
                         // preResolveForPlayback() treat the failing URL as fresh -> recovery loop.
-                        val rawIsSaavn = rawUriString.contains("saavncdn.com") || rawUriString.contains("jiosaavn.com")
+                        val rawIsSaavn = rawUriString.contains("saavncdn.com") || rawUriString.contains("jiosaavn.com") ||
+                            failedUriForSource.contains("saavncdn.com") || failedUriForSource.contains("jiosaavn.com")
                         val rawNeedsSourceReset = rawUriString.contains("googlevideo.com") || rawIsLossless || rawIsSaavn
                         val ytVideoId = rawItem.mediaId
                             .takeIf { it.startsWith("youtube_") }
@@ -2147,24 +2191,23 @@ class MusicService : MediaLibraryService() {
                                 rawNeedsSourceReset && it.length == 11 && !it.all(Char::isDigit)
                             }
 
-                        if (!ytVideoId.isNullOrBlank()) {
+                        if (!ytVideoId.isNullOrBlank() && !isLosslessStream && !rawIsSaavn) {
                             com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.markStreamStalledOrThrottled(ytVideoId)
                         }
 
-                        val isMonochrome = rawUriString.startsWith("monochrome://") ||
-                            rawUriString.contains("monochrome.st/track/") ||
+                        val isMonochrome = isMonochromeUri(rawUriString) ||
+                            isMonochromeUri(failedUriForSource) ||
                             rawItem.mediaId.startsWith("monochrome_")
                         val monoTrackId = if (isMonochrome) {
-                            rawItem.mediaId.removePrefix("monochrome_")
-                                .takeIf { it.isNotBlank() }
-                                ?: rawUriString.removePrefix("monochrome://").substringAfterLast("/").takeIf { it.isNotBlank() }
+                            rawItem.mediaId.takeIf { it.startsWith("monochrome_") }?.removePrefix("monochrome_")
+                                ?: rawUriString.takeIf { it.startsWith("monochrome://") }?.removePrefix("monochrome://")?.substringAfterLast("/")
                         } else null
 
                         val item = if (
                             (rawNeedsSourceReset || isMonochrome) && !ytVideoId.isNullOrBlank()
                         ) {
                             if (rawIsSaavn) {
-                                com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver.markUriFresh(rawUriString, 0L)
+                                com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver.markUriFresh(failedUriForSource, 0L)
                             }
                             rawItem.buildUpon()
                                 .setUri(android.net.Uri.parse("youtube://$ytVideoId"))
@@ -2174,6 +2217,7 @@ class MusicService : MediaLibraryService() {
                         } else if (isMonochrome && !monoTrackId.isNullOrBlank()) {
                             rawItem.buildUpon()
                                 .setUri(android.net.Uri.parse("monochrome://$monoTrackId"))
+                                .setMimeType(null)
                                 .build()
                         } else {
                             rawItem
@@ -2639,6 +2683,8 @@ class MusicService : MediaLibraryService() {
         engine.removeTransitionFinishedListener(transitionFinishedListener)
         discordPresenceListener?.let { mediaSession?.player?.removeListener(it) }
         discordPresenceListener = null
+        observedMusicPlayer?.removeListener(playerListener)
+        observedMusicPlayer = null
         mediaSession?.player?.removeListener(playerListener)
         engine.masterPlayer.removeListener(playerListener)
 

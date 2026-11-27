@@ -4039,7 +4039,10 @@ class PlayerViewModel @Inject constructor(
                             val mediaItems = newSongs.map { MediaItemBuilder.build(it) }.toMutableList()
                             if (mediaItems.isNotEmpty()) {
                                 runCatching {
-                                    mediaItems[0] = dualPlayerEngine.preResolveForPlayback(mediaItems[0])
+                                    mediaItems[0] = dualPlayerEngine.preResolveForPlayback(
+                                        mediaItems[0],
+                                        isNextInQueue = true,
+                                    )
                                 }
                             }
                             withContext(Dispatchers.Main) {

@@ -455,12 +455,38 @@ object LosslessStreamResolver {
      * Returns `true` if a specific source was excluded and another attempt should run before
      * abandoning lossless/addons completely.
      */
-    fun markCurrentSourceFailedForTrack(mediaId: String, reason: String = "Playback stream error"): Boolean {
+    fun markCurrentSourceFailedForTrack(
+        mediaId: String,
+        reason: String = "Playback stream error",
+        failingUri: String? = null,
+    ): Boolean {
         val clean = mediaId.removePrefix("youtube_").removePrefix("monochrome_")
+        val isMonoFailure = failingUri?.contains("monochrome.st", ignoreCase = true) == true ||
+            reason.contains("monochrome", ignoreCase = true)
+        if (isMonoFailure && reason.contains("429")) {
+            markMonochromeDown(2 * 60 * 1000L)
+        }
         val active = resolvedByMediaId[mediaId] ?: resolvedByMediaId[clean]
         if (active == null) {
+            if (isMonoFailure) {
+                val set = failedSourceIdsByTrack.getOrPut(clean) { ConcurrentHashMap.newKeySet() }
+                set.add("builtin:MONOCHROME")
+                directStreamCache.remove(sourceCacheKey(AudioSourceType.MONOCHROME, mediaId))
+                directStreamCache.remove(sourceCacheKey(AudioSourceType.MONOCHROME, clean))
+                return set.size < 6 && !isFailedForTrack(mediaId)
+            }
+            val existingFailures = failedSourceIdsByTrack[clean]
+            if (!existingFailures.isNullOrEmpty() && failingUri != null) {
+                return existingFailures.size < 6 && !isFailedForTrack(mediaId)
+            }
             markFailedForTrack(mediaId)
             return false
+        }
+        if (failingUri != null && active.uri != failingUri &&
+            !(isMonoFailure && active.source == AudioSourceType.MONOCHROME)
+        ) {
+            // A newer fallback source was already resolved for this track; do not evict it.
+            return !isFailedForTrack(mediaId)
         }
         AddonHealthTracker.recordFailure(active.sourceId, reason)
         val set = failedSourceIdsByTrack.getOrPut(clean) { ConcurrentHashMap.newKeySet() }
@@ -493,6 +519,7 @@ object LosslessStreamResolver {
         failedMediaIds.remove(clean)
         failedSourceIdsByTrack.remove(mediaId)
         failedSourceIdsByTrack.remove(clean)
+        com.unshoo.pixelmusic.data.remote.youtube.StreamFallbackPlanner.invalidateTrack(clean)
     }
 
     fun isFailedForTrack(mediaId: String?): Boolean {
@@ -517,6 +544,7 @@ object LosslessStreamResolver {
         resolvedSourcesByMediaId.clear()
         failedMediaIds.clear()
         failedSourceIdsByTrack.clear()
+        com.unshoo.pixelmusic.data.remote.youtube.StreamFallbackPlanner.invalidateAll()
     }
 
     suspend fun setSongSourceOverride(
@@ -623,7 +651,7 @@ object LosslessStreamResolver {
             addonTimeoutMs = (p[AddonsTimeoutMsKey] ?: AddonManager.DEFAULT_PER_ADDON_TIMEOUT_MS).coerceIn(2_000L, 20_000L),
             installedAddons = addons,
             unifiedOrder = AddonManager.readUnifiedOrder(p, addons),
-            saavnEnabled = p[SaavnEnabledPrefKey] ?: true,
+            saavnEnabled = p[SaavnEnabledPrefKey] ?: false,
             monochromeEnabled = p[MonochromeEnabledKey] ?: losslessMasterEnabled,
             monochromeInstances = parseMultiline(p[MonochromeInstancesKey]),
             tidalEnabled = p[TidalEnabledKey] ?: true,
@@ -704,7 +732,7 @@ object LosslessStreamResolver {
         when (source) {
             AudioSourceType.ADDON -> s.addonsMasterEnabled && s.installedAddons.any { it.enabled }
             AudioSourceType.YOUTUBE -> true
-            AudioSourceType.MONOCHROME -> s.monochromeEnabled
+            AudioSourceType.MONOCHROME -> s.monochromeEnabled && isMonochromeUp()
             AudioSourceType.TIDAL -> s.tidalEnabled
             AudioSourceType.QOBUZ -> s.qobuzEnabled
             AudioSourceType.DEEZER -> s.deezerEnabled

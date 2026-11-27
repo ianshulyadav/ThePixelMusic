@@ -241,7 +241,7 @@ object AddonManager {
         AudioSourceType.QOBUZ -> prefs[QobuzEnabledKey] ?: false
         AudioSourceType.DEEZER -> prefs[DeezerEnabledKey] ?: false
         AudioSourceType.APPLE -> prefs[AppleMusicSourceEnabledKey] ?: true
-        AudioSourceType.JIOSAAVN -> prefs[SaavnEnabledPrefKey] ?: true
+        AudioSourceType.JIOSAAVN -> prefs[SaavnEnabledPrefKey] ?: false
         AudioSourceType.YOUTUBE -> true
         AudioSourceType.ADDON -> prefs[AddonsEnabledKey] ?: true
         AudioSourceType.QOBUZ_BACKUP, AudioSourceType.AMAZON -> false

@@ -111,7 +111,9 @@ class DualPlayerEngine @Inject constructor(
         private const val SKIP_FADE_START_WAIT_MS = 6_000L
         private const val DEAD_URL_TTL_MS = 6 * 60 * 60 * 1000L
         private const val FORCED_REFRESH_MIN_INTERVAL_MS = 15_000L
-        private val REFUSED_STREAM_CODES = setOf(401, 403, 404, 410)
+        private const val HTTP_TOO_MANY_REQUESTS = 429
+        private const val MONOCHROME_RATE_LIMIT_BACKOFF_MS = 2 * 60 * 1000L
+        private val REFUSED_STREAM_CODES = setOf(401, 403, 404, 410, HTTP_TOO_MANY_REQUESTS)
         private const val AUDIO_OFFLOAD_BUFFERING_FALLBACK_MS = 4_000L
         private const val MAX_AUXILIARY_TIMELINE_ITEMS = 200
         private const val STREAM_RESOLVE_TIMEOUT_MS = 8_000L
@@ -798,9 +800,9 @@ class DualPlayerEngine @Inject constructor(
     // â”€â”€ Stream expiry / dead-link handling â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /**
-     * Links the CDN refused (401/403/404/410) even though their `expire=` time has not passed:
-     * revoked tokens, IP changes, throttled sessions. Treated as stale so no cache layer hands
-     * them out again.
+     * Links the CDN refused (401/403/404/410/429) even though their `expire=` time has not passed:
+     * revoked tokens, rate-limited endpoints, IP changes, or throttled sessions. Treated as stale
+     * so no cache layer hands them out again.
      */
     private val deadStreamUrls = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private val lastForcedRefreshAtMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
@@ -819,6 +821,64 @@ class DualPlayerEngine @Inject constructor(
             return false
         }
         return true
+    }
+
+    internal fun isRefusedHttpCode(code: Int): Boolean = code in REFUSED_STREAM_CODES
+
+    internal fun findHttpResponseException(
+        error: Throwable?,
+    ): androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException? {
+        var cause: Throwable? = error
+        while (cause != null) {
+            if (cause is androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException) {
+                return cause
+            }
+            cause = cause.cause
+        }
+        return null
+    }
+
+    internal fun peekResolvedPlaybackUri(originalUriString: String): String? =
+        (activePlaybackResolvedUris[originalUriString] ?: resolvedUriCache.get(originalUriString))?.toString()
+
+    private fun findYoutubeIdByResolvedUrl(failingUrl: String): String? {
+        if (failingUrl.isBlank()) return null
+        val fromActive = activePlaybackResolvedUris.entries
+            .firstOrNull { it.key.startsWith("youtube://") && it.value.toString() == failingUrl }
+            ?.key
+            ?.removePrefix("youtube://")
+        if (fromActive != null) return fromActive
+        return resolvedUriCache.snapshot().entries
+            .firstOrNull { it.key.startsWith("youtube://") && it.value.toString() == failingUrl }
+            ?.key
+            ?.removePrefix("youtube://")
+    }
+
+    internal fun recordRefusedStreamFailure(
+        failingUrl: String,
+        responseCode: Int?,
+        videoId: String?,
+    ): Boolean? {
+        if (failingUrl.isNotBlank()) markStreamUrlDead(failingUrl)
+        val isMonoUrl = failingUrl.contains("monochrome.st", ignoreCase = true) ||
+            failingUrl.startsWith("monochrome://", ignoreCase = true)
+        if (isMonoUrl && responseCode == HTTP_TOO_MANY_REQUESTS) {
+            LosslessStreamResolver.markMonochromeDown(MONOCHROME_RATE_LIMIT_BACKOFF_MS)
+        }
+        var stepDown: Boolean? = null
+        if (!videoId.isNullOrBlank()) {
+            val isLosslessOrMono = isMonoUrl || LosslessStreamResolver.isLosslessUri(failingUrl)
+            if (isLosslessOrMono) {
+                stepDown = LosslessStreamResolver.markCurrentSourceFailedForTrack(
+                    mediaId = videoId,
+                    reason = "HTTP ${responseCode ?: "error"}",
+                    failingUri = failingUrl.takeIf { it.isNotBlank() },
+                )
+            }
+            invalidateResolvedUri("youtube://$videoId")
+        }
+        if (failingUrl.isNotBlank()) invalidateResolvedUri(failingUrl)
+        return stepDown
     }
 
     /**
@@ -876,12 +936,7 @@ class DualPlayerEngine @Inject constructor(
         override fun getRetryDelayMsFor(
             loadErrorInfo: androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy.LoadErrorInfo
         ): Long {
-            var cause: Throwable? = loadErrorInfo.exception
-            var http: androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException? = null
-            while (cause != null && http == null) {
-                http = cause as? androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException
-                cause = cause.cause
-            }
+            val http = findHttpResponseException(loadErrorInfo.exception)
             // Every attempt already ran the full resolver chain (cache, Saavn, all YouTube
             // clients, up to LOAD_THREAD_RESOLVE_AWAIT_MS). Retrying that forever is what kept
             // unplayable tracks "buffering" indefinitely; after one retry hand the error to the
@@ -894,12 +949,19 @@ class DualPlayerEngine @Inject constructor(
                 return if (loadErrorInfo.errorCount <= 1) 1_000L else C.TIME_UNSET
             }
             if (http != null && http.responseCode in REFUSED_STREAM_CODES) {
-                markStreamUrlDead(http.dataSpec.uri.toString())
+                val failingUrl = http.dataSpec.uri.toString()
                 val originalSpec = loadErrorInfo.loadEventInfo.dataSpec
                 val videoId = originalSpec.key?.substringBefore('#')
+                    ?.takeIf { YOUTUBE_ID_REGEX.matches(it) && !it.all(Char::isDigit) }
                     ?: originalSpec.uri.toString().takeIf { it.startsWith("youtube://") }?.removePrefix("youtube://")
-                if (videoId != null) invalidateResolvedUri("youtube://$videoId")
-                return if (loadErrorInfo.errorCount <= 2) 250L else C.TIME_UNSET
+                    ?: findYoutubeIdByResolvedUrl(failingUrl)
+                recordRefusedStreamFailure(failingUrl, http.responseCode, videoId)
+                val isMonoOrLossless = LosslessStreamResolver.isLosslessUri(failingUrl) ||
+                    failingUrl.contains("monochrome.st", ignoreCase = true)
+                val canQuickRetryInPlace = http.responseCode != HTTP_TOO_MANY_REQUESTS &&
+                    originalSpec.uri.scheme == "youtube" &&
+                    !isMonoOrLossless
+                return if (canQuickRetryInPlace && loadErrorInfo.errorCount <= 2) 250L else C.TIME_UNSET
             }
             return super.getRetryDelayMsFor(loadErrorInfo)
         }
@@ -909,6 +971,7 @@ class DualPlayerEngine @Inject constructor(
     @Volatile private var currentMasterYoutubeId: String? = null
 
     private var isReleased = false
+    private var auxiliaryErrorListener: Player.Listener? = null
     internal val resolvedUriCache = LruCache<String, Uri>(100)
     private val activePlaybackResolvedUris = java.util.concurrent.ConcurrentHashMap<String, Uri>()
     private val localFilePathCache = LruCache<String, String>(200)
@@ -979,7 +1042,7 @@ class DualPlayerEngine @Inject constructor(
      * This keeps ExoPlayer's load thread free of network work and eliminates miniplayer freezes
      * when users tap song cards.
      */
-    suspend fun preResolveForPlayback(mediaItem: MediaItem): MediaItem {
+    suspend fun preResolveForPlayback(mediaItem: MediaItem, isNextInQueue: Boolean = false): MediaItem {
         val uri = mediaItem.localConfiguration?.uri ?: return mediaItem
         val scheme = uri.scheme
         val uriString = uri.toString()
@@ -994,7 +1057,15 @@ class DualPlayerEngine @Inject constructor(
             }
         }
         if (scheme == "http" || scheme == "https") {
-            if (isResolvedUriFresh(originalUriString, uri)) {
+            val ytId = youtubeIdOf(mediaItem)
+            val needsUpgrade = isNextInQueue && ytId != null &&
+                com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.shouldUpgradeCachedStream(
+                    context = context,
+                    videoId = ytId,
+                    cachedUrl = uriString,
+                    isNextInQueue = true,
+                )
+            if (isResolvedUriFresh(originalUriString, uri) && !needsUpgrade) {
                 return mediaItem
             }
             // If the URL has expired or is nearing expiration (<15m left), re-resolve from source URI.
@@ -1003,7 +1074,7 @@ class DualPlayerEngine @Inject constructor(
             // saavn links handed straight to ExoPlayer -> 403 -> error-recovery loop). Fall back to
             // the item's YouTube id, the same way ensureFreshStreamForResume() does.
             val sourceUri = Uri.parse(originalUriString).takeIf { it.scheme in REMOTE_MEDIA_SCHEMES }
-                ?: youtubeIdOf(mediaItem)?.let { Uri.parse("youtube://$it") }
+                ?: ytId?.let { Uri.parse("youtube://$it") }
             if (sourceUri != null) {
                 invalidateResolvedUri(uriString)
                 return resolveMediaItem(
@@ -1011,7 +1082,8 @@ class DualPlayerEngine @Inject constructor(
                         .setUri(sourceUri)
                         .setCustomCacheKey(null)
                         .setMimeType(null)
-                        .build()
+                        .build(),
+                    isNextInQueue = isNextInQueue,
                 )
             }
             return mediaItem
@@ -1019,7 +1091,7 @@ class DualPlayerEngine @Inject constructor(
         if (scheme !in REMOTE_MEDIA_SCHEMES) {
             return mediaItem
         }
-        return resolveMediaItem(mediaItem)
+        return resolveMediaItem(mediaItem, isNextInQueue = isNextInQueue)
     }
 
     /** YouTube video id for [item], or null for local / non-YouTube sources. */
@@ -1128,10 +1200,11 @@ class DualPlayerEngine @Inject constructor(
             if (safeStart - 1 >= 0) add(safeStart - 1)
         }
         for (idx in warm) {
+            val isImmediateNext = (idx == safeStart + 1)
             scope.launch(Dispatchers.IO) {
                 runCatching {
-                    val resolved = preResolveForPlayback(result[idx])
-                    // Cache only â€” do not mutate the already-returned list.
+                    val resolved = preResolveForPlayback(result[idx], isNextInQueue = isImmediateNext)
+                    // Cache only — do not mutate the already-returned list.
                     resolved.localConfiguration?.uri?.toString()?.let { u ->
                         if (!LosslessStreamResolver.isLosslessUri(u) && !u.contains("monochrome.st/track/")) {
                             val key = result[idx].mediaId.removePrefix("youtube_").takeIf { it.isNotBlank() }
@@ -1546,7 +1619,9 @@ class DualPlayerEngine @Inject constructor(
     fun failoverLosslessToYoutube(
         mediaItem: MediaItem,
         targetPlayer: ExoPlayer? = null,
-        reason: String = "Lossless stream failed or stalled"
+        reason: String = "Lossless stream failed or stalled",
+        failingUri: String? = null,
+        stepDownOverride: Boolean? = null,
     ) {
         val player = targetPlayer ?: if (::playerA.isInitialized) playerA else return
         val rawUri = mediaItem.localConfiguration?.uri?.toString().orEmpty()
@@ -1559,7 +1634,12 @@ class DualPlayerEngine @Inject constructor(
             return
         }
 
-        val shouldStepDown = LosslessStreamResolver.markCurrentSourceFailedForTrack(videoId, reason)
+        val resolvedFailingUri = failingUri ?: peekResolvedPlaybackUri(rawUri) ?: rawUri.takeIf { it.isNotBlank() }
+        val shouldStepDown = stepDownOverride ?: LosslessStreamResolver.markCurrentSourceFailedForTrack(
+            mediaId = videoId,
+            reason = reason,
+            failingUri = resolvedFailingUri,
+        )
         Timber.tag("DualPlayerEngine").w(
             "Source Failover: %s (%s) -> stepDown=%s",
             videoId,
@@ -1572,17 +1652,24 @@ class DualPlayerEngine @Inject constructor(
 
         scope.launch(Dispatchers.IO) {
             try {
+                val durMs = mediaItem.mediaMetadata.extras
+                    ?.getLong(com.unshoo.pixelmusic.utils.MediaItemBuilder.EXTERNAL_EXTRA_DURATION, 0L) ?: 0L
                 val song = com.unshoo.pixelmusic.data.model.youtube.Song(
                     youtubeId = videoId,
                     title = mediaItem.mediaMetadata.title?.toString().orEmpty(),
                     artist = mediaItem.mediaMetadata.artist?.toString().orEmpty(),
-                    album = mediaItem.mediaMetadata.albumTitle?.toString().orEmpty()
+                    album = mediaItem.mediaMetadata.albumTitle?.toString().orEmpty(),
+                    duration = if (durMs > 0L) (durMs / 1_000L).toString() else "",
                 )
+                val isAuxiliaryTarget = withContext(Dispatchers.Main.immediate) {
+                    player === playerB
+                }
                 val ytUrl = com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.getSongPlayerUrl(
                     context = context,
                     song = song,
                     allowLocal = true,
                     allowLossless = shouldStepDown,
+                    isNextInQueue = isAuxiliaryTarget,
                 )
                 if (ytUrl.isBlank()) {
                     Timber.tag("DualPlayerEngine").e("failoverLosslessToYoutube: fallback URL resolution returned blank for %s", videoId)
@@ -1595,14 +1682,20 @@ class DualPlayerEngine @Inject constructor(
                     Uri.fromFile(java.io.File(ytUrl))
                 }
                 val isStillLossless = LosslessStreamResolver.isLosslessUri(ytUrl)
+                if (fallbackUri.scheme != "file" && fallbackUri.scheme != "content") {
+                    resolvedUriCache.put("youtube://$videoId", fallbackUri)
+                }
                 val containerMime = LosslessStreamResolver.resultFor(videoId)?.containerMimeType
                     ?: com.unshoo.pixelmusic.data.addons.AddonStreamRegistry.metaFor(ytUrl)
                         ?.let { com.unshoo.pixelmusic.data.addons.AddonStreamRegistry.containerMimeOf(it.transport) }
                 val replacement = mediaItem.buildUpon()
                     .setUri(fallbackUri)
+                    .setMimeType(containerMime)
+                    .setCustomCacheKey(if (!isStillLossless) streamCacheKey(videoId, ytUrl) else null)
                     .apply {
-                        if (!isStillLossless) setCustomCacheKey(streamCacheKey(videoId, ytUrl))
-                        if (containerMime != null) setMimeType(containerMime)
+                        if (AppleMusicDrm.infoFor(videoId) == null && AppleMusicDrm.infoFor(mediaItem.mediaId) == null) {
+                            setDrmConfiguration(null)
+                        }
                     }
                     .build()
 
@@ -2230,20 +2323,76 @@ class DualPlayerEngine @Inject constructor(
         }
     }
 
+    private fun attachAuxiliaryErrorListener(aux: ExoPlayer) {
+        auxiliaryErrorListener?.let { runCatching { aux.removeListener(it) } }
+        val listener = object : Player.Listener {
+            override fun onPlayerError(error: PlaybackException) {
+                if (aux !== playerB || transitionRunning || isReleased) return
+                val failedItem = aux.currentMediaItem ?: return
+                val failedUri = failedItem.localConfiguration?.uri?.toString()
+                val http = findHttpResponseException(error)
+                val failedStreamUrl = http?.dataSpec?.uri?.toString()
+                    ?: failedUri?.let { peekResolvedPlaybackUri(it) }
+                    ?: failedUri
+                val stepDownOverride = if (http != null && http.responseCode in REFUSED_STREAM_CODES) {
+                    recordRefusedStreamFailure(http.dataSpec.uri.toString(), http.responseCode, youtubeIdOf(failedItem))
+                } else {
+                    null
+                }
+                if (LosslessStreamResolver.isLosslessUri(failedUri) || youtubeIdOf(failedItem) != null) {
+                    Timber.tag("TransitionDebug").w(
+                        error,
+                        "Auxiliary preload error for %s; stepping down fallback",
+                        failedItem.mediaId,
+                    )
+                    failoverLosslessToYoutube(
+                        mediaItem = failedItem,
+                        targetPlayer = aux,
+                        reason = error.message ?: "Auxiliary preload error (${error.errorCodeName})",
+                        failingUri = failedStreamUrl,
+                        stepDownOverride = stepDownOverride,
+                    )
+                }
+            }
+        }
+        auxiliaryErrorListener = listener
+        aux.addListener(listener)
+    }
+
     private fun getOrCreateAuxiliaryPlayer(): ExoPlayer {
         playerB?.let { existing ->
             val unusable = (existing.playbackState == Player.STATE_IDLE && existing.playerError != null) ||
                 !existing.applicationLooper.thread.isAlive
-            if (!unusable) return existing
+            if (!unusable) {
+                attachAuxiliaryErrorListener(existing)
+                return existing
+            }
+            auxiliaryErrorListener?.let { runCatching { existing.removeListener(it) } }
             try { existing.release() } catch (_: Exception) {}
             playerB = null
         }
-        return buildPlayer().also { playerB = it }
+        return buildPlayer().also { aux ->
+            attachAuxiliaryErrorListener(aux)
+            playerB = aux
+        }
     }
 
     fun setPauseAtEndOfMediaItems(shouldPause: Boolean) {
         if (::playerA.isInitialized) {
             playerA.pauseAtEndOfMediaItems = shouldPause
+        }
+    }
+
+    internal fun resumeOrAdvanceIfPausedAtEnd(player: Player) {
+        if (!::playerA.isInitialized || player !== playerA) return
+        val dur = player.duration
+        val nearEnd = dur != C.TIME_UNSET && dur > 0L && player.currentPosition >= dur - 1_000L
+        val stalledAtEnd = player.playbackState == Player.STATE_ENDED ||
+            (!player.isPlaying && !player.playWhenReady && nearEnd)
+        if (stalledAtEnd && player.hasNextMediaItem()) {
+            player.seekToNext()
+            player.prepare()
+            player.play()
         }
     }
 
@@ -2256,7 +2405,22 @@ class DualPlayerEngine @Inject constructor(
 
         val targetIndex = when (repeatMode) {
             Player.REPEAT_MODE_ONE -> currentAbsoluteIndex
-            else -> currentAbsoluteIndex + 1
+            else -> {
+                val playerNext = if (::playerA.isInitialized &&
+                    playerA.currentMediaItem?.mediaId == currentMediaItem.mediaId
+                ) {
+                    val idx = playerA.nextMediaItemIndex
+                    if (idx != C.INDEX_UNSET) {
+                        val abs = if (activePlayerUsesWindowedQueue) activeWindowStartIndex + idx else idx
+                        abs.takeIf { it in snapshot.indices }
+                    } else null
+                } else null
+                playerNext ?: when {
+                    currentAbsoluteIndex + 1 in snapshot.indices -> currentAbsoluteIndex + 1
+                    repeatMode == Player.REPEAT_MODE_ALL && snapshot.isNotEmpty() -> 0
+                    else -> -1
+                }
+            }
         }
 
         val targetItem = snapshot.getOrNull(targetIndex) ?: return null
@@ -2388,8 +2552,17 @@ class DualPlayerEngine @Inject constructor(
         }
 
         if (isHttp) {
-            if (isResolvedUriFresh(originalUriStr, currentUri)) {
+            val activeError = withContext(Dispatchers.Main.immediate) {
+                if (::playerA.isInitialized) playerA.playerError else null
+            }
+            if (activeError == null && isResolvedUriFresh(originalUriStr, currentUri)) {
                 return // Fast path: already fresh
+            }
+            if (activeError != null) {
+                val http = findHttpResponseException(activeError)
+                if (http != null && http.responseCode in REFUSED_STREAM_CODES) {
+                    recordRefusedStreamFailure(http.dataSpec.uri.toString(), http.responseCode, youtubeIdOf(currentItem))
+                }
             }
             Timber.tag("DualPlayerEngine").i("Stream URL stale on resume for %s, re-resolving...", originalUriStr)
             invalidateResolvedUri(originalUriStr)
@@ -2444,7 +2617,23 @@ class DualPlayerEngine @Inject constructor(
         rebuildPlayersPreservingMasterState("Hi-Fi mode set to $enabled")
     }
 
-    suspend fun resolveCloudUri(uri: Uri): Uri = withContext(Dispatchers.IO) {
+    internal fun cachePreloadedStreamUri(youtubeUriString: String, resolved: Uri) {
+        val existing = resolvedUriCache.get(youtubeUriString)
+        if (existing != null &&
+            isResolvedUriFresh(youtubeUriString, existing) &&
+            LosslessStreamResolver.isLosslessUri(existing.toString()) &&
+            !LosslessStreamResolver.isLosslessUri(resolved.toString())
+        ) {
+            return
+        }
+        resolvedUriCache.put(youtubeUriString, resolved)
+    }
+
+    suspend fun resolveCloudUri(
+        uri: Uri,
+        isNextInQueue: Boolean = false,
+        lockForActivePlayback: Boolean = true,
+    ): Uri = withContext(Dispatchers.IO) {
         val uriString = uri.toString()
 
         // Downloaded since the stream URL was cached? Play the file, drop the stale stream.
@@ -2466,17 +2655,28 @@ class DualPlayerEngine @Inject constructor(
         }
         
         resolvedUriCache.get(uriString)?.let { cachedUri ->
-            if (isResolvedUriFresh(uriString, cachedUri)) {
-                activePlaybackResolvedUris[uriString] = cachedUri
+            val youtubeId = if (uri.scheme == "youtube") uriString.removePrefix("youtube://") else null
+            val needsUpgrade = isNextInQueue && youtubeId != null &&
+                com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.shouldUpgradeCachedStream(
+                    context = context,
+                    videoId = youtubeId,
+                    cachedUrl = cachedUri.toString(),
+                    isNextInQueue = true,
+                )
+            if (isResolvedUriFresh(uriString, cachedUri) && !needsUpgrade) {
+                if (lockForActivePlayback) activePlaybackResolvedUris[uriString] = cachedUri
                 return@withContext cachedUri
             }
-            resolvedUriCache.remove(uriString)
+            if (!needsUpgrade) {
+                resolvedUriCache.remove(uriString)
+            }
         }
 
-        val deferred = activeResolutions.computeIfAbsent(uriString) {
+        val resolutionKey = if (isNextInQueue) "$uriString|next" else uriString
+        val deferred = activeResolutions.computeIfAbsent(resolutionKey) {
             scope.async(Dispatchers.IO, start = kotlinx.coroutines.CoroutineStart.LAZY) {
-                // Leave time for the YouTube resolver's own timeout and fallback.
-                val timeoutMs = LOSSLESS_RESOLVE_EXTRA_MS + if (connectivityStateHolder.isMeteredNetwork.value) {
+                val losslessExtraMs = if (isNextInQueue && uri.scheme == "youtube") 9_500L else LOSSLESS_RESOLVE_EXTRA_MS
+                val timeoutMs = losslessExtraMs + if (connectivityStateHolder.isMeteredNetwork.value) {
                     STREAM_RESOLVE_TIMEOUT_LOW_CONNECTIVITY_MS + 4_000L
                 } else {
                     STREAM_RESOLVE_TIMEOUT_MS + 4_000L
@@ -2485,7 +2685,7 @@ class DualPlayerEngine @Inject constructor(
                     when (uri.scheme) {
                         "telegram" -> resolveTelegramUriAsync(uri, uriString)
                         "gdrive" -> resolveGDriveUriAsync(uriString)
-                        "youtube" -> resolveYoutubeUriAsync(uriString)
+                        "youtube" -> resolveYoutubeUriAsync(uriString, isNextInQueue = isNextInQueue)
                         "monochrome" -> {
                             val trackId = uriString.substringAfter("monochrome://")
                             Uri.parse("https://tracks.monochrome.st/track/$trackId")
@@ -2496,20 +2696,21 @@ class DualPlayerEngine @Inject constructor(
                 if (resolved != null) {
                     if (resolved.scheme != "file" && resolved.scheme != "content") {
                         resolvedUriCache.put(uriString, resolved)
-                        activePlaybackResolvedUris[uriString] = resolved
+                        if (lockForActivePlayback) activePlaybackResolvedUris[uriString] = resolved
                     }
                     resolved
                 } else {
                     Timber.tag("DualPlayerEngine").w(
-                        "resolveCloudUri timed out/null for %s (metered=%s)",
+                        "resolveCloudUri timed out/null for %s (metered=%s, next=%s)",
                         uriString,
-                        connectivityStateHolder.isMeteredNetwork.value
+                        connectivityStateHolder.isMeteredNetwork.value,
+                        isNextInQueue,
                     )
                     uri
                 }
             }
         }
-        deferred.invokeOnCompletion { activeResolutions.remove(uriString, deferred) }
+        deferred.invokeOnCompletion { activeResolutions.remove(resolutionKey, deferred) }
 
         try {
             deferred.await()
@@ -2522,6 +2723,7 @@ class DualPlayerEngine @Inject constructor(
 
     private fun isResolvedUriFresh(originalUriString: String, resolvedUri: Uri): Boolean {
         val resolved = resolvedUri.toString()
+        if (isDeadStreamUrl(resolved)) return false
         // Lossless-source URIs carry their own freshness window (Tidal/Qobuz/Deezer links expire,
         // flattened Apple files can be evicted); the resolver tracks it, never the googlevideo
         // `expire=` heuristic below.
@@ -2611,13 +2813,22 @@ class DualPlayerEngine @Inject constructor(
     private suspend fun preResolveNeighborYoutube(uri: Uri) = withContext(Dispatchers.IO) {
         val uriString = uri.toString()
         if (resolveLocalDiskFile(uriString) != null) return@withContext
+        val youtubeId = uriString.removePrefix("youtube://")
         activePlaybackResolvedUris[uriString]?.let { if (isResolvedUriFresh(uriString, it)) return@withContext }
-        resolvedUriCache.get(uriString)?.let { if (isResolvedUriFresh(uriString, it)) return@withContext }
+        resolvedUriCache.get(uriString)?.let { cached ->
+            val needsUpgrade = com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.shouldUpgradeCachedStream(
+                context = context,
+                videoId = youtubeId,
+                cachedUrl = cached.toString(),
+                isNextInQueue = true,
+            )
+            if (isResolvedUriFresh(uriString, cached) && !needsUpgrade) return@withContext
+        }
         val outerTimeoutMs = if (connectivityStateHolder.isMeteredNetwork.value) 22_000L else 18_000L
         val resolved = withTimeoutOrNull(outerTimeoutMs) {
-            resolveYoutubeUriAsync(uriString, isNextInQueue = true)
+            resolveCloudUri(uri, isNextInQueue = true, lockForActivePlayback = false)
         }
-        if (resolved != null && resolved.scheme != "file" && resolved.scheme != "content") {
+        if (resolved != null && resolved != uri && resolved.scheme != "file" && resolved.scheme != "content") {
             resolvedUriCache.put(uriString, resolved)
         }
     }
@@ -2634,19 +2845,25 @@ class DualPlayerEngine @Inject constructor(
             val matchingItem = queueSnapshot.firstOrNull {
                 it.mediaId == youtubeId ||
                     it.mediaId == "youtube_$youtubeId" ||
-                    it.requestMetadata.mediaUri?.toString() == uriString
+                    it.requestMetadata.mediaUri?.toString() == uriString ||
+                    it.localConfiguration?.uri?.toString() == uriString
             } ?: withContext(Dispatchers.Main.immediate) {
                 fun matches(item: androidx.media3.common.MediaItem?): Boolean =
                     item != null && (
                         item.mediaId == youtubeId ||
                             item.mediaId == "youtube_$youtubeId" ||
-                            item.requestMetadata.mediaUri?.toString() == uriString
+                            item.requestMetadata.mediaUri?.toString() == uriString ||
+                            item.localConfiguration?.uri?.toString() == uriString
                     )
                 val itemA = if (::playerA.isInitialized) playerA.currentMediaItem else null
                 val itemB = playerB?.currentMediaItem
                 when {
                     matches(itemA) -> itemA
                     matches(itemB) -> itemB
+                    ::playerA.isInitialized -> (0 until playerA.mediaItemCount)
+                        .asSequence()
+                        .map { playerA.getMediaItemAt(it) }
+                        .firstOrNull(::matches)
                     else -> null
                 }
             }
@@ -2759,7 +2976,7 @@ class DualPlayerEngine @Inject constructor(
         }
     }
 
-    suspend fun resolveMediaItem(mediaItem: MediaItem): MediaItem {
+    suspend fun resolveMediaItem(mediaItem: MediaItem, isNextInQueue: Boolean = false): MediaItem {
         val uri = mediaItem.localConfiguration?.uri ?: return mediaItem
         val scheme = uri.scheme
         if (scheme !in REMOTE_MEDIA_SCHEMES) return mediaItem
@@ -2778,7 +2995,7 @@ class DualPlayerEngine @Inject constructor(
                 }
             }
         }
-        val resolvedUri = resolveCloudUri(uri)
+        val resolvedUri = resolveCloudUri(uri, isNextInQueue = isNextInQueue, lockForActivePlayback = !isNextInQueue)
         if (resolvedUri == uri) return mediaItem
         if (resolvedUri.scheme == "file" || resolvedUri.scheme == "content") {
             return mediaItem.buildUpon().setUri(resolvedUri).setMimeType(null).setCustomCacheKey(null).build()
@@ -2875,7 +3092,7 @@ class DualPlayerEngine @Inject constructor(
                     snapshot[preferredAbsoluteIndex].mediaId == mediaItem.mediaId -> preferredAbsoluteIndex
                 else -> findMediaItemIndex(snapshot, mediaItem.mediaId, currentAbsoluteIndex)
             }
-            val resolvedItem = resolveMediaItem(mediaItem)
+            val resolvedItem = resolveMediaItem(mediaItem, isNextInQueue = true)
             currentCoroutineContext().ensureActive()
             if (transitionRunning || isReleased) return
 
@@ -3140,6 +3357,8 @@ class DualPlayerEngine @Inject constructor(
 
         outgoingPlayer.removeListener(masterPlayerListener)
         outgoingPlayer.removeAnalyticsListener(masterPlayerListener)
+        auxiliaryErrorListener?.let { runCatching { incomingPlayer.removeListener(it) } }
+        auxiliaryErrorListener = null
 
         playerA = incomingPlayer
         playerB = outgoingPlayer
@@ -3162,6 +3381,7 @@ class DualPlayerEngine @Inject constructor(
         playerB?.stop()
         playerB?.clearMediaItems()
         playerB?.volume = 0f
+        playerB?.let { attachAuxiliaryErrorListener(it) }
 
         setPauseAtEndOfMediaItems(false)
     }

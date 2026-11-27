@@ -112,6 +112,13 @@ class TransitionController @Inject constructor(
                 engine.cancelNext()
                 engine.masterPlayer.currentMediaItem?.let { scheduleTransitionFor(it) }
             }
+
+            override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+                Timber.tag("TransitionDebug").d("Shuffle mode changed to %b. Rescheduling transition.", shuffleModeEnabled)
+                transitionSchedulerJob?.cancel()
+                engine.cancelNext()
+                engine.masterPlayer.currentMediaItem?.let { scheduleTransitionFor(it) }
+            }
         }
 
         // Initial setup
@@ -254,6 +261,7 @@ class TransitionController @Inject constructor(
                             Timber.tag("TransitionDebug").w("Too close to end (%d ms left). Skipping to avoid glitch.", remaining)
                             engine.cancelNext()
                             engine.setPauseAtEndOfMediaItems(shouldPause = false)
+                            engine.resumeOrAdvanceIfPausedAtEnd(player)
                         }
                         return@collectLatest
                     }
@@ -285,10 +293,12 @@ class TransitionController @Inject constructor(
                             Timber.tag("TransitionDebug").w("Too close to end (%d ms left). Skipping to avoid glitch.", remaining)
                             engine.cancelNext()
                             engine.setPauseAtEndOfMediaItems(shouldPause = false)
+                            engine.resumeOrAdvanceIfPausedAtEnd(player)
                         }
                     } else {
                         Timber.tag("TransitionDebug").d("Job cancelled before firing.")
                         engine.setPauseAtEndOfMediaItems(shouldPause = false)
+                        engine.resumeOrAdvanceIfPausedAtEnd(player)
                     }
                 }
         }

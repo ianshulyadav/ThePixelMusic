@@ -1,7 +1,7 @@
 package com.unshoo.pixelmusic.data.remote.youtube
 
 import android.content.Context
-import android.util.LruCache
+import androidx.collection.LruCache
 import androidx.core.net.toUri
 import com.unshoo.pixelmusic.data.database.youtube.AppDatabase
 import com.unshoo.pixelmusic.data.model.youtube.PlaylistInfo
@@ -19,9 +19,12 @@ import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.Serializable
@@ -663,7 +666,13 @@ object YoutubeHelper {
         val preferLowFirst: Boolean,
         /** True when background queue preloads may attempt lossless (HIGH, or AUTO on Wi-Fi / force-high mobile). */
         val allowLosslessPreload: Boolean,
+        /** The user's configured quality before AUTO network adaptation. */
+        val configuredQuality: StreamingAudioQuality = quality,
+        /** Whether connectivity was online when this plan was computed. */
+        val isOnline: Boolean = true,
     )
+
+    private val playerUrlMutexes = ConcurrentHashMap<String, Mutex>()
 
     private suspend fun resolveStreamQualityPlan(context: Context): StreamQualityPlan {
         return try {
@@ -684,6 +693,8 @@ object YoutubeHelper {
                     maxBitrateKbps = StreamingAudioQuality.LOW.maxBitrateKbps,
                     preferLowFirst = true,
                     allowLosslessPreload = false,
+                    configuredQuality = StreamingAudioQuality.LOW,
+                    isOnline = false,
                 )
             }
 
@@ -712,18 +723,24 @@ object YoutubeHelper {
                             maxBitrateKbps = StreamingAudioQuality.LOW.maxBitrateKbps,
                             preferLowFirst = true,
                             allowLosslessPreload = wifiOrForcedHigh,
+                            configuredQuality = targetQuality,
+                            isOnline = true,
                         )
                         StreamingAudioQuality.MEDIUM -> StreamQualityPlan(
                             quality = StreamingAudioQuality.MEDIUM,
                             maxBitrateKbps = 0,
                             preferLowFirst = false,
                             allowLosslessPreload = wifiOrForcedHigh,
+                            configuredQuality = targetQuality,
+                            isOnline = true,
                         )
                         else -> StreamQualityPlan(
                             quality = StreamingAudioQuality.HIGH,
                             maxBitrateKbps = 0,
                             preferLowFirst = false,
                             allowLosslessPreload = wifiOrForcedHigh,
+                            configuredQuality = targetQuality,
+                            isOnline = true,
                         )
                     }
                 }
@@ -732,18 +749,24 @@ object YoutubeHelper {
                     maxBitrateKbps = 0, // no ceiling → highest available
                     preferLowFirst = false,
                     allowLosslessPreload = true,
+                    configuredQuality = targetQuality,
+                    isOnline = true,
                 )
                 StreamingAudioQuality.MEDIUM -> StreamQualityPlan(
                     quality = StreamingAudioQuality.MEDIUM,
                     maxBitrateKbps = 0, // YouTube high (or JioSaavn 320k HQ)
                     preferLowFirst = false,
                     allowLosslessPreload = false,
+                    configuredQuality = targetQuality,
+                    isOnline = true,
                 )
                 StreamingAudioQuality.LOW -> StreamQualityPlan(
                     quality = StreamingAudioQuality.LOW,
                     maxBitrateKbps = StreamingAudioQuality.LOW.maxBitrateKbps,
                     preferLowFirst = true,
                     allowLosslessPreload = false,
+                    configuredQuality = targetQuality,
+                    isOnline = true,
                 )
             }
         } catch (_: Exception) {
@@ -752,6 +775,8 @@ object YoutubeHelper {
                 maxBitrateKbps = 0,
                 preferLowFirst = false,
                 allowLosslessPreload = true,
+                configuredQuality = StreamingAudioQuality.HIGH,
+                isOnline = true,
             )
         }
     }
@@ -807,6 +832,105 @@ object YoutubeHelper {
         val savedSong = getSavedSong(context, videoId)
         resolveOfflineFirst(context, song, savedSong)?.let { return it }
 
+        if (videoId.isBlank()) {
+            return resolveSongPlayerUrlLocked(
+                context = context,
+                song = song,
+                savedSong = savedSong,
+                allowLossless = allowLossless,
+                isNextInQueue = isNextInQueue,
+            )
+        }
+
+        val mutex = playerUrlMutexes.getOrPut(videoId) { Mutex() }
+        return try {
+            mutex.withLock {
+                resolveSongPlayerUrlLocked(
+                    context = context,
+                    song = song,
+                    savedSong = savedSong,
+                    allowLossless = allowLossless,
+                    isNextInQueue = isNextInQueue,
+                )
+            }
+        } finally {
+            if (!mutex.isLocked) {
+                playerUrlMutexes.remove(videoId, mutex)
+            }
+        }
+    }
+
+    /**
+     * Returns true if a cached URI for [videoId] (e.g. from lookahead or fast inline play)
+     * should be re-evaluated so Lossless / JioSaavn can upgrade it for [isNextInQueue].
+     */
+    suspend fun shouldUpgradeCachedStream(
+        context: Context,
+        videoId: String,
+        cachedUrl: String?,
+        isNextInQueue: Boolean,
+        allowLossless: Boolean = true,
+    ): Boolean {
+        if (videoId.isBlank() || cachedUrl.isNullOrBlank()) return false
+        val isCachedLossless = LosslessStreamResolver.isLosslessUri(cachedUrl)
+        val isCachedSaavn = isSaavnUrl(cachedUrl)
+
+        val userPreferencesRepository = EntryPointAccessors.fromApplication(
+            context.applicationContext,
+            YoutubeHelperEntryPoint::class.java
+        ).userPreferencesRepository()
+        val isSaavnEnabled = userPreferencesRepository.enableSaavnStreamingFlow.first()
+        if (!isSaavnEnabled && isCachedSaavn) return true
+
+        val plan = resolveStreamQualityPlan(context)
+        val losslessEnabled = LosslessStreamResolver.isEnabled(context)
+        if (!losslessEnabled && isCachedLossless) return true
+
+        val unifiedSongOverride = if (losslessEnabled) runCatching {
+            LosslessStreamResolver.getUnifiedSongSourceOverride(context, videoId)
+        }.getOrNull() else null
+        val unifiedOrder = runCatching {
+            com.unshoo.pixelmusic.data.addons.AddonManager.readUnifiedOrder(context)
+        }.getOrDefault(emptyList())
+
+        val fallbackPlan = StreamFallbackPlanner.computePlan(
+            StreamFallbackPlanner.FallbackInput(
+                allowLossless = allowLossless,
+                losslessEnabled = losslessEnabled,
+                saavnEnabled = isSaavnEnabled,
+                isNextInQueue = isNextInQueue,
+                effectiveQuality = plan.quality,
+                userConfiguredQuality = plan.configuredQuality,
+                preferLowFirst = plan.preferLowFirst,
+                allowLosslessPreload = plan.allowLosslessPreload,
+                isOnline = plan.isOnline,
+                unifiedSongOverride = unifiedSongOverride,
+                unifiedOrder = unifiedOrder,
+                losslessFailedForTrack = LosslessStreamResolver.isFailedForTrack(videoId),
+                losslessCheckedUnavailable = StreamFallbackPlanner.isLosslessUnavailable(videoId),
+            )
+        )
+        val targetCacheKey = if (plan.maxBitrateKbps > 0) "${videoId}_q${plan.maxBitrateKbps}" else "${videoId}_high"
+        val cachedTier = StreamFallbackPlanner.tierForCacheKey(targetCacheKey)
+            ?: StreamFallbackPlanner.tierForCacheKey("${videoId}_high")
+            ?: StreamFallbackPlanner.tierForCacheKey("${videoId}_low")
+
+        return StreamFallbackPlanner.needsCacheUpgrade(
+            cachedTier = cachedTier,
+            isCachedLossless = isCachedLossless,
+            isCachedSaavn = isCachedSaavn,
+            plan = fallbackPlan,
+        )
+    }
+
+    private suspend fun resolveSongPlayerUrlLocked(
+        context: Context,
+        song: Song,
+        savedSong: Song?,
+        allowLossless: Boolean,
+        isNextInQueue: Boolean,
+    ): String {
+        val videoId = song.youtubeId
         val plan = resolveStreamQualityPlan(context)
         val maxBitrate = plan.maxBitrateKbps
         val preferLowFirst = plan.preferLowFirst
@@ -822,73 +946,89 @@ object YoutubeHelper {
 
         // If Saavn is disabled, proactively evict any stale Saavn URLs so playback never touches Saavn
         if (!isSaavnEnabled) {
-            streamUrlLruCache.get(targetCacheKey)?.let {
-                if (isSaavnUrl(it)) {
-                    streamUrlLruCache.remove(targetCacheKey)
-                    streamMimeTypeLruCache.remove(targetCacheKey)
-                    streamBitrateLruCache.remove(targetCacheKey)
-                }
-            }
-            streamUrlLruCache.get("${videoId}_high")?.let {
-                if (isSaavnUrl(it)) {
-                    streamUrlLruCache.remove("${videoId}_high")
-                    streamMimeTypeLruCache.remove("${videoId}_high")
-                    streamBitrateLruCache.remove("${videoId}_high")
-                }
-            }
-            streamUrlLruCache.get("${videoId}_low")?.let {
-                if (isSaavnUrl(it)) {
-                    streamUrlLruCache.remove("${videoId}_low")
-                    streamMimeTypeLruCache.remove("${videoId}_low")
-                    streamBitrateLruCache.remove("${videoId}_low")
+            listOf(targetCacheKey, "${videoId}_high", "${videoId}_low").distinct().forEach { key ->
+                streamUrlLruCache.get(key)?.let {
+                    if (isSaavnUrl(it)) {
+                        streamUrlLruCache.remove(key)
+                        streamMimeTypeLruCache.remove(key)
+                        streamBitrateLruCache.remove(key)
+                        StreamFallbackPlanner.invalidateTrack(videoId)
+                    }
                 }
             }
         }
 
-        val losslessEnabled = allowLossless && LosslessStreamResolver.isEnabled(context)
-        // ── Cache hit at the quality the user actually wants ───────────────────
-        streamUrlLruCache.get(targetCacheKey)?.let {
-            if ((losslessEnabled || !LosslessStreamResolver.isLosslessUri(it)) &&
-                isUrlAllowed(it, isSaavnEnabled) && isYoutubeUrlValid(it)) {
-                PixelMusicHelper.printd(
-                    "$videoId : INSTANT start from cache ($targetCacheKey, quality=${plan.quality})"
-                )
-                return it
-            }
-        }
-        // HIGH: also accept a valid _high entry under any alias.
-        if (maxBitrate == 0) {
-            streamUrlLruCache.get("${videoId}_high")?.let {
-                if ((losslessEnabled || !LosslessStreamResolver.isLosslessUri(it)) &&
-                    isUrlAllowed(it, isSaavnEnabled) && isYoutubeUrlValid(it)) {
-                    PixelMusicHelper.printd("$videoId : INSTANT start from cached HIGH stream")
-                    return it
-                }
-            }
-        }
-
-        // ── UNIFIED ADDONS & LOSSLESS SOURCES GATE ──
-        val isAutoQuality = plan.quality == StreamingAudioQuality.AUTO
-        val fastPlaybackForAuto = plan.preferLowFirst
-
-        // Unified addons & lossless sources gate
-        val unifiedSongOverride = if (losslessEnabled) runCatching {
+        val losslessMasterEnabled = LosslessStreamResolver.isEnabled(context)
+        val unifiedSongOverride = if (losslessMasterEnabled) runCatching {
             LosslessStreamResolver.getUnifiedSongSourceOverride(context, videoId)
         }.getOrNull() else null
         val unifiedOrder = runCatching {
             com.unshoo.pixelmusic.data.addons.AddonManager.readUnifiedOrder(context)
         }.getOrDefault(emptyList())
-        val youtubeBeforeSaavn = run {
-            val ytIdx = unifiedOrder.indexOf("builtin:YOUTUBE")
-            val saavnIdx = unifiedOrder.indexOf("builtin:JIOSAAVN")
-            ytIdx >= 0 && saavnIdx >= 0 && ytIdx < saavnIdx
+
+        val fallbackPlan = StreamFallbackPlanner.computePlan(
+            StreamFallbackPlanner.FallbackInput(
+                allowLossless = allowLossless,
+                losslessEnabled = losslessMasterEnabled,
+                saavnEnabled = isSaavnEnabled,
+                isNextInQueue = isNextInQueue,
+                effectiveQuality = plan.quality,
+                userConfiguredQuality = plan.configuredQuality,
+                preferLowFirst = preferLowFirst,
+                allowLosslessPreload = plan.allowLosslessPreload,
+                isOnline = plan.isOnline,
+                unifiedSongOverride = unifiedSongOverride,
+                unifiedOrder = unifiedOrder,
+                losslessFailedForTrack = LosslessStreamResolver.isFailedForTrack(videoId),
+                losslessCheckedUnavailable = StreamFallbackPlanner.isLosslessUnavailable(videoId),
+            )
+        )
+
+        var preResolvedFallbackUrl: String? = null
+        var preResolvedFallbackTier: StreamFallbackPlanner.ResolutionTier? = null
+        val losslessCacheAllowed = allowLossless && losslessMasterEnabled
+
+        suspend fun findValidCachedEntry(key: String): Pair<String, StreamFallbackPlanner.ResolutionTier?>? {
+            val cached = streamUrlLruCache.get(key) ?: return null
+            if (!((losslessCacheAllowed || !LosslessStreamResolver.isLosslessUri(cached)) &&
+                    isUrlAllowed(cached, isSaavnEnabled) && isYoutubeUrlValid(cached))) {
+                return null
+            }
+            return cached to StreamFallbackPlanner.tierForCacheKey(key)
         }
 
-        val canTryLossless = losslessEnabled && (
-            unifiedSongOverride != null ||
-                if (isNextInQueue) plan.allowLosslessPreload else !fastPlaybackForAuto
+        val cachedMatch = findValidCachedEntry(targetCacheKey)
+            ?: if (maxBitrate == 0 || isNextInQueue) findValidCachedEntry("${videoId}_high") else null
+
+        if (cachedMatch != null) {
+            val (cachedUrl, cachedTier) = cachedMatch
+            val needsUpgrade = StreamFallbackPlanner.needsCacheUpgrade(
+                cachedTier = cachedTier,
+                isCachedLossless = LosslessStreamResolver.isLosslessUri(cachedUrl),
+                isCachedSaavn = isSaavnUrl(cachedUrl),
+                plan = fallbackPlan,
             )
-        if (canTryLossless && (!LosslessStreamResolver.isFailedForTrack(videoId) || unifiedSongOverride != null)) {
+            if (!needsUpgrade) {
+                PixelMusicHelper.printd(
+                    "$videoId : INSTANT start from cache ($targetCacheKey, quality=${plan.quality}, tier=$cachedTier)"
+                )
+                return cachedUrl
+            }
+            preResolvedFallbackUrl = cachedUrl
+            preResolvedFallbackTier = cachedTier
+        }
+
+        val hasOverride = unifiedSongOverride != null
+        val baseFallbackTier = when {
+            hasOverride -> StreamFallbackPlanner.ResolutionTier.OVERRIDE_PINNED
+            fallbackPlan.tryLossless -> StreamFallbackPlanner.ResolutionTier.LOSSLESS_CHECKED
+            fallbackPlan.trySaavn || (!preferLowFirst && plan.quality != StreamingAudioQuality.LOW) ->
+                StreamFallbackPlanner.ResolutionTier.FALLBACK_ONLY_NO_LOSSLESS
+            else -> StreamFallbackPlanner.ResolutionTier.YOUTUBE_FAST_ONLY
+        }
+
+        var losslessProbed = false
+        if (fallbackPlan.tryLossless) {
             val budgetMs = if (isNextInQueue || unifiedSongOverride != null) {
                 LOSSLESS_PRELOAD_BUDGET_MS
             } else {
@@ -899,7 +1039,7 @@ object YoutubeHelper {
             } else {
                 LOSSLESS_HEDGE_HEAD_START_MS
             }
-            val hedged: String? = kotlinx.coroutines.coroutineScope {
+            val hedged: String? = coroutineScope {
                 val lossless = async {
                     resolveLosslessStreamUrl(
                         context = context,
@@ -907,16 +1047,43 @@ object YoutubeHelper {
                         savedSong = savedSong,
                         cacheKeys = listOf(targetCacheKey, "${videoId}_high"),
                         lowDataMode = false,
+                        onUnavailable = {
+                            StreamFallbackPlanner.markLosslessUnavailable(videoId)
+                        },
                     )
                 }
                 val headStart = withTimeoutOrNull(headStartMs) { lossless.await() }
                 when {
-                    !headStart.isNullOrBlank() -> headStart
-                    lossless.isCompleted -> null // lossless answered "not available": continue inline
+                    !headStart.isNullOrBlank() -> {
+                        StreamFallbackPlanner.recordCacheTier(
+                            listOf(targetCacheKey, "${videoId}_high"),
+                            if (hasOverride) {
+                                StreamFallbackPlanner.ResolutionTier.OVERRIDE_PINNED
+                            } else {
+                                StreamFallbackPlanner.ResolutionTier.LOSSLESS_CHECKED
+                            },
+                        )
+                        headStart
+                    }
+                    lossless.isCompleted -> {
+                        losslessProbed = true
+                        null // lossless answered "not available": continue inline to JioSaavn -> YouTube
+                    }
                     else -> {
                         val fallback = async {
                             runCatching {
-                                getSongPlayerUrl(context, song, allowLocal, allowLossless = false, isNextInQueue = isNextInQueue)
+                                resolveNonLosslessPlayerUrl(
+                                    context = context,
+                                    song = song,
+                                    savedSong = savedSong,
+                                    plan = plan,
+                                    fallbackPlan = fallbackPlan,
+                                    targetCacheKey = targetCacheKey,
+                                    saavnQuality = saavnQuality,
+                                    tierWhenLosslessUnavailable = baseFallbackTier,
+                                    preResolvedFallbackUrl = preResolvedFallbackUrl,
+                                    preResolvedFallbackTier = preResolvedFallbackTier,
+                                )
                             }
                         }
                         val late = withTimeoutOrNull((budgetMs - headStartMs).coerceAtLeast(0L)) {
@@ -924,8 +1091,17 @@ object YoutubeHelper {
                         }
                         if (!late.isNullOrBlank()) {
                             fallback.cancel()
+                            StreamFallbackPlanner.recordCacheTier(
+                                listOf(targetCacheKey, "${videoId}_high"),
+                                if (hasOverride) {
+                                    StreamFallbackPlanner.ResolutionTier.OVERRIDE_PINNED
+                                } else {
+                                    StreamFallbackPlanner.ResolutionTier.LOSSLESS_CHECKED
+                                },
+                            )
                             late
                         } else {
+                            losslessProbed = lossless.isCompleted
                             lossless.cancel()
                             fallback.await().getOrNull()?.takeIf { it.isNotBlank() }
                         }
@@ -935,10 +1111,53 @@ object YoutubeHelper {
             if (!hedged.isNullOrBlank()) return hedged
         }
 
-        // JioSaavn gate: only try if explicitly forced or not in AUTO mode
-        val forceYoutubeOnly = unifiedSongOverride == "builtin:YOUTUBE" || (unifiedSongOverride == null && youtubeBeforeSaavn)
-        val forceSaavn = unifiedSongOverride == "builtin:JIOSAAVN"
-        if (!forceYoutubeOnly && !fastPlaybackForAuto && (forceSaavn || (isSaavnEnabled && plan.quality != StreamingAudioQuality.LOW))) {
+        val effectiveTier = if (losslessProbed || !fallbackPlan.tryLossless) {
+            baseFallbackTier
+        } else {
+            StreamFallbackPlanner.ResolutionTier.FALLBACK_ONLY_NO_LOSSLESS
+        }
+
+        return resolveNonLosslessPlayerUrl(
+            context = context,
+            song = song,
+            savedSong = savedSong,
+            plan = plan,
+            fallbackPlan = fallbackPlan,
+            targetCacheKey = targetCacheKey,
+            saavnQuality = saavnQuality,
+            tierWhenLosslessUnavailable = effectiveTier,
+            preResolvedFallbackUrl = preResolvedFallbackUrl,
+            preResolvedFallbackTier = preResolvedFallbackTier,
+        )
+    }
+
+    private suspend fun resolveNonLosslessPlayerUrl(
+        context: Context,
+        song: Song,
+        savedSong: Song?,
+        plan: StreamQualityPlan,
+        fallbackPlan: StreamFallbackPlanner.FallbackPlan,
+        targetCacheKey: String,
+        saavnQuality: SaavnAudioQuality,
+        tierWhenLosslessUnavailable: StreamFallbackPlanner.ResolutionTier,
+        preResolvedFallbackUrl: String? = null,
+        preResolvedFallbackTier: StreamFallbackPlanner.ResolutionTier? = null,
+    ): String {
+        val videoId = song.youtubeId
+        val maxBitrate = plan.maxBitrateKbps
+        val preferLowFirst = plan.preferLowFirst
+
+        // Reuse already-warmed JioSaavn URL without extra API calls when appropriate
+        if (!preResolvedFallbackUrl.isNullOrBlank() && isSaavnUrl(preResolvedFallbackUrl) && fallbackPlan.trySaavn) {
+            StreamFallbackPlanner.recordCacheTier(
+                listOf(targetCacheKey, "${videoId}_high"),
+                tierWhenLosslessUnavailable,
+            )
+            return preResolvedFallbackUrl
+        }
+
+        // JioSaavn gate: Lossless -> JioSaavn (if enabled) -> YouTube Music
+        if (fallbackPlan.trySaavn) {
             try {
                 var effectiveTitle = song.title.ifBlank { savedSong?.title.orEmpty() }
                 var effectiveArtist = song.artist.ifBlank { savedSong?.artist.orEmpty() }
@@ -985,6 +1204,10 @@ object YoutubeHelper {
                         streamUrlLruCache.put("${videoId}_high", saavnUrl)
                         streamMimeTypeLruCache.put("${videoId}_high", mimeType)
                         streamBitrateLruCache.put("${videoId}_high", saavnBitrate)
+                        StreamFallbackPlanner.recordCacheTier(
+                            listOf(targetCacheKey, "${videoId}_high"),
+                            tierWhenLosslessUnavailable,
+                        )
 
                         PixelMusicHelper.printd(
                             "$videoId : Playing via JioSaavn HQ stream (${saavnResult.quality}, bitrate=${saavnBitrate})"
@@ -999,6 +1222,20 @@ object YoutubeHelper {
             } catch (saavnEx: Exception) {
                 PixelMusicHelper.printe("$videoId : JioSaavn stream resolve exception: ${saavnEx.message}, falling back to YouTube")
             }
+        }
+
+        // Reuse warmed YouTube URL when only lossless/Saavn upgrade was needed and they returned null
+        if (!preResolvedFallbackUrl.isNullOrBlank() &&
+            !isSaavnUrl(preResolvedFallbackUrl) &&
+            !LosslessStreamResolver.isLosslessUri(preResolvedFallbackUrl) &&
+            (preResolvedFallbackTier != StreamFallbackPlanner.ResolutionTier.YOUTUBE_FAST_ONLY ||
+                plan.quality == StreamingAudioQuality.LOW)
+        ) {
+            StreamFallbackPlanner.recordCacheTier(
+                listOf(targetCacheKey, "${videoId}_high"),
+                tierWhenLosslessUnavailable,
+            )
+            return preResolvedFallbackUrl
         }
 
         // ── Resolve at the selected quality FIRST (no forced low on HIGH) ──────
@@ -1020,8 +1257,6 @@ object YoutubeHelper {
                 "$videoId : ${plan.quality} stream resolve failed (${primary.message}); " +
                     "retrying with fallback quality"
             )
-            // Fallback: if HIGH fails (weak link), try LOW so playback still starts.
-            // If LOW fails, try unrestricted once more.
             try {
                 if (!useLowQuality) {
                     getSongUrlFromYoutube(
@@ -1053,15 +1288,19 @@ object YoutubeHelper {
         mimeType?.let { streamMimeTypeLruCache.put(targetCacheKey, it) }
         bitrate?.let { streamBitrateLruCache.put(targetCacheKey, it) }
 
+        val recordedKeys = mutableListOf(targetCacheKey)
         if (useLowQuality) {
             streamUrlLruCache.put("${videoId}_low", newUri)
             mimeType?.let { streamMimeTypeLruCache.put("${videoId}_low", it) }
             bitrate?.let { streamBitrateLruCache.put("${videoId}_low", it) }
+            recordedKeys += "${videoId}_low"
         } else if (maxBitrate == 0 || maxBitrate >= StreamingAudioQuality.HIGH.maxBitrateKbps) {
             streamUrlLruCache.put("${videoId}_high", newUri)
             mimeType?.let { streamMimeTypeLruCache.put("${videoId}_high", it) }
             bitrate?.let { streamBitrateLruCache.put("${videoId}_high", it) }
+            recordedKeys += "${videoId}_high"
         }
+        StreamFallbackPlanner.recordCacheTier(recordedKeys, tierWhenLosslessUnavailable)
 
         // Trigger background warming for the actual desired target quality if we had to start on LOW first
         if (plan.quality == StreamingAudioQuality.AUTO && preferLowFirst && targetCacheKey == "${videoId}_low") {
@@ -1070,7 +1309,7 @@ object YoutubeHelper {
 
         PixelMusicHelper.printd(
             "$videoId : INSTANT ${plan.quality} stream ready " +
-                "(ceiling=${maxBitrate}kbps lowFirst=$preferLowFirst targetCacheKey=$targetCacheKey bitrate=$bitrate)"
+                "(ceiling=${maxBitrate}kbps lowFirst=$preferLowFirst targetCacheKey=$targetCacheKey bitrate=$bitrate tier=$tierWhenLosslessUnavailable)"
         )
         return newUri
     }
@@ -1249,6 +1488,7 @@ object YoutubeHelper {
         lowDataMode: Boolean,
         fastTimeoutMs: Long? = null,
         forDownload: Boolean = false,
+        onUnavailable: (() -> Unit)? = null,
     ): String? {
         val videoId = song.youtubeId
         return try {
@@ -1303,8 +1543,9 @@ object YoutubeHelper {
                 .ifEmpty { listOf(effectiveArtist).filter { it.isNotBlank() } }
 
             val defaultTimeout = if (forDownload) 18_000L else 10_000L
+            var timedOut = true
             val result = withTimeoutOrNull(fastTimeoutMs ?: defaultTimeout) {
-                LosslessStreamResolver.resolve(
+                val resolved = LosslessStreamResolver.resolve(
                     context = context,
                     request = LosslessStreamResolver.Request(
                         mediaId = videoId,
@@ -1316,7 +1557,15 @@ object YoutubeHelper {
                     lowDataMode = lowDataMode,
                     forDownload = forDownload,
                 )
-            } ?: return null
+                timedOut = false
+                resolved
+            }
+            if (result == null) {
+                if (!timedOut && unifiedOverride == null) {
+                    onUnavailable?.invoke()
+                }
+                return null
+            }
 
             // Safety net: a lossless catalog can hand back a slowed / sped-up / extended upload
             // under the original title. Its real length gives it away, so for direct FLAC
@@ -1412,6 +1661,7 @@ object YoutubeHelper {
         streamMimeTypeLruCache.evictAll()
         streamBitrateLruCache.evictAll()
         resolvedCandidateUrlCache.clear()
+        StreamFallbackPlanner.invalidateAll()
         com.unshoo.pixelmusic.data.service.player.StreamChoice.clear()
     }
 
@@ -1678,6 +1928,7 @@ object YoutubeHelper {
         }
         val candidatePrefix = "$youtubeId|"
         resolvedCandidateUrlCache.entries.removeIf { it.key.startsWith(candidatePrefix) }
+        StreamFallbackPlanner.invalidateTrack(youtubeId)
         localFilePathCache.remove(youtubeId)
         playbackTrackingCache.remove(youtubeId)
         watchtimeTrackingCache.remove(youtubeId)
@@ -1848,7 +2099,7 @@ object YoutubeHelper {
      *  2. Fallback: the original NewPipe extractor (watch-page scrape), RETRY_COUNT attempts
      *     with linear back-off.
      */
-    private suspend fun getSongUrlFromYoutube(
+    internal suspend fun getSongUrlFromYoutube(
         context: Context,
         song: Song,
         retries: Int = Constants.YoutubeApi.RETRY_COUNT,

@@ -163,7 +163,7 @@ object QueuePreloadManager {
                     if (!streamUrl.isNullOrBlank() && (streamUrl.startsWith("http") ||
                             com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver.isLosslessUri(streamUrl))) {
                         val ytUri = "youtube://$videoId"
-                        engineRef?.resolvedUriCache?.put(ytUri, android.net.Uri.parse(streamUrl))
+                        engineRef?.cachePreloadedStreamUri(ytUri, android.net.Uri.parse(streamUrl))
                         if (streamUrl.startsWith("http") &&
                             !com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver.isLosslessUri(streamUrl) &&
                             !streamUrl.contains("monochrome.st/track/") &&
@@ -179,8 +179,13 @@ object QueuePreloadManager {
                             if (engine != null && playerRef === player &&
                                 player.nextMediaItemIndex == i &&
                                 engine.getPreparedNextMediaId() != mediaItem.mediaId) {
-                                engine.getNextTransitionTarget(player.currentMediaItem ?: mediaItem, player.repeatMode)
-                                    ?.let { engine.prepareNext(it) }
+                                engine.prepareNext(
+                                    DualPlayerEngine.TransitionTarget(
+                                        mediaItem = mediaItem,
+                                        absoluteIndex = i,
+                                        queueSize = totalCount,
+                                    )
+                                )
                             }
                         }
                     }
