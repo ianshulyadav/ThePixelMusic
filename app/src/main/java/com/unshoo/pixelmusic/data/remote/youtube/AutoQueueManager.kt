@@ -7,8 +7,7 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
-import com.unshoo.pixelmusic.data.remote.youtube.queue.EmptyQueue
-import com.unshoo.pixelmusic.data.remote.youtube.queue.Queue
+import com.unshoo.pixelmusic.data.remote.youtube.queue.AutoplayRadio
 import com.unshoo.pixelmusic.data.remote.youtube.queue.ResilientRadioQueue
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -19,12 +18,14 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import timber.log.Timber
 import kotlin.math.absoluteValue
 import com.unshoo.pixelmusic.utils.YouTubeIdUtils
 
+import unshoo.ianshulyadav.pixelmusic.innertube.YouTube
 import unshoo.ianshulyadav.pixelmusic.innertube.models.WatchEndpoint
 import com.unshoo.pixelmusic.data.model.Song
 import com.unshoo.pixelmusic.data.database.MusicDao
@@ -35,17 +36,39 @@ import com.unshoo.pixelmusic.utils.MediaItemBuilder
 
 object AutoQueueManager {
     private const val TAG = "AutoQueueMgr"
-    private const val REFILL_THRESHOLD = 5
-    private const val TARGET_UPCOMING_COUNT = 25
-    private const val MAX_REFILL_BATCH_ATTEMPTS = 5
+    /** Auto-queue keeps at least this many songs ahead of the playing one (it asks for more below it). */
+    private const val AUTOPLAY_AHEAD = 10
+    /** Songs auto-queue hands the player at a time. */
+    private const val AUTOPLAY_BATCH = 20
+    /** Answers that add nothing before auto-queue stops asking for one song. */
+    private const val AUTOPLAY_RETRIES = 3
+    private const val AUTOPLAY_RETRY_DELAY_MS = 1_500L
     private const val STARTUP_SAFETY_CHECK_DELAY_MS = 2_500L
     private const val SETTINGS_READ_TIMEOUT_MS = 2_000L
 
-    @Volatile private var currentQueue: Queue = EmptyQueue
-    private val sessionQueuedIds = LinkedHashSet<String>()
+    /** A radio song: its video id and the item the player gets. */
+    private data class Candidate(val videoId: String, val item: MediaItem)
+
+    /** A radio the user started (its songs already fill the queue): auto-queue carries it on. */
+    private data class Resume(val endpoint: WatchEndpoint, val continuation: String?, val videoId: String)
+
+    /** The running radio (as in PixelMusicDesktop); only touched while [refillMutex] is held. */
+    private val radio = AutoplayRadio<Candidate>(
+        pages = AutoplayRadio.RadioPages { endpoint, continuation -> fetchRadioPage(endpoint, continuation) },
+        idOf = { it.videoId },
+    )
+    private var localQueue: ResilientRadioQueue? = null
+    private var radioGeneration = -1L
+
+    /** Bumped by [reset]/[seed]: a refill started before drops its answer and the radio starts over. */
+    @Volatile private var generation = 0L
+    @Volatile private var pendingResume: Resume? = null
+    /** The song auto-queue was last asked for (once per song). */
+    @Volatile private var askedFor: String? = null
+    /** The song asked for and how many of its answers added nothing (each is asked again, up to AUTOPLAY_RETRIES). */
+    @Volatile private var emptyFor: Pair<String, Int>? = null
 
     private val refillMutex = Mutex()
-    @Volatile private var refillRequestedAgain = false
 
     private val internalScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var scope: CoroutineScope? = null
@@ -220,12 +243,10 @@ object AutoQueueManager {
 
     fun reset() {
         Timber.tag(TAG).d("reset() called")
-        currentQueue = EmptyQueue
-        if (sessionQueuedIds.size > 100) {
-            val keep = sessionQueuedIds.toList().takeLast(30)
-            sessionQueuedIds.clear()
-            sessionQueuedIds.addAll(keep)
-        }
+        pendingResume = null
+        askedFor = null
+        emptyFor = null
+        generation++
     }
 
     fun disableAndTrimQueue() {
@@ -255,43 +276,30 @@ object AutoQueueManager {
         lastReseedRequestAtMs = now
         Timber.tag(TAG).d("resetAndReseedFromCurrentSong()")
         reset()
-        getActiveScope().launch(Dispatchers.IO) {
-            try {
-                if (!isAutoQueueEnabled()) {
-                    Timber.tag(TAG).d("AutoQueue disabled, skipping reseed")
-                    return@launch
-                }
-                val currentId = withContext(Dispatchers.Main) { livePlayer()?.currentMediaItem?.mediaId } ?: return@launch
-                seedFromMediaId(currentId)
-                checkAndRefill(forceImmediate = true)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Timber.tag(TAG).e(e, "resetAndReseedFromCurrentSong failed")
-            }
-        }
+        checkAndRefill()
     }
 
+    /**
+     * A radio the user started: its first songs are in the queue and [continuation] is the page after them.
+     * Auto-queue carries that radio on instead of starting a new one from the playing song.
+     */
     fun seed(endpoint: WatchEndpoint, continuation: String?, videoId: String) {
-        val dao = musicDaoRef ?: return
-        currentQueue = ResilientRadioQueue.resumed(
-            endpoint = endpoint,
-            continuation = continuation,
-            musicDao = dao,
-            isOnline = ::hasInternet,
-        )
         Timber.tag(TAG).d("seed() videoId=%s hasContinuation=%b", videoId, continuation != null)
-        getActiveScope().launch(Dispatchers.IO) { ensureLocalSeed(videoId) }
+        pendingResume = Resume(endpoint, continuation, videoId)
+        askedFor = null
+        emptyFor = null
+        generation++
     }
 
+    /**
+     * Ask again for the playing song (after a new queue was built). [forceRefresh] drops the running radio so
+     * the playing song's own radio follows.
+     */
     fun scheduleAdaptiveRefill(delayMs: Long? = null, forceRefresh: Boolean = false) {
         getActiveScope().launch(Dispatchers.IO) {
             if (delayMs != null && delayMs > 0L) delay(delayMs)
-            if (forceRefresh) {
-                val currentId = withContext(Dispatchers.Main) { livePlayer()?.currentMediaItem?.mediaId }
-                if (currentId != null) seedFromMediaId(currentId)
-            }
-            doRefill()
+            if (forceRefresh) reset() else askedFor = null
+            checkAndRefill()
         }
     }
 
@@ -366,20 +374,24 @@ object AutoQueueManager {
         }
     }
 
+    /**
+     * The queue is about to run out: ask once per song for the radio that keeps it going (PixelMusicDesktop's
+     * autoplay) — while fewer than [AUTOPLAY_AHEAD] songs are left after the playing one and repeat is off.
+     */
     private fun checkAndRefill(forceImmediate: Boolean = false) {
         getActiveScope().launch(Dispatchers.IO) {
             try {
                 if (!isAutoQueueEnabled()) return@launch
-
-                val (remaining, isPlaying) = withContext(Dispatchers.Main) {
-                    val p = livePlayer() ?: return@withContext Pair(-1, false)
-                    Pair(computeRemainingUpcoming(p), p.isPlaying || p.playWhenReady)
-                }
-                if (remaining < 0 || !isPlaying) return@launch
-
-                if (forceImmediate || remaining <= REFILL_THRESHOLD) {
-                    doRefill()
-                }
+                val seedMediaId = withContext(Dispatchers.Main) {
+                    val p = livePlayer() ?: return@withContext null
+                    val current = p.currentMediaItem?.mediaId ?: return@withContext null
+                    if (p.repeatMode != Player.REPEAT_MODE_OFF) return@withContext null
+                    if (computeRemainingUpcoming(p) >= AUTOPLAY_AHEAD) return@withContext null
+                    if (!forceImmediate && askedFor == current) return@withContext null
+                    askedFor = current
+                    current
+                } ?: return@launch
+                refillMutex.withLock { refillLocked(seedMediaId) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -388,246 +400,163 @@ object AutoQueueManager {
         }
     }
 
-    private suspend fun doRefill() {
-        if (!refillMutex.tryLock()) {
-            refillRequestedAgain = true
+    private suspend fun refillLocked(seedMediaId: String) {
+        val gen = generation
+        if (radioGeneration != gen) {
+            radio.clear()
+            localQueue = null
+            radioGeneration = gen
+        }
+        val snap = withContext(Dispatchers.Main) { livePlayer()?.let(::snapshotOf) } ?: return
+        // another song plays by now (it asks for itself), or the queue filled meanwhile
+        if (snap.currentMediaId != seedMediaId || snap.remaining >= AUTOPLAY_AHEAD) return
+
+        pendingResume?.let { resume ->
+            pendingResume = null
+            radio.resume(resume.endpoint, resume.continuation, snap.queueVideoIds.toList() + resume.videoId)
+        }
+
+        val filters = loadFilters()
+        val videoId = resolveVideoId(seedMediaId)
+        val items: List<MediaItem> = if (videoId != null) {
+            radio.nextBatch(videoId, AUTOPLAY_BATCH) { passes(it.item, snap, filters) }.map { it.item }
+        } else {
+            // an on-device song with no YouTube id: songs related to it from the library
+            localFallback(seedMediaId).filter { passes(it, snap, filters) }
+        }
+        if (gen != generation) {
+            Timber.tag(TAG).d("refill for %s dropped: the queue changed meanwhile", seedMediaId)
+            // the new queue (or seeded radio) asks for itself once this refill lets go of the lock
+            checkAndRefill()
             return
         }
-        try {
-            do {
-                refillRequestedAgain = false
-                doRefillLocked()
-            } while (refillRequestedAgain)
-        } finally {
-            refillMutex.unlock()
-        }
-    }
 
-    private suspend fun doRefillLocked() {
-        if (livePlayer() == null) return
-        if (!isAutoQueueEnabled()) return
-
-        var (remaining, isPlaying) = withContext(Dispatchers.Main) {
-            val p = livePlayer() ?: return@withContext Pair(-1, false)
-            Pair(computeRemainingUpcoming(p), p.isPlaying || p.playWhenReady)
-        }
-        if (remaining < 0 || !isPlaying || remaining > REFILL_THRESHOLD) return
-
-        if (currentQueue === EmptyQueue) {
-            val currentId = withContext(Dispatchers.Main) { livePlayer()?.currentMediaItem?.mediaId }
-            if (currentId != null) seedFromMediaId(currentId)
-        }
-
-        var batchAttempts = 0
-        var totalAdded = 0
-        var consecutiveEmptyFetches = 0
-        val batchedItems = mutableListOf<MediaItem>()
-        var firstBatchAdded = false
-
-        while (remaining < TARGET_UPCOMING_COUNT && batchAttempts < MAX_REFILL_BATCH_ATTEMPTS) {
-            batchAttempts++
-            val activeQueue = currentQueue
-            if (activeQueue === EmptyQueue) {
-                val seedMediaId = withContext(Dispatchers.Main) {
-                    val p = livePlayer() ?: return@withContext null
-                    p.currentMediaItem?.mediaId
-                        ?: if (p.mediaItemCount > 0) p.getMediaItemAt(p.mediaItemCount - 1).mediaId else null
-                }
-                if (seedMediaId != null) {
-                    seedFromMediaId(seedMediaId)
-                } else {
-                    break
-                }
-            }
-
-            val (existingIds, existingVideoIds, currentTrackSignature, currentVideoId, existingSignatures) = withContext(Dispatchers.Main) {
-                val p = livePlayer() ?: return@withContext QueueFilterSnapshot(emptySet(), emptySet(), null, null, emptySet())
-                val ids = HashSet<String>(p.mediaItemCount * 2)
-                val vIds = HashSet<String>(p.mediaItemCount * 2)
-                val sigs = HashSet<String>(p.mediaItemCount)
-                for (i in 0 until p.mediaItemCount) {
-                    val mi = p.getMediaItemAt(i)
-                    ids.add(mi.mediaId)
-                    ids.add(mi.mediaId.removePrefix("youtube_"))
-                    val extracted = YouTubeIdUtils.extractVideoId(mi.mediaId)
-                    if (extracted.isNotBlank()) vIds.add(extracted)
-                    val uriId = mi.localConfiguration?.uri?.toString()?.let(YouTubeIdUtils::extractVideoId).orEmpty()
-                    if (uriId.isNotBlank()) vIds.add(uriId)
-                    val t = mi.mediaMetadata.title?.toString()?.trim()?.lowercase().orEmpty()
-                    val a = mi.mediaMetadata.artist?.toString()?.trim()?.lowercase().orEmpty()
-                    if (t.isNotBlank() && a.isNotBlank()) {
-                        sigs.add("$t|$a")
-                    }
-                }
-                val cur = p.currentMediaItem
-                val curTitle = cur?.mediaMetadata?.title?.toString()?.trim()?.lowercase()
-                val curArtist = cur?.mediaMetadata?.artist?.toString()?.trim()?.lowercase()
-                val sig = if (!curTitle.isNullOrBlank() && !curArtist.isNullOrBlank()) "$curTitle|$curArtist" else null
-                val curVid = cur?.let {
-                    val idFromMedia = YouTubeIdUtils.extractVideoId(it.mediaId)
-                    val idFromUri = it.localConfiguration?.uri?.toString()?.let(YouTubeIdUtils::extractVideoId).orEmpty()
-                    if (idFromMedia.length == 11) idFromMedia else if (idFromUri.length == 11) idFromUri else null
-                }
-                QueueFilterSnapshot(ids, vIds, sig, curVid, sigs)
-            }
-
-            val fetched = try {
-                currentQueue.nextPage()
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Timber.tag(TAG).e(e, "nextPage() failed on batch %d", batchAttempts)
-                emptyList()
-            }
-
-            val filterCoverLofi = runCatching { userPreferencesRepository?.filterCoverAndLofiFlow?.first() }.getOrNull() ?: true
-            val filterKeywords = runCatching { userPreferencesRepository?.filterKeywordsFlow?.first() }.getOrNull() ?: ContentFilterUtils.DEFAULT_FILTER_KEYWORDS
-            val pureYtMusic = runCatching { userPreferencesRepository?.pureYtMusicOnlyFlow?.first() }.getOrNull() ?: true
-            val dislikedYtIds = runCatching { musicDaoRef?.getDislikedYoutubeIds()?.toSet() }.getOrNull() ?: emptySet()
-            val dislikedSongIds = runCatching { musicDaoRef?.getDislikedSongIds()?.map { it.toString() }?.toSet() }.getOrNull() ?: emptySet()
-            val notInterestedIds = runCatching { userPreferencesRepository?.notInterestedSongIdsFlow?.first() }.getOrNull() ?: emptySet()
-
-            // Fetch recently played and over-rotated songs to prevent repetitive tracks in auto-queue
-            val recentPlayedSongIds = HashSet<String>()
-            val highlyRotatedSongIds = HashSet<String>()
-            runCatching {
-                val recentEngagements = engagementDaoRef?.getRecentlyPlayedSongs(40).orEmpty()
-                recentEngagements.forEach {
-                    recentPlayedSongIds.add(it.songId)
-                    recentPlayedSongIds.add(it.songId.removePrefix("youtube_"))
-                    val ext = YouTubeIdUtils.extractVideoId(it.songId)
-                    if (ext.isNotBlank()) recentPlayedSongIds.add(ext)
-                }
-                val topEngagements = engagementDaoRef?.getTopPlayedSongs(25).orEmpty()
-                topEngagements.filter { it.playCount >= 6 }.forEach {
-                    highlyRotatedSongIds.add(it.songId)
-                    highlyRotatedSongIds.add(it.songId.removePrefix("youtube_"))
-                    val ext = YouTubeIdUtils.extractVideoId(it.songId)
-                    if (ext.isNotBlank()) highlyRotatedSongIds.add(ext)
-                }
-            }
-
-            val newItems = fetched.filterNot { item ->
-                val ytId = YouTubeIdUtils.extractVideoId(item.mediaId)
-                val itemTitle = item.mediaMetadata.title?.toString()?.trim()?.lowercase()
-                val itemArtist = item.mediaMetadata.artist?.toString()?.trim()?.lowercase()
-                val itemSig = if (!itemTitle.isNullOrBlank() && !itemArtist.isNullOrBlank()) "$itemTitle|$itemArtist" else null
-
-                item.mediaId in existingIds ||
-                item.mediaId.removePrefix("youtube_") in existingIds ||
-                (ytId.isNotBlank() && (ytId in existingVideoIds || ytId == currentVideoId)) ||
-                (itemSig != null && (itemSig == currentTrackSignature || itemSig in existingSignatures)) ||
-                item.mediaId in dislikedSongIds ||
-                (ytId.isNotBlank() && ytId in dislikedYtIds) ||
-                item.mediaId in notInterestedIds ||
-                (ytId.isNotBlank() && ytId in notInterestedIds) ||
-                (ytId.isNotBlank() && ytId in sessionQueuedIds) ||
-                (ytId.isNotBlank() && ytId in recentPlayedSongIds) ||
-                (ytId.isNotBlank() && ytId in highlyRotatedSongIds) ||
-                item.mediaId in sessionQueuedIds ||
-                item.mediaId in recentPlayedSongIds ||
-                item.mediaId in highlyRotatedSongIds
-            }.let { items ->
-                var filtered = items
-                if (filterCoverLofi) {
-                    filtered = filtered.filterNot { item ->
-                        val title = item.mediaMetadata.title?.toString().orEmpty()
-                        val artist = item.mediaMetadata.artist?.toString().orEmpty()
-                        val album = item.mediaMetadata.albumTitle?.toString().orEmpty()
-                        ContentFilterUtils.isCoverOrLofi(title, artist, album, filterKeywords = filterKeywords)
-                    }
-                }
-                if (pureYtMusic) {
-                    filtered = filtered.filterNot { item ->
-                        val title = item.mediaMetadata.title?.toString().orEmpty()
-                        ContentFilterUtils.isVideoTitle(title)
-                    }
-                }
-                filtered
-            }
-
-            if (newItems.isNotEmpty()) {
-                consecutiveEmptyFetches = 0
-                for (item in newItems) {
-                    val yt = YouTubeIdUtils.extractVideoId(item.mediaId)
-                    if (yt.isNotBlank()) sessionQueuedIds.add(yt)
-                    sessionQueuedIds.add(item.mediaId)
-                }
-                if (!firstBatchAdded && remaining <= 1) {
-                    withContext(Dispatchers.Main) {
-                        livePlayer()?.addMediaItems(newItems)
-                        onQueueItemsAddedCallback?.invoke()
-                    }
-                    firstBatchAdded = true
-                } else {
-                    batchedItems.addAll(newItems)
-                }
-                totalAdded += newItems.size
-                remaining += newItems.size
-                Timber.tag(TAG).d("Batch %d: buffered %d items -> remaining target is now %d", batchAttempts, newItems.size, remaining)
-            } else {
-                consecutiveEmptyFetches++
-                Timber.tag(TAG).w("Batch %d yielded no new items (fetched=%d, existing=%d). Consecutive empty=%d",
-                    batchAttempts, fetched.size, existingIds.size, consecutiveEmptyFetches)
-
-                if (consecutiveEmptyFetches >= 2) {
-                    // Try reseeding from current playing track or the last track in the player queue
-                    val reseedId = withContext(Dispatchers.Main) {
-                        val p = livePlayer() ?: return@withContext null
-                        p.currentMediaItem?.mediaId
-                            ?: if (p.mediaItemCount > 0) p.getMediaItemAt(p.mediaItemCount - 1).mediaId else null
-                    }
-                    if (reseedId != null) {
-                        Timber.tag(TAG).d("Reseeding AutoQueue from song: %s", reseedId)
-                        seedFromMediaId(reseedId)
-                    } else {
-                        break
-                    }
-                }
-                if (consecutiveEmptyFetches >= 4) {
-                    break
-                }
-            }
-        }
-
-        if (batchedItems.isNotEmpty()) {
+        if (items.isNotEmpty()) {
+            emptyFor = null
             withContext(Dispatchers.Main) {
-                livePlayer()?.addMediaItems(batchedItems)
+                if (gen != generation) return@withContext
+                livePlayer()?.addMediaItems(items)
                 onQueueItemsAddedCallback?.invoke()
             }
-            Timber.tag(TAG).d("Committed %d batched items to livePlayer in a single call", batchedItems.size)
-        }
-
-        if (totalAdded > 0) {
-            val finalRemaining = withContext(Dispatchers.Main) {
-                val p = livePlayer() ?: return@withContext -1
-                computeRemainingUpcoming(p)
-            }
-            Timber.tag(TAG).d("doRefillLocked finished: total added %d items, upcoming remaining is now %d", totalAdded, finalRemaining)
-        }
-    }
-
-    private suspend fun seedFromMediaId(mediaId: String) {
-        val dao = musicDaoRef ?: return
-        val videoId = resolveVideoId(mediaId)
-        if (videoId == null) {
-            currentQueue = ResilientRadioQueue.radio(videoId = null, musicDao = dao, isOnline = ::hasInternet)
-            ensureLocalSeed(mediaId)
+            Timber.tag(TAG).d("auto-queue after %s: %d songs", seedMediaId, items.size)
             return
         }
-        currentQueue = ResilientRadioQueue.radio(videoId = videoId, musicDao = dao, isOnline = ::hasInternet)
-        ensureLocalSeed(videoId)
+
+        // nothing new (all already listed, filtered, or an empty page) while that song still plays: ask again
+        val tries = emptyFor?.takeIf { it.first == seedMediaId }?.second ?: 0
+        Timber.tag(TAG).w("auto-queue after %s added nothing (try %d)", seedMediaId, tries + 1)
+        if (tries < AUTOPLAY_RETRIES) {
+            emptyFor = seedMediaId to tries + 1
+            if (askedFor == seedMediaId) askedFor = null
+            getActiveScope().launch(Dispatchers.IO) {
+                delay(AUTOPLAY_RETRY_DELAY_MS)
+                checkAndRefill()
+            }
+        }
     }
 
-    private suspend fun ensureLocalSeed(idOrMediaId: String) {
-        val dao = musicDaoRef ?: return
-        val queue = currentQueue
-        if (queue !is ResilientRadioQueue) return
+    /** One page of a song's YouTube Music radio. */
+    private suspend fun fetchRadioPage(endpoint: WatchEndpoint, continuation: String?): AutoplayRadio.Page<Candidate> =
+        withContext(Dispatchers.IO) {
+            var result = YouTube.next(endpoint, continuation).getOrThrow()
+            // a song radio holding only the song itself: that song's plain watch queue instead
+            val videoId = endpoint.videoId
+            if (continuation == null && result.items.size <= 1 && videoId != null &&
+                endpoint.playlistId?.startsWith("RDAMVM") == true
+            ) {
+                YouTube.next(WatchEndpoint(videoId = videoId), null).getOrNull()
+                    ?.takeIf { it.items.size > 1 }
+                    ?.let { result = it }
+            }
+            AutoplayRadio.Page(
+                items = result.items.map { Candidate(it.id, MediaItemBuilder.build(it.toNativeSong())) },
+                continuation = result.continuation,
+                endpoint = result.endpoint,
+            )
+        }
+
+    private suspend fun localFallback(seedMediaId: String): List<MediaItem> {
+        val dao = musicDaoRef ?: return emptyList()
+        val queue = localQueue ?: ResilientRadioQueue.radio(videoId = null, musicDao = dao, isOnline = ::hasInternet).also {
+            localQueue = it
+        }
         val entity = withContext(Dispatchers.IO) {
-            val longId = idOrMediaId.toLongOrNull() ?: getDatabaseIdForYoutubeId(normalizeId(idOrMediaId))
+            val longId = seedMediaId.toLongOrNull() ?: getDatabaseIdForYoutubeId(normalizeId(seedMediaId))
             runCatching { dao.getSongByIdOnce(longId) }.getOrNull()
         }
         queue.updateLocalSeed(entity)
+        return runCatching { queue.nextPage() }.getOrElse {
+            if (it is CancellationException) throw it
+            emptyList()
+        }
+    }
+
+    private class Filters(
+        val coverLofi: Boolean,
+        val keywords: List<String>,
+        val pureYtMusic: Boolean,
+        val dislikedYtIds: Set<String>,
+        val dislikedSongIds: Set<String>,
+        val notInterestedIds: Set<String>,
+    )
+
+    private suspend fun loadFilters(): Filters {
+        val prefs = userPreferencesRepository
+        return Filters(
+            coverLofi = runCatching { prefs?.filterCoverAndLofiFlow?.first() }.getOrNull() ?: true,
+            keywords = runCatching { prefs?.filterKeywordsFlow?.first() }.getOrNull() ?: ContentFilterUtils.DEFAULT_FILTER_KEYWORDS,
+            pureYtMusic = runCatching { prefs?.pureYtMusicOnlyFlow?.first() }.getOrNull() ?: true,
+            dislikedYtIds = runCatching { musicDaoRef?.getDislikedYoutubeIds()?.toSet() }.getOrNull() ?: emptySet(),
+            dislikedSongIds = runCatching { musicDaoRef?.getDislikedSongIds()?.map { it.toString() }?.toSet() }.getOrNull() ?: emptySet(),
+            notInterestedIds = runCatching { prefs?.notInterestedSongIdsFlow?.first() }.getOrNull() ?: emptySet(),
+        )
+    }
+
+    /** Not already in the queue, not disliked / not interested, and allowed by the content filters. */
+    private fun passes(item: MediaItem, snap: QueueSnapshot, filters: Filters): Boolean {
+        val ytId = YouTubeIdUtils.extractVideoId(item.mediaId)
+        val title = item.mediaMetadata.title?.toString().orEmpty()
+        val artist = item.mediaMetadata.artist?.toString().orEmpty()
+        val sig = signature(title, artist)
+        val ids = listOf(item.mediaId, item.mediaId.removePrefix("youtube_"))
+        if (ids.any { it in snap.mediaIds || it in filters.dislikedSongIds || it in filters.notInterestedIds }) return false
+        if (ytId.isNotBlank() &&
+            (ytId in snap.queueVideoIds || ytId in filters.dislikedYtIds || ytId in filters.notInterestedIds)
+        ) return false
+        if (sig != null && sig in snap.signatures) return false
+        if (filters.coverLofi &&
+            ContentFilterUtils.isCoverOrLofi(title, artist, item.mediaMetadata.albumTitle?.toString().orEmpty(), filterKeywords = filters.keywords)
+        ) return false
+        if (filters.pureYtMusic && ContentFilterUtils.isVideoTitle(title)) return false
+        return true
+    }
+
+    private fun signature(title: String, artist: String): String? {
+        val t = title.trim().lowercase()
+        val a = artist.trim().lowercase()
+        return if (t.isNotBlank() && a.isNotBlank()) "$t|$a" else null
+    }
+
+    /** What the refill needs of the player, read on the main thread. */
+    private fun snapshotOf(p: Player): QueueSnapshot? {
+        val current = p.currentMediaItem?.mediaId ?: return null
+        val mediaIds = HashSet<String>(p.mediaItemCount * 2)
+        val videoIds = LinkedHashSet<String>(p.mediaItemCount)
+        val signatures = HashSet<String>(p.mediaItemCount)
+        for (i in 0 until p.mediaItemCount) {
+            val mi = p.getMediaItemAt(i)
+            mediaIds += mi.mediaId
+            mediaIds += mi.mediaId.removePrefix("youtube_")
+            val fromId = YouTubeIdUtils.extractVideoId(mi.mediaId)
+            val fromUri = mi.localConfiguration?.uri?.toString()?.let(YouTubeIdUtils::extractVideoId).orEmpty()
+            when {
+                fromId.length == 11 -> videoIds += fromId
+                fromUri.length == 11 -> videoIds += fromUri
+            }
+            signature(mi.mediaMetadata.title?.toString().orEmpty(), mi.mediaMetadata.artist?.toString().orEmpty())
+                ?.let { signatures += it }
+        }
+        return QueueSnapshot(current, computeRemainingUpcoming(p), mediaIds, videoIds, signatures)
     }
 
     private suspend fun resolveVideoId(mediaId: String): String? {
@@ -741,10 +670,11 @@ object AutoQueueManager {
     }
 }
 
-private data class QueueFilterSnapshot(
-    val existingIds: Set<String>,
-    val existingVideoIds: Set<String>,
-    val currentTrackSignature: String?,
-    val currentVideoId: String?,
-    val existingSignatures: Set<String>,
+private data class QueueSnapshot(
+    val currentMediaId: String,
+    val remaining: Int,
+    val mediaIds: Set<String>,
+    /** video ids of the queue, in queue order */
+    val queueVideoIds: Set<String>,
+    val signatures: Set<String>,
 )
