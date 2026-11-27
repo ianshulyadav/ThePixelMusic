@@ -514,6 +514,10 @@ private fun KineticTransport(
     height: Dp
 ) {
     val scheme = LocalMaterialTheme.current
+    val longPressSeekConfig = LocalLongPressSeekConfig.current
+    val latestOnHoldBackwardStart = androidx.compose.runtime.rememberUpdatedState(longPressSeekConfig.onHoldBackwardStart)
+    val latestOnHoldForwardStart = androidx.compose.runtime.rememberUpdatedState(longPressSeekConfig.onHoldForwardStart)
+    val latestOnHoldEnd = androidx.compose.runtime.rememberUpdatedState(longPressSeekConfig.onHoldEnd)
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -523,6 +527,9 @@ private fun KineticTransport(
     ) {
         KineticTransportButton(
             onClick = actions.onPrevious,
+            longPressEnabled = longPressSeekConfig.enabled,
+            onHoldStart = { latestOnHoldBackwardStart.value() },
+            onHoldEnd = { latestOnHoldEnd.value() },
             container = scheme.secondaryContainer,
             shape = RoundedCornerShape(percent = 50),
             modifier = Modifier.weight(0.8f)
@@ -559,6 +566,9 @@ private fun KineticTransport(
         }
         KineticTransportButton(
             onClick = actions.onNext,
+            longPressEnabled = longPressSeekConfig.enabled,
+            onHoldStart = { latestOnHoldForwardStart.value() },
+            onHoldEnd = { latestOnHoldEnd.value() },
             container = scheme.secondaryContainer,
             shape = RoundedCornerShape(percent = 50),
             modifier = Modifier.weight(0.8f)
@@ -579,22 +589,32 @@ private fun KineticTransportButton(
     container: Color,
     shape: androidx.compose.ui.graphics.Shape,
     modifier: Modifier = Modifier,
+    longPressEnabled: Boolean = false,
+    onHoldStart: () -> Unit = {},
+    onHoldEnd: () -> Unit = {},
     content: @Composable () -> Unit
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed) 0.92f else 1f, tween(120), label = "kineticPress")
     Surface(
-        onClick = onClick,
         shape = shape,
         color = container,
-        interactionSource = interaction,
         modifier = modifier
             .fillMaxHeight()
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
             }
+            .clip(shape)
+            .transportHoldToSeek(
+                interactionSource = interaction,
+                indication = androidx.compose.foundation.LocalIndication.current,
+                longPressEnabled = longPressEnabled,
+                onHoldStart = onHoldStart,
+                onHoldEnd = onHoldEnd,
+                onTap = onClick
+            )
     ) {
         Box(contentAlignment = Alignment.Center) { content() }
     }

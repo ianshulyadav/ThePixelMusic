@@ -87,6 +87,7 @@ import com.unshoo.pixelmusic.presentation.viewmodel.ProxyTestUiState
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.FastForward
 import androidx.compose.material.icons.outlined.LightMode
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Person
@@ -1238,6 +1239,75 @@ fun SettingsCategoryScreen(
                                     onCheckedChange = { settingsViewModel.setUseExistingCopies(it) },
                                     leadingIcon = { Icon(Icons.Rounded.MusicNote, null, tint = MaterialTheme.colorScheme.secondary) }
                                 )
+                            }
+                            SettingsSubsection(title = stringResource(R.string.setcat_playback_controls_section)) {
+                                SwitchSettingItem(
+                                    title = stringResource(R.string.setcat_long_press_seek_title),
+                                    subtitle = stringResource(R.string.setcat_long_press_seek_subtitle),
+                                    checked = uiState.longPressSeekEnabled,
+                                    onCheckedChange = { settingsViewModel.setLongPressSeekEnabled(it) },
+                                    leadingIcon = { Icon(Icons.Rounded.FastForward, null, tint = MaterialTheme.colorScheme.secondary) }
+                                )
+                                AnimatedVisibility(
+                                    visible = uiState.longPressSeekEnabled,
+                                    enter = expandVertically() + fadeIn(),
+                                    exit = shrinkVertically() + fadeOut()
+                                ) {
+                                    Column {
+                                        ThemeSelectorItem(
+                                            label = stringResource(R.string.setcat_long_press_seek_mode_label),
+                                            description = stringResource(R.string.setcat_long_press_seek_mode_desc),
+                                            options = mapOf(
+                                                com.unshoo.pixelmusic.data.preferences.LongPressSeekMode.SPEED_BASED.name to
+                                                    stringResource(R.string.setcat_long_press_seek_mode_speed),
+                                                com.unshoo.pixelmusic.data.preferences.LongPressSeekMode.TIME_BASED.name to
+                                                    stringResource(R.string.setcat_long_press_seek_mode_time)
+                                            ),
+                                            selectedKey = uiState.longPressSeekMode.name,
+                                            onSelectionChanged = { key ->
+                                                val mode = if (key == com.unshoo.pixelmusic.data.preferences.LongPressSeekMode.TIME_BASED.name) {
+                                                    com.unshoo.pixelmusic.data.preferences.LongPressSeekMode.TIME_BASED
+                                                } else {
+                                                    com.unshoo.pixelmusic.data.preferences.LongPressSeekMode.SPEED_BASED
+                                                }
+                                                settingsViewModel.setLongPressSeekMode(mode)
+                                            },
+                                            leadingIcon = { Icon(Icons.Outlined.Speed, null, tint = MaterialTheme.colorScheme.secondary) }
+                                        )
+                                        if (uiState.longPressSeekMode == com.unshoo.pixelmusic.data.preferences.LongPressSeekMode.SPEED_BASED) {
+                                            ThemeSelectorItem(
+                                                label = stringResource(R.string.setcat_long_press_seek_speed_label),
+                                                description = stringResource(R.string.setcat_long_press_seek_speed_desc),
+                                                options = mapOf(
+                                                    "1.5" to stringResource(R.string.setcat_long_press_seek_speed_1_5x),
+                                                    "2.0" to stringResource(R.string.setcat_long_press_seek_speed_2x),
+                                                    "3.0" to stringResource(R.string.setcat_long_press_seek_speed_3x),
+                                                    "4.0" to stringResource(R.string.setcat_long_press_seek_speed_4x)
+                                                ),
+                                                selectedKey = listOf("1.5", "2.0", "3.0", "4.0").firstOrNull {
+                                                    kotlin.math.abs(it.toFloat() - uiState.longPressSeekSpeed) < 0.05f
+                                                } ?: "2.0",
+                                                onSelectionChanged = { settingsViewModel.setLongPressSeekSpeed(it.toFloat()) },
+                                                leadingIcon = { Icon(Icons.Rounded.FastForward, null, tint = MaterialTheme.colorScheme.secondary) }
+                                            )
+                                        } else {
+                                            ThemeSelectorItem(
+                                                label = stringResource(R.string.setcat_long_press_seek_time_rate_label),
+                                                description = stringResource(R.string.setcat_long_press_seek_time_rate_desc),
+                                                options = mapOf(
+                                                    "5" to stringResource(R.string.setcat_long_press_seek_time_5s),
+                                                    "10" to stringResource(R.string.setcat_long_press_seek_time_10s),
+                                                    "15" to stringResource(R.string.setcat_long_press_seek_time_15s),
+                                                    "30" to stringResource(R.string.setcat_long_press_seek_time_30s)
+                                                ),
+                                                selectedKey = uiState.longPressSeekTimeRateSeconds.toString()
+                                                    .takeIf { it in listOf("5", "10", "15", "30") } ?: "10",
+                                                onSelectionChanged = { settingsViewModel.setLongPressSeekTimeRateSeconds(it.toInt()) },
+                                                leadingIcon = { Icon(Icons.Rounded.Timer, null, tint = MaterialTheme.colorScheme.secondary) }
+                                            )
+                                        }
+                                    }
+                                }
                             }
                             SettingsSubsection(title = stringResource(R.string.setcat_background_playback)) {
                                 ThemeSelectorItem(

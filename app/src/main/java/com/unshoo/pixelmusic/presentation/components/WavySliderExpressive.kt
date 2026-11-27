@@ -152,13 +152,16 @@ fun WavySliderExpressive(
     var glideStartNanos by remember { mutableLongStateOf(0L) }
     var glideDeadlineNanos by remember { mutableLongStateOf(0L) }
     var lastProgressUpdateNanos by remember { mutableLongStateOf(0L) }
+    val isLongPressSeeking =
+        com.unshoo.pixelmusic.presentation.components.player.LocalLongPressSeekConfig.current.isActivelySeeking
     LaunchedEffect(
         normalizedValue,
         transitionKey,
         isInteracting,
         enabled,
         performanceModeEnabled,
-        seekerAnimationConfig
+        seekerAnimationConfig,
+        isLongPressSeeking
     ) {
         val target = normalizedValue.coerceIn(0f, 1f)
         val keyChanged = transitionKey != lastObservedTransitionKey
@@ -175,6 +178,7 @@ fun WavySliderExpressive(
             targetProgress = target,
             seekerAnimationEnabled = seekerAnimationConfig.enabled,
             seekerAnimationDurationMs = seekerAnimationConfig.durationMs,
+            isLongPressSeeking = isLongPressSeeking,
         )
 
         val nowNanos = System.nanoTime()
@@ -399,11 +403,19 @@ internal fun resolveSliderProgressAnimationMode(
     targetProgress: Float,
     seekerAnimationEnabled: Boolean = false,
     seekerAnimationDurationMs: Int = DEFAULT_SEEKER_ANIMATION_DURATION_MS,
+    isLongPressSeeking: Boolean = false,
 ): SliderProgressAnimationMode {
     if (!enabled || isInteracting || performanceModeEnabled) {
         return SliderProgressAnimationMode.SNAP
     }
     val delta = abs(targetProgress - currentProgress)
+    if (isLongPressSeeking) {
+        return if (keyChanged || delta <= SUB_PIXEL_PROGRESS_STEP) {
+            SliderProgressAnimationMode.SNAP
+        } else {
+            SliderProgressAnimationMode.LINEAR_TICK
+        }
+    }
     if (!seekerAnimationEnabled) {
         if (keyChanged ||
             targetProgress < currentProgress - BACKWARD_JUMP_THRESHOLD ||

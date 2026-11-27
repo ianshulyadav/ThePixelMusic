@@ -78,6 +78,10 @@ fun ExpressivePlayerControls(
     modifier: Modifier = Modifier
 ) {
     val haptics = LocalHapticFeedback.current
+    val longPressSeekConfig = LocalLongPressSeekConfig.current
+    val latestOnHoldBackwardStart = androidx.compose.runtime.rememberUpdatedState(longPressSeekConfig.onHoldBackwardStart)
+    val latestOnHoldForwardStart = androidx.compose.runtime.rememberUpdatedState(longPressSeekConfig.onHoldForwardStart)
+    val latestOnHoldEnd = androidx.compose.runtime.rememberUpdatedState(longPressSeekConfig.onHoldEnd)
     val isPlaying = isPlayingProvider()
     val isBuffering = isBufferingProvider()
     val isDark = LocalPixelMusicDarkTheme.current
@@ -160,6 +164,9 @@ fun ExpressivePlayerControls(
                 modifier = Modifier.weight(1f),
                 shape = RoundedCornerShape(50),
                 color = skipContainer,
+                longPressEnabled = longPressSeekConfig.enabled,
+                onHoldStart = { latestOnHoldBackwardStart.value() },
+                onHoldEnd = { latestOnHoldEnd.value() },
                 onClick = {
                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     onPrevious()
@@ -176,6 +183,9 @@ fun ExpressivePlayerControls(
                 modifier = Modifier.weight(1f),
                 shape = RoundedCornerShape(50),
                 color = skipContainer,
+                longPressEnabled = longPressSeekConfig.enabled,
+                onHoldStart = { latestOnHoldForwardStart.value() },
+                onHoldEnd = { latestOnHoldEnd.value() },
                 onClick = {
                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     onNext()
@@ -268,6 +278,9 @@ private fun ExpressiveTile(
     modifier: Modifier,
     shape: androidx.compose.ui.graphics.Shape,
     color: Color,
+    longPressEnabled: Boolean = false,
+    onHoldStart: () -> Unit = {},
+    onHoldEnd: () -> Unit = {},
     onClick: () -> Unit,
     content: @Composable () -> Unit
 ) {
@@ -287,7 +300,14 @@ private fun ExpressiveTile(
             }
             .clip(shape)
             .background(color)
-            .clickable(interactionSource = interaction, indication = null, onClick = onClick),
+            .transportHoldToSeek(
+                interactionSource = interaction,
+                indication = null,
+                longPressEnabled = longPressEnabled,
+                onHoldStart = onHoldStart,
+                onHoldEnd = onHoldEnd,
+                onTap = onClick
+            ),
         contentAlignment = Alignment.Center
     ) {
         content()

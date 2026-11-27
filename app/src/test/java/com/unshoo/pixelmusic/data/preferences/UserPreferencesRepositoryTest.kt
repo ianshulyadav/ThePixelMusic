@@ -206,4 +206,68 @@ class UserPreferencesRepositoryTest {
             tempDir.toFile().deleteRecursively()
         }
     }
+
+    @Test
+    fun `longPressSeek preferences default enabled at 2x speed and clamp bounds`() = runTest {
+        val tempDir = Files.createTempDirectory("user-preferences-repository-test")
+        try {
+            val repository = UserPreferencesRepository(
+                dataStore = PreferenceDataStoreFactory.create(
+                    scope = backgroundScope,
+                    produceFile = { tempDir.resolve("settings.preferences_pb").toFile() }
+                ),
+                json = Json
+            )
+
+            assertTrue(repository.longPressSeekEnabledFlow.first())
+            assertEquals(DEFAULT_LONG_PRESS_SEEK_SPEED, repository.longPressSeekSpeedFlow.first())
+
+            repository.setLongPressSeekEnabled(false)
+            assertFalse(repository.longPressSeekEnabledFlow.first())
+
+            repository.setLongPressSeekEnabled(true)
+            assertTrue(repository.longPressSeekEnabledFlow.first())
+
+            repository.setLongPressSeekSpeed(0.25f)
+            assertEquals(MIN_LONG_PRESS_SEEK_SPEED, repository.longPressSeekSpeedFlow.first())
+
+            repository.setLongPressSeekSpeed(12f)
+            assertEquals(MAX_LONG_PRESS_SEEK_SPEED, repository.longPressSeekSpeedFlow.first())
+
+            repository.setLongPressSeekSpeed(3.0f)
+            assertEquals(3.0f, repository.longPressSeekSpeedFlow.first())
+
+            assertEquals(
+                com.unshoo.pixelmusic.data.preferences.LongPressSeekMode.SPEED_BASED,
+                repository.longPressSeekModeFlow.first()
+            )
+            assertEquals(
+                com.unshoo.pixelmusic.data.preferences.DEFAULT_LONG_PRESS_SEEK_TIME_RATE_SECONDS,
+                repository.longPressSeekTimeRateSecondsFlow.first()
+            )
+
+            repository.setLongPressSeekMode(com.unshoo.pixelmusic.data.preferences.LongPressSeekMode.TIME_BASED)
+            assertEquals(
+                com.unshoo.pixelmusic.data.preferences.LongPressSeekMode.TIME_BASED,
+                repository.longPressSeekModeFlow.first()
+            )
+
+            repository.setLongPressSeekTimeRateSeconds(1)
+            assertEquals(
+                com.unshoo.pixelmusic.data.preferences.MIN_LONG_PRESS_SEEK_TIME_RATE_SECONDS,
+                repository.longPressSeekTimeRateSecondsFlow.first()
+            )
+
+            repository.setLongPressSeekTimeRateSeconds(120)
+            assertEquals(
+                com.unshoo.pixelmusic.data.preferences.MAX_LONG_PRESS_SEEK_TIME_RATE_SECONDS,
+                repository.longPressSeekTimeRateSecondsFlow.first()
+            )
+
+            repository.setLongPressSeekTimeRateSeconds(15)
+            assertEquals(15, repository.longPressSeekTimeRateSecondsFlow.first())
+        } finally {
+            tempDir.toFile().deleteRecursively()
+        }
+    }
 }

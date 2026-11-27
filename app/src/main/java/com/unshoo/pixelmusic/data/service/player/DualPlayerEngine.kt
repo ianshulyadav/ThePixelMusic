@@ -1828,7 +1828,10 @@ class DualPlayerEngine @Inject constructor(
             ): AudioSink {
                 return DefaultAudioSink.Builder(context)
                     .setEnableFloatOutput(floatEnabled)
-                    .setEnableAudioOutputPlaybackParameters(enableAudioOutputPlaybackParams)
+                    // DefaultAudioSink bypasses SonicAudioProcessor whenever outputting float PCM
+                    // (Hi-Fi / 24-bit+ lossless), so enable AudioTrack playback parameters there to
+                    // prevent setPlaybackSpeed from resetting to 1.0x.
+                    .setEnableAudioOutputPlaybackParameters(floatEnabled || enableAudioOutputPlaybackParams)
                     .setAudioProcessorChain(
                         DefaultAudioSink.DefaultAudioProcessorChain(
                             HiResSampleRateCapAudioProcessor(),

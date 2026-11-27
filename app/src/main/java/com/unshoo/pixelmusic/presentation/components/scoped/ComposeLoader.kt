@@ -5,6 +5,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -72,13 +73,22 @@ fun rememberSmoothProgress(
     val latestSampleWhilePlayingMs by rememberUpdatedState(sampleWhilePlayingMs)
     val latestSampleWhilePausedMs by rememberUpdatedState(sampleWhilePausedMs)
     val latestIsVisible by rememberUpdatedState(isVisible)
+    val latestIsLongPressSeeking by rememberUpdatedState(
+        com.unshoo.pixelmusic.presentation.components.player.LocalLongPressSeekConfig.current.isActivelySeeking
+    )
 
     val safeUpperBound = totalDuration.coerceAtLeast(0L)
     val safeDuration = totalDuration.coerceAtLeast(1L)
 
     LaunchedEffect(totalDuration, songId) {
+        var lastRawPosition = -1L
+        var pausedSeekBoostTicks = 0
         fun sampleNow() {
             val rawPosition = latestPositionProvider()
+            if (!latestIsPlayingProvider() && lastRawPosition >= 0L && rawPosition != lastRawPosition) {
+                pausedSeekBoostTicks = 10
+            }
+            lastRawPosition = rawPosition
             val clampedPosition = rawPosition.coerceIn(0L, safeUpperBound)
             sampledPosition = clampedPosition
             sampledFraction = (clampedPosition / safeDuration.toFloat()).coerceIn(0f, 1f)
@@ -92,7 +102,15 @@ fun rememberSmoothProgress(
                 continue
             }
             val isPlaying = latestIsPlayingProvider()
-            val delayMillis = if (isPlaying) latestSampleWhilePlayingMs else latestSampleWhilePausedMs
+            val delayMillis = when {
+                latestIsLongPressSeeking -> 50L
+                isPlaying -> latestSampleWhilePlayingMs
+                pausedSeekBoostTicks > 0 -> {
+                    pausedSeekBoostTicks--
+                    150L
+                }
+                else -> latestSampleWhilePausedMs
+            }
             delay(delayMillis.coerceAtLeast(1L))
             sampleNow()
         }

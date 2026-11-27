@@ -249,4 +249,37 @@ class WavySliderExpressiveTest {
             )
         )
     }
+
+    @Test
+    fun `active long-press seek uses linear ticks forward and backward even with seeker animation on`() {
+        assertEquals(
+            SliderProgressAnimationMode.LINEAR_TICK,
+            resolveSliderProgressAnimationMode(
+                enabled = true,
+                isInteracting = false,
+                performanceModeEnabled = false,
+                keyChanged = false,
+                isTransitionGlideActive = true,
+                currentProgress = 0.50f,
+                targetProgress = 0.45f,
+                seekerAnimationEnabled = true,
+                seekerAnimationDurationMs = 750,
+                isLongPressSeeking = true,
+            )
+        )
+        assertEquals(
+            SliderProgressAnimationMode.LINEAR_TICK,
+            resolveSliderProgressAnimationMode(
+                enabled = true,
+                isInteracting = false,
+                performanceModeEnabled = false,
+                keyChanged = false,
+                isTransitionGlideActive = false,
+                currentProgress = 0.30f,
+                targetProgress = 0.35f,
+                seekerAnimationEnabled = false,
+                isLongPressSeeking = true,
+            )
+        )
+    }
 }

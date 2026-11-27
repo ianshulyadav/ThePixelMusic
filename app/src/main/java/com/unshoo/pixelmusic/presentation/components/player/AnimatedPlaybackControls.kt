@@ -92,6 +92,10 @@ fun AnimatedPlaybackControls(
     var playPauseVisualState by remember { mutableStateOf(isPlaying) }
     var pendingPlayPauseState by remember { mutableStateOf<Boolean?>(null) }
     val hapticFeedback = LocalHapticFeedback.current
+    val longPressSeekConfig = LocalLongPressSeekConfig.current
+    val latestOnHoldBackwardStart by rememberUpdatedState(longPressSeekConfig.onHoldBackwardStart)
+    val latestOnHoldForwardStart by rememberUpdatedState(longPressSeekConfig.onHoldForwardStart)
+    val latestOnHoldEnd by rememberUpdatedState(longPressSeekConfig.onHoldEnd)
 
     LaunchedEffect(lastClicked) {
         if (lastClicked != null) {
@@ -163,14 +167,20 @@ fun AnimatedPlaybackControls(
                         scaleX = prevPressScale
                         scaleY = prevPressScale
                     }
-                    .clickable(
+                    .transportHoldToSeek(
                         interactionSource = prevInteractionSource,
-                        indication = LocalIndication.current
-                    ) {
-                        lastClicked = PlaybackButtonType.PREVIOUS
-                        hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        latestOnPrevious()
-                    },
+                        indication = LocalIndication.current,
+                        longPressEnabled = longPressSeekConfig.enabled,
+                        onHoldStart = { latestOnHoldBackwardStart() },
+                        onHoldEnd = { latestOnHoldEnd() },
+                        onTapHaptic = {
+                            hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        },
+                        onTap = {
+                            lastClicked = PlaybackButtonType.PREVIOUS
+                            latestOnPrevious()
+                        }
+                    ),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -272,14 +282,20 @@ fun AnimatedPlaybackControls(
                         scaleX = nextPressScale
                         scaleY = nextPressScale
                     }
-                    .clickable(
+                    .transportHoldToSeek(
                         interactionSource = nextInteractionSource,
-                        indication = LocalIndication.current
-                    ) {
-                        lastClicked = PlaybackButtonType.NEXT
-                        hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        latestOnNext()
-                    },
+                        indication = LocalIndication.current,
+                        longPressEnabled = longPressSeekConfig.enabled,
+                        onHoldStart = { latestOnHoldForwardStart() },
+                        onHoldEnd = { latestOnHoldEnd() },
+                        onTapHaptic = {
+                            hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        },
+                        onTap = {
+                            lastClicked = PlaybackButtonType.NEXT
+                            latestOnNext()
+                        }
+                    ),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(

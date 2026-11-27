@@ -8,7 +8,12 @@ import androidx.media3.common.Player
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import com.unshoo.pixelmusic.data.service.player.DualPlayerEngine
+import com.unshoo.pixelmusic.data.preferences.DEFAULT_LONG_PRESS_SEEK_SPEED
+import com.unshoo.pixelmusic.data.preferences.DEFAULT_LONG_PRESS_SEEK_TIME_RATE_SECONDS
+import com.unshoo.pixelmusic.data.preferences.LongPressSeekMode
 import com.unshoo.pixelmusic.data.preferences.UserPreferencesRepository
+import com.unshoo.pixelmusic.data.preferences.sanitizeLongPressSeekSpeed
+import com.unshoo.pixelmusic.data.preferences.sanitizeLongPressSeekTimeRateSeconds
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -104,6 +109,25 @@ class PlaybackStateHolder @Inject constructor(
     private var coldStartSnapshotPositionMs: Long? = null
     private var shuffleToggleJob: Job? = null
     private var lastShuffleToggleFinishedAtMs: Long = 0L
+
+    private enum class SpeedSeekDirection { NONE, FORWARD, REVERSE }
+
+    private var activeSpeedSeekDirection = SpeedSeekDirection.NONE
+    private var activeLongPressSeekMode: LongPressSeekMode = LongPressSeekMode.SPEED_BASED
+    private var speedSeekMultiplier: Float = DEFAULT_LONG_PRESS_SEEK_SPEED
+    private var speedSeekPreHoldSpeed: Float = 1f
+    private var speedSeekPreHoldVolume: Float = 1f
+    private var speedSeekPreHoldWasPlaying: Boolean = false
+    private var speedSeekRemoteFallback: Boolean = false
+    private var speedSeekBasePosMs: Long = 0L
+    private var speedSeekStartElapsedMs: Long = 0L
+    private var speedSeekDurationMs: Long = 0L
+    private var speedSeekPreviewJob: Job? = null
+
+    private val _isLongPressSeeking = MutableStateFlow(false)
+    val isLongPressSeeking: StateFlow<Boolean> = _isLongPressSeeking.asStateFlow()
+
+    internal var elapsedRealtimeMs: () -> Long = { SystemClock.elapsedRealtime() }
     private val powerManager: PowerManager by lazy(LazyThreadSafetyMode.NONE) {
         appContext.getSystemService(Context.POWER_SERVICE) as PowerManager
     }
@@ -272,6 +296,9 @@ class PlaybackStateHolder @Inject constructor(
     }
 
     fun onPlaybackOccurrenceTransition(mediaId: String?) {
+        if (activeSpeedSeekDirection == SpeedSeekDirection.REVERSE) {
+            stopSpeedSeek(commitReverseSeek = false)
+        }
         activatePlaybackOccurrence(mediaId, forceNewOccurrence = true)
     }
 
@@ -548,7 +575,389 @@ class PlaybackStateHolder @Inject constructor(
         }
     }
 
+    /**
+     * Plays continuously at [speed] (e.g. 2.0x) while Next is held down, avoiding repeated seekTo
+     * decoder flushes. Cast sessions smoothly advance preview position and commit once on release.
+     */
+    fun startForwardSpeedSeek(speed: Float = DEFAULT_LONG_PRESS_SEEK_SPEED) {
+        startForwardLongPressSeek(
+            mode = LongPressSeekMode.SPEED_BASED,
+            speed = speed,
+            timeRateSeconds = DEFAULT_LONG_PRESS_SEEK_TIME_RATE_SECONDS
+        )
+    }
+
+    fun startForwardLongPressSeek(
+        mode: LongPressSeekMode = LongPressSeekMode.SPEED_BASED,
+        speed: Float = DEFAULT_LONG_PRESS_SEEK_SPEED,
+        timeRateSeconds: Int = DEFAULT_LONG_PRESS_SEEK_TIME_RATE_SECONDS
+    ) {
+        if (activeSpeedSeekDirection == SpeedSeekDirection.FORWARD) return
+        if (activeSpeedSeekDirection == SpeedSeekDirection.REVERSE) {
+            stopSpeedSeek(commitReverseSeek = false)
+        }
+        val effectiveRate = resolveLongPressSeekRate(mode, speed, timeRateSeconds)
+        val castSession = castStateHolder.castSession.value
+        val remoteClient = castSession?.remoteMediaClient
+        val controller = mediaController
+
+        activeSpeedSeekDirection = SpeedSeekDirection.FORWARD
+        activeLongPressSeekMode = mode
+        speedSeekMultiplier = effectiveRate
+        _isLongPressSeeking.value = true
+
+        if (mode == LongPressSeekMode.SPEED_BASED && remoteClient == null && controller != null) {
+            speedSeekRemoteFallback = false
+            speedSeekPreHoldSpeed = try {
+                controller.playbackParameters.speed.takeIf { it > 0f } ?: 1f
+            } catch (_: IllegalStateException) {
+                1f
+            }
+            speedSeekPreHoldVolume = try {
+                controller.volume.takeIf { it > 0.001f } ?: 1f
+            } catch (_: IllegalStateException) {
+                1f
+            }
+            speedSeekPreHoldWasPlaying = try {
+                controller.playWhenReady || controller.isPlaying
+            } catch (_: IllegalStateException) {
+                false
+            }
+            try {
+                controller.setPlaybackSpeed(effectiveRate)
+                if (!speedSeekPreHoldWasPlaying) {
+                    controller.play()
+                }
+            } catch (e: IllegalStateException) {
+                Timber.w(e, "startForwardLongPressSeek failed on invalid mediaController")
+                activeSpeedSeekDirection = SpeedSeekDirection.NONE
+                _isLongPressSeeking.value = false
+                return
+            }
+            progressPoke.trySend(Unit)
+            startForwardSpeedVerificationLoop(effectiveRate)
+        } else {
+            // Time-based continuous mode or remote Cast: treat one hold as ONE continuous
+            // timeline scrub in memory (muting local playback briefly if playing) and commit
+            // a single seekTo on release with zero intermediate decoder skips.
+            speedSeekRemoteFallback = true
+            val currentPos = resolveActivePositionForSpeedSeek(controller, remoteClient)
+            val durationMs = resolveDurationForSpeedSeek(controller, remoteClient, currentPos)
+            speedSeekBasePosMs = currentPos
+            speedSeekDurationMs = durationMs
+            speedSeekStartElapsedMs = elapsedRealtimeMs()
+            isSeeking = true
+            localSeekUnlockJob?.cancel()
+            _currentPosition.value = currentPos
+            if (remoteClient == null && controller != null) {
+                speedSeekPreHoldVolume = try {
+                    controller.volume.takeIf { it > 0.001f } ?: 1f
+                } catch (_: IllegalStateException) {
+                    1f
+                }
+                speedSeekPreHoldWasPlaying = try {
+                    controller.isPlaying
+                } catch (_: IllegalStateException) {
+                    false
+                }
+                if (speedSeekPreHoldWasPlaying) {
+                    try {
+                        controller.volume = 0f
+                    } catch (_: IllegalStateException) {
+                    }
+                }
+            } else {
+                speedSeekPreHoldWasPlaying = false
+            }
+            startSpeedSeekPreviewLoop()
+        }
+    }
+
+    /**
+     * Scrubs smoothly backward in memory while Previous is held (muting output if playing
+     * so forward audio is suppressed without triggering pause/resume telemetry), then commits ONE
+     * clean seek on [stopSpeedSeek].
+     */
+    fun startReverseSpeedSeek(speed: Float = DEFAULT_LONG_PRESS_SEEK_SPEED): Long =
+        startReverseLongPressSeek(
+            mode = LongPressSeekMode.SPEED_BASED,
+            speed = speed,
+            timeRateSeconds = DEFAULT_LONG_PRESS_SEEK_TIME_RATE_SECONDS
+        )
+
+    fun startReverseLongPressSeek(
+        mode: LongPressSeekMode = LongPressSeekMode.SPEED_BASED,
+        speed: Float = DEFAULT_LONG_PRESS_SEEK_SPEED,
+        timeRateSeconds: Int = DEFAULT_LONG_PRESS_SEEK_TIME_RATE_SECONDS
+    ): Long {
+        if (activeSpeedSeekDirection == SpeedSeekDirection.REVERSE) {
+            return updateReverseSpeedSeek()
+        }
+        if (activeSpeedSeekDirection == SpeedSeekDirection.FORWARD) {
+            stopSpeedSeek(commitReverseSeek = false)
+        }
+        val effectiveRate = resolveLongPressSeekRate(mode, speed, timeRateSeconds)
+        val castSession = castStateHolder.castSession.value
+        val remoteClient = castSession?.remoteMediaClient
+        val controller = mediaController
+        val currentPos = resolveActivePositionForSpeedSeek(controller, remoteClient)
+        val durationMs = resolveDurationForSpeedSeek(controller, remoteClient, currentPos)
+
+        activeSpeedSeekDirection = SpeedSeekDirection.REVERSE
+        activeLongPressSeekMode = mode
+        speedSeekRemoteFallback = remoteClient != null || controller == null
+        speedSeekMultiplier = effectiveRate
+        speedSeekBasePosMs = currentPos
+        speedSeekDurationMs = durationMs
+        speedSeekStartElapsedMs = elapsedRealtimeMs()
+        isSeeking = true
+        _isLongPressSeeking.value = true
+        localSeekUnlockJob?.cancel()
+        _currentPosition.value = currentPos
+
+        if (remoteClient == null && controller != null) {
+            speedSeekPreHoldVolume = try {
+                controller.volume.takeIf { it > 0.001f } ?: 1f
+            } catch (_: IllegalStateException) {
+                1f
+            }
+            speedSeekPreHoldWasPlaying = try {
+                controller.isPlaying
+            } catch (_: IllegalStateException) {
+                false
+            }
+            if (speedSeekPreHoldWasPlaying) {
+                try {
+                    controller.volume = 0f
+                } catch (_: IllegalStateException) {
+                }
+            }
+        }
+        startSpeedSeekPreviewLoop()
+        return currentPos
+    }
+
+    private fun resolveLongPressSeekRate(
+        mode: LongPressSeekMode,
+        speed: Float,
+        timeRateSeconds: Int
+    ): Float = when (mode) {
+        LongPressSeekMode.SPEED_BASED -> sanitizeLongPressSeekSpeed(speed)
+        LongPressSeekMode.TIME_BASED -> sanitizeLongPressSeekTimeRateSeconds(timeRateSeconds).toFloat()
+    }
+
+    internal var speedVerificationDelayMs: Long = 240L
+
+    private fun startForwardSpeedVerificationLoop(requestedSpeed: Float) {
+        speedSeekPreviewJob?.cancel()
+        speedSeekPreviewJob = scope.launch(Dispatchers.Main) {
+            if (speedVerificationDelayMs > 0L) {
+                delay(speedVerificationDelayMs)
+            }
+            while (activeSpeedSeekDirection == SpeedSeekDirection.FORWARD && !speedSeekRemoteFallback) {
+                val activeController = mediaController ?: break
+                val actualSpeed = try {
+                    activeController.playbackParameters.speed
+                } catch (_: IllegalStateException) {
+                    break
+                }
+                val isPlayingNow = try {
+                    activeController.isPlaying
+                } catch (_: IllegalStateException) {
+                    false
+                }
+                val isBufferingNow = try {
+                    activeController.playbackState == Player.STATE_BUFFERING
+                } catch (_: IllegalStateException) {
+                    false
+                }
+                val canSeekNow = try {
+                    activeController.isCurrentMediaItemSeekable
+                } catch (_: IllegalStateException) {
+                    false
+                }
+                // Offload DSP, BT HAL, float PCM limits, or slow Hi-Res FLAC buffering can hold speed at 1x
+                // or stall during 2x-4x. Fall back seamlessly to continuous scrub + single seek commit.
+                if (canSeekNow &&
+                    (abs(actualSpeed - requestedSpeed) > 0.15f || isBufferingNow || !isPlayingNow)
+                ) {
+                    promoteActiveForwardHoldToContinuousScrub(activeController)
+                    return@launch
+                }
+                delay(150L)
+            }
+        }
+    }
+
+    private fun promoteActiveForwardHoldToContinuousScrub(controller: MediaController) {
+        val currentPos = resolveActivePositionForSpeedSeek(controller, remoteClient = null)
+        val durationMs = resolveDurationForSpeedSeek(controller, remoteClient = null, currentPos)
+        speedSeekRemoteFallback = true
+        speedSeekBasePosMs = currentPos
+        speedSeekDurationMs = durationMs
+        speedSeekStartElapsedMs = elapsedRealtimeMs()
+        isSeeking = true
+        localSeekUnlockJob?.cancel()
+        _currentPosition.value = currentPos
+        try {
+            controller.setPlaybackSpeed(speedSeekPreHoldSpeed)
+            if (!speedSeekPreHoldWasPlaying) {
+                controller.pause()
+            } else {
+                controller.volume = 0f
+            }
+        } catch (_: IllegalStateException) {
+        }
+        startSpeedSeekPreviewLoop()
+    }
+
+    private fun startSpeedSeekPreviewLoop() {
+        speedSeekPreviewJob?.cancel()
+        speedSeekPreviewJob = scope.launch(Dispatchers.Main) {
+            while (activeSpeedSeekDirection != SpeedSeekDirection.NONE) {
+                val updatedPos = updateSpeedSeekPreview()
+                val reachedBoundary =
+                    (activeSpeedSeekDirection == SpeedSeekDirection.REVERSE && updatedPos <= 0L) ||
+                        (activeSpeedSeekDirection == SpeedSeekDirection.FORWARD &&
+                            speedSeekDurationMs > 0L &&
+                            updatedPos >= (speedSeekDurationMs - 1_000L).coerceAtLeast(0L))
+                if (reachedBoundary) break
+                delay(50L)
+            }
+        }
+    }
+
+    fun updateSpeedSeekPreview(): Long {
+        val direction = activeSpeedSeekDirection
+        if (direction == SpeedSeekDirection.NONE) return _currentPosition.value
+        if (direction == SpeedSeekDirection.FORWARD && !speedSeekRemoteFallback) {
+            return _currentPosition.value
+        }
+        val elapsedMs = (elapsedRealtimeMs() - speedSeekStartElapsedMs).coerceAtLeast(0L)
+        val deltaMs = (elapsedMs * speedSeekMultiplier).toLong()
+        val target = if (direction == SpeedSeekDirection.FORWARD) {
+            val rawTarget = speedSeekBasePosMs + deltaMs
+            if (speedSeekDurationMs > 1_000L) {
+                rawTarget.coerceAtMost(speedSeekDurationMs - 1_000L)
+            } else if (speedSeekDurationMs > 0L) {
+                rawTarget.coerceAtMost(speedSeekDurationMs)
+            } else {
+                rawTarget
+            }
+        } else {
+            (speedSeekBasePosMs - deltaMs).coerceAtLeast(0L)
+        }
+        if (_currentPosition.value != target) {
+            _currentPosition.value = target
+        }
+        return target
+    }
+
+    fun updateReverseSpeedSeek(): Long = updateSpeedSeekPreview()
+
+    fun stopSpeedSeek(commitReverseSeek: Boolean = true) {
+        val direction = activeSpeedSeekDirection
+        if (direction == SpeedSeekDirection.NONE) return
+
+        speedSeekPreviewJob?.cancel()
+        speedSeekPreviewJob = null
+
+        val previewTarget = if (direction == SpeedSeekDirection.REVERSE || speedSeekRemoteFallback) {
+            updateSpeedSeekPreview()
+        } else {
+            _currentPosition.value
+        }
+
+        activeSpeedSeekDirection = SpeedSeekDirection.NONE
+        activeLongPressSeekMode = LongPressSeekMode.SPEED_BASED
+        val wasRemoteFallback = speedSeekRemoteFallback
+        speedSeekRemoteFallback = false
+        _isLongPressSeeking.value = false
+        val controller = mediaController
+
+        when (direction) {
+            SpeedSeekDirection.FORWARD -> {
+                if (wasRemoteFallback) {
+                    if (commitReverseSeek) {
+                        seekTo(previewTarget)
+                    } else {
+                        isSeeking = false
+                    }
+                    if (controller != null && speedSeekPreHoldWasPlaying) {
+                        try {
+                            controller.volume = speedSeekPreHoldVolume
+                        } catch (_: IllegalStateException) {
+                        }
+                    }
+                } else if (controller != null) {
+                    try {
+                        controller.setPlaybackSpeed(speedSeekPreHoldSpeed)
+                        if (!speedSeekPreHoldWasPlaying) {
+                            controller.pause()
+                        }
+                    } catch (e: IllegalStateException) {
+                        Timber.w(e, "stopSpeedSeek(FORWARD) failed on invalid mediaController")
+                    }
+                }
+            }
+            SpeedSeekDirection.REVERSE -> {
+                if (commitReverseSeek) {
+                    seekTo(previewTarget)
+                } else {
+                    isSeeking = false
+                }
+                if (!wasRemoteFallback && controller != null && speedSeekPreHoldWasPlaying) {
+                    try {
+                        controller.volume = speedSeekPreHoldVolume
+                    } catch (_: IllegalStateException) {
+                    }
+                }
+            }
+            SpeedSeekDirection.NONE -> Unit
+        }
+    }
+
+    private fun resolveActivePositionForSpeedSeek(
+        controller: MediaController?,
+        remoteClient: com.google.android.gms.cast.framework.media.RemoteMediaClient?
+    ): Long {
+        val activeMediaId = try {
+            controller?.currentMediaItem?.mediaId
+        } catch (_: IllegalStateException) {
+            null
+        }
+        return when {
+            isSeeking -> _currentPosition.value
+            remoteClient != null -> remoteClient.approximateStreamPosition
+            controller != null && controller.isPlaying -> controller.currentPosition
+            pausedPositionOverrideMs != null &&
+                pausedPositionOverrideMediaId != null &&
+                pausedPositionOverrideMediaId == activeMediaId ->
+                pausedPositionOverrideMs!!
+            else -> _currentPosition.value
+        }.coerceAtLeast(0L)
+    }
+
+    private fun resolveDurationForSpeedSeek(
+        controller: MediaController?,
+        remoteClient: com.google.android.gms.cast.framework.media.RemoteMediaClient?,
+        currentPos: Long
+    ): Long {
+        val state = _stablePlayerState.value
+        val reportedDuration = when {
+            remoteClient != null -> remoteClient.streamDuration
+            controller != null -> controller.duration
+            else -> C.TIME_UNSET
+        }
+        return resolveEffectiveDuration(
+            reportedDurationMs = reportedDuration,
+            songDurationHintMs = state.currentSong?.duration ?: state.totalDuration,
+            currentPositionMs = currentPos
+        )
+    }
+
     fun previousSong() {
+        stopSpeedSeek(commitReverseSeek = false)
         val castSession = castStateHolder.castSession.value
         if (castSession != null && castSession.remoteMediaClient != null) {
             castStateHolder.castPlayer?.previous()
@@ -566,6 +975,7 @@ class PlaybackStateHolder @Inject constructor(
     }
 
     fun nextSong() {
+        stopSpeedSeek(commitReverseSeek = false)
         val castSession = castStateHolder.castSession.value
         if (castSession != null && castSession.remoteMediaClient != null) {
             castStateHolder.castPlayer?.next()
@@ -813,6 +1223,9 @@ class PlaybackStateHolder @Inject constructor(
     }
 
     private fun currentProgressTickMs(): Long {
+        if (activeSpeedSeekDirection == SpeedSeekDirection.FORWARD && !speedSeekRemoteFallback) {
+            return 60L
+        }
         if (!powerManager.isInteractive) return BACKGROUND_PROGRESS_TICK_MS
         // If nothing is rendering the playback slider/position, poll at 1s to stop 4 Binder IPCs/sec
         if (_currentPosition.subscriptionCount.value == 0) return UNOBSERVED_PROGRESS_TICK_MS

@@ -812,6 +812,38 @@ class PlayerViewModel @Inject constructor(
             initialValue = true
         )
 
+    val longPressSeekEnabled: StateFlow<Boolean> = userPreferencesRepository.longPressSeekEnabledFlow
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = true
+        )
+
+    val longPressSeekSpeed: StateFlow<Float> = userPreferencesRepository.longPressSeekSpeedFlow
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = com.unshoo.pixelmusic.data.preferences.DEFAULT_LONG_PRESS_SEEK_SPEED
+        )
+
+    val longPressSeekMode: StateFlow<com.unshoo.pixelmusic.data.preferences.LongPressSeekMode> =
+        userPreferencesRepository.longPressSeekModeFlow
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.Eagerly,
+                initialValue = com.unshoo.pixelmusic.data.preferences.LongPressSeekMode.SPEED_BASED
+            )
+
+    val longPressSeekTimeRateSeconds: StateFlow<Int> =
+        userPreferencesRepository.longPressSeekTimeRateSecondsFlow
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.Eagerly,
+                initialValue = com.unshoo.pixelmusic.data.preferences.DEFAULT_LONG_PRESS_SEEK_TIME_RATE_SECONDS
+            )
+
+    val isLongPressSeeking: StateFlow<Boolean> = playbackStateHolder.isLongPressSeeking
+
     // Lyrics sync offset - now managed by LyricsStateHolder
     val currentSongLyricsSyncOffset: StateFlow<Int> = lyricsStateHolder.currentSongSyncOffset
 
@@ -7574,7 +7606,42 @@ class PlayerViewModel @Inject constructor(
     }
 
     fun seekTo(position: Long) {
-        runWhenMediaControllerReady { playbackStateHolder.seekTo(position) }
+        runWhenMediaControllerReady {
+            playbackStateHolder.stopSpeedSeek(commitReverseSeek = false)
+            playbackStateHolder.seekTo(position)
+        }
+    }
+
+    fun startForwardSpeedSeek(
+        mode: com.unshoo.pixelmusic.data.preferences.LongPressSeekMode = longPressSeekMode.value,
+        speed: Float = longPressSeekSpeed.value,
+        timeRateSeconds: Int = longPressSeekTimeRateSeconds.value
+    ) {
+        runWhenMediaControllerReady {
+            playbackStateHolder.startForwardLongPressSeek(
+                mode = mode,
+                speed = speed,
+                timeRateSeconds = timeRateSeconds
+            )
+        }
+    }
+
+    fun startReverseSpeedSeek(
+        mode: com.unshoo.pixelmusic.data.preferences.LongPressSeekMode = longPressSeekMode.value,
+        speed: Float = longPressSeekSpeed.value,
+        timeRateSeconds: Int = longPressSeekTimeRateSeconds.value
+    ) {
+        runWhenMediaControllerReady {
+            playbackStateHolder.startReverseLongPressSeek(
+                mode = mode,
+                speed = speed,
+                timeRateSeconds = timeRateSeconds
+            )
+        }
+    }
+
+    fun stopSpeedSeek() {
+        playbackStateHolder.stopSpeedSeek()
     }
 
     fun nextSong() {

@@ -89,6 +89,30 @@ const val DEFAULT_SEEKER_ANIMATION_DURATION_MS = 400
 internal fun sanitizeSeekerAnimationDurationMs(durationMs: Int): Int =
     durationMs.coerceIn(MIN_SEEKER_ANIMATION_DURATION_MS, MAX_SEEKER_ANIMATION_DURATION_MS)
 
+enum class LongPressSeekMode {
+    SPEED_BASED,
+    TIME_BASED,
+}
+
+const val MIN_LONG_PRESS_SEEK_SPEED = 1.5f
+const val MAX_LONG_PRESS_SEEK_SPEED = 4.0f
+const val DEFAULT_LONG_PRESS_SEEK_SPEED = 2.0f
+
+const val MIN_LONG_PRESS_SEEK_TIME_RATE_SECONDS = 5
+const val MAX_LONG_PRESS_SEEK_TIME_RATE_SECONDS = 30
+const val DEFAULT_LONG_PRESS_SEEK_TIME_RATE_SECONDS = 10
+
+internal fun sanitizeLongPressSeekSpeed(speed: Float): Float {
+    if (speed.isNaN()) return DEFAULT_LONG_PRESS_SEEK_SPEED
+    return speed.coerceIn(MIN_LONG_PRESS_SEEK_SPEED, MAX_LONG_PRESS_SEEK_SPEED)
+}
+
+internal fun sanitizeLongPressSeekMode(raw: String?): LongPressSeekMode =
+    LongPressSeekMode.entries.firstOrNull { it.name == raw } ?: LongPressSeekMode.SPEED_BASED
+
+internal fun sanitizeLongPressSeekTimeRateSeconds(seconds: Int): Int =
+    seconds.coerceIn(MIN_LONG_PRESS_SEEK_TIME_RATE_SECONDS, MAX_LONG_PRESS_SEEK_TIME_RATE_SECONDS)
+
 /**
  * Album art quality settings for developer options.
  * Controls maximum resolution for album artwork in player view.
@@ -370,6 +394,10 @@ constructor(
         val EXO_CACHE_SIZE_BYTES = longPreferencesKey("exo_cache_size_bytes")
         val LAST_SUCCESSFUL_YOUTUBE_CLIENT_KEY = stringPreferencesKey("last_successful_youtube_client_key")
         val TAP_BACKGROUND_CLOSES_PLAYER = booleanPreferencesKey("tap_background_closes_player")
+        val LONG_PRESS_SEEK_ENABLED = booleanPreferencesKey("long_press_seek_enabled")
+        val LONG_PRESS_SEEK_SPEED = androidx.datastore.preferences.core.floatPreferencesKey("long_press_seek_speed")
+        val LONG_PRESS_SEEK_MODE = stringPreferencesKey("long_press_seek_mode")
+        val LONG_PRESS_SEEK_TIME_RATE_SECONDS = intPreferencesKey("long_press_seek_time_rate_seconds")
         val HAPTICS_ENABLED = booleanPreferencesKey("haptics_enabled")
         val IMMERSIVE_LYRICS_ENABLED = booleanPreferencesKey("immersive_lyrics_enabled")
         val IMMERSIVE_LYRICS_TIMEOUT = longPreferencesKey("immersive_lyrics_timeout")
@@ -2400,6 +2428,66 @@ constructor(
     suspend fun setTapBackgroundClosesPlayer(enabled: Boolean) {
         dataStore.edit { preferences ->
             preferences[PreferencesKeys.TAP_BACKGROUND_CLOSES_PLAYER] = enabled
+        }
+    }
+
+    val longPressSeekEnabledFlow: Flow<Boolean> =
+        dataStore.data
+            .map { preferences ->
+                preferences[PreferencesKeys.LONG_PRESS_SEEK_ENABLED] ?: true
+            }
+            .distinctUntilChanged()
+
+    suspend fun setLongPressSeekEnabled(enabled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.LONG_PRESS_SEEK_ENABLED] = enabled
+        }
+    }
+
+    val longPressSeekSpeedFlow: Flow<Float> =
+        dataStore.data
+            .map { preferences ->
+                sanitizeLongPressSeekSpeed(
+                    preferences[PreferencesKeys.LONG_PRESS_SEEK_SPEED]
+                        ?: DEFAULT_LONG_PRESS_SEEK_SPEED
+                )
+            }
+            .distinctUntilChanged()
+
+    suspend fun setLongPressSeekSpeed(speed: Float) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.LONG_PRESS_SEEK_SPEED] =
+                sanitizeLongPressSeekSpeed(speed)
+        }
+    }
+
+    val longPressSeekModeFlow: Flow<LongPressSeekMode> =
+        dataStore.data
+            .map { preferences ->
+                sanitizeLongPressSeekMode(preferences[PreferencesKeys.LONG_PRESS_SEEK_MODE])
+            }
+            .distinctUntilChanged()
+
+    suspend fun setLongPressSeekMode(mode: LongPressSeekMode) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.LONG_PRESS_SEEK_MODE] = mode.name
+        }
+    }
+
+    val longPressSeekTimeRateSecondsFlow: Flow<Int> =
+        dataStore.data
+            .map { preferences ->
+                sanitizeLongPressSeekTimeRateSeconds(
+                    preferences[PreferencesKeys.LONG_PRESS_SEEK_TIME_RATE_SECONDS]
+                        ?: DEFAULT_LONG_PRESS_SEEK_TIME_RATE_SECONDS
+                )
+            }
+            .distinctUntilChanged()
+
+    suspend fun setLongPressSeekTimeRateSeconds(seconds: Int) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.LONG_PRESS_SEEK_TIME_RATE_SECONDS] =
+                sanitizeLongPressSeekTimeRateSeconds(seconds)
         }
     }
 

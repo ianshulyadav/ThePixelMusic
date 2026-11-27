@@ -1098,6 +1098,42 @@ class MainActivity : ComponentActivity() {
         val seekerAnimationDurationMs by userPreferencesRepository.seekerAnimationDurationMsFlow.collectAsStateWithLifecycle(
             initialValue = com.unshoo.pixelmusic.data.preferences.DEFAULT_SEEKER_ANIMATION_DURATION_MS
         )
+        val longPressSeekEnabled by playerViewModel.longPressSeekEnabled.collectAsStateWithLifecycle()
+        val longPressSeekMode by playerViewModel.longPressSeekMode.collectAsStateWithLifecycle()
+        val longPressSeekSpeed by playerViewModel.longPressSeekSpeed.collectAsStateWithLifecycle()
+        val longPressSeekTimeRateSeconds by playerViewModel.longPressSeekTimeRateSeconds.collectAsStateWithLifecycle()
+        val isLongPressSeeking by playerViewModel.isLongPressSeeking.collectAsStateWithLifecycle()
+        val longPressSeekConfig = remember(
+            longPressSeekEnabled,
+            longPressSeekMode,
+            longPressSeekSpeed,
+            longPressSeekTimeRateSeconds,
+            isLongPressSeeking,
+            playerViewModel
+        ) {
+            com.unshoo.pixelmusic.presentation.components.player.LongPressSeekConfig(
+                enabled = longPressSeekEnabled,
+                mode = longPressSeekMode,
+                speedMultiplier = longPressSeekSpeed,
+                timeRateSeconds = longPressSeekTimeRateSeconds,
+                isActivelySeeking = isLongPressSeeking,
+                onHoldForwardStart = {
+                    playerViewModel.startForwardSpeedSeek(
+                        mode = longPressSeekMode,
+                        speed = longPressSeekSpeed,
+                        timeRateSeconds = longPressSeekTimeRateSeconds
+                    )
+                },
+                onHoldBackwardStart = {
+                    playerViewModel.startReverseSpeedSeek(
+                        mode = longPressSeekMode,
+                        speed = longPressSeekSpeed,
+                        timeRateSeconds = longPressSeekTimeRateSeconds
+                    )
+                },
+                onHoldEnd = { playerViewModel.stopSpeedSeek() }
+            )
+        }
         val navBarFrostedBlur = !performanceModeEnabled && useBlurEffects && navBarFrostedBlurPreference
         val mainBackdropSource = com.unshoo.pixelmusic.presentation.components.rememberBackdropSource()
 
@@ -1111,7 +1147,9 @@ class MainActivity : ComponentActivity() {
                 com.unshoo.pixelmusic.presentation.components.SeekerAnimationConfig(
                     enabled = seekerAnimationEnabled,
                     durationMs = seekerAnimationDurationMs
-                )
+                ),
+            com.unshoo.pixelmusic.presentation.components.player.LocalLongPressSeekConfig provides
+                longPressSeekConfig
         ) {
             AppSidebarDrawer(
                 drawerState = drawerState,

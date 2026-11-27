@@ -56,6 +56,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.size.Size
 import com.unshoo.pixelmusic.data.model.Song
+import com.unshoo.pixelmusic.presentation.components.player.LocalLongPressSeekConfig
+import com.unshoo.pixelmusic.presentation.components.player.transportHoldToSeek
 import com.unshoo.pixelmusic.ui.theme.GoogleSansRounded
 
 internal val LocalMaterialTheme = staticCompositionLocalOf<ColorScheme> { error("No ColorScheme provided") }
@@ -93,6 +95,10 @@ internal fun MiniPlayerContentInternal(
     val latestOnPrevious = rememberUpdatedState(onPrevious)
     val latestOnPlayPause = rememberUpdatedState(onPlayPause)
     val latestOnNext = rememberUpdatedState(onNext)
+    val longPressSeekConfig = LocalLongPressSeekConfig.current
+    val latestOnHoldBackwardStart = rememberUpdatedState(longPressSeekConfig.onHoldBackwardStart)
+    val latestOnHoldForwardStart = rememberUpdatedState(longPressSeekConfig.onHoldForwardStart)
+    val latestOnHoldEnd = rememberUpdatedState(longPressSeekConfig.onHoldEnd)
     val miniPlayerIndication = remember { ripple(bounded = false) }
 
     // Album art with clean rounded corners
@@ -204,14 +210,18 @@ internal fun MiniPlayerContentInternal(
                     .size(36.dp)
                     .clip(CircleShape)
                     .background(LocalMaterialTheme.current.onPrimary)
-                    .clickable(
+                    .transportHoldToSeek(
                         interactionSource = previousInteraction,
                         indication = miniPlayerIndication,
-                        enabled = controlsEnabled
-                    ) {
-                        hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        latestOnPrevious.value()
-                    },
+                        enabled = controlsEnabled,
+                        longPressEnabled = longPressSeekConfig.enabled,
+                        onHoldStart = { latestOnHoldBackwardStart.value() },
+                        onHoldEnd = { latestOnHoldEnd.value() },
+                        onTapHaptic = {
+                            hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        },
+                        onTap = { latestOnPrevious.value() }
+                    ),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -259,14 +269,18 @@ internal fun MiniPlayerContentInternal(
                     .size(36.dp)
                     .clip(CircleShape)
                     .background(LocalMaterialTheme.current.onPrimary)
-                    .clickable(
+                    .transportHoldToSeek(
                         interactionSource = nextInteraction,
                         indication = miniPlayerIndication,
-                        enabled = controlsEnabled
-                    ) {
-                        hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        latestOnNext.value()
-                    },
+                        enabled = controlsEnabled,
+                        longPressEnabled = longPressSeekConfig.enabled,
+                        onHoldStart = { latestOnHoldForwardStart.value() },
+                        onHoldEnd = { latestOnHoldEnd.value() },
+                        onTapHaptic = {
+                            hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        },
+                        onTap = { latestOnNext.value() }
+                    ),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(

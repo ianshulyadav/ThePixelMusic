@@ -121,6 +121,12 @@ data class SettingsUiState(
     val albumArtQuality: AlbumArtQuality = AlbumArtQuality.MEDIUM,
     val albumArtCacheLimitMb: Int = 200,
     val tapBackgroundClosesPlayer: Boolean = false,
+    val longPressSeekEnabled: Boolean = true,
+    val longPressSeekMode: com.unshoo.pixelmusic.data.preferences.LongPressSeekMode =
+        com.unshoo.pixelmusic.data.preferences.LongPressSeekMode.SPEED_BASED,
+    val longPressSeekSpeed: Float = com.unshoo.pixelmusic.data.preferences.DEFAULT_LONG_PRESS_SEEK_SPEED,
+    val longPressSeekTimeRateSeconds: Int =
+        com.unshoo.pixelmusic.data.preferences.DEFAULT_LONG_PRESS_SEEK_TIME_RATE_SECONDS,
     val hapticsEnabled: Boolean = true,
     val immersiveLyricsEnabled: Boolean = false,
     val immersiveLyricsTimeout: Long = 4000L,
@@ -881,6 +887,30 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             userPreferencesRepository.tapBackgroundClosesPlayerFlow.collect { enabled ->
                 _uiState.update { it.copy(tapBackgroundClosesPlayer = enabled) }
+            }
+        }
+
+        viewModelScope.launch {
+            userPreferencesRepository.longPressSeekEnabledFlow.collect { enabled ->
+                _uiState.update { it.copy(longPressSeekEnabled = enabled) }
+            }
+        }
+
+        viewModelScope.launch {
+            userPreferencesRepository.longPressSeekSpeedFlow.collect { speed ->
+                _uiState.update { it.copy(longPressSeekSpeed = speed) }
+            }
+        }
+
+        viewModelScope.launch {
+            userPreferencesRepository.longPressSeekModeFlow.collect { mode ->
+                _uiState.update { it.copy(longPressSeekMode = mode) }
+            }
+        }
+
+        viewModelScope.launch {
+            userPreferencesRepository.longPressSeekTimeRateSecondsFlow.collect { seconds ->
+                _uiState.update { it.copy(longPressSeekTimeRateSeconds = seconds) }
             }
         }
 
@@ -2071,6 +2101,30 @@ fun setBeta05CleanInstallDisclaimerDismissed(dismissed: Boolean) {
     fun setTapBackgroundClosesPlayer(enabled: Boolean) {
         viewModelScope.launch {
             userPreferencesRepository.setTapBackgroundClosesPlayer(enabled)
+        }
+    }
+
+    fun setLongPressSeekEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            userPreferencesRepository.setLongPressSeekEnabled(enabled)
+        }
+    }
+
+    fun setLongPressSeekSpeed(speed: Float) {
+        viewModelScope.launch {
+            userPreferencesRepository.setLongPressSeekSpeed(speed)
+        }
+    }
+
+    fun setLongPressSeekMode(mode: com.unshoo.pixelmusic.data.preferences.LongPressSeekMode) {
+        viewModelScope.launch {
+            userPreferencesRepository.setLongPressSeekMode(mode)
+        }
+    }
+
+    fun setLongPressSeekTimeRateSeconds(seconds: Int) {
+        viewModelScope.launch {
+            userPreferencesRepository.setLongPressSeekTimeRateSeconds(seconds)
         }
     }
 
