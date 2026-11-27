@@ -376,19 +376,17 @@ internal fun smartImageOptimizedModel(
         val heightPx = (requestTargetSize.height as? coil.size.Dimension.Pixels)?.px ?: (if (isThumbnail) SmartImageBuckets.LIST_ROW_PX else SmartImageBuckets.CARD_PX)
         val targetDim = maxOf(widthPx, heightPx)
         val bucketDim = smartImageBucketForPx(targetDim, isThumbnail)
-        val sizeStr = if (bucketDim >= 1024) {
-            "=w1024-h1024-l90-rj"
-        } else {
-            "=w$bucketDim-h$bucketDim-c-rj"
-        }
-        if (SmartImageRegex.sizeParamRegex.containsMatchIn(unwrappedStr)) {
-            unwrappedStr.replace(SmartImageRegex.sizeParamRegex, sizeStr)
-        } else if (SmartImageRegex.sizeParamRegex2.containsMatchIn(unwrappedStr)) {
+        if (com.unshoo.pixelmusic.data.remote.youtube.isSignedGoogleThumbnailUrl(unwrappedStr)) {
+            unwrappedStr
+        } else if (SmartImageRegex.sizeParamRegex2.containsMatchIn(unwrappedStr) && !unwrappedStr.contains("=w") && !unwrappedStr.contains("=s")) {
+            val sizeStr = if (bucketDim >= 1024) "=w1024-h1024-l90-rj" else "=w$bucketDim-h$bucketDim-c-rj"
             unwrappedStr.replace(SmartImageRegex.sizeParamRegex2, sizeStr.replace("=", "/"))
-        } else if (unwrappedStr.contains("=")) {
-            unwrappedStr.substringBeforeLast("=") + sizeStr
         } else {
-            "$unwrappedStr$sizeStr"
+            com.unshoo.pixelmusic.data.remote.youtube.rewriteGoogleThumbnailUrl(
+                unwrappedStr,
+                widthPx = bucketDim,
+                cropSquare = bucketDim < 1024
+            )
         }
     } else if (rawUnwrapped is String && (rawUnwrapped.contains("i.ytimg.com") || rawUnwrapped.contains("img.youtube.com"))) {
         val match = SmartImageRegex.youtubeViRegex.find(rawUnwrapped)

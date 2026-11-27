@@ -2111,7 +2111,9 @@ constructor(
             // Upsert actual YouTube playlists
             youtubePlaylists.forEach { playlist ->
                 val playlistSongIds = appDatabase.playlistRepository().getOrderedSongIds(playlist.id).map { "youtube_$it" }
-                val targetCoverUri = com.unshoo.pixelmusic.data.remote.youtube.upgradeThumbnailUrlToHighQuality(playlist.coverPath ?: playlist.coverHref)
+                val rawCover = (playlist.coverPath ?: playlist.coverHref).takeIf { it.isNotBlank() }
+                val targetCoverUri = com.unshoo.pixelmusic.data.remote.youtube.upgradeThumbnailUrlToHighQuality(rawCover)
+                    ?.takeIf { it.isNotBlank() }
 
                 // Check if already exists in main database to avoid overwriting user edits or custom playlist attributes
                 val existing = allPlaylists.find { it.id == playlist.id.removePrefix("VL") }
@@ -2124,16 +2126,19 @@ constructor(
                         source = "YOUTUBE"
                     )
                 } else {
+                    val hasUserCover = playlistPreferencesRepository.hasCustomCoverOverride(existing.id)
+                    val desiredCover = if (hasUserCover) existing.coverImageUri else (targetCoverUri ?: existing.coverImageUri)
                     val isUnchanged = existing.name == playlist.title &&
                         existing.songIds == playlistSongIds &&
-                        (existing.coverImageUri == targetCoverUri || targetCoverUri.isNullOrBlank())
+                        existing.coverImageUri == desiredCover
                     if (!isUnchanged) {
                         playlistPreferencesRepository.updatePlaylist(
                             existing.copy(
                                 name = playlist.title,
                                 songIds = playlistSongIds,
-                                coverImageUri = targetCoverUri ?: existing.coverImageUri
-                            )
+                                coverImageUri = desiredCover
+                            ),
+                            isUserCustomization = false
                         )
                     }
                 }

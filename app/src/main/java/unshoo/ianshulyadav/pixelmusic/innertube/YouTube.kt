@@ -839,7 +839,7 @@ object YouTube {
 
             val title = detailHeader.title.runs?.firstOrNull()?.text
                 ?: throw IllegalStateException("PLAYLIST_PRIVATE")
-            val thumbnail = detailHeader.thumbnail.musicThumbnailRenderer?.getThumbnailUrl() ?: ""
+            val thumbnail = detailHeader.thumbnail.getThumbnailUrl() ?: ""
 
             // Songs live in singleColumnBrowseResultsRenderer for this layout
             val singleColContents = response.contents?.singleColumnBrowseResultsRenderer?.tabs
@@ -878,8 +878,8 @@ object YouTube {
         }
 
         val title = header.title.runs?.firstOrNull()?.text ?: throw IllegalStateException("PLAYLIST_PRIVATE")
-        val thumbnail = header.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails?.lastOrNull()?.normalizedUrl
-            ?: header.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails?.firstOrNull()?.normalizedUrl
+        val thumbnail = header.thumbnail?.getThumbnailUrl()
+            ?: base?.musicEditablePlaylistDetailHeaderRenderer?.header?.musicDetailHeaderRenderer?.thumbnail?.getThumbnailUrl()
             ?: ""
 
         val editable = base?.musicEditablePlaylistDetailHeaderRenderer != null

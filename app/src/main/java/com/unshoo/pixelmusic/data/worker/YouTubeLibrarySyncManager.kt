@@ -405,13 +405,14 @@ class YouTubeLibrarySyncManager @Inject constructor(
                 page1Songs.isNotEmpty() && page1Songs.size <= existingIds.size &&
                 page1Songs.indices.all { page1Songs[it].id == existingIds[it] }
 
-            // Self-made playlists often come back without a thumbnail in the library listing,
-            // which left them coverless (e.g. "Bhajan"); fall back to the first song's art.
-            val coverSource = item.thumbnail?.takeIf { it.isNotBlank() }
+            // Prefer the playlist detail header thumbnail (freshest after edits on YouTube Music),
+            // then the library card thumbnail, then the first track's artwork if self-made/coverless.
+            val coverSource = page1Result.playlist.thumbnail?.takeIf { it.isNotBlank() }
+                ?: item.thumbnail?.takeIf { it.isNotBlank() }
                 ?: page1Songs.firstOrNull { !it.thumbnail.isNullOrBlank() }?.thumbnail
             val highQualityCover = com.unshoo.pixelmusic.data.remote.youtube.upgradeThumbnailUrlToHighQuality(
                 coverSource
-            ) ?: coverSource ?: ""
+            )?.takeIf { it.isNotBlank() } ?: ""
 
             val info = PlaylistInfo(
                 id = existing?.id ?: id,
@@ -426,6 +427,7 @@ class YouTubeLibrarySyncManager @Inject constructor(
                 Timber.d("YouTubeLibrarySyncManager: Playlist '%s' unchanged (signature & count match). Skipping.", item.title)
                 if (existing != info.copy(lastSyncTimestamp = existing.lastSyncTimestamp)) {
                     playlistRepo.insertPlaylist(info)
+                    changed = true
                 }
                 continue
             }
@@ -446,7 +448,10 @@ class YouTubeLibrarySyncManager @Inject constructor(
                 songs.indices.all { songs[it].youtubeId == existingIds[it] }
             ) {
                 val metadata = info.copy(lastSyncSongCount = songs.size, lastSyncTimestamp = existing.lastSyncTimestamp)
-                if (metadata != existing) playlistRepo.insertPlaylist(metadata)
+                if (metadata != existing) {
+                    playlistRepo.insertPlaylist(metadata)
+                    changed = true
+                }
                 continue
             }
             if (persistenceManager.persistPlaylist(info, songs)) changed = true

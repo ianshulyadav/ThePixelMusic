@@ -60,7 +60,7 @@ data class LibraryPage(
                     title = renderer.title.runs?.firstOrNull()?.text ?: return null,
                     author = null,
                     songCountText = renderer.subtitle?.runs?.lastOrNull()?.text,
-                    thumbnail = renderer.thumbnailRenderer.musicThumbnailRenderer?.getThumbnailUrl() ?: return null,
+                    thumbnail = renderer.thumbnailRenderer.getThumbnailUrl() ?: "",
                     playEndpoint = renderer.thumbnailOverlay
                         ?.musicItemThumbnailOverlayRenderer?.content
                         ?.musicPlayButtonRenderer?.playNavigationEndpoint

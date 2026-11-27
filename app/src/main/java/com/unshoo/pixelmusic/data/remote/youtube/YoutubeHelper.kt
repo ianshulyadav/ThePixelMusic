@@ -246,11 +246,17 @@ object YoutubeHelper {
     }
 
     fun getBestThumbnailUrl(thumbnailElement: JsonElement): String {
-        val url =
-            thumbnailElement.jsonObject["musicThumbnailRenderer"]?.jsonObject?.get("thumbnail")?.jsonObject?.get(
-                "thumbnails"
-            )?.jsonArray?.last()?.jsonObject?.get("url")?.jsonPrimitive?.contentOrNull ?: ""
-        return upgradeThumbnailUrlToHighQuality(url)
+        val obj = thumbnailElement.jsonObject
+        val renderer = obj["musicThumbnailRenderer"]?.jsonObject
+            ?: obj["croppedSquareThumbnailRenderer"]?.jsonObject
+            ?: obj["musicAnimatedThumbnailRenderer"]?.jsonObject?.get("backupRenderer")?.jsonObject
+        val url = renderer?.get("thumbnail")?.jsonObject?.get("thumbnails")
+            ?.jsonArray?.lastOrNull()?.jsonObject?.get("url")?.jsonPrimitive?.contentOrNull
+            ?: obj["musicAnimatedThumbnailRenderer"]?.jsonObject?.get("animatedThumbnail")?.jsonObject
+                ?.get("thumbnails")?.jsonArray?.lastOrNull()?.jsonObject?.get("url")?.jsonPrimitive?.contentOrNull
+            ?: ""
+        val normalized = if (url.startsWith("//")) "https:$url" else url
+        return upgradeThumbnailUrlToHighQuality(normalized)
     }
 
     private fun upgradeThumbnailUrlToHighQuality(url: String): String {

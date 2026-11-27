@@ -42,6 +42,13 @@ class PlaylistPreferencesRepository @Inject constructor(
 
     private val _pinnedPlaylistIds = MutableStateFlow<Set<String>>(emptySet())
     val pinnedPlaylistIds = _pinnedPlaylistIds.asStateFlow()
+    private val _coverCustomizationVersion = MutableStateFlow(0L)
+
+    fun hasCustomCoverOverride(playlistId: String): Boolean {
+        val normalizedId = playlistId.removePrefix("VL")
+        return coverPrefs.getBoolean("${normalizedId}_customCoverLocked", false) ||
+            coverPrefs.getBoolean("${playlistId}_customCoverLocked", false)
+    }
 
     init {
         val pinned = pinPrefs.getStringSet("pinned_ids", emptySet()) ?: emptySet()
@@ -111,7 +118,7 @@ class PlaylistPreferencesRepository @Inject constructor(
         ) { infos, refs -> infos to refs },
         AppDatabase.getInstance(context).playlistRepository().observePlaylistSongCounts(),
         AppDatabase.getInstance(context).songRepository().observeDownloadedSongs(),
-        _pinnedPlaylistIds
+        combine(_pinnedPlaylistIds, _coverCustomizationVersion) { pinned, _ -> pinned }
     ) { localPlaylists, (ytPlaylistInfos, allCrossRefs), ytSongCountRows, downloadedSongs, pinnedIds ->
         val crossRefsByPlaylistId = allCrossRefs.groupBy { it.playlistId }
         val ytSongCounts = ytSongCountRows.associate { it.playlistId to it.songCount }
@@ -119,11 +126,13 @@ class PlaylistPreferencesRepository @Inject constructor(
             .filter { com.unshoo.pixelmusic.data.remote.youtube.YouTubeItemFilter.isMusicPlaylist(it.title, it.id) }
             .map { ytPlaylistInfo ->
             val pId = ytPlaylistInfo.id.removePrefix("VL")
-            val defaultCoverImage = ytPlaylistInfo.coverPath ?: ytPlaylistInfo.coverHref
+            val defaultCoverImage = (ytPlaylistInfo.coverPath ?: ytPlaylistInfo.coverHref)
+                .takeIf { it.isNotBlank() && it != "__REMOVED__" }
+            val hasCustomLock = coverPrefs.getBoolean("${pId}_customCoverLocked", false) ||
+                coverPrefs.getBoolean("${ytPlaylistInfo.id}_customCoverLocked", false)
             val savedCoverRaw = coverPrefs.getString("${pId}_coverImageUri", null) ?: coverPrefs.getString("${ytPlaylistInfo.id}_coverImageUri", null)
             val savedCoverImageUri = when (savedCoverRaw) {
-                "__REMOVED__" -> null
-                null -> defaultCoverImage
+                null, "", "__REMOVED__" -> null
                 else -> savedCoverRaw
             }
             val coverColor = when {
@@ -176,7 +185,7 @@ class PlaylistPreferencesRepository @Inject constructor(
                 lastModified = mTime,
                 isAiGenerated = false,
                 isQueueGenerated = false,
-                coverImageUri = savedCoverImageUri ?: defaultCoverImage,
+                coverImageUri = if (hasCustomLock) savedCoverImageUri else (savedCoverImageUri ?: defaultCoverImage),
                 coverColorArgb = coverColor,
                 coverIconName = coverIcon,
                 coverShapeType = coverShape,
@@ -289,7 +298,10 @@ class PlaylistPreferencesRepository @Inject constructor(
             remove("${playlistId}_coverShapeDetail3")
             remove("${normalizedId}_coverShapeDetail4")
             remove("${playlistId}_coverShapeDetail4")
+            remove("${normalizedId}_customCoverLocked")
+            remove("${playlistId}_customCoverLocked")
         }.apply()
+        _coverCustomizationVersion.value += 1L
     }
 
     suspend fun renamePlaylist(playlistId: String, newName: String) {
@@ -308,7 +320,7 @@ class PlaylistPreferencesRepository @Inject constructor(
         }
     }
 
-    suspend fun updatePlaylist(playlist: Playlist) {
+    suspend fun updatePlaylist(playlist: Playlist, isUserCustomization: Boolean = false) {
         ensureMigratedIfNeeded()
         val normalizedId = playlist.id.removePrefix("VL")
         if (playlist.source == "YOUTUBE") {
@@ -332,7 +344,7 @@ class PlaylistPreferencesRepository @Inject constructor(
             
             val existingLocal = localPlaylistDao.getPlaylistById(normalizedId) ?: localPlaylistDao.getPlaylistById(playlist.id)
             if (existingLocal != null) {
-                if (existingLocal.name != playlist.name) {
+                if (existingLocal.name != playlist.name || isUserCustomization) {
                     localPlaylistDao.upsertPlaylist(playlist.toEntity().copy(id = existingLocal.id))
                 }
                 val currentLocalSongIds = localPlaylistDao.getSongIdsForPlaylist(existingLocal.id)
@@ -341,56 +353,78 @@ class PlaylistPreferencesRepository @Inject constructor(
                 }
             }
 
-            coverPrefs.edit().apply {
-                if (playlist.coverImageUri != null) {
-                    putString("${normalizedId}_coverImageUri", playlist.coverImageUri)
-                    putString("${playlist.id}_coverImageUri", playlist.coverImageUri)
-                } else {
-                    putString("${normalizedId}_coverImageUri", "__REMOVED__")
-                    putString("${playlist.id}_coverImageUri", "__REMOVED__")
-                }
-                if (playlist.coverColorArgb != null) {
-                    putInt("${normalizedId}_coverColorArgb", playlist.coverColorArgb)
-                    putInt("${playlist.id}_coverColorArgb", playlist.coverColorArgb)
-                } else {
-                    remove("${normalizedId}_coverColorArgb")
-                    remove("${playlist.id}_coverColorArgb")
-                }
-                putString("${normalizedId}_coverIconName", playlist.coverIconName)
-                putString("${playlist.id}_coverIconName", playlist.coverIconName)
-                putString("${normalizedId}_coverShapeType", playlist.coverShapeType)
-                putString("${playlist.id}_coverShapeType", playlist.coverShapeType)
-                if (playlist.coverShapeDetail1 != null) {
-                    putFloat("${normalizedId}_coverShapeDetail1", playlist.coverShapeDetail1)
-                    putFloat("${playlist.id}_coverShapeDetail1", playlist.coverShapeDetail1)
-                } else {
-                    remove("${normalizedId}_coverShapeDetail1")
-                    remove("${playlist.id}_coverShapeDetail1")
-                }
-                if (playlist.coverShapeDetail2 != null) {
-                    putFloat("${normalizedId}_coverShapeDetail2", playlist.coverShapeDetail2)
-                    putFloat("${playlist.id}_coverShapeDetail2", playlist.coverShapeDetail2)
-                } else {
-                    remove("${normalizedId}_coverShapeDetail2")
-                    remove("${playlist.id}_coverShapeDetail2")
-                }
-                if (playlist.coverShapeDetail3 != null) {
-                    putFloat("${normalizedId}_coverShapeDetail3", playlist.coverShapeDetail3)
-                    putFloat("${playlist.id}_coverShapeDetail3", playlist.coverShapeDetail3)
-                } else {
-                    remove("${normalizedId}_coverShapeDetail3")
-                    remove("${playlist.id}_coverShapeDetail3")
-                }
-                if (playlist.coverShapeDetail4 != null) {
-                    putFloat("${normalizedId}_coverShapeDetail4", playlist.coverShapeDetail4)
-                    putFloat("${playlist.id}_coverShapeDetail4", playlist.coverShapeDetail4)
-                } else {
-                    remove("${normalizedId}_coverShapeDetail4")
-                    remove("${playlist.id}_coverShapeDetail4")
-                }
-            }.apply()
+            val cleanCoverUri = playlist.coverImageUri?.takeIf { it.isNotBlank() && it != "__REMOVED__" }
+            val wasLocked = hasCustomCoverOverride(playlist.id)
+            if (isUserCustomization) {
+                val shouldLockCustom = !cleanCoverUri.isNullOrBlank() || playlist.coverColorArgb != null
+                coverPrefs.edit().apply {
+                    putBoolean("${normalizedId}_customCoverLocked", shouldLockCustom)
+                    putBoolean("${playlist.id}_customCoverLocked", shouldLockCustom)
+                    if (cleanCoverUri != null) {
+                        putString("${normalizedId}_coverImageUri", cleanCoverUri)
+                        putString("${playlist.id}_coverImageUri", cleanCoverUri)
+                    } else {
+                        remove("${normalizedId}_coverImageUri")
+                        remove("${playlist.id}_coverImageUri")
+                    }
+                    if (playlist.coverColorArgb != null) {
+                        putInt("${normalizedId}_coverColorArgb", playlist.coverColorArgb)
+                        putInt("${playlist.id}_coverColorArgb", playlist.coverColorArgb)
+                    } else {
+                        remove("${normalizedId}_coverColorArgb")
+                        remove("${playlist.id}_coverColorArgb")
+                    }
+                    putString("${normalizedId}_coverIconName", playlist.coverIconName)
+                    putString("${playlist.id}_coverIconName", playlist.coverIconName)
+                    putString("${normalizedId}_coverShapeType", playlist.coverShapeType)
+                    putString("${playlist.id}_coverShapeType", playlist.coverShapeType)
+                    if (playlist.coverShapeDetail1 != null) {
+                        putFloat("${normalizedId}_coverShapeDetail1", playlist.coverShapeDetail1)
+                        putFloat("${playlist.id}_coverShapeDetail1", playlist.coverShapeDetail1)
+                    } else {
+                        remove("${normalizedId}_coverShapeDetail1")
+                        remove("${playlist.id}_coverShapeDetail1")
+                    }
+                    if (playlist.coverShapeDetail2 != null) {
+                        putFloat("${normalizedId}_coverShapeDetail2", playlist.coverShapeDetail2)
+                        putFloat("${playlist.id}_coverShapeDetail2", playlist.coverShapeDetail2)
+                    } else {
+                        remove("${normalizedId}_coverShapeDetail2")
+                        remove("${playlist.id}_coverShapeDetail2")
+                    }
+                    if (playlist.coverShapeDetail3 != null) {
+                        putFloat("${normalizedId}_coverShapeDetail3", playlist.coverShapeDetail3)
+                        putFloat("${playlist.id}_coverShapeDetail3", playlist.coverShapeDetail3)
+                    } else {
+                        remove("${normalizedId}_coverShapeDetail3")
+                        remove("${playlist.id}_coverShapeDetail3")
+                    }
+                    if (playlist.coverShapeDetail4 != null) {
+                        putFloat("${normalizedId}_coverShapeDetail4", playlist.coverShapeDetail4)
+                        putFloat("${playlist.id}_coverShapeDetail4", playlist.coverShapeDetail4)
+                    } else {
+                        remove("${normalizedId}_coverShapeDetail4")
+                        remove("${playlist.id}_coverShapeDetail4")
+                    }
+                }.apply()
+                _coverCustomizationVersion.value += 1L
+            } else if (!wasLocked) {
+                coverPrefs.edit().apply {
+                    if (cleanCoverUri != null) {
+                        putString("${normalizedId}_coverImageUri", cleanCoverUri)
+                        putString("${playlist.id}_coverImageUri", cleanCoverUri)
+                    } else {
+                        remove("${normalizedId}_coverImageUri")
+                        remove("${playlist.id}_coverImageUri")
+                    }
+                }.apply()
+                _coverCustomizationVersion.value += 1L
+            }
         } else {
-            val updated = playlist.copy(lastModified = System.currentTimeMillis())
+            val updated = playlist.copy(
+                coverImageUri = playlist.coverImageUri?.takeIf { it.isNotBlank() && it != "__REMOVED__" },
+                lastModified = System.currentTimeMillis()
+            )
             localPlaylistDao.upsertPlaylist(updated.toEntity())
             val currentLocalSongIds = localPlaylistDao.getSongIdsForPlaylist(updated.id)
             if (currentLocalSongIds != updated.songIds) {

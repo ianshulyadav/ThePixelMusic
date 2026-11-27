@@ -568,11 +568,45 @@ class PlaylistViewModel @Inject constructor(
                                             )
                                         }
 
+                                    val resolvedRemoteCover = com.unshoo.pixelmusic.data.remote.youtube.upgradeThumbnailUrlToHighQuality(
+                                        ytPlaylist.thumbnail?.takeIf { it.isNotBlank() }
+                                            ?: ytPlaylistPage.songs.firstOrNull { !it.thumbnail.isNullOrBlank() }?.thumbnail
+                                    )?.takeIf { it.isNotBlank() }
+                                    val hasUserCover = playlistPreferencesRepository.hasCustomCoverOverride(playlistId)
+
                                     if (page1Matches) {
+                                        val effectiveCoverForUnchanged = if (hasUserCover) {
+                                            playlist.coverImageUri
+                                        } else {
+                                            resolvedRemoteCover ?: playlist.coverImageUri
+                                        }
+                                        val metadataChanged = ytPlaylist.title != playlist.name ||
+                                            effectiveCoverForUnchanged != playlist.coverImageUri
+                                        if (metadataChanged) {
+                                            playlistPreferencesRepository.updatePlaylist(
+                                                playlist.copy(
+                                                    name = ytPlaylist.title,
+                                                    coverImageUri = effectiveCoverForUnchanged
+                                                ),
+                                                isUserCustomization = false
+                                            )
+                                        }
                                         Log.d("PlaylistViewModel", "YouTube playlist '$playlistId' unchanged (signature & count match). Skipping paging.")
                                         withContext(Dispatchers.Main) {
                                             if (_uiState.value.currentPlaylistDetails?.id == playlistId) {
-                                                _uiState.update { it.copy(isLoading = false) }
+                                                _uiState.update { state ->
+                                                    state.copy(
+                                                        currentPlaylistDetails = if (metadataChanged) {
+                                                            state.currentPlaylistDetails?.copy(
+                                                                name = ytPlaylist.title,
+                                                                coverImageUri = effectiveCoverForUnchanged
+                                                            )
+                                                        } else {
+                                                            state.currentPlaylistDetails
+                                                        },
+                                                        isLoading = false
+                                                    )
+                                                }
                                             }
                                         }
                                         return@launch
@@ -599,9 +633,12 @@ class PlaylistViewModel @Inject constructor(
                                     }
 
                                     // Atomic update via centralized persistence manager
-                                    val highQualityCover = com.unshoo.pixelmusic.data.remote.youtube.upgradeThumbnailUrlToHighQuality(
-                                        ytPlaylist.thumbnail
-                                    ) ?: ytPlaylist.thumbnail ?: ""
+                                    val highQualityCover = resolvedRemoteCover
+                                        ?: com.unshoo.pixelmusic.data.remote.youtube.upgradeThumbnailUrlToHighQuality(
+                                            ytPlaylist.thumbnail?.takeIf { it.isNotBlank() }
+                                                ?: allYtSongs.firstOrNull { !it.thumbnail.isNullOrBlank() }?.thumbnail
+                                        )?.takeIf { it.isNotBlank() }
+                                        ?: ""
 
                                     val info = PlaylistInfo(
                                         id = playlistId,
@@ -622,11 +659,17 @@ class PlaylistViewModel @Inject constructor(
                                         if (_uiState.value.currentPlaylistDetails?.id == playlistId) {
                                             _uiState.update { state ->
                                                 val songsChanged = state.currentPlaylistSongs != allNativeSongs
+                                                val effectiveCover = if (hasUserCover) {
+                                                    state.currentPlaylistDetails?.coverImageUri
+                                                } else {
+                                                    highQualityCover.takeIf { it.isNotBlank() }
+                                                        ?: state.currentPlaylistDetails?.coverImageUri
+                                                }
                                                 state.copy(
                                                     currentPlaylistDetails = state.currentPlaylistDetails?.copy(
                                                         name = ytPlaylist.title,
                                                         songIds = allSongIds,
-                                                        coverImageUri = highQualityCover
+                                                        coverImageUri = effectiveCover
                                                     ),
                                                     currentPlaylistSongs = if (songsChanged) allNativeSongs else state.currentPlaylistSongs,
                                                     isLoading = false
@@ -690,6 +733,10 @@ class PlaylistViewModel @Inject constructor(
                             val existing = playlistPreferencesRepository.userPlaylistsFlow.first().find {
                                 it.id.removePrefix("VL") == cleanId
                             }
+                            val remoteCover = com.unshoo.pixelmusic.data.remote.youtube.upgradeThumbnailUrlToHighQuality(
+                                ytPlaylist.thumbnail?.takeIf { it.isNotBlank() }
+                                    ?: ytPlaylistPage.songs.firstOrNull { !it.thumbnail.isNullOrBlank() }?.thumbnail
+                            )?.takeIf { it.isNotBlank() }
                             if (existing != null) {
                                 val updatedSongIds = if (existing.songIds.size > firstPageSongs.size) {
                                     existing.songIds
@@ -700,8 +747,13 @@ class PlaylistViewModel @Inject constructor(
                                     existing.copy(
                                         name = ytPlaylist.title,
                                         songIds = updatedSongIds,
-                                        coverImageUri = ytPlaylist.thumbnail
-                                    )
+                                        coverImageUri = if (playlistPreferencesRepository.hasCustomCoverOverride(existing.id)) {
+                                            existing.coverImageUri
+                                        } else {
+                                            remoteCover ?: existing.coverImageUri
+                                        }
+                                    ),
+                                    isUserCustomization = false
                                 )
                             }
 
@@ -721,7 +773,11 @@ class PlaylistViewModel @Inject constructor(
                                 id = playlistId,
                                 name = ytPlaylist.title,
                                 songIds = displaySongs.map { s -> s.id },
-                                coverImageUri = ytPlaylist.thumbnail,
+                                coverImageUri = if (existing != null && playlistPreferencesRepository.hasCustomCoverOverride(existing.id)) {
+                                    existing.coverImageUri
+                                } else {
+                                    remoteCover
+                                },
                                 source = "YOUTUBE"
                             )
 
@@ -1264,95 +1320,121 @@ class PlaylistViewModel @Inject constructor(
         cropPanY: Float
     ): String? {
         return withContext(Dispatchers.IO) {
+            val targetSize = 1024
+            var originalBitmap: Bitmap? = null
+            var targetBitmap: Bitmap? = null
             try {
-                val originalBitmap: android.graphics.Bitmap? = when {
+                originalBitmap = when {
                     uri.scheme == "http" || uri.scheme == "https" -> {
-                        val loader = context.imageLoader
                         val request = coil.request.ImageRequest.Builder(context)
                             .data(uri)
+                            .size(targetSize, targetSize)
                             .allowHardware(false)
                             .build()
-                        val result = loader.execute(request)
+                        val result = context.imageLoader.execute(request)
                         (result.drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap
                     }
                     uri.scheme == "file" || uri.scheme.isNullOrEmpty() -> {
                         val path = uri.path ?: uri.toString()
-                        android.graphics.BitmapFactory.decodeFile(path)
+                        val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        android.graphics.BitmapFactory.decodeFile(path, bounds)
+                        var sampleSize = 1
+                        while (bounds.outWidth / (sampleSize * 2) >= targetSize &&
+                            bounds.outHeight / (sampleSize * 2) >= targetSize
+                        ) {
+                            sampleSize *= 2
+                        }
+                        android.graphics.BitmapFactory.decodeFile(
+                            path,
+                            android.graphics.BitmapFactory.Options().apply { inSampleSize = sampleSize }
+                        )
                     }
                     Build.VERSION.SDK_INT >= Build.VERSION_CODES.P -> {
-                        ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, uri)) { decoder, _, _ ->
-                            decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-                        }
+                        runCatching {
+                            ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, uri)) { decoder, info, _ ->
+                                decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                                val maxSide = maxOf(info.size.width, info.size.height)
+                                if (maxSide > 2048) {
+                                    val scaleFactor = 2048f / maxSide.toFloat()
+                                    decoder.setTargetSize(
+                                        (info.size.width * scaleFactor).toInt().coerceAtLeast(1),
+                                        (info.size.height * scaleFactor).toInt().coerceAtLeast(1)
+                                    )
+                                }
+                            }
+                        }.getOrNull()
                     }
                     else -> {
                         @Suppress("DEPRECATION")
-                        MediaStore.Images.Media.getBitmap(context.contentResolver, uri)
+                        runCatching { MediaStore.Images.Media.getBitmap(context.contentResolver, uri) }.getOrNull()
                     }
                 }
-                if (originalBitmap == null) return@withContext null
 
-                // Target dimensions (Square)
-                val targetSize = 1024
+                // Fallback to Coil (handles scoped Photo Picker URIs, WebP/HEIC, and animated/vector drawables).
+                if (originalBitmap == null) {
+                    val request = coil.request.ImageRequest.Builder(context)
+                        .data(uri)
+                        .size(targetSize, targetSize)
+                        .allowHardware(false)
+                        .build()
+                    val result = context.imageLoader.execute(request)
+                    originalBitmap = (result.drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap
+                        ?: result.drawable?.let { drawable ->
+                            val w = drawable.intrinsicWidth.coerceIn(1, targetSize)
+                            val h = drawable.intrinsicHeight.coerceIn(1, targetSize)
+                            val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                            val c = android.graphics.Canvas(bmp)
+                            drawable.setBounds(0, 0, w, h)
+                            drawable.draw(c)
+                            bmp
+                        }
+                }
+                if (originalBitmap == null || originalBitmap.width <= 0 || originalBitmap.height <= 0) {
+                    return@withContext null
+                }
 
-                // create target bitmap
-                val targetBitmap = Bitmap.createBitmap(targetSize, targetSize, Bitmap.Config.ARGB_8888)
+                targetBitmap = Bitmap.createBitmap(targetSize, targetSize, Bitmap.Config.ARGB_8888)
                 val canvas = android.graphics.Canvas(targetBitmap)
 
-                // Calculate base dimensions (fitting smallest dimension to target)
-                // Logic must match ImageCropView
                 val bitmapWidth = originalBitmap.width.toFloat()
                 val bitmapHeight = originalBitmap.height.toFloat()
                 val bitmapRatio = bitmapWidth / bitmapHeight
 
                 val (baseWidth, baseHeight) = if (bitmapRatio > 1f) {
-                    // Wide: Height matches target
                     targetSize * bitmapRatio to targetSize.toFloat()
                 } else {
-                    // Tall: Width matches target
                     targetSize.toFloat() to targetSize / bitmapRatio
                 }
 
-                // Calculate transformations
-                // Scaled Dimensions
-                val scaledWidth = baseWidth * cropScale
-                val scaledHeight = baseHeight * cropScale
-
-                // Center + Pan
-                // Center of target is targetSize/2
-                // We want to center the Scaled Image at (Center + Pan)
-                // TopLeft = CenterX - ScaledW/2 + PanX
-
-                // Pan is normalized relative to Viewport (TargetSize)
+                val safeCropScale = cropScale.coerceIn(1f, 5f)
+                val scaledWidth = baseWidth * safeCropScale
+                val scaledHeight = baseHeight * safeCropScale
                 val panPxX = cropPanX * targetSize
                 val panPxY = cropPanY * targetSize
-
                 val dx = (targetSize - scaledWidth) / 2f + panPxX
                 val dy = (targetSize - scaledHeight) / 2f + panPxY
 
-                // Draw
-                // We draw the original bitmap scaled to (scaledWidth, scaledHeight) at (dx, dy)
                 val matrix = android.graphics.Matrix()
                 matrix.postScale(scaledWidth / bitmapWidth, scaledHeight / bitmapHeight)
                 matrix.postTranslate(dx, dy)
+                canvas.drawBitmap(originalBitmap, matrix, android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG))
 
-                canvas.drawBitmap(originalBitmap, matrix, null)
-
-                // Save
                 val fileName = "playlist_cover_$uniqueId.jpg"
                 val file = File(context.filesDir, fileName)
                 FileOutputStream(file).use { out ->
-                    targetBitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+                    targetBitmap.compress(Bitmap.CompressFormat.JPEG, 92, out)
                 }
-
-                // Recycle
-                if (originalBitmap != targetBitmap) originalBitmap.recycle()
-                // Target bitmap is not recycled here, let GC handle?
-                // Or recycle explicitly if immediate memory pressure concern.
-
                 file.absolutePath
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e("PlaylistViewModel", "Failed to save playlist cover image for uri=$uri", e)
                 null
+            } finally {
+                if (originalBitmap != null && originalBitmap != targetBitmap && !originalBitmap.isRecycled) {
+                    originalBitmap.recycle()
+                }
+                if (targetBitmap != null && !targetBitmap.isRecycled) {
+                    targetBitmap.recycle()
+                }
             }
         }
     }
@@ -1641,22 +1723,33 @@ class PlaylistViewModel @Inject constructor(
         coverShapeDetail4: Float?
     ) {
         if (isFolderPlaylistId(playlistId)) return
-        val currentPlaylist = _uiState.value.currentPlaylistDetails ?: return
-        if (currentPlaylist.id != playlistId) return
 
         viewModelScope.launch {
-            var savedCoverPath: String? = currentPlaylist.coverImageUri
+            val cleanId = playlistId.removePrefix("VL")
+            val currentPlaylist = _uiState.value.currentPlaylistDetails
+                ?.takeIf { it.id == playlistId || it.id.removePrefix("VL") == cleanId }
+                ?: playlistPreferencesRepository.getPlaylistsOnce().find {
+                    it.id == playlistId || it.id.removePrefix("VL") == cleanId
+                }
+                ?: return@launch
 
-            // If a new URI is provided and it's different from the existing one (and not null)
-            // Or if we need to re-save because crop params changed?
-            // For simplicity, if coverImageUri is passed and it's a content URI, we save it.
-            // If it's the same string as savedCoverPath, we assume it's unchanged unless we want to force re-crop.
-            // The UI will pass the Uri string. If it's a local file path, it's likely already saved.
-            // But if the user selected a new image, it will be a content content:// uri.
+            val existingRaw = currentPlaylist.coverImageUri?.takeIf { it.isNotBlank() && it != "__REMOVED__" }
+            val incomingRaw = coverImageUri?.takeIf { it.isNotBlank() && it != "__REMOVED__" }
+            val hasCropAdjustment = cropScale != 1f || cropPanX != 0f || cropPanY != 0f
+            val isSameExistingCover = existingRaw != null && incomingRaw != null && (
+                incomingRaw == existingRaw ||
+                    (existingRaw.startsWith("/") && incomingRaw == Uri.fromFile(File(existingRaw)).toString()) ||
+                    (incomingRaw.startsWith("file://") && incomingRaw.removePrefix("file://") == existingRaw)
+                )
 
-            if (coverImageUri != null && coverImageUri != currentPlaylist.coverImageUri) {
+            var savedCoverPath: String? = existingRaw
+            if (incomingRaw != null && (!isSameExistingCover || hasCropAdjustment)) {
                 val imageId = UUID.randomUUID().toString()
-                val parsedUri = Uri.parse(coverImageUri)
+                val parsedUri = if (incomingRaw.startsWith("/")) {
+                    Uri.fromFile(File(incomingRaw))
+                } else {
+                    Uri.parse(incomingRaw)
+                }
                 val newPath = saveCoverImageToInternalStorage(
                     parsedUri,
                     imageId,
@@ -1665,17 +1758,29 @@ class PlaylistViewModel @Inject constructor(
                     cropPanY
                 )
                 if (newPath != null) {
+                    // Clean up replaced internal playlist_cover_*.jpg file to avoid orphan files.
+                    if (existingRaw != null && existingRaw.startsWith(context.filesDir.absolutePath) &&
+                        File(existingRaw).name.startsWith("playlist_cover_")
+                    ) {
+                        runCatching { File(existingRaw).delete() }
+                    }
                     savedCoverPath = newPath
+                } else {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, "Could not save selected cover image", Toast.LENGTH_SHORT).show()
+                    }
                 }
-            } else if (coverImageUri == null) {
+            } else if (incomingRaw == null) {
+                if (existingRaw != null && existingRaw.startsWith(context.filesDir.absolutePath) &&
+                    File(existingRaw).name.startsWith("playlist_cover_")
+                ) {
+                    runCatching { File(existingRaw).delete() }
+                }
                 savedCoverPath = null
-            } else {
-                savedCoverPath = currentPlaylist.coverImageUri
             }
 
-
             val updatedPlaylist = currentPlaylist.copy(
-                name = name,
+                name = name.ifBlank { currentPlaylist.name },
                 coverImageUri = savedCoverPath,
                 coverColorArgb = coverColor,
                 coverIconName = coverIcon,
@@ -1687,16 +1792,19 @@ class PlaylistViewModel @Inject constructor(
             )
 
             // Optimistic update
-            _uiState.update {
-                it.copy(currentPlaylistDetails = updatedPlaylist)
+            _uiState.update { state ->
+                val matchesCurrent = state.currentPlaylistDetails?.let {
+                    it.id == playlistId || it.id.removePrefix("VL") == cleanId
+                } == true
+                if (matchesCurrent) state.copy(currentPlaylistDetails = updatedPlaylist) else state
             }
 
-            playlistPreferencesRepository.updatePlaylist(updatedPlaylist)
+            playlistPreferencesRepository.updatePlaylist(updatedPlaylist, isUserCustomization = true)
 
-            if (currentPlaylist.source == "YOUTUBE" && currentPlaylist.name != name) {
+            if (currentPlaylist.source == "YOUTUBE" && currentPlaylist.name != updatedPlaylist.name) {
                 try {
                     withContext(Dispatchers.IO) {
-                        YouTube.renamePlaylist(currentPlaylist.id, name)
+                        YouTube.renamePlaylist(currentPlaylist.id, updatedPlaylist.name)
                     }
                 } catch (e: Exception) {
                     Log.e("PlaylistViewModel", "Failed to rename remote YouTube playlist in updatePlaylistParameters", e)
@@ -2727,12 +2835,28 @@ class PlaylistViewModel @Inject constructor(
                         )
                         
                         val updatedIds = allNativeSongs.map { it.id }
+                        val remoteCover = com.unshoo.pixelmusic.data.remote.youtube.upgradeThumbnailUrlToHighQuality(
+                            ytPlaylist.thumbnail?.takeIf { it.isNotBlank() }
+                                ?: allYtSongs.firstOrNull { !it.thumbnail.isNullOrBlank() }?.thumbnail
+                        )?.takeIf { it.isNotBlank() }
+                        val existingYtInfo = com.unshoo.pixelmusic.data.database.youtube.AppDatabase
+                            .getInstance(context)
+                            .playlistRepository()
+                            .getPlaylistById(playlistId.removePrefix("VL"))?.info
+                        if (existingYtInfo != null && remoteCover != null && existingYtInfo.coverHref != remoteCover) {
+                            com.unshoo.pixelmusic.data.database.youtube.AppDatabase
+                                .getInstance(context)
+                                .playlistRepository()
+                                .insertPlaylist(existingYtInfo.copy(title = ytPlaylist.title, coverHref = remoteCover))
+                        }
+                        val hasUserCover = playlistPreferencesRepository.hasCustomCoverOverride(playlist.id)
                         playlistPreferencesRepository.updatePlaylist(
                             playlist.copy(
                                 name = ytPlaylist.title,
                                 songIds = updatedIds,
-                                coverImageUri = ytPlaylist.thumbnail
-                            )
+                                coverImageUri = if (hasUserCover) playlist.coverImageUri else (remoteCover ?: playlist.coverImageUri)
+                            ),
+                            isUserCustomization = false
                         )
                         
                         withContext(Dispatchers.Main) {

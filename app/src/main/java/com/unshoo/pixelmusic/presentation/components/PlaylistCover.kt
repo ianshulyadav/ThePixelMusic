@@ -13,7 +13,10 @@ import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -76,6 +79,19 @@ fun PlaylistCover(
         Modifier.graphicsLayer(scaleX = s, scaleY = s)
     } else Modifier
 
+    val rawCoverUri = playlist.coverImageUri
+        ?.takeIf { it.isNotBlank() && it != "__REMOVED__" }
+    val localCoverExists = remember(rawCoverUri) {
+        if (rawCoverUri != null && rawCoverUri.startsWith("/")) {
+            val file = java.io.File(rawCoverUri)
+            file.exists() && file.length() > 0L
+        } else {
+            true
+        }
+    }
+    val effectiveCoverUri = if (localCoverExists) rawCoverUri else null
+    var imageLoadFailed by remember(effectiveCoverUri) { mutableStateOf(false) }
+
     Box(
         modifier = modifier
             .size(size)
@@ -83,12 +99,13 @@ fun PlaylistCover(
             .then(shapeMod)
             .clip(shape)
     ) {
-        if (!playlist.coverImageUri.isNullOrBlank()) {
+        if (effectiveCoverUri != null && !imageLoadFailed) {
             AsyncImage(
-                model = if (playlist.coverImageUri.startsWith("/")) java.io.File(playlist.coverImageUri) else playlist.coverImageUri,
+                model = if (effectiveCoverUri.startsWith("/")) java.io.File(effectiveCoverUri) else effectiveCoverUri,
                 contentDescription = null,
                 modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
+                contentScale = ContentScale.Crop,
+                onError = { imageLoadFailed = true }
             )
         } else if (playlist.coverColorArgb != null) {
             Box(

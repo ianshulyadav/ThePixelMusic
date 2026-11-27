@@ -6,24 +6,60 @@ import com.unshoo.pixelmusic.utils.extractArtistsFromTitle
 import unshoo.ianshulyadav.pixelmusic.innertube.models.SongItem
 import unshoo.ianshulyadav.pixelmusic.innertube.pages.PageHelper
 
+private val GOOGLE_SIZE_W_H_REGEX = Regex("=w\\d+-h\\d+[^?]*")
+private val GOOGLE_SIZE_S_REGEX = Regex("=s\\d+[^?]*")
+private val YTIMG_VIDEO_REGEX = Regex("/vi(?:_webp)?/([^/]+)/")
+
+/**
+ * Signed or tokenized Google/YouTube URLs (`?sqp=...&rs=...`, `&sigh=...`, `Signature=...`)
+ * break with HTTP 400/403/404 if any resize segment is modified. Keep them verbatim.
+ */
+fun isSignedGoogleThumbnailUrl(url: String): Boolean {
+    val qIdx = url.indexOf('?')
+    if (qIdx < 0) return false
+    val query = url.substring(qIdx)
+    return query.contains("sqp=", ignoreCase = true) ||
+        query.contains("rs=", ignoreCase = true) ||
+        query.contains("sigh=", ignoreCase = true) ||
+        query.contains("Signature=", ignoreCase = true) ||
+        query.contains("Expires=", ignoreCase = true)
+}
+
+/**
+ * Rewrites resize parameters on unsigned `googleusercontent.com` / `ggpht.com` URLs without
+ * corrupting URLs that carry `?` query strings.
+ */
+fun rewriteGoogleThumbnailUrl(url: String, widthPx: Int, cropSquare: Boolean = false): String {
+    if (isSignedGoogleThumbnailUrl(url)) return url
+    val sizeParam = if (cropSquare) "=w$widthPx-h$widthPx-c-rj" else "=w$widthPx-h$widthPx-l90-rj"
+    val sParam = "=s$widthPx"
+    val qIdx = url.indexOf('?')
+    val path = if (qIdx >= 0) url.substring(0, qIdx) else url
+    val query = if (qIdx >= 0) url.substring(qIdx) else ""
+    val rewrittenPath = path
+        .replace(GOOGLE_SIZE_W_H_REGEX, sizeParam)
+        .replace(GOOGLE_SIZE_S_REGEX, sParam)
+        .let { updated ->
+            when {
+                updated.contains("=w") || updated.contains("=s") -> updated
+                updated.contains("=") -> updated.substringBeforeLast("=") + sizeParam
+                else -> "$updated$sizeParam"
+            }
+        }
+    return rewrittenPath + query
+}
+
 fun upgradeThumbnailUrlToQuality(
     url: String?,
     quality: com.unshoo.pixelmusic.data.preferences.AlbumArtQuality = com.unshoo.pixelmusic.data.preferences.AlbumArtQuality.ORIGINAL
 ): String? {
     if (url.isNullOrBlank()) return url
 
-    val sizeParam = when (quality) {
-        com.unshoo.pixelmusic.data.preferences.AlbumArtQuality.LOW -> "=w256-h256-l90-rj"
-        com.unshoo.pixelmusic.data.preferences.AlbumArtQuality.MEDIUM -> "=w512-h512-l90-rj"
-        com.unshoo.pixelmusic.data.preferences.AlbumArtQuality.HIGH -> "=w800-h800-l90-rj"
-        com.unshoo.pixelmusic.data.preferences.AlbumArtQuality.ORIGINAL -> "=w1024-h1024-l90-rj"
-    }
-
-    val sParam = when (quality) {
-        com.unshoo.pixelmusic.data.preferences.AlbumArtQuality.LOW -> "=s256"
-        com.unshoo.pixelmusic.data.preferences.AlbumArtQuality.MEDIUM -> "=s512"
-        com.unshoo.pixelmusic.data.preferences.AlbumArtQuality.HIGH -> "=s800"
-        com.unshoo.pixelmusic.data.preferences.AlbumArtQuality.ORIGINAL -> "=s1024"
+    val widthPx = when (quality) {
+        com.unshoo.pixelmusic.data.preferences.AlbumArtQuality.LOW -> 256
+        com.unshoo.pixelmusic.data.preferences.AlbumArtQuality.MEDIUM -> 512
+        com.unshoo.pixelmusic.data.preferences.AlbumArtQuality.HIGH -> 800
+        com.unshoo.pixelmusic.data.preferences.AlbumArtQuality.ORIGINAL -> 1024
     }
 
     val ytQuality = when (quality) {
@@ -34,18 +70,10 @@ fun upgradeThumbnailUrlToQuality(
     }
 
     return when {
-        url.contains("googleusercontent.com") || url.contains("ggpht.com") -> {
-            url.replace(Regex("=w\\d+-h\\d+.*"), sizeParam)
-                .replace(Regex("=s\\d+.*"), sParam)
-                .let {
-                    if (!it.contains("=w") && !it.contains("=s")) {
-                        if (it.contains("=")) it.substringBeforeLast("=") + sizeParam
-                        else "$it$sizeParam"
-                    } else it
-                }
-        }
+        url.contains("googleusercontent.com") || url.contains("ggpht.com") ->
+            rewriteGoogleThumbnailUrl(url, widthPx, cropSquare = false)
         url.contains("i.ytimg.com") || url.contains("img.youtube.com") -> {
-            val match = Regex("/vi(?:_webp)?/([^/]+)/").find(url)
+            val match = YTIMG_VIDEO_REGEX.find(url)
             if (match != null) {
                 val videoId = match.groupValues[1]
                 "https://i.ytimg.com/vi/$videoId/$ytQuality"

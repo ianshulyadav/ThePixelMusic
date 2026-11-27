@@ -341,20 +341,16 @@ private fun CreatePlaylistContent(
     var starSides by remember { androidx.compose.runtime.mutableIntStateOf(5) } // 3 - 20
 
     LaunchedEffect(selectedImageUri) {
-         if (selectedImageUri != null) {
-             val loader = context.imageLoader
-             val request = ImageRequest.Builder(context)
-                 .data(selectedImageUri)
-                 .allowHardware(false)
-                 .build()
-             
-             val result = withContext(Dispatchers.IO) { loader.execute(request) }
-             val drawable = result.drawable
-             if (drawable is android.graphics.drawable.BitmapDrawable) {
-                 imageBitmap = drawable.bitmap.asImageBitmap()
+         val currentUri = selectedImageUri
+         if (currentUri != null) {
+             val loaded = loadCoverPreviewBitmap(context, currentUri)
+             imageBitmap = loaded
+             if (loaded == null) {
+                 showCropUi = false
              }
          } else {
              imageBitmap = null
+             showCropUi = false
              cropScale = 1f
              cropOffset = androidx.compose.ui.geometry.Offset.Zero
          }
@@ -364,6 +360,8 @@ private fun CreatePlaylistContent(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri?.let {
+            cropScale = 1f
+            cropOffset = androidx.compose.ui.geometry.Offset.Zero
             selectedImageUri = it
             showCropUi = true
         }
@@ -724,6 +722,52 @@ private fun CreatePlaylistContent(
     }
 }
 
+private fun parseCoverModelUri(raw: String?): Uri? {
+    val trimmed = raw?.trim()?.takeIf { it.isNotBlank() && it != "__REMOVED__" } ?: return null
+    return when {
+        trimmed.startsWith("/") -> {
+            val file = java.io.File(trimmed)
+            if (file.exists()) Uri.fromFile(file) else null
+        }
+        trimmed.startsWith("file://") -> {
+            val parsed = Uri.parse(trimmed)
+            val path = parsed.path
+            if (path != null && java.io.File(path).exists()) parsed else null
+        }
+        else -> Uri.parse(trimmed)
+    }
+}
+
+private suspend fun loadCoverPreviewBitmap(
+    context: android.content.Context,
+    uri: Uri
+): ImageBitmap? {
+    val loader = context.imageLoader
+    val request = ImageRequest.Builder(context)
+        .data(uri)
+        .size(1024, 1024)
+        .allowHardware(false)
+        .build()
+    val result = withContext(Dispatchers.IO) { loader.execute(request) }
+    val drawable = result.drawable ?: return null
+    val bitmap = if (drawable is android.graphics.drawable.BitmapDrawable) {
+        drawable.bitmap
+    } else {
+        val width = drawable.intrinsicWidth.takeIf { it > 0 }?.coerceAtMost(1024) ?: 512
+        val height = drawable.intrinsicHeight.takeIf { it > 0 }?.coerceAtMost(1024) ?: 512
+        val fallback = android.graphics.Bitmap.createBitmap(
+            width,
+            height,
+            android.graphics.Bitmap.Config.ARGB_8888
+        )
+        val canvas = android.graphics.Canvas(fallback)
+        drawable.setBounds(0, 0, canvas.width, canvas.height)
+        drawable.draw(canvas)
+        fallback
+    }
+    return bitmap?.asImageBitmap()
+}
+
 @Composable
 fun EditPlaylistContent(
     initialName: String,
@@ -743,15 +787,17 @@ fun EditPlaylistContent(
     // Initial State Setup
     var playlistName by remember { mutableStateOf(initialName) }
     
+    val initialParsedImageUri = remember(initialImageUri) { parseCoverModelUri(initialImageUri) }
+
     // Determine initial tab
     // 0=Default, 1=Image, 2=Icon
-    // Logic: If imageUri present -> Image. If Color/Icon present -> Icon. Else Default.
+    // Logic: If valid imageUri present -> Image. If Color/Icon present -> Icon. Else Default.
     // NOTE: existing playlist usually has one of these.
     var selectedTab by remember { 
         mutableStateOf(
             when {
-                // If it's a file path or content URI
-                initialImageUri != null -> 1 
+                // If it's a valid file path, content URI, or remote URL
+                initialParsedImageUri != null -> 1 
                 // If it has specific color/icon (and not just defaults potentially, though defaults are allowed)
                 // We check if image is null. If image is null, do we have custom icon?
                 initialColor != null || initialIconName != null -> 2
@@ -760,7 +806,7 @@ fun EditPlaylistContent(
         )
     }
 
-    var selectedImageUri by remember { mutableStateOf<Uri?>(initialImageUri?.let { Uri.parse(it) }) }
+    var selectedImageUri by remember { mutableStateOf<Uri?>(initialParsedImageUri) }
     var showCropUi by remember { mutableStateOf(false) }
     var imageBitmap by remember(selectedImageUri) { mutableStateOf<ImageBitmap?>(null) }
     
@@ -789,19 +835,16 @@ fun EditPlaylistContent(
 
     // Image Loader
     LaunchedEffect(selectedImageUri) {
-         if (selectedImageUri != null) {
-             val loader = context.imageLoader
-             val request = ImageRequest.Builder(context)
-                 .data(selectedImageUri)
-                 .allowHardware(false)
-                 .build()
-             val result = withContext(Dispatchers.IO) { loader.execute(request) }
-             val drawable = result.drawable
-             if (drawable is android.graphics.drawable.BitmapDrawable) {
-                 imageBitmap = drawable.bitmap.asImageBitmap()
+         val currentUri = selectedImageUri
+         if (currentUri != null) {
+             val loaded = loadCoverPreviewBitmap(context, currentUri)
+             imageBitmap = loaded
+             if (loaded == null) {
+                 showCropUi = false
              }
          } else {
              imageBitmap = null
+             showCropUi = false
              cropScale = 1f
              cropOffset = androidx.compose.ui.geometry.Offset.Zero
          }
@@ -811,6 +854,8 @@ fun EditPlaylistContent(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri?.let {
+            cropScale = 1f
+            cropOffset = androidx.compose.ui.geometry.Offset.Zero
             selectedImageUri = it
             showCropUi = true
             selectedTab = 1 // Force switch to image tab
@@ -982,28 +1027,37 @@ private fun PlaylistFormContent(
     isYoutubeLoggedIn: Boolean = false,
     onGenerateClick: (() -> Unit)? = null
 ) {
-    if (showCropUi && imageBitmap != null) {
-         // Fullscreen Crop UI overrides normal content
-         Box(modifier = modifier.fillMaxSize().padding(16.dp).clip(RoundedCornerShape(24.dp))) {
-             ImageCropView(
-                 imageBitmap = imageBitmap,
-                 modifier = Modifier.fillMaxSize(),
-                 scale = cropScale,
-                 pan = cropOffset,
-                 enabled = true,
-                 onCrop = { scale, pan -> 
-                     onCropScaleChange(scale)
-                     onCropOffsetChange(pan)
-                 }
-             )
-             FilledIconButton(
-                onClick = { onShowCropUiChange(false) },
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(16.dp)
-            ) {
-                Icon(Icons.Rounded.Check, contentDescription = stringResource(R.string.presentation_batch_f_cd_confirm_crop))
-            }
+    if (showCropUi) {
+         if (imageBitmap != null) {
+             // Fullscreen Crop UI overrides normal content
+             Box(modifier = modifier.fillMaxSize().padding(16.dp).clip(RoundedCornerShape(24.dp))) {
+                 ImageCropView(
+                     imageBitmap = imageBitmap,
+                     modifier = Modifier.fillMaxSize(),
+                     scale = cropScale,
+                     pan = cropOffset,
+                     enabled = true,
+                     onCrop = { scale, pan -> 
+                         onCropScaleChange(scale)
+                         onCropOffsetChange(pan)
+                     }
+                 )
+                 FilledIconButton(
+                    onClick = { onShowCropUiChange(false) },
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(16.dp)
+                ) {
+                    Icon(Icons.Rounded.Check, contentDescription = stringResource(R.string.presentation_batch_f_cd_confirm_crop))
+                }
+             }
+         } else {
+             Box(
+                 modifier = modifier.fillMaxSize().padding(16.dp),
+                 contentAlignment = Alignment.Center
+             ) {
+                 androidx.compose.material3.CircularProgressIndicator()
+             }
          }
          return
     }
