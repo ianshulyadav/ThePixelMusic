@@ -9,12 +9,14 @@ import io.mockk.coEvery
 import io.mockk.coJustRun
 import io.mockk.coVerify
 import io.mockk.mockk
+import unshoo.ianshulyadav.pixelmusic.innertube.models.ArtistItem
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -180,5 +182,45 @@ class ArtistImageRepositoryTest {
 
         val validCustom = broken.copy(customImageUri = "/data/user/0/app/files/artist_art_1.jpg")
         assertEquals("/data/user/0/app/files/artist_art_1.jpg", validCustom.effectiveImageUrl)
+    }
+
+    @Test
+    fun `selectBestYoutubeArtistThumbnail matches middle-name channel titles for multi-word queries only`() {
+        val amitChannel = ArtistItem(
+            id = "UC19pnd-F7tw6vDhkmEiAkgA",
+            title = "Amit Shankar Trivedi",
+            thumbnail = "https://yt3.googleusercontent.com/amit=w120-h120-p-l90-rj",
+            shuffleEndpoint = null,
+            radioEndpoint = null
+        )
+        val unrelatedAmit = ArtistItem(
+            id = "UCRQmZ4lsrzXAyvKRV1DSMYA",
+            title = "Amitabh Bhattacharya",
+            thumbnail = "https://yt3.googleusercontent.com/amitabh=w120-h120-l90-rj",
+            shuffleEndpoint = null,
+            radioEndpoint = null
+        )
+        assertEquals(
+            "https://yt3.googleusercontent.com/amit=w120-h120-p-l90-rj",
+            ArtistImageRepository.selectBestYoutubeArtistThumbnail(
+                "AMIT TRIVEDI",
+                listOf(unrelatedAmit, amitChannel)
+            )
+        )
+
+        val singleWordPartial = ArtistItem(
+            id = "UC_other",
+            title = "Aaghaz Live Band",
+            thumbnail = "https://yt3.googleusercontent.com/other=w120-h120-l90-rj",
+            shuffleEndpoint = null,
+            radioEndpoint = null
+        )
+        assertFalse(ArtistImageRepository.matchesArtistTokensInOrder("Aaghaz", "Aaghaz Live Band"))
+        assertNull(
+            ArtistImageRepository.selectBestYoutubeArtistThumbnail(
+                "Aaghaz",
+                listOf(singleWordPartial)
+            )
+        )
     }
 }

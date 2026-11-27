@@ -15,6 +15,7 @@ import com.unshoo.pixelmusic.utils.NetworkRetryUtils
 import com.unshoo.pixelmusic.utils.isRetryableNetworkError
 import unshoo.ianshulyadav.pixelmusic.innertube.YouTube
 import unshoo.ianshulyadav.pixelmusic.innertube.models.ArtistItem
+import unshoo.ianshulyadav.pixelmusic.innertube.models.YTItem
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
@@ -67,6 +68,45 @@ class ArtistImageRepository @Inject constructor(
             cleanArtistQueryName(name)
                 .lowercase(Locale.ROOT)
                 .replace(artistKeyStripRegex, "")
+
+        internal fun matchesArtistTokensInOrder(query: String, candidate: String): Boolean {
+            val queryTokens = cleanArtistQueryName(query)
+                .lowercase(Locale.ROOT)
+                .split(artistKeyStripRegex)
+                .filter { it.isNotBlank() }
+            if (queryTokens.size < 2 || queryTokens.any { it.length < 2 }) return false
+
+            val candidateTokens = cleanArtistQueryName(candidate)
+                .lowercase(Locale.ROOT)
+                .split(artistKeyStripRegex)
+                .filter { it.isNotBlank() }
+            if (candidateTokens.size < queryTokens.size) return false
+
+            var queryIndex = 0
+            for (token in candidateTokens) {
+                if (token == queryTokens[queryIndex]) {
+                    queryIndex++
+                    if (queryIndex == queryTokens.size) return true
+                }
+            }
+            return false
+        }
+
+        internal fun selectBestYoutubeArtistThumbnail(
+            targetName: String,
+            items: List<YTItem>
+        ): String? {
+            val cleanTarget = cleanArtistQueryName(targetName)
+            val targetKey = normalizeArtistMatchKey(cleanTarget)
+            if (targetKey.isBlank()) return null
+            val artistItems = items
+                .asSequence()
+                .filterIsInstance<ArtistItem>()
+                .filter { isValidArtistImageUrl(it.thumbnail) }
+                .toList()
+            return artistItems.firstOrNull { normalizeArtistMatchKey(it.title) == targetKey }?.thumbnail
+                ?: artistItems.firstOrNull { matchesArtistTokensInOrder(cleanTarget, it.title) }?.thumbnail
+        }
 
         internal fun isValidArtistImageUrl(url: String?): Boolean {
             if (url.isNullOrBlank()) return false
@@ -269,19 +309,20 @@ class ArtistImageRepository @Inject constructor(
     }
 
     private suspend fun fetchYoutubeArtistChannelImage(cleanName: String): String? {
-        val targetKey = normalizeArtistMatchKey(cleanName)
-        if (targetKey.isBlank()) return null
+        if (normalizeArtistMatchKey(cleanName).isBlank()) return null
         return runCatching {
-            val page = YouTube.search(cleanName, YouTube.SearchFilter.FILTER_ARTIST).getOrNull()
-                ?: return null
-            page.items
-                .asSequence()
-                .filterIsInstance<ArtistItem>()
-                .firstOrNull { item ->
-                    normalizeArtistMatchKey(item.title) == targetKey &&
-                        isValidArtistImageUrl(item.thumbnail)
-                }
-                ?.thumbnail
+            val filteredItems = YouTube.search(cleanName, YouTube.SearchFilter.FILTER_ARTIST)
+                .getOrNull()
+                ?.items
+                .orEmpty()
+            selectBestYoutubeArtistThumbnail(cleanName, filteredItems)?.let { return@runCatching it }
+
+            val summaryItems = YouTube.searchSummary(cleanName)
+                .getOrNull()
+                ?.summaries
+                ?.flatMap { it.items }
+                .orEmpty()
+            selectBestYoutubeArtistThumbnail(cleanName, summaryItems)
         }.onFailure { throwable ->
             if (throwable is CancellationException) throw throwable
             Timber.tag(TAG).w("YouTube Music artist search failed for $cleanName: ${throwable.message}")
