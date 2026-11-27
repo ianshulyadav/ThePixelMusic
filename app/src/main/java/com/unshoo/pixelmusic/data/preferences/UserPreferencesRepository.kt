@@ -82,6 +82,13 @@ const val MAX_NAV_BAR_CORNER_RADIUS = 60
 internal fun sanitizeNavBarCornerRadius(radius: Int): Int =
         radius.coerceIn(MIN_NAV_BAR_CORNER_RADIUS, MAX_NAV_BAR_CORNER_RADIUS)
 
+const val MIN_SEEKER_ANIMATION_DURATION_MS = 150
+const val MAX_SEEKER_ANIMATION_DURATION_MS = 1200
+const val DEFAULT_SEEKER_ANIMATION_DURATION_MS = 400
+
+internal fun sanitizeSeekerAnimationDurationMs(durationMs: Int): Int =
+    durationMs.coerceIn(MIN_SEEKER_ANIMATION_DURATION_MS, MAX_SEEKER_ANIMATION_DURATION_MS)
+
 /**
  * Album art quality settings for developer options.
  * Controls maximum resolution for album artwork in player view.
@@ -277,6 +284,8 @@ constructor(
         val FOLDER_BACK_GESTURE_NAVIGATION = booleanPreferencesKey("folder_back_gesture_navigation")
         val USE_SMOOTH_CORNERS = booleanPreferencesKey("use_smooth_corners")
         val SHOW_SCROLLBAR = booleanPreferencesKey("show_scrollbar")
+        val SEEKER_ANIMATION_ENABLED = booleanPreferencesKey("seeker_animation_enabled")
+        val SEEKER_ANIMATION_DURATION_MS = intPreferencesKey("seeker_animation_duration_ms")
         val HIGH_REFRESH_RATE_ENABLED = booleanPreferencesKey("high_refresh_rate_enabled")
         val KEEP_PLAYING_IN_BACKGROUND = booleanPreferencesKey("keep_playing_in_background")
         val IS_CROSSFADE_ENABLED = booleanPreferencesKey("is_crossfade_enabled")
@@ -2252,6 +2261,33 @@ constructor(
     suspend fun setShowScrollbar(enabled: Boolean) {
         dataStore.edit { preferences ->
             preferences[PreferencesKeys.SHOW_SCROLLBAR] = enabled
+        }
+    }
+
+    val seekerAnimationEnabledFlow: Flow<Boolean> = dataStore.data
+        .map { preferences ->
+            preferences[PreferencesKeys.SEEKER_ANIMATION_ENABLED] ?: true
+        }
+        .distinctUntilChanged()
+
+    suspend fun setSeekerAnimationEnabled(enabled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.SEEKER_ANIMATION_ENABLED] = enabled
+        }
+    }
+
+    val seekerAnimationDurationMsFlow: Flow<Int> = dataStore.data
+        .map { preferences ->
+            sanitizeSeekerAnimationDurationMs(
+                preferences[PreferencesKeys.SEEKER_ANIMATION_DURATION_MS] ?: DEFAULT_SEEKER_ANIMATION_DURATION_MS
+            )
+        }
+        .distinctUntilChanged()
+
+    suspend fun setSeekerAnimationDurationMs(durationMs: Int) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.SEEKER_ANIMATION_DURATION_MS] =
+                sanitizeSeekerAnimationDurationMs(durationMs)
         }
     }
 

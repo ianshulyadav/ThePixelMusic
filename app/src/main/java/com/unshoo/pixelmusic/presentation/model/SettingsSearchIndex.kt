@@ -51,6 +51,8 @@ object SettingsSearchIndex {
         SettingsSearchEntry(SettingsCategory.APPEARANCE, R.string.setcat_fullscreen_player_title, R.string.setcat_fullscreen_player_subtitle),
         SettingsSearchEntry(SettingsCategory.APPEARANCE, R.string.setcat_album_art_palette_title, null),
         SettingsSearchEntry(SettingsCategory.APPEARANCE, R.string.setcat_carousel_style_label, R.string.setcat_carousel_style_desc),
+        SettingsSearchEntry(SettingsCategory.APPEARANCE, R.string.settings_seeker_animation_title, R.string.settings_seeker_animation_desc),
+        SettingsSearchEntry(SettingsCategory.APPEARANCE, R.string.settings_seeker_animation_duration_label, null),
         SettingsSearchEntry(SettingsCategory.APPEARANCE, R.string.customize_home_title, R.string.customize_home_desc),
         SettingsSearchEntry(SettingsCategory.APPEARANCE, R.string.setcat_navbar_style_label, R.string.setcat_navbar_style_desc),
         SettingsSearchEntry(SettingsCategory.APPEARANCE, R.string.setcat_compact_mode_title, R.string.setcat_compact_mode_subtitle),

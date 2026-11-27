@@ -172,4 +172,35 @@ class UserPreferencesRepositoryTest {
             tempDir.toFile().deleteRecursively()
         }
     }
+
+    @Test
+    fun `seekerAnimation preferences default enabled at default duration and clamp bounds`() = runTest {
+        val tempDir = Files.createTempDirectory("user-preferences-repository-test")
+        try {
+            val repository = UserPreferencesRepository(
+                dataStore = PreferenceDataStoreFactory.create(
+                    scope = backgroundScope,
+                    produceFile = { tempDir.resolve("settings.preferences_pb").toFile() }
+                ),
+                json = Json
+            )
+
+            assertTrue(repository.seekerAnimationEnabledFlow.first())
+            assertEquals(DEFAULT_SEEKER_ANIMATION_DURATION_MS, repository.seekerAnimationDurationMsFlow.first())
+
+            repository.setSeekerAnimationEnabled(false)
+            assertFalse(repository.seekerAnimationEnabledFlow.first())
+
+            repository.setSeekerAnimationDurationMs(50)
+            assertEquals(MIN_SEEKER_ANIMATION_DURATION_MS, repository.seekerAnimationDurationMsFlow.first())
+
+            repository.setSeekerAnimationDurationMs(5000)
+            assertEquals(MAX_SEEKER_ANIMATION_DURATION_MS, repository.seekerAnimationDurationMsFlow.first())
+
+            repository.setSeekerAnimationDurationMs(750)
+            assertEquals(750, repository.seekerAnimationDurationMsFlow.first())
+        } finally {
+            tempDir.toFile().deleteRecursively()
+        }
+    }
 }

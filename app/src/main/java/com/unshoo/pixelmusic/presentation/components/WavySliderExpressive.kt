@@ -1,7 +1,11 @@
 package com.unshoo.pixelmusic.presentation.components
 
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -19,6 +23,7 @@ import androidx.compose.material3.ProgressIndicatorDefaults
 import androidx.compose.material3.WavyProgressIndicatorDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -45,13 +50,22 @@ import androidx.compose.ui.semantics.setProgress
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.max
-import kotlinx.coroutines.isActive
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.unshoo.pixelmusic.data.preferences.DEFAULT_SEEKER_ANIMATION_DURATION_MS
+import com.unshoo.pixelmusic.data.preferences.sanitizeSeekerAnimationDurationMs
 import dagger.hilt.android.EntryPointAccessors
+
+/** Global seeker transition setting provided from app preferences. */
+data class SeekerAnimationConfig(
+    val enabled: Boolean = true,
+    val durationMs: Int = DEFAULT_SEEKER_ANIMATION_DURATION_MS,
+)
+
+val LocalSeekerAnimationConfig = compositionLocalOf { SeekerAnimationConfig() }
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -78,7 +92,8 @@ fun WavySliderExpressive(
     waveAmplitudeWhenPlaying: Dp = 4.dp,
     thumbLineHeightWhenInteracting: Dp = 24.dp,
     semanticsLabel: String? = null,
-    semanticsProgressStep: Float = 0.01f
+    semanticsProgressStep: Float = 0.01f,
+    transitionKey: Any? = null
 ) {
     val context = LocalContext.current
     val appContext = context.applicationContext
@@ -87,6 +102,7 @@ fun WavySliderExpressive(
     }
     val userPreferencesRepository = entryPoint.userPreferencesRepository()
     val performanceModeEnabled by userPreferencesRepository.performanceModeEnabledFlow.collectAsStateWithLifecycle(initialValue = false)
+    val seekerAnimationConfig = LocalSeekerAnimationConfig.current
 
     val density = LocalDensity.current
     val strokeWidthPx = with(density) { strokeWidth.toPx() }
@@ -126,54 +142,114 @@ fun WavySliderExpressive(
     )
 
     // Keep visual progress interpolation out of composition:
-    // update this state on frame clock, then consume it only inside draw lambdas.
-    // This preserves smooth visuals while avoiding high-frequency recompositions.
-    val renderedNormalizedProgress = remember { mutableFloatStateOf(normalizedValue) }
+    // update Animatable off composition, then consume .value only inside draw lambdas.
+    val progressAnimatable = remember { Animatable(normalizedValue.coerceIn(0f, 1f)) }
+    val latestTarget by rememberUpdatedState(normalizedValue.coerceIn(0f, 1f))
+    var lastObservedTransitionKey by remember { mutableStateOf(transitionKey) }
+    var isTransitionGlideActive by remember { mutableStateOf(false) }
+    var isTimedGlideActive by remember { mutableStateOf(false) }
+    var glideStartValue by remember { mutableFloatStateOf(normalizedValue.coerceIn(0f, 1f)) }
+    var glideStartNanos by remember { mutableLongStateOf(0L) }
+    var glideDeadlineNanos by remember { mutableLongStateOf(0L) }
     var lastProgressUpdateNanos by remember { mutableLongStateOf(0L) }
-    LaunchedEffect(normalizedValue, isInteracting, enabled, performanceModeEnabled) {
+    LaunchedEffect(
+        normalizedValue,
+        transitionKey,
+        isInteracting,
+        enabled,
+        performanceModeEnabled,
+        seekerAnimationConfig
+    ) {
         val target = normalizedValue.coerceIn(0f, 1f)
-        if (!enabled || isInteracting || performanceModeEnabled) {
-            renderedNormalizedProgress.floatValue = target
-            lastProgressUpdateNanos = System.nanoTime()
-            return@LaunchedEffect
-        }
+        val keyChanged = transitionKey != lastObservedTransitionKey
+        lastObservedTransitionKey = transitionKey
 
-        val start = renderedNormalizedProgress.floatValue
-        if (abs(start - target) > 0.1f) {
-            renderedNormalizedProgress.floatValue = target
-            lastProgressUpdateNanos = System.nanoTime()
-            return@LaunchedEffect
-        }
+        val current = progressAnimatable.value
+        val mode = resolveSliderProgressAnimationMode(
+            enabled = enabled,
+            isInteracting = isInteracting,
+            performanceModeEnabled = performanceModeEnabled,
+            keyChanged = keyChanged,
+            isTransitionGlideActive = isTransitionGlideActive,
+            currentProgress = current,
+            targetProgress = target,
+            seekerAnimationEnabled = seekerAnimationConfig.enabled,
+            seekerAnimationDurationMs = seekerAnimationConfig.durationMs,
+        )
 
         val nowNanos = System.nanoTime()
         val intervalMs = if (lastProgressUpdateNanos == 0L) {
-            180L
+            180
         } else {
-            ((nowNanos - lastProgressUpdateNanos) / 1_000_000L).coerceIn(1L, 250L)
+            ((nowNanos - lastProgressUpdateNanos) / 1_000_000L).coerceIn(1L, 250L).toInt()
         }
         lastProgressUpdateNanos = nowNanos
 
-        // Normal playback moves the thumb far less than a pixel between position samples
-        // (a 3-minute song across ~900 px is ~0.2 s per pixel). Interpolating that over
-        // ~120 ms of frames redrew the whole player at full refresh rate for no visible change,
-        // which kept the GPU/CPU busy for the entire song. Snap such tiny steps; only animate
-        // jumps that are actually visible.
-        if (abs(start - target) <= SUB_PIXEL_PROGRESS_STEP) {
-            renderedNormalizedProgress.floatValue = target
-            return@LaunchedEffect
+        when (mode) {
+            SliderProgressAnimationMode.SNAP -> {
+                isTransitionGlideActive = false
+                isTimedGlideActive = false
+                progressAnimatable.snapTo(target)
+            }
+            SliderProgressAnimationMode.SPRING_TRANSITION -> {
+                isTransitionGlideActive = true
+                isTimedGlideActive = false
+                try {
+                    progressAnimatable.animateTo(
+                        targetValue = target,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioNoBouncy,
+                            stiffness = TRACK_SWITCH_SPRING_STIFFNESS,
+                            visibilityThreshold = PROGRESS_VISIBILITY_THRESHOLD,
+                        ),
+                    )
+                    isTransitionGlideActive = false
+                } finally {
+                    lastProgressUpdateNanos = System.nanoTime()
+                }
+            }
+            SliderProgressAnimationMode.TIMED_TRANSITION -> {
+                val durationMs = sanitizeSeekerAnimationDurationMs(seekerAnimationConfig.durationMs)
+                val firstFrameNanos = withFrameNanos { it }
+                if (keyChanged || !isTimedGlideActive || firstFrameNanos >= glideDeadlineNanos) {
+                    glideStartValue = current
+                    glideStartNanos = firstFrameNanos
+                    glideDeadlineNanos = firstFrameNanos + durationMs.toLong() * 1_000_000L
+                }
+                isTransitionGlideActive = true
+                isTimedGlideActive = true
+                val totalNanos = (glideDeadlineNanos - glideStartNanos).coerceAtLeast(1_000_000L)
+                try {
+                    while (true) {
+                        val frameNanos = withFrameNanos { it }
+                        val rawFraction = ((frameNanos - glideStartNanos).toDouble() / totalNanos.toDouble())
+                            .toFloat()
+                            .coerceIn(0f, 1f)
+                        val easedFraction = FastOutSlowInEasing.transform(rawFraction)
+                        val nextValue = glideStartValue + (latestTarget - glideStartValue) * easedFraction
+                        progressAnimatable.snapTo(nextValue)
+                        if (rawFraction >= 1f) break
+                    }
+                    progressAnimatable.snapTo(latestTarget)
+                    isTransitionGlideActive = false
+                    isTimedGlideActive = false
+                } finally {
+                    lastProgressUpdateNanos = System.nanoTime()
+                }
+            }
+            SliderProgressAnimationMode.LINEAR_TICK -> {
+                isTimedGlideActive = false
+                val durationMs = ((intervalMs * 9) / 10).coerceAtLeast(16)
+                try {
+                    progressAnimatable.animateTo(
+                        targetValue = target,
+                        animationSpec = tween(durationMillis = durationMs, easing = LinearEasing),
+                    )
+                } finally {
+                    lastProgressUpdateNanos = System.nanoTime()
+                }
+            }
         }
-
-        val durationNanos = (intervalMs * 900_000L).coerceAtLeast(1_000_000L)
-        var startFrameNanos = 0L
-        while (isActive) {
-            val frameNanos = withFrameNanos { it }
-            if (startFrameNanos == 0L) startFrameNanos = frameNanos
-            val elapsedNanos = (frameNanos - startFrameNanos).coerceAtLeast(0L)
-            val fraction = (elapsedNanos.toDouble() / durationNanos.toDouble()).toFloat().coerceIn(0f, 1f)
-            renderedNormalizedProgress.floatValue = start + (target - start) * fraction
-            if (fraction >= 1f) break
-        }
-        renderedNormalizedProgress.floatValue = target
     }
 
     val containerHeight = max(WavyProgressIndicatorDefaults.LinearContainerHeight, max(thumbRadius * 2, thumbLineHeightWhenInteracting))
@@ -204,7 +280,7 @@ fun WavySliderExpressive(
         contentAlignment = Alignment.Center
     ) {
         LinearWavyProgressIndicator(
-            progress = { renderedNormalizedProgress.floatValue },
+            progress = { progressAnimatable.value },
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = trackEdgePadding.coerceAtLeast(0.dp))
@@ -227,7 +303,7 @@ fun WavySliderExpressive(
             val trackEnd = size.width - edgePaddingPx
             val trackWidth = (trackEnd - trackStart).coerceAtLeast(0f)
             val thumbY = size.height / 2
-            val renderedProgress = renderedNormalizedProgress.floatValue
+            val renderedProgress = progressAnimatable.value
 
             fun lerp(start: Float, stop: Float, fraction: Float): Float {
                 return start + (stop - start) * fraction
@@ -254,7 +330,7 @@ fun WavySliderExpressive(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(enabled, valueRange, trackEdgePaddingPx) {
+                .pointerInput(enabled, valueRange, trackEdgePaddingPx, transitionKey) {
                     if (!enabled) return@pointerInput
 
                     fun valueForX(rawX: Float): Float {
@@ -306,5 +382,60 @@ fun WavySliderExpressive(
     }
 }
 
-/** ~2 px on a typical phone-width track: below this, interpolation is invisible. */
-private const val SUB_PIXEL_PROGRESS_STEP = 0.0025f
+internal enum class SliderProgressAnimationMode {
+    SNAP,
+    LINEAR_TICK,
+    SPRING_TRANSITION,
+    TIMED_TRANSITION,
+}
+
+internal fun resolveSliderProgressAnimationMode(
+    enabled: Boolean,
+    isInteracting: Boolean,
+    performanceModeEnabled: Boolean,
+    keyChanged: Boolean,
+    isTransitionGlideActive: Boolean,
+    currentProgress: Float,
+    targetProgress: Float,
+    seekerAnimationEnabled: Boolean = true,
+    seekerAnimationDurationMs: Int = DEFAULT_SEEKER_ANIMATION_DURATION_MS,
+): SliderProgressAnimationMode {
+    if (!enabled || isInteracting || performanceModeEnabled) {
+        return SliderProgressAnimationMode.SNAP
+    }
+    val delta = abs(targetProgress - currentProgress)
+    if (!seekerAnimationEnabled) {
+        if (keyChanged ||
+            targetProgress < currentProgress - BACKWARD_JUMP_THRESHOLD ||
+            delta > LEGACY_SNAP_JUMP_THRESHOLD ||
+            delta <= SUB_PIXEL_PROGRESS_STEP
+        ) {
+            return SliderProgressAnimationMode.SNAP
+        }
+        return SliderProgressAnimationMode.LINEAR_TICK
+    }
+    if (isTransitionGlideActive ||
+        (keyChanged && delta > SUB_PIXEL_PROGRESS_STEP) ||
+        targetProgress < currentProgress - BACKWARD_JUMP_THRESHOLD ||
+        delta > JUMP_ANIMATION_THRESHOLD
+    ) {
+        val clampedDurationMs = sanitizeSeekerAnimationDurationMs(seekerAnimationDurationMs)
+        return if (clampedDurationMs == DEFAULT_SEEKER_ANIMATION_DURATION_MS) {
+            SliderProgressAnimationMode.SPRING_TRANSITION
+        } else {
+            SliderProgressAnimationMode.TIMED_TRANSITION
+        }
+    }
+    if (delta <= SUB_PIXEL_PROGRESS_STEP) {
+        return SliderProgressAnimationMode.SNAP
+    }
+    return SliderProgressAnimationMode.LINEAR_TICK
+}
+
+/** ~2 px on a typical phone-width track: below this, steady forward interpolation is invisible. */
+internal const val SUB_PIXEL_PROGRESS_STEP = 0.0025f
+internal const val BACKWARD_JUMP_THRESHOLD = 0.005f
+internal const val JUMP_ANIMATION_THRESHOLD = 0.02f
+internal const val LEGACY_SNAP_JUMP_THRESHOLD = 0.1f
+private const val TRACK_SWITCH_SPRING_STIFFNESS = 240f
+private const val PROGRESS_VISIBILITY_THRESHOLD = 0.0005f

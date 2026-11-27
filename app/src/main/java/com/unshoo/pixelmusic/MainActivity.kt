@@ -1094,6 +1094,10 @@ class MainActivity : ComponentActivity() {
             default = false
         )
         val showScrollbar by userPreferencesRepository.showScrollbarFlow.collectAsStateWithLifecycle(initialValue = true)
+        val seekerAnimationEnabled by userPreferencesRepository.seekerAnimationEnabledFlow.collectAsStateWithLifecycle(initialValue = true)
+        val seekerAnimationDurationMs by userPreferencesRepository.seekerAnimationDurationMsFlow.collectAsStateWithLifecycle(
+            initialValue = com.unshoo.pixelmusic.data.preferences.DEFAULT_SEEKER_ANIMATION_DURATION_MS
+        )
         val navBarFrostedBlur = !performanceModeEnabled && useBlurEffects && navBarFrostedBlurPreference
         val mainBackdropSource = com.unshoo.pixelmusic.presentation.components.rememberBackdropSource()
 
@@ -1102,7 +1106,12 @@ class MainActivity : ComponentActivity() {
             LocalHapticFeedback provides scopedHapticFeedback,
             com.unshoo.pixelmusic.presentation.components.LocalBackdropSource provides mainBackdropSource,
             com.unshoo.pixelmusic.presentation.components.LocalAppWindowLayout provides windowLayout,
-            com.unshoo.pixelmusic.presentation.components.LocalShowScrollbar provides showScrollbar
+            com.unshoo.pixelmusic.presentation.components.LocalShowScrollbar provides showScrollbar,
+            com.unshoo.pixelmusic.presentation.components.LocalSeekerAnimationConfig provides
+                com.unshoo.pixelmusic.presentation.components.SeekerAnimationConfig(
+                    enabled = seekerAnimationEnabled,
+                    durationMs = seekerAnimationDurationMs
+                )
         ) {
             AppSidebarDrawer(
                 drawerState = drawerState,

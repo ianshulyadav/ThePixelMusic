@@ -2613,32 +2613,31 @@ private fun PlayerProgressBarSection(
             // playerSheetVerticalDragGesture from intercepting slider touches. If the
             // user's drag has a vertical component, the inner handler absorbs it (consuming
             // the events) so the sheet-collapse gesture never activates in this area.
-            androidx.compose.runtime.key(songId) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .pointerInput(Unit) {
-                            detectVerticalDragGestures(onVerticalDrag = { _, _ -> })
-                        }
-                ) {
-                    EfficientSlider(
-                        valueState = animatedProgressState,
-                        onValueChange = { sliderDragValue = it },
-                        onValueCommit = { finalValue ->
-                            val targetMs = (finalValue * durationForCalc).roundToLong()
-                            targetSeekFraction = finalValue
-                            lastSeekFinishedTime = System.currentTimeMillis()
-                            onSeek(targetMs)
-                            sliderDragValue = null
-                        },
-                        thumbColor = thumbColor,
-                        activeTrackColor = activeTrackColor,
-                        inactiveTrackColor = inactiveTrackColor,
-                        interactionSource = interactionSource,
-                        isPlaying = shouldAnimateWavyProgress,
-                        trackEdgePadding = progressSectionHorizontalInset
-                    )
-                }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .pointerInput(Unit) {
+                        detectVerticalDragGestures(onVerticalDrag = { _, _ -> })
+                    }
+            ) {
+                EfficientSlider(
+                    valueState = animatedProgressState,
+                    onValueChange = { sliderDragValue = it },
+                    onValueCommit = { finalValue ->
+                        val targetMs = (finalValue * durationForCalc).roundToLong()
+                        targetSeekFraction = finalValue
+                        lastSeekFinishedTime = System.currentTimeMillis()
+                        onSeek(targetMs)
+                        sliderDragValue = null
+                    },
+                    thumbColor = thumbColor,
+                    activeTrackColor = activeTrackColor,
+                    inactiveTrackColor = inactiveTrackColor,
+                    interactionSource = interactionSource,
+                    isPlaying = shouldAnimateWavyProgress,
+                    trackEdgePadding = progressSectionHorizontalInset,
+                    transitionKey = songId
+                )
             }
 
             // Isolated Time Labels
@@ -2665,7 +2664,8 @@ private fun EfficientSlider(
     inactiveTrackColor: Color,
     interactionSource: MutableInteractionSource,
     isPlaying: Boolean,
-    trackEdgePadding: Dp
+    trackEdgePadding: Dp,
+    transitionKey: Any? = null
 ) {
     val haptics = LocalHapticFeedback.current
     val currentOnValueChange = rememberUpdatedState(onValueChange)
@@ -2693,6 +2693,7 @@ private fun EfficientSlider(
         isPlaying = isPlaying,
         trackEdgePadding = trackEdgePadding,
         semanticsLabel = "Playback position",
+        transitionKey = transitionKey,
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 8.dp, horizontal = 0.dp)

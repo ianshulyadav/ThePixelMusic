@@ -2009,6 +2009,16 @@ fun setBeta05CleanInstallDisclaimerDismissed(dismissed: Boolean) {
     val showScrollbar: StateFlow<Boolean> = userPreferencesRepository.showScrollbarFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
 
+    val seekerAnimationEnabled: StateFlow<Boolean> = userPreferencesRepository.seekerAnimationEnabledFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+
+    val seekerAnimationDurationMs: StateFlow<Int> = userPreferencesRepository.seekerAnimationDurationMsFlow
+        .stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5000),
+            com.unshoo.pixelmusic.data.preferences.DEFAULT_SEEKER_ANIMATION_DURATION_MS
+        )
+
     val highRefreshRate: StateFlow<Boolean> = userPreferencesRepository.highRefreshRateFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), userPreferencesRepository.defaultHighRefreshRate)
 
@@ -2037,6 +2047,18 @@ fun setBeta05CleanInstallDisclaimerDismissed(dismissed: Boolean) {
     fun setShowScrollbar(enabled: Boolean) {
         viewModelScope.launch {
             userPreferencesRepository.setShowScrollbar(enabled)
+        }
+    }
+
+    fun setSeekerAnimationEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            userPreferencesRepository.setSeekerAnimationEnabled(enabled)
+        }
+    }
+
+    fun setSeekerAnimationDurationMs(durationMs: Int) {
+        viewModelScope.launch {
+            userPreferencesRepository.setSeekerAnimationDurationMs(durationMs)
         }
     }
 

@@ -102,6 +102,7 @@ import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.LinearScale
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Restore
 import androidx.compose.material.icons.rounded.Science
@@ -827,6 +828,11 @@ fun SettingsCategoryScreen(
                             val useSmoothCorners by settingsViewModel.useSmoothCorners.collectAsStateWithLifecycle()
                             val highRefreshRate by settingsViewModel.highRefreshRate.collectAsStateWithLifecycle()
                             val showScrollbar by settingsViewModel.showScrollbar.collectAsStateWithLifecycle()
+                            val seekerAnimationEnabled by settingsViewModel.seekerAnimationEnabled.collectAsStateWithLifecycle()
+                            val seekerAnimationDurationMs by settingsViewModel.seekerAnimationDurationMs.collectAsStateWithLifecycle()
+                            var seekerDurationDraft by remember(categoryId, seekerAnimationDurationMs) {
+                                mutableStateOf(seekerAnimationDurationMs.toFloat())
+                            }
 
                             SettingsSubsection(title = stringResource(R.string.tab_home)) {
                                 SettingsItem(
@@ -1025,6 +1031,50 @@ fun SettingsCategoryScreen(
                                     onSelectionChanged = { settingsViewModel.setCarouselStyle(it) },
                                     leadingIcon = { Icon(painterResource(R.drawable.rounded_view_carousel_24), null, tint = MaterialTheme.colorScheme.secondary) }
                                 )
+                                SwitchSettingItem(
+                                    title = stringResource(R.string.settings_seeker_animation_title),
+                                    subtitle = stringResource(R.string.settings_seeker_animation_desc),
+                                    checked = seekerAnimationEnabled,
+                                    onCheckedChange = settingsViewModel::setSeekerAnimationEnabled,
+                                    leadingIcon = { Icon(Icons.Rounded.LinearScale, null, tint = MaterialTheme.colorScheme.secondary) }
+                                )
+                                AnimatedVisibility(
+                                    visible = seekerAnimationEnabled,
+                                    enter = expandVertically(animationSpec = spring(dampingRatio = 0.8f, stiffness = 400f)) +
+                                        fadeIn(animationSpec = spring(stiffness = 400f)),
+                                    exit = shrinkVertically(animationSpec = spring(stiffness = 500f)) +
+                                        fadeOut(animationSpec = spring(stiffness = 500f))
+                                ) {
+                                    SliderSettingsItem(
+                                        label = stringResource(R.string.settings_seeker_animation_duration_label),
+                                        value = seekerDurationDraft,
+                                        valueRange = com.unshoo.pixelmusic.data.preferences.MIN_SEEKER_ANIMATION_DURATION_MS.toFloat()..
+                                            com.unshoo.pixelmusic.data.preferences.MAX_SEEKER_ANIMATION_DURATION_MS.toFloat(),
+                                        steps = 20,
+                                        onValueChange = { raw ->
+                                            seekerDurationDraft = (((raw / 50f).roundToInt()) * 50)
+                                                .coerceIn(
+                                                    com.unshoo.pixelmusic.data.preferences.MIN_SEEKER_ANIMATION_DURATION_MS,
+                                                    com.unshoo.pixelmusic.data.preferences.MAX_SEEKER_ANIMATION_DURATION_MS
+                                                )
+                                                .toFloat()
+                                        },
+                                        onValueChangeFinished = {
+                                            val selected = seekerDurationDraft.toInt()
+                                            if (selected != seekerAnimationDurationMs) {
+                                                settingsViewModel.setSeekerAnimationDurationMs(selected)
+                                            }
+                                        },
+                                        valueText = { value ->
+                                            val ms = value.toInt()
+                                            if (ms == com.unshoo.pixelmusic.data.preferences.DEFAULT_SEEKER_ANIMATION_DURATION_MS) {
+                                                "${ms}ms (${context.getString(R.string.settings_seeker_animation_duration_default)})"
+                                            } else {
+                                                "${ms}ms"
+                                            }
+                                        }
+                                    )
+                                }
                             }
 
                             SettingsSubsection(title = stringResource(R.string.setcat_navigation_bar)) {

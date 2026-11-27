@@ -439,6 +439,10 @@
     <!-- Blur Settings -->
     <string name="settings_show_scrollbar_title">Show Scrollbar</string>
     <string name="settings_show_scrollbar_desc">Display lateral scrollbar on music lists for quick scrolling</string>
+    <string name="settings_seeker_animation_title">Seeker Animation</string>
+    <string name="settings_seeker_animation_desc">Smoothly glide the player seeker when switching tracks</string>
+    <string name="settings_seeker_animation_duration_label">Seeker Animation Duration</string>
+    <string name="settings_seeker_animation_duration_default">Default</string>
     <string name="blur_settings_title">Blur Settings</string>
     <string name="blur_settings_desc">Customize blur effects across the app</string>
     <string name="blur_settings_use_blur_effects">Use blur effects</string>

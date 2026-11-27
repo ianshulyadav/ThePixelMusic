@@ -104,41 +104,39 @@ fun PlayerSeekBar(
 //            color = onBackgroundColor,
 //            fontSize = 12.sp
 //        )
-        androidx.compose.runtime.key(songId) {
-            WavySliderExpressive(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 0.dp),
-                    //.weight(0.8f),
-                value = seekFraction,
-                onValueChange = { newFraction ->
-                    isUserSeeking = true
-                    seekFraction = newFraction
-                    onSeekPreview?.invoke((newFraction * totalDuration).roundToLong())
-                    val quantized = (newFraction.coerceIn(0f, 1f) * 20f).toInt()
-                    if (quantized != lastHapticStep[0]) {
-                        lastHapticStep[0] = quantized
-                        hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    }
-                },
-                onValueCommit = { finalFraction ->
-                    seekFraction = finalFraction
-                    onSeek((finalFraction * totalDuration).roundToLong())
-                    onSeekPreview?.invoke(null)
-                    targetSeekFraction = finalFraction
-                    lastSeekFinishedTime = System.currentTimeMillis()
-                    isUserSeeking = false
-                },
-                strokeWidth = 5.dp, // Was trackHeight
-                thumbRadius = 8.dp,
-                activeTrackColor = primaryColor,
-                inactiveTrackColor = primaryColor.copy(alpha = 0.2f),
-                thumbColor = primaryColor,
-                wavelength = 30.dp, // Was waveLength
-                isPlaying = isPlaying,
-                semanticsLabel = "Playback position"
-            )
-        }
+        WavySliderExpressive(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 0.dp),
+            value = seekFraction,
+            onValueChange = { newFraction ->
+                isUserSeeking = true
+                seekFraction = newFraction
+                onSeekPreview?.invoke((newFraction * totalDuration).roundToLong())
+                val quantized = (newFraction.coerceIn(0f, 1f) * 20f).toInt()
+                if (quantized != lastHapticStep[0]) {
+                    lastHapticStep[0] = quantized
+                    hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                }
+            },
+            onValueCommit = { finalFraction ->
+                seekFraction = finalFraction
+                onSeek((finalFraction * totalDuration).roundToLong())
+                onSeekPreview?.invoke(null)
+                targetSeekFraction = finalFraction
+                lastSeekFinishedTime = System.currentTimeMillis()
+                isUserSeeking = false
+            },
+            strokeWidth = 5.dp, // Was trackHeight
+            thumbRadius = 8.dp,
+            activeTrackColor = primaryColor,
+            inactiveTrackColor = primaryColor.copy(alpha = 0.2f),
+            thumbColor = primaryColor,
+            wavelength = 30.dp, // Was waveLength
+            isPlaying = isPlaying,
+            semanticsLabel = "Playback position",
+            transitionKey = songId
+        )
 //        Text(
 //            modifier = Modifier.weight(0.2f),
 //            text = formatDuration(totalDuration),
