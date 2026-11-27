@@ -248,4 +248,37 @@ object PageHelper {
     fun extractAlbum(renderer: MusicTwoRowItemRenderer): Album? {
         return extractAlbumFromRuns(renderer.subtitle?.runs)
     }
+
+    private val PLAYLIST_SONG_COUNT_REGEX = Regex(
+        """^\s*([\d,.\u00A0\u202F\s]+)\s*(?:songs?|tracks?|videos?|titles?|titels?|titres?|t[íi]tulos?|canciones?|can[çc][õo]es|brani|nummers?|utwory|utwor[óo]w|lagu|b[àa]i|пес(?:ня|ни|ен)|трек(?:а|ов)?|गाने|गाना|गीत)\s*$""",
+        RegexOption.IGNORE_CASE
+    )
+    private val PLAYLIST_CJK_SONG_COUNT_REGEX = Regex("""^\s*([\d,]+)\s*(?:곡|曲|首(?:歌曲)?)\s*$""")
+    private val BARE_INTEGER_COUNT_REGEX = Regex("""^\s*[\d,.\u00A0\u202F\s]+\s*$""")
+
+    fun parsePlaylistSongCount(text: String?, allowBareDigits: Boolean = false): Int? {
+        val clean = text
+            ?.replace('\u00A0', ' ')
+            ?.replace('\u202F', ' ')
+            ?.trim()
+            .orEmpty()
+        if (clean.isEmpty() || isCountMetadata(clean)) return null
+        val numberGroup = PLAYLIST_SONG_COUNT_REGEX.matchEntire(clean)?.groupValues?.getOrNull(1)
+            ?: PLAYLIST_CJK_SONG_COUNT_REGEX.matchEntire(clean)?.groupValues?.getOrNull(1)
+            ?: clean.takeIf { allowBareDigits && BARE_INTEGER_COUNT_REGEX.matches(clean) }
+            ?: return null
+        return numberGroup.filter(Char::isDigit).toIntOrNull()?.takeIf { it > 0 }
+    }
+
+    fun extractPlaylistSongCountTextFromGroups(groups: List<List<Run>>): String? =
+        groups.firstNotNullOfOrNull { group ->
+            val text = group.joinToString(separator = "") { it.text }
+                .replace('\u00A0', ' ')
+                .replace('\u202F', ' ')
+                .trim()
+            if (parsePlaylistSongCount(text) != null) text else null
+        }
+
+    fun extractPlaylistSongCountText(runs: List<Run>?): String? =
+        runs?.splitBySeparator()?.let(::extractPlaylistSongCountTextFromGroups)
 }

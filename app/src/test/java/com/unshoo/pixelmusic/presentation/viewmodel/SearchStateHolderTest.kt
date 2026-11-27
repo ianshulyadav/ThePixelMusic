@@ -20,14 +20,17 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import unshoo.ianshulyadav.pixelmusic.innertube.YouTube
 import unshoo.ianshulyadav.pixelmusic.innertube.models.Artist as YtArtist
 import unshoo.ianshulyadav.pixelmusic.innertube.models.ArtistItem as YtArtistItem
+import unshoo.ianshulyadav.pixelmusic.innertube.models.PlaylistItem as YtPlaylistItem
 import unshoo.ianshulyadav.pixelmusic.innertube.models.SearchSuggestions
 import unshoo.ianshulyadav.pixelmusic.innertube.models.SongItem as YtSongItem
+import unshoo.ianshulyadav.pixelmusic.innertube.pages.PlaylistPage
 import unshoo.ianshulyadav.pixelmusic.innertube.pages.SearchResult
 import unshoo.ianshulyadav.pixelmusic.innertube.pages.SearchSummaryPage
 
@@ -270,14 +273,108 @@ class SearchStateHolderTest {
         assertFalse(holder.isSearching.value)
     }
 
+    @Test
+    fun `playlist search parses inline count and hydrates missing counts from playlist page`() {
+        val dispatcher = StandardTestDispatcher()
+        val scope = TestScope(dispatcher)
+        val fakeRemote = FakeRemoteDataSource(
+            searchHandler = { _, filter ->
+                when (filter) {
+                    YouTube.SearchFilter.FILTER_FEATURED_PLAYLIST -> Result.success(
+                        SearchResult(
+                            items = listOf(
+                                YtPlaylistItem(
+                                    id = "RDCLAK5uy_hits",
+                                    title = "Hits of 2026 (So Far)",
+                                    author = YtArtist("YouTube Music", null),
+                                    songCountText = null,
+                                    thumbnail = "https://example.com/hits.jpg",
+                                    playEndpoint = null,
+                                    shuffleEndpoint = null,
+                                    radioEndpoint = null,
+                                )
+                            )
+                        )
+                    )
+                    YouTube.SearchFilter.FILTER_COMMUNITY_PLAYLIST -> Result.success(
+                        SearchResult(
+                            items = listOf(
+                                YtPlaylistItem(
+                                    id = "PL_inline",
+                                    title = "Bairan Inline",
+                                    author = YtArtist("Creator", null),
+                                    songCountText = "37 songs",
+                                    thumbnail = "https://example.com/inline.jpg",
+                                    playEndpoint = null,
+                                    shuffleEndpoint = null,
+                                    radioEndpoint = null,
+                                ),
+                                YtPlaylistItem(
+                                    id = "PL_offline_fail",
+                                    title = "Unresolved Playlist",
+                                    author = YtArtist("Creator 2", null),
+                                    songCountText = null,
+                                    thumbnail = "https://example.com/fail.jpg",
+                                    playEndpoint = null,
+                                    shuffleEndpoint = null,
+                                    radioEndpoint = null,
+                                ),
+                            )
+                        )
+                    )
+                    else -> Result.success(SearchResult(emptyList()))
+                }
+            },
+            playlistHandler = { playlistId ->
+                when (playlistId) {
+                    "RDCLAK5uy_hits" -> Result.success(
+                        PlaylistPage(
+                            playlist = YtPlaylistItem(
+                                id = "RDCLAK5uy_hits",
+                                title = "Hits of 2026 (So Far)",
+                                author = YtArtist("YouTube Music", null),
+                                songCountText = "50 songs",
+                                thumbnail = "https://example.com/hits.jpg",
+                                playEndpoint = null,
+                                shuffleEndpoint = null,
+                                radioEndpoint = null,
+                            ),
+                            songs = emptyList(),
+                            songsContinuation = null,
+                            continuation = null,
+                        )
+                    )
+                    else -> Result.failure(RuntimeException("not available"))
+                }
+            }
+        )
+
+        val holder = SearchStateHolder(appContext, prefs, musicRepository, fakeRemote, debounceMs = 300L, ioDispatcher = dispatcher)
+        holder.initialize(scope)
+        holder.updateSearchFilter(SearchFilterType.PLAYLISTS)
+        holder.performSearch("bairan")
+        scope.advanceUntilIdle()
+
+        val playlists = holder.searchResults.value.filterIsInstance<SearchResultItem.PlaylistItem>()
+        assertEquals(3, playlists.size)
+        assertEquals(50, playlists.first { it.playlist.id == "RDCLAK5uy_hits" }.playlist.displaySongCount)
+        assertEquals(37, playlists.first { it.playlist.id == "PL_inline" }.playlist.displaySongCount)
+        assertNull(playlists.first { it.playlist.id == "PL_offline_fail" }.playlist.displaySongCount)
+        // PL_inline already had songCountText, so it should not be fetched remotely.
+        assertEquals(2, fakeRemote.fetchedPlaylistIds.size)
+        assertEquals(setOf("RDCLAK5uy_hits", "PL_offline_fail"), fakeRemote.fetchedPlaylistIds.toSet())
+    }
+
     private class FakeRemoteDataSource(
         private val summaryHandler: suspend (String) -> Result<SearchSummaryPage> = { Result.success(SearchSummaryPage(emptyList())) },
         private val searchHandler: suspend (String, YouTube.SearchFilter) -> Result<SearchResult> = { _, _ -> Result.success(SearchResult(emptyList())) },
         private val suggestionsHandler: suspend (String) -> Result<SearchSuggestions> = { Result.success(SearchSuggestions(emptyList(), emptyList())) },
+        private val playlistHandler: suspend (String) -> Result<PlaylistPage> = { Result.failure(IllegalStateException("unused")) },
         private val saavnHandler: suspend (String, Int) -> Result<List<SaavnSong>> = { _, _ -> Result.success(emptyList()) },
     ) : SearchRemoteDataSource {
         var summaryCalls = 0
             private set
+        val fetchedPlaylistIds = mutableListOf<String>()
 
         override suspend fun searchYouTubeSummary(query: String): Result<SearchSummaryPage> {
             summaryCalls++
@@ -292,6 +389,13 @@ class SearchStateHolderTest {
 
         override suspend fun searchYouTubeSuggestions(query: String): Result<SearchSuggestions> =
             suggestionsHandler(query)
+
+        override suspend fun fetchPlaylistPage(playlistId: String): Result<PlaylistPage> {
+            synchronized(fetchedPlaylistIds) {
+                fetchedPlaylistIds.add(playlistId)
+            }
+            return playlistHandler(playlistId)
+        }
 
         override suspend fun searchSaavnSongs(query: String, limit: Int): Result<List<SaavnSong>> =
             saavnHandler(query, limit)

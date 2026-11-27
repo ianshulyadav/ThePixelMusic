@@ -143,7 +143,7 @@ object SearchPage {
                             ?: return null,
                     title = title,
                     author = playlistMetadata.playlistAuthor(),
-                    songCountText = playlistMetadata.lastText(),
+                    songCountText = PageHelper.extractPlaylistSongCountTextFromGroups(playlistMetadata),
                     thumbnail = thumbnail,
                     playEndpoint =
                         renderer.watchEndpoint(),
@@ -245,8 +245,3 @@ private fun List<List<Run>>.playlistAuthor(): Artist? {
             )
         }
 }
-
-private fun List<List<Run>>.lastText(): String? =
-    lastOrNull()
-        ?.joinToString(separator = "") { it.text }
-        ?.takeIf { it.isNotBlank() }

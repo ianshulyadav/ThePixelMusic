@@ -4,15 +4,18 @@ import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import unshoo.ianshulyadav.pixelmusic.innertube.models.ArtistItem
 import unshoo.ianshulyadav.pixelmusic.innertube.models.MusicCardShelfRenderer
 import unshoo.ianshulyadav.pixelmusic.innertube.models.MusicResponsiveListItemRenderer
+import unshoo.ianshulyadav.pixelmusic.innertube.models.MusicTwoRowItemRenderer
 import unshoo.ianshulyadav.pixelmusic.innertube.models.PlaylistItem
 import unshoo.ianshulyadav.pixelmusic.innertube.models.SongItem
 import unshoo.ianshulyadav.pixelmusic.innertube.models.AlbumItem
 import unshoo.ianshulyadav.pixelmusic.innertube.models.response.SearchResponse
+import unshoo.ianshulyadav.pixelmusic.innertube.pages.PageHelper
 import unshoo.ianshulyadav.pixelmusic.innertube.pages.SearchPage
 import unshoo.ianshulyadav.pixelmusic.innertube.pages.SearchSummaryPage
 
@@ -184,5 +187,115 @@ class InnerTubeSearchParsingTest {
         assertEquals("PL999", playlist.id)
         assertEquals("Top Hits", playlist.title)
         assertEquals("YouTube Music", playlist.author?.name)
+        assertNull(playlist.songCountText)
+    }
+
+    @Test
+    fun `playlist songCountText extracts real counts and ignores views or channel names`() {
+        val withCountRaw = """
+            {
+              "flexColumns": [
+                { "musicResponsiveListItemFlexColumnRenderer": { "text": { "runs": [ { "text": "Haryanvi Hitlist" } ] } } },
+                {
+                  "musicResponsiveListItemFlexColumnRenderer": {
+                    "text": {
+                      "runs": [
+                        { "text": "Playlist" },
+                        { "text": " • " },
+                        { "text": "YouTube Music" },
+                        { "text": " • " },
+                        { "text": "1,234 songs" }
+                      ]
+                    }
+                  }
+                }
+              ],
+              "navigationEndpoint": {
+                "browseEndpoint": { "browseId": "VLRDCLAK5uy_hits" }
+              }
+            }
+        """.trimIndent()
+        val withViewsOnlyRaw = """
+            {
+              "flexColumns": [
+                { "musicResponsiveListItemFlexColumnRenderer": { "text": { "runs": [ { "text": "Bairan - Banjaare" } ] } } },
+                {
+                  "musicResponsiveListItemFlexColumnRenderer": {
+                    "text": {
+                      "runs": [
+                        { "text": "Playlist" },
+                        { "text": " • " },
+                        { "text": "Banjaare Fans" },
+                        { "text": " • " },
+                        { "text": "12K views" }
+                      ]
+                    }
+                  }
+                }
+              ],
+              "navigationEndpoint": {
+                "browseEndpoint": { "browseId": "VLPL_views_only" }
+              }
+            }
+        """.trimIndent()
+        val cardWithCountRaw = """
+            {
+              "title": { "runs": [ { "text": "Bairan Mix" } ] },
+              "subtitle": {
+                "runs": [
+                  { "text": "Playlist" },
+                  { "text": " • " },
+                  { "text": "Creator" },
+                  { "text": " • " },
+                  { "text": "42 tracks" }
+                ]
+              },
+              "onTap": {
+                "browseEndpoint": {
+                  "browseId": "VLPL_card_count",
+                  "browseEndpointContextSupportedConfigs": {
+                    "browseEndpointContextMusicConfig": { "pageType": "MUSIC_PAGE_TYPE_PLAYLIST" }
+                  }
+                }
+              }
+            }
+        """.trimIndent()
+        val twoRowWithCountRaw = """
+            {
+              "title": { "runs": [ { "text": "Carousel Playlist" } ] },
+              "subtitle": {
+                "runs": [
+                  { "text": "YouTube Music" },
+                  { "text": " • " },
+                  { "text": "25 songs" }
+                ]
+              },
+              "thumbnailRenderer": {},
+              "navigationEndpoint": {
+                "browseEndpoint": {
+                  "browseId": "VLPL_carousel",
+                  "browseEndpointContextSupportedConfigs": {
+                    "browseEndpointContextMusicConfig": { "pageType": "MUSIC_PAGE_TYPE_PLAYLIST" }
+                  }
+                }
+              }
+            }
+        """.trimIndent()
+
+        val withCount = SearchPage.toYTItem(json.decodeFromString<MusicResponsiveListItemRenderer>(withCountRaw)) as PlaylistItem
+        val withViewsOnly = SearchPage.toYTItem(json.decodeFromString<MusicResponsiveListItemRenderer>(withViewsOnlyRaw)) as PlaylistItem
+        val cardWithCount = SearchSummaryPage.fromMusicCardShelfRenderer(json.decodeFromString<MusicCardShelfRenderer>(cardWithCountRaw)) as PlaylistItem
+        val twoRowWithCount = SearchSummaryPage.fromMusicTwoRowItemRenderer(json.decodeFromString<MusicTwoRowItemRenderer>(twoRowWithCountRaw)) as PlaylistItem
+
+        assertEquals("1,234 songs", withCount.songCountText)
+        assertEquals(1234, PageHelper.parsePlaylistSongCount(withCount.songCountText))
+        assertNull(withViewsOnly.songCountText)
+        assertEquals("42 tracks", cardWithCount.songCountText)
+        assertEquals(42, PageHelper.parsePlaylistSongCount(cardWithCount.songCountText))
+        assertEquals("25 songs", twoRowWithCount.songCountText)
+        assertEquals(50, PageHelper.parsePlaylistSongCount("50\u00A0songs"))
+        assertNull(PageHelper.parsePlaylistSongCount("1.2K views"))
+        assertNull(PageHelper.parsePlaylistSongCount("2026"))
+        assertEquals(50, PageHelper.parsePlaylistSongCount("50", allowBareDigits = true))
     }
 }

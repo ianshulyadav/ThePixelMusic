@@ -21,10 +21,14 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import timber.log.Timber
 import unshoo.ianshulyadav.pixelmusic.innertube.YouTube
 import unshoo.ianshulyadav.pixelmusic.innertube.models.AlbumItem
@@ -34,8 +38,11 @@ import unshoo.ianshulyadav.pixelmusic.innertube.models.SearchSuggestions
 import unshoo.ianshulyadav.pixelmusic.innertube.models.SongItem
 import unshoo.ianshulyadav.pixelmusic.innertube.models.YTItem
 import unshoo.ianshulyadav.pixelmusic.innertube.models.filterVideo
+import unshoo.ianshulyadav.pixelmusic.innertube.pages.PageHelper
+import unshoo.ianshulyadav.pixelmusic.innertube.pages.PlaylistPage
 import unshoo.ianshulyadav.pixelmusic.innertube.pages.SearchResult
 import unshoo.ianshulyadav.pixelmusic.innertube.pages.SearchSummaryPage
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -54,6 +61,7 @@ internal interface SearchRemoteDataSource {
     suspend fun searchYouTube(query: String, filter: YouTube.SearchFilter): Result<SearchResult>
     suspend fun searchYouTubeContinuation(token: String): Result<SearchResult>
     suspend fun searchYouTubeSuggestions(query: String): Result<SearchSuggestions>
+    suspend fun fetchPlaylistPage(playlistId: String): Result<PlaylistPage>
     suspend fun searchSaavnSongs(query: String, limit: Int): Result<List<SaavnSong>>
     suspend fun prefetchSongUrl(context: android.content.Context, song: com.unshoo.pixelmusic.data.model.youtube.Song)
 }
@@ -70,6 +78,9 @@ private object DefaultSearchRemoteDataSource : SearchRemoteDataSource {
 
     override suspend fun searchYouTubeSuggestions(query: String): Result<SearchSuggestions> =
         YouTube.searchSuggestions(query)
+
+    override suspend fun fetchPlaylistPage(playlistId: String): Result<PlaylistPage> =
+        YouTube.playlist(playlistId)
 
     override suspend fun searchSaavnSongs(query: String, limit: Int): Result<List<SaavnSong>> =
         SaavnService.searchSongs(query, limit = limit)
@@ -110,6 +121,8 @@ class SearchStateHolder internal constructor(
     companion object {
         const val SEARCH_DEBOUNCE_MS = 300L
         const val SEARCH_CACHE_SIZE = 150
+        const val PLAYLIST_COUNT_CACHE_SIZE = 200
+        const val MAX_PLAYLIST_COUNT_HYDRATIONS = 15
         val albumIdMap = java.util.concurrent.ConcurrentHashMap<Long, String>()
     }
 
@@ -122,6 +135,13 @@ class SearchStateHolder internal constructor(
         object : LinkedHashMap<String, SearchCacheEntry>(SEARCH_CACHE_SIZE, 0.75f, true) {
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, SearchCacheEntry>?): Boolean =
                 size > SEARCH_CACHE_SIZE
+        }
+    )
+
+    private val playlistSongCountCache = java.util.Collections.synchronizedMap(
+        object : LinkedHashMap<String, Int>(PLAYLIST_COUNT_CACHE_SIZE, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Int>?): Boolean =
+                size > PLAYLIST_COUNT_CACHE_SIZE
         }
     )
 
@@ -196,10 +216,15 @@ class SearchStateHolder internal constructor(
                     val key = cacheKey(query, currentFilter, source, pureYtMusic, hideVideo)
                     val cached = if (!request.bypassCache && source != SearchSource.LOCAL) searchResultCache[key] else null
                     if (cached != null && cached.items.isNotEmpty()) {
+                        val hydratedCached = applyCachedPlaylistCounts(cached.items)
                         if (request.requestId == latestSearchRequestId.get()) {
-                            _searchResults.value = cached.items
+                            _searchResults.value = hydratedCached
                             lastContinuationToken = cached.continuationToken
                             _isSearching.value = false
+                            if (hydratedCached !== cached.items) {
+                                searchResultCache.put(key, cached.copy(items = hydratedCached))
+                            }
+                            schedulePlaylistCountHydration(hydratedCached, request.requestId, key)
                         }
                         return@collectLatest
                     }
@@ -304,6 +329,7 @@ class SearchStateHolder internal constructor(
                             // Never cache "nothing": a failed search must not stick for this query.
                             if (immutable.isNotEmpty()) {
                                 searchResultCache.put(key, SearchCacheEntry(immutable, lastContinuationToken))
+                                schedulePlaylistCountHydration(immutable, request.requestId, key)
                             }
 
                             scope?.launch(ioDispatcher) {
@@ -411,9 +437,24 @@ class SearchStateHolder internal constructor(
                         albumArtUriString = thumbnail, songCount = 0)
                 )
             }
-            is PlaylistItem -> SearchResultItem.PlaylistItem(
-                Playlist(id = id, name = title, songIds = emptyList(), coverImageUri = thumbnail, source = "YOUTUBE")
-            )
+            is PlaylistItem -> {
+                val normalizedId = id.removePrefix("VL")
+                val parsedCount = PageHelper.parsePlaylistSongCount(songCountText)
+                    ?: playlistSongCountCache[normalizedId]
+                if (parsedCount != null) {
+                    playlistSongCountCache[normalizedId] = parsedCount
+                }
+                SearchResultItem.PlaylistItem(
+                    Playlist(
+                        id = id,
+                        name = title,
+                        songIds = emptyList(),
+                        coverImageUri = thumbnail,
+                        source = "YOUTUBE",
+                        displaySongCount = parsedCount,
+                    )
+                )
+            }
         }
 
     fun loadMoreSearch() {
@@ -423,26 +464,116 @@ class SearchStateHolder internal constructor(
         if (token == null || query == null || isLoadingMore) return
 
         isLoadingMore = true
+        val requestIdAtStart = latestSearchRequestId.get()
         scope?.launch(ioDispatcher) {
             try {
                 if (userPreferencesRepository.localModeEnabledFlow.first()) return@launch
                 val result = remoteDataSource.searchYouTubeContinuation(token).getOrNull()
-                if (result != null) {
+                if (result != null && requestIdAtStart == latestSearchRequestId.get()) {
                     val pureYtMusicOnly = userPreferencesRepository.pureYtMusicOnlyFlow.first()
                     val hideVideo = userPreferencesRepository.hideVideoFlow.first()
                     val shouldFilterVideos = if (filter == SearchFilterType.VIDEOS) false else (pureYtMusicOnly || hideVideo)
                     val newItems = result.items.mapNotNull { it.toSearchResultItem(shouldFilterVideos) }
-                    if (newItems.isNotEmpty()) {
+                    if (newItems.isNotEmpty() && requestIdAtStart == latestSearchRequestId.get()) {
                         val currentList = _searchResults.value
                         val updatedList = (currentList + newItems).toImmutableList()
                         _searchResults.value = updatedList
                         lastContinuationToken = result.continuation
+                        schedulePlaylistCountHydration(newItems, requestIdAtStart)
                     }
                 }
             } catch (e: Exception) {
                 Timber.e(e, "Error loading more search results")
             } finally {
                 isLoadingMore = false
+            }
+        }
+    }
+
+    private fun applyCachedPlaylistCounts(items: ImmutableList<SearchResultItem>): ImmutableList<SearchResultItem> {
+        var changed = false
+        val updated = items.map { item ->
+            if (item is SearchResultItem.PlaylistItem &&
+                item.playlist.source.equals("YOUTUBE", ignoreCase = true) &&
+                item.playlist.displaySongCount == null
+            ) {
+                val cachedCount = playlistSongCountCache[item.playlist.id.removePrefix("VL")]
+                if (cachedCount != null && cachedCount > 0) {
+                    changed = true
+                    item.copy(playlist = item.playlist.copy(displaySongCount = cachedCount))
+                } else {
+                    item
+                }
+            } else {
+                item
+            }
+        }
+        return if (changed) updated.toImmutableList() else items
+    }
+
+    private fun resolvePlaylistSongCount(page: PlaylistPage): Int? {
+        val fromHeader = PageHelper.parsePlaylistSongCount(page.playlist.songCountText, allowBareDigits = true)
+        return when {
+            fromHeader != null && fromHeader > 0 -> fromHeader
+            page.songs.isNotEmpty() -> page.songs.size
+            else -> null
+        }
+    }
+
+    private fun schedulePlaylistCountHydration(
+        items: List<SearchResultItem>,
+        requestId: Long,
+        cacheKey: String? = null,
+    ) {
+        val playlistsToResolve = items
+            .asSequence()
+            .filterIsInstance<SearchResultItem.PlaylistItem>()
+            .map { it.playlist }
+            .filter {
+                it.source.equals("YOUTUBE", ignoreCase = true) &&
+                    it.displaySongCount == null &&
+                    it.songIds.isEmpty() &&
+                    playlistSongCountCache[it.id.removePrefix("VL")] == null
+            }
+            .map { it.id }
+            .distinctBy { it.removePrefix("VL") }
+            .take(MAX_PLAYLIST_COUNT_HYDRATIONS)
+            .toList()
+        if (playlistsToResolve.isEmpty()) return
+
+        scope?.launch(ioDispatcher) {
+            try {
+                val semaphore = Semaphore(4)
+                val resolvedAny = AtomicBoolean(false)
+                coroutineScope {
+                    playlistsToResolve.map { playlistId ->
+                        async {
+                            semaphore.withPermit {
+                                if (requestId != latestSearchRequestId.get()) return@async
+                                val page = remoteDataSource.fetchPlaylistPage(playlistId).getOrNull() ?: return@async
+                                val count = resolvePlaylistSongCount(page) ?: return@async
+                                playlistSongCountCache[playlistId.removePrefix("VL")] = count
+                                resolvedAny.set(true)
+                            }
+                        }
+                    }.awaitAll()
+                }
+                if (!resolvedAny.get() || requestId != latestSearchRequestId.get()) return@launch
+                _searchResults.update { current ->
+                    if (requestId == latestSearchRequestId.get()) applyCachedPlaylistCounts(current) else current
+                }
+                if (cacheKey != null) {
+                    searchResultCache[cacheKey]?.let { entry ->
+                        val updated = applyCachedPlaylistCounts(entry.items)
+                        if (updated !== entry.items) {
+                            searchResultCache.put(cacheKey, entry.copy(items = updated))
+                        }
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Timber.d(e, "Playlist song count hydration skipped")
             }
         }
     }

@@ -222,7 +222,7 @@ data class SearchSummaryPage(
                         id = playlistId,
                         title = playlistTitle,
                         author = authorText?.let { Artist(id = null, name = it) },
-                        songCountText = null,
+                        songCountText = PageHelper.extractPlaylistSongCountText(renderer.subtitle.runs),
                         thumbnail = thumbnailUrl,
                         playEndpoint =
                             renderer.buttons
@@ -325,7 +325,7 @@ data class SearchSummaryPage(
                         id = id,
                         title = title,
                         author = subtitleRuns.firstOrNull()?.text?.takeIf { it.isNotBlank() }?.let { Artist(name = it, id = null) },
-                        songCountText = null,
+                        songCountText = PageHelper.extractPlaylistSongCountText(subtitleRuns),
                         thumbnail = thumbnailUrl,
                         playEndpoint = renderer.thumbnailOverlay?.musicItemThumbnailOverlayRenderer?.content
                             ?.musicPlayButtonRenderer?.playNavigationEndpoint?.anyWatchEndpoint,

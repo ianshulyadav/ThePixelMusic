@@ -1736,8 +1736,18 @@ fun SearchResultPlaylistItem(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                val countLabel = when {
+                    playlist.displaySongCount != null && playlist.displaySongCount > 0 ->
+                        formatSongCount(playlist.displaySongCount)
+                    playlist.songIds.isNotEmpty() ->
+                        formatSongCount(playlist.songIds.size)
+                    playlist.source.equals("YOUTUBE", ignoreCase = true) ->
+                        "Playlist"
+                    else ->
+                        formatSongCount(playlist.displaySongCount ?: 0)
+                }
                 Text(
-                    text = formatSongCount(playlist.songIds.size),
+                    text = countLabel,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

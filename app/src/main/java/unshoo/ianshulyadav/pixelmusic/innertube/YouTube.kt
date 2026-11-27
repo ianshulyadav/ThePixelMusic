@@ -63,6 +63,7 @@ import unshoo.ianshulyadav.pixelmusic.innertube.pages.LibraryPage
 import unshoo.ianshulyadav.pixelmusic.innertube.pages.NewReleaseAlbumPage
 import unshoo.ianshulyadav.pixelmusic.innertube.pages.NextPage
 import unshoo.ianshulyadav.pixelmusic.innertube.pages.NextResult
+import unshoo.ianshulyadav.pixelmusic.innertube.pages.PageHelper
 import unshoo.ianshulyadav.pixelmusic.innertube.pages.PlaylistContinuationPage
 import unshoo.ianshulyadav.pixelmusic.innertube.pages.PlaylistPage
 import unshoo.ianshulyadav.pixelmusic.innertube.pages.RelatedPage
@@ -861,7 +862,8 @@ object YouTube {
                     id = playlistId,
                     title = title,
                     author = null,
-                    songCountText = detailHeader.secondSubtitle.runs?.firstOrNull()?.text,
+                    songCountText = PageHelper.extractPlaylistSongCountText(detailHeader.secondSubtitle.runs)
+                        ?: detailHeader.secondSubtitle.runs?.firstOrNull()?.text,
                     thumbnail = thumbnail,
                     description = detailHeader.description?.runs?.joinToString("") { it.text },
                     playEndpoint = null,
@@ -903,7 +905,8 @@ object YouTube {
                         id = it.navigationEndpoint?.browseEndpoint?.browseId
                     )
                 },
-                songCountText = header.secondSubtitle?.runs?.firstOrNull()?.text,
+                songCountText = PageHelper.extractPlaylistSongCountText(header.secondSubtitle?.runs)
+                    ?: header.secondSubtitle?.runs?.firstOrNull()?.text,
                 thumbnail = thumbnail,
                 description = description,
                 playEndpoint = header.buttons.firstOrNull()?.musicPlayButtonRenderer?.playNavigationEndpoint?.anyWatchEndpoint,
