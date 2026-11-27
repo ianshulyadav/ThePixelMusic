@@ -174,7 +174,7 @@ class UserPreferencesRepositoryTest {
     }
 
     @Test
-    fun `seekerAnimation preferences default enabled at default duration and clamp bounds`() = runTest {
+    fun `seekerAnimation preferences default disabled at default duration and clamp bounds`() = runTest {
         val tempDir = Files.createTempDirectory("user-preferences-repository-test")
         try {
             val repository = UserPreferencesRepository(
@@ -185,8 +185,11 @@ class UserPreferencesRepositoryTest {
                 json = Json
             )
 
-            assertTrue(repository.seekerAnimationEnabledFlow.first())
+            assertFalse(repository.seekerAnimationEnabledFlow.first())
             assertEquals(DEFAULT_SEEKER_ANIMATION_DURATION_MS, repository.seekerAnimationDurationMsFlow.first())
+
+            repository.setSeekerAnimationEnabled(true)
+            assertTrue(repository.seekerAnimationEnabledFlow.first())
 
             repository.setSeekerAnimationEnabled(false)
             assertFalse(repository.seekerAnimationEnabledFlow.first())

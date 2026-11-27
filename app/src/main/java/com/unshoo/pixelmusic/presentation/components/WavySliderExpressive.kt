@@ -61,7 +61,7 @@ import dagger.hilt.android.EntryPointAccessors
 
 /** Global seeker transition setting provided from app preferences. */
 data class SeekerAnimationConfig(
-    val enabled: Boolean = true,
+    val enabled: Boolean = false,
     val durationMs: Int = DEFAULT_SEEKER_ANIMATION_DURATION_MS,
 )
 
@@ -397,7 +397,7 @@ internal fun resolveSliderProgressAnimationMode(
     isTransitionGlideActive: Boolean,
     currentProgress: Float,
     targetProgress: Float,
-    seekerAnimationEnabled: Boolean = true,
+    seekerAnimationEnabled: Boolean = false,
     seekerAnimationDurationMs: Int = DEFAULT_SEEKER_ANIMATION_DURATION_MS,
 ): SliderProgressAnimationMode {
     if (!enabled || isInteracting || performanceModeEnabled) {

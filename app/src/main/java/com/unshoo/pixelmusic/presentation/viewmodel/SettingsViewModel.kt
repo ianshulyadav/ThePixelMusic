@@ -2010,7 +2010,7 @@ fun setBeta05CleanInstallDisclaimerDismissed(dismissed: Boolean) {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
 
     val seekerAnimationEnabled: StateFlow<Boolean> = userPreferencesRepository.seekerAnimationEnabledFlow
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     val seekerAnimationDurationMs: StateFlow<Int> = userPreferencesRepository.seekerAnimationDurationMsFlow
         .stateIn(

@@ -2,12 +2,30 @@ package com.unshoo.pixelmusic.presentation.components
 
 import com.unshoo.pixelmusic.data.preferences.DEFAULT_SEEKER_ANIMATION_DURATION_MS
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Test
 
 class WavySliderExpressiveTest {
 
     @Test
-    fun `song switch from mid-song or end-of-song uses smooth spring transition`() {
+    fun `seeker animation defaults off so song switches snap until enabled`() {
+        assertFalse(SeekerAnimationConfig().enabled)
+        assertEquals(
+            SliderProgressAnimationMode.SNAP,
+            resolveSliderProgressAnimationMode(
+                enabled = true,
+                isInteracting = false,
+                performanceModeEnabled = false,
+                keyChanged = true,
+                isTransitionGlideActive = false,
+                currentProgress = 0.43f,
+                targetProgress = 0.0f,
+            )
+        )
+    }
+
+    @Test
+    fun `song switch from mid-song or end-of-song uses smooth spring transition when enabled`() {
         assertEquals(
             SliderProgressAnimationMode.SPRING_TRANSITION,
             resolveSliderProgressAnimationMode(
@@ -18,6 +36,7 @@ class WavySliderExpressiveTest {
                 isTransitionGlideActive = false,
                 currentProgress = 0.43f,
                 targetProgress = 0.0f,
+                seekerAnimationEnabled = true,
             )
         )
         assertEquals(
@@ -30,6 +49,7 @@ class WavySliderExpressiveTest {
                 isTransitionGlideActive = false,
                 currentProgress = 0.99f,
                 targetProgress = 0.0f,
+                seekerAnimationEnabled = true,
             )
         )
         // Even switching very early in a song (e.g. 0:04 -> 0:00) glides cleanly instead of snapping.
@@ -43,6 +63,7 @@ class WavySliderExpressiveTest {
                 isTransitionGlideActive = false,
                 currentProgress = 0.02f,
                 targetProgress = 0.0f,
+                seekerAnimationEnabled = true,
             )
         )
     }
@@ -59,12 +80,13 @@ class WavySliderExpressiveTest {
                 isTransitionGlideActive = true,
                 currentProgress = 0.20f,
                 targetProgress = 0.002f,
+                seekerAnimationEnabled = true,
             )
         )
     }
 
     @Test
-    fun `same song repeat-one or previous-to-start restart uses spring transition`() {
+    fun `same song repeat-one or previous-to-start restart uses spring transition when enabled`() {
         assertEquals(
             SliderProgressAnimationMode.SPRING_TRANSITION,
             resolveSliderProgressAnimationMode(
@@ -75,6 +97,7 @@ class WavySliderExpressiveTest {
                 isTransitionGlideActive = false,
                 currentProgress = 0.30f,
                 targetProgress = 0.0f,
+                seekerAnimationEnabled = true,
             )
         )
     }
@@ -91,6 +114,7 @@ class WavySliderExpressiveTest {
                 isTransitionGlideActive = false,
                 currentProgress = 0.250f,
                 targetProgress = 0.256f,
+                seekerAnimationEnabled = true,
             )
         )
         assertEquals(
@@ -103,6 +127,7 @@ class WavySliderExpressiveTest {
                 isTransitionGlideActive = false,
                 currentProgress = 0.2500f,
                 targetProgress = 0.2510f,
+                seekerAnimationEnabled = true,
             )
         )
     }
@@ -119,6 +144,7 @@ class WavySliderExpressiveTest {
                 isTransitionGlideActive = true,
                 currentProgress = 0.40f,
                 targetProgress = 0.65f,
+                seekerAnimationEnabled = true,
             )
         )
         assertEquals(
@@ -131,6 +157,7 @@ class WavySliderExpressiveTest {
                 isTransitionGlideActive = false,
                 currentProgress = 0.40f,
                 targetProgress = 0.0f,
+                seekerAnimationEnabled = true,
             )
         )
         assertEquals(
@@ -143,6 +170,7 @@ class WavySliderExpressiveTest {
                 isTransitionGlideActive = false,
                 currentProgress = 0.40f,
                 targetProgress = 0.0f,
+                seekerAnimationEnabled = true,
             )
         )
     }

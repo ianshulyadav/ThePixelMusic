@@ -2266,7 +2266,7 @@ constructor(
 
     val seekerAnimationEnabledFlow: Flow<Boolean> = dataStore.data
         .map { preferences ->
-            preferences[PreferencesKeys.SEEKER_ANIMATION_ENABLED] ?: true
+            preferences[PreferencesKeys.SEEKER_ANIMATION_ENABLED] ?: false
         }
         .distinctUntilChanged()
 

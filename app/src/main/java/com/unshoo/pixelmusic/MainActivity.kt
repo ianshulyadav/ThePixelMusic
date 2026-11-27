@@ -1094,7 +1094,7 @@ class MainActivity : ComponentActivity() {
             default = false
         )
         val showScrollbar by userPreferencesRepository.showScrollbarFlow.collectAsStateWithLifecycle(initialValue = true)
-        val seekerAnimationEnabled by userPreferencesRepository.seekerAnimationEnabledFlow.collectAsStateWithLifecycle(initialValue = true)
+        val seekerAnimationEnabled by userPreferencesRepository.seekerAnimationEnabledFlow.collectAsStateWithLifecycle(initialValue = false)
         val seekerAnimationDurationMs by userPreferencesRepository.seekerAnimationDurationMsFlow.collectAsStateWithLifecycle(
             initialValue = com.unshoo.pixelmusic.data.preferences.DEFAULT_SEEKER_ANIMATION_DURATION_MS
         )
