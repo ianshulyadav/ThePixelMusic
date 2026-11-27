@@ -103,6 +103,9 @@ class CoilBitmapLoader(private val context: Context, private val scope: Coroutin
                             return@launch
                         }
                     }
+                    if (candidate is String && com.unshoo.pixelmusic.data.image.YouTubeThumbnailCache.isMaxResUrl(candidate)) {
+                        com.unshoo.pixelmusic.data.image.YouTubeThumbnailCache.markMaxResMissingForUrl(candidate)
+                    }
                     lastError = IllegalStateException("Coil returned no image for: $data")
                 } catch (e: Exception) {
                     lastError = e
@@ -113,12 +116,8 @@ class CoilBitmapLoader(private val context: Context, private val scope: Coroutin
         return future
     }
 
-    private fun youtubeThumbnailFallbacks(url: String): List<String> {
-        val match = Regex("""i\.ytimg\.com/vi(?:_webp)?/([^/]+)/(maxresdefault|sddefault|hq720)""").find(url)
-            ?: return listOf(url)
-        val id = match.groupValues[1]
-        return listOf(url, "https://i.ytimg.com/vi/$id/hqdefault.jpg", "https://i.ytimg.com/vi/$id/mqdefault.jpg")
-    }
+    private fun youtubeThumbnailFallbacks(url: String): List<String> =
+        com.unshoo.pixelmusic.data.image.YouTubeThumbnailCache.fallbackCandidates(url)
 
     override fun supportsMimeType(mimeType: String): Boolean {
         return true // Coil supports most image types

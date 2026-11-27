@@ -96,8 +96,7 @@ class ColorSchemeProcessor @Inject constructor(
             return generateAndCacheColorScheme(
                 albumArtUri = albumArtUri,
                 paletteStyle = paletteStyle,
-                colorAccuracyLevel = resolvedAccuracyLevel,
-                forceRefresh = forceRefresh
+                colorAccuracyLevel = resolvedAccuracyLevel
             )
         } finally {
             Trace.endSection()
@@ -130,15 +129,14 @@ class ColorSchemeProcessor @Inject constructor(
         albumArtUri: String,
         paletteStyle: AlbumArtPaletteStyle,
         colorAccuracyLevel: Int,
-        persistToDatabase: Boolean = true,
-        forceRefresh: Boolean = false
+        persistToDatabase: Boolean = true
     ): ColorSchemePair? {
         Trace.beginSection("ColorSchemeProcessor.generate")
         try {
             val cacheKey = buildCacheKey(albumArtUri, paletteStyle, colorAccuracyLevel)
             // Load bitmap on IO dispatcher
             val bitmap = withContext(Dispatchers.IO) {
-                loadBitmapForColorExtraction(albumArtUri, forceRefresh)
+                loadBitmapForColorExtraction(albumArtUri)
             } ?: return null
 
             // Extract colors on Default dispatcher (CPU-bound)
@@ -184,35 +182,56 @@ class ColorSchemeProcessor @Inject constructor(
     /**
      * Loads a small bitmap optimized for color extraction.
      */
-    private suspend fun loadBitmapForColorExtraction(uri: String, skipCache: Boolean): Bitmap? {
+    @OptIn(coil.annotation.ExperimentalCoilApi::class)
+    private suspend fun loadBitmapForColorExtraction(uri: String): Bitmap? {
         return try {
-            val cachePolicy = if (skipCache) CachePolicy.DISABLED else CachePolicy.ENABLED
-            val diskCachePolicy = if (LocalArtworkUri.isLocalArtworkUri(uri)) CachePolicy.DISABLED else cachePolicy
-            
-            // Load the same URL the player shows, so colours come from the already-downloaded
-            // cover (disk cache) instead of a separate fetch of the raw URL.
+            val loader = context.imageLoader
+            val diskCachePolicy = if (LocalArtworkUri.isLocalArtworkUri(uri)) CachePolicy.DISABLED else CachePolicy.ENABLED
+
+            val resolved = com.unshoo.pixelmusic.utils.MediaItemBuilder.resolveArtworkUri(uri) ?: uri
             val playerSize = com.unshoo.pixelmusic.presentation.components.smartImageRequestSize(
                 com.unshoo.pixelmusic.presentation.components.PlayerCoverTargetSize
             )
-            val resolved = com.unshoo.pixelmusic.utils.MediaItemBuilder.resolveArtworkUri(uri) ?: uri
-            fun build(nonce: Int) = ImageRequest.Builder(context)
-                .data(
-                    com.unshoo.pixelmusic.presentation.components.smartImageOptimizedModel(
-                        resolved, playerSize, isThumbnail = false, artRetryNonce = nonce
-                    ) ?: uri
-                )
+            val playerUrl = com.unshoo.pixelmusic.presentation.components.smartImageOptimizedModel(
+                resolved, playerSize, isThumbnail = false, artRetryNonce = 0
+            )
+            val previewUrl = com.unshoo.pixelmusic.presentation.components.smartImageOptimizedModel(
+                resolved, com.unshoo.pixelmusic.presentation.components.AlbumArtPreviewSize, isThumbnail = false, artRetryNonce = 0
+            )
+            val fallbackUrl = com.unshoo.pixelmusic.presentation.components.smartImageOptimizedModel(
+                resolved, playerSize, isThumbnail = false, artRetryNonce = 1
+            )
+
+            // Prefer the compact 256px preview (~6-12 KB) unless the player cover is already on disk/memory,
+            // since extractSeedColor downsamples to 128x128 anyway.
+            val hasFullOnDisk = (playerUrl as? String)?.let { candidate ->
+                runCatching { loader.diskCache?.openSnapshot(candidate)?.use { true } == true }.getOrDefault(false)
+            } == true
+            val candidateChain = listOfNotNull(
+                if (hasFullOnDisk) playerUrl else null,
+                previewUrl,
+                if (!hasFullOnDisk) playerUrl else null,
+                fallbackUrl,
+            ).distinct()
+
+            fun build(data: Any) = ImageRequest.Builder(context)
+                .data(data)
                 .allowHardware(false) // Required for pixel access
                 .size(Size(128, 128)) // Small size for fast processing
                 .bitmapConfig(Bitmap.Config.ARGB_8888)
-                .memoryCachePolicy(cachePolicy)
+                .memoryCachePolicy(CachePolicy.ENABLED)
                 .diskCachePolicy(diskCachePolicy)
                 .build()
 
-            // Second try = the player's own fallback (e.g. YouTube hqdefault when there is no
-            // 1280px frame for the video).
-            val drawable = context.imageLoader.execute(build(0)).drawable
-                ?: context.imageLoader.execute(build(1)).drawable
-                ?: return null
+            var drawable: android.graphics.drawable.Drawable? = null
+            for (candidate in candidateChain) {
+                drawable = loader.execute(build(candidate)).drawable
+                if (drawable != null) break
+                if (candidate is String && com.unshoo.pixelmusic.data.image.YouTubeThumbnailCache.isMaxResUrl(candidate)) {
+                    com.unshoo.pixelmusic.data.image.YouTubeThumbnailCache.markMaxResMissingForUrl(candidate)
+                }
+            }
+            if (drawable == null) return null
             
             val targetWidth = drawable.intrinsicWidth.coerceIn(1, 128)
             val targetHeight = drawable.intrinsicHeight.coerceIn(1, 128)

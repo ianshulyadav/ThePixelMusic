@@ -24,6 +24,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import coil.imageLoader
 import coil.compose.AsyncImage
 import coil.compose.SubcomposeAsyncImage
 import coil.compose.SubcomposeAsyncImageContent
@@ -33,6 +34,7 @@ import coil.request.ImageRequest
 import coil.size.Dimension
 import coil.size.Size
 import com.unshoo.pixelmusic.R
+import com.unshoo.pixelmusic.data.image.YouTubeThumbnailCache
 import com.unshoo.pixelmusic.data.preferences.AlbumArtQuality
 import com.unshoo.pixelmusic.data.remote.youtube.upgradeThumbnailUrlToQuality
 import com.unshoo.pixelmusic.utils.LocalArtworkUri
@@ -62,46 +64,74 @@ fun OptimizedAlbumArt(
     val performanceModeEnabled = com.unshoo.pixelmusic.ui.theme.LocalPerformanceModeEnabled.current || SmartImageCache.performanceModeEnabled
     // Progressive remote art: a small preview (fast, usually already cached from lists) is drawn
     // first and the full-resolution cover fades in over it once loaded. If the full-size image
-    // does not exist (e.g. YouTube "maxresdefault" 404s), the preview simply stays.
-    val lowQualityUrl = remember(uri) {
-        albumArtPreviewUrl(uri as? String)
+    // is already in Coil's memory cache, skip the extra preview request altogether.
+    val effectiveUri: Any? = remember(uri) {
+        if (uri is String) YouTubeThumbnailCache.rewriteIfMaxResMissing(uri) else uri
+    }
+    val lowQualityUrl = remember(effectiveUri) {
+        albumArtPreviewUrl(effectiveUri as? String)
     }
     if (lowQualityUrl != null) {
+        val highSize = remember(targetSize) {
+            val safe = safeAlbumArtTargetSize(targetSize)
+            val w = (safe.width as? Dimension.Pixels)?.px?.coerceAtMost(MaxSafeAlbumArtDimensionPx)
+            val h = (safe.height as? Dimension.Pixels)?.px?.coerceAtMost(MaxSafeAlbumArtDimensionPx)
+            if (w != null && h != null) Size(w, h) else safe
+        }
+        var highRetryNonce by remember(effectiveUri) { mutableStateOf(0) }
+        val highData = remember(effectiveUri, highRetryNonce) {
+            val raw = effectiveUri as String
+            if (highRetryNonce > 0) {
+                YouTubeThumbnailCache.fallbackCandidates(raw).drop(highRetryNonce).firstOrNull()
+                    ?: YouTubeThumbnailCache.rewriteIfMaxResMissing(raw)
+            } else {
+                YouTubeThumbnailCache.rewriteIfMaxResMissing(raw)
+            }
+        }
+        val highMemoryKey = remember(effectiveUri, highSize) {
+            albumArtMemoryCacheKey(effectiveUri, highSize)
+        }
+        val skipPreviewFetch = remember(effectiveUri, highMemoryKey, highSize, loadHighQuality, performanceModeEnabled) {
+            loadHighQuality && !performanceModeEnabled && highMemoryKey != null &&
+                context.imageLoader.memoryCache?.get(MemoryCache.Key(highMemoryKey)) != null
+        }
         Box(modifier = modifier) {
-            AsyncImage(
-                model = remember(context, lowQualityUrl) {
-                    ImageRequest.Builder(context)
-                        .data(lowQualityUrl)
-                        .size(AlbumArtPreviewSize)
-                        .memoryCacheKey(albumArtMemoryCacheKey(lowQualityUrl, AlbumArtPreviewSize))
-                        .crossfade(false)
-                        .build()
-                },
-                contentDescription = "Album art of $title",
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
-                placeholder = painterResource(R.drawable.ic_music_placeholder),
-                error = painterResource(R.drawable.ic_music_placeholder)
-            )
-            if (loadHighQuality && !performanceModeEnabled) {
-                val highSize = remember(targetSize) {
-                    val safe = safeAlbumArtTargetSize(targetSize)
-                    val w = (safe.width as? Dimension.Pixels)?.px?.coerceAtMost(MaxSafeAlbumArtDimensionPx)
-                    val h = (safe.height as? Dimension.Pixels)?.px?.coerceAtMost(MaxSafeAlbumArtDimensionPx)
-                    if (w != null && h != null) Size(w, h) else safe
-                }
+            if (!skipPreviewFetch) {
                 AsyncImage(
-                    model = remember(uri, highSize) {
+                    model = remember(context, lowQualityUrl) {
                         ImageRequest.Builder(context)
-                            .data(uri)
-                            .size(highSize)
-                            .crossfade(300)
-                            .apply { albumArtMemoryCacheKey(uri, highSize)?.let { memoryCacheKey(it) } }
+                            .data(lowQualityUrl)
+                            .size(AlbumArtPreviewSize)
+                            .memoryCacheKey(albumArtMemoryCacheKey(lowQualityUrl, AlbumArtPreviewSize))
+                            .crossfade(false)
                             .build()
                     },
-                    contentDescription = null,
+                    contentDescription = "Album art of $title",
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop,
+                    placeholder = painterResource(R.drawable.ic_music_placeholder),
+                    error = painterResource(R.drawable.ic_music_placeholder)
+                )
+            }
+            if (loadHighQuality && !performanceModeEnabled) {
+                AsyncImage(
+                    model = remember(highData, highSize, highMemoryKey, skipPreviewFetch) {
+                        ImageRequest.Builder(context)
+                            .data(highData)
+                            .size(highSize)
+                            .crossfade(if (skipPreviewFetch) 0 else 250)
+                            .apply { highMemoryKey?.let { memoryCacheKey(it) } }
+                            .build()
+                    },
+                    contentDescription = if (skipPreviewFetch) "Album art of $title" else null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                    onError = {
+                        if (YouTubeThumbnailCache.isMaxResUrl(highData) && highRetryNonce == 0) {
+                            YouTubeThumbnailCache.markMaxResMissingForUrl(highData)
+                            highRetryNonce = 1
+                        }
+                    }
                 )
             }
         }

@@ -56,7 +56,7 @@ fun AlbumCarouselSection(
     playbackStartedProvider: () -> Boolean = { true },
 ) {
     val targetSize = remember(albumArtQuality) {
-        if (albumArtQuality.maxSize == 0) SafeOriginalAlbumArtSize
+        if (albumArtQuality.maxSize == 0) PlayerCoverTargetSize
         else Size(albumArtQuality.maxSize, albumArtQuality.maxSize)
     }
     val currentSongIndex = remember(currentSong?.id, currentMediaItemIndex, queue) {

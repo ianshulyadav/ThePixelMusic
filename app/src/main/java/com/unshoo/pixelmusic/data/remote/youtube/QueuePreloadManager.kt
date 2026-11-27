@@ -24,9 +24,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import coil.annotation.ExperimentalCoilApi
+import coil.imageLoader
 import java.io.File
 
-@OptIn(UnstableApi::class)
+@OptIn(UnstableApi::class, ExperimentalCoilApi::class)
 object QueuePreloadManager {
 
     private const val PRELOAD_LOOKAHEAD_CONCURRENCY = 2
@@ -144,19 +146,40 @@ object QueuePreloadManager {
 
                 val durMs = mediaItem.mediaMetadata.extras
                     ?.getLong(com.unshoo.pixelmusic.utils.MediaItemBuilder.EXTERNAL_EXTRA_DURATION, 0L) ?: 0L
+                val rawArtworkUri = com.unshoo.pixelmusic.utils.MediaItemBuilder.resolveArtworkUri(
+                    mediaItem.mediaMetadata.extras?.getString(com.unshoo.pixelmusic.utils.MediaItemBuilder.EXTERNAL_EXTRA_ALBUM_ART)
+                        ?: mediaItem.mediaMetadata.artworkUri?.toString(),
+                    mediaItem.mediaId,
+                    videoId
+                )
+                val upgradedThumb = upgradeThumbnailUrlToHighQuality(rawArtworkUri)
+                    ?.takeIf { it.startsWith("http", ignoreCase = true) }
                 val song = Song(
                     youtubeId = videoId,
                     title = mediaItem.mediaMetadata.title?.toString() ?: "",
                     artist = mediaItem.mediaMetadata.artist?.toString() ?: "",
                     album = mediaItem.mediaMetadata.albumTitle?.toString(),
                     duration = if (durMs > 0L) (durMs / 1_000L).toString() else "",
-                    thumbnailHref = upgradeThumbnailUrlToHighQuality(mediaItem.mediaMetadata.artworkUri?.toString()).orEmpty()
+                    thumbnailHref = upgradedThumb.orEmpty()
                 )
 
                 val isImmediateNext = (i == nextIndex)
-                if (includeArtworkAsync && song.thumbnailHref.isNotBlank()) {
+                if (includeArtworkAsync && (!rawArtworkUri.isNullOrBlank() || song.thumbnailHref.isNotBlank())) {
                     currentScope.launch(Dispatchers.IO) {
-                        cacheArtworkIfMissing(ctx, videoId, song.thumbnailHref)
+                        if (isImmediateNext && !rawArtworkUri.isNullOrBlank()) {
+                            com.unshoo.pixelmusic.presentation.components.prefetchSmartImage(
+                                ctx,
+                                rawArtworkUri,
+                                com.unshoo.pixelmusic.presentation.components.PlayerCoverTargetSize
+                            )
+                            com.unshoo.pixelmusic.presentation.components.blur.ArtworkGaussianBlur.load(
+                                ctx,
+                                rawArtworkUri
+                            )
+                        }
+                        if (song.thumbnailHref.isNotBlank()) {
+                            cacheArtworkIfMissing(ctx, videoId, song.thumbnailHref)
+                        }
                     }
                 }
 
@@ -228,6 +251,7 @@ object QueuePreloadManager {
         }
     }
 
+    @kotlin.OptIn(ExperimentalCoilApi::class)
     private suspend fun cacheArtworkIfMissing(ctx: Context, videoId: String, thumbnailUrl: String) {
         try {
             val imageDir = PixelMusicHelper.getDownloadDirectory(
@@ -235,11 +259,26 @@ object QueuePreloadManager {
                 Constants.Downloads.THUMBNAILS_FOLDER
             )
             val destFile = File(imageDir, "$videoId.jpg")
-            if (!destFile.exists()) {
-                val artBytes = PixelMusicHelper.fetchArtworkBytes(thumbnailUrl)
-                if (artBytes != null && artBytes.isNotEmpty()) {
-                    destFile.writeBytes(artBytes)
+            if (destFile.exists() && destFile.length() > 0L) return
+
+            // Reuse Coil's disk cache before touching the network.
+            val diskCache = ctx.imageLoader.diskCache
+            if (diskCache != null) {
+                for (candidate in com.unshoo.pixelmusic.data.image.YouTubeThumbnailCache.fallbackCandidates(thumbnailUrl)) {
+                    val copied = diskCache.openSnapshot(candidate)?.use { snapshot ->
+                        val cachedFile = snapshot.data.toFile()
+                        if (cachedFile.exists() && cachedFile.length() > 0L) {
+                            cachedFile.copyTo(destFile, overwrite = true)
+                            true
+                        } else false
+                    } ?: false
+                    if (copied) return
                 }
+            }
+
+            val artBytes = PixelMusicHelper.fetchArtworkBytes(thumbnailUrl)
+            if (artBytes != null && artBytes.isNotEmpty()) {
+                destFile.writeBytes(artBytes)
             }
         } catch (_: Exception) {
         }

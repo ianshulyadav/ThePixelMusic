@@ -58,16 +58,48 @@ object ArtworkGaussianBlur {
      * Decodes [model] small, blurs it and caches the result. Safe to call repeatedly (e.g. to
      * pre-warm the next track); returns the cached bitmap immediately on a hit.
      */
+    @OptIn(coil.annotation.ExperimentalCoilApi::class)
     suspend fun load(context: Context, model: String, sigma: Float = DEFAULT_SIGMA): ImageBitmap? {
         cache.get(key(model, sigma))?.let { return it }
-        val request = ImageRequest.Builder(context)
-            .data(model)
+        val appContext = context.applicationContext
+        val loader = appContext.imageLoader
+        // Prefer an already-cached high/player URL if present on memory/disk so we pay 0 network bytes;
+        // otherwise fetch the compact 128px thumbnail (~4-8 KB) instead of a 1024px cover just to blur at 64px.
+        val playerCandidate = com.unshoo.pixelmusic.presentation.components.smartImageOptimizedModel(
+            model,
+            com.unshoo.pixelmusic.presentation.components.PlayerCoverTargetSize,
+            isThumbnail = false
+        ) as? String ?: model
+        val compactCandidate = com.unshoo.pixelmusic.presentation.components.smartImageOptimizedModel(
+            model,
+            coil.size.Size(SOURCE_SIZE_PX * 2, SOURCE_SIZE_PX * 2),
+            isThumbnail = true
+        ) as? String ?: model
+        val hasCachedFull = run {
+            val memKey = com.unshoo.pixelmusic.presentation.components.smartImageMemoryCacheKey(
+                model,
+                com.unshoo.pixelmusic.presentation.components.PlayerCoverTargetSize,
+                isThumbnail = false
+            )
+            (memKey != null && loader.memoryCache?.get(memKey) != null) ||
+                runCatching { loader.diskCache?.openSnapshot(playerCandidate)?.use { true } ?: false }.getOrDefault(false) ||
+                runCatching { loader.diskCache?.openSnapshot(model)?.use { true } ?: false }.getOrDefault(false)
+        }
+        val fetchData = if (hasCachedFull) playerCandidate else compactCandidate
+
+        val request = ImageRequest.Builder(appContext)
+            .data(fetchData)
             .size(SOURCE_SIZE_PX * 2, SOURCE_SIZE_PX * 2)
             // Software bitmap: we need pixel access, and a hardware bitmap would force a GPU readback.
             .allowHardware(false)
             .memoryCacheKey("blur_src:$model")
             .build()
-        val drawable = (context.imageLoader.execute(request) as? SuccessResult)?.drawable ?: return null
+        val drawable = (loader.execute(request) as? SuccessResult)?.drawable
+            ?: if (fetchData != playerCandidate) {
+                (loader.execute(request.newBuilder().data(playerCandidate).build()) as? SuccessResult)?.drawable
+            } else {
+                null
+            } ?: return null
         val source = (drawable as? BitmapDrawable)?.bitmap ?: return null
         val blurred = withContext(Dispatchers.Default) { blur(source, sigma) } ?: return null
         val image = blurred.asImageBitmap().also { it.prepareToDraw() }
@@ -80,16 +112,29 @@ object ArtworkGaussianBlur {
         if (source.width <= 0 || source.height <= 0) return null
         val size = SOURCE_SIZE_PX
         val side = min(source.width, source.height)
-        val cropped = Bitmap.createBitmap(
-            source,
-            (source.width - side) / 2,
-            (source.height - side) / 2,
-            side,
-            side
-        )
-        val scaled = Bitmap.createScaledBitmap(cropped, size, size, true)
+        val cropped = if (source.width == source.height) {
+            source
+        } else {
+            Bitmap.createBitmap(
+                source,
+                (source.width - side) / 2,
+                (source.height - side) / 2,
+                side,
+                side
+            )
+        }
+        val scaled = if (cropped.width == size && cropped.height == size) {
+            cropped
+        } else {
+            Bitmap.createScaledBitmap(cropped, size, size, true)
+        }
         val pixels = IntArray(size * size)
-        scaled.getPixels(pixels, 0, size, 0, 0, size, size)
+        try {
+            scaled.getPixels(pixels, 0, size, 0, 0, size, size)
+        } finally {
+            if (scaled !== cropped && scaled !== source) scaled.recycle()
+            if (cropped !== source) cropped.recycle()
+        }
         gaussianBlurArgb(pixels, size, size, sigma)
         return Bitmap.createBitmap(pixels, size, size, Bitmap.Config.ARGB_8888).apply {
             if (pixels.all { it ushr 24 == 255 }) setHasAlpha(false)

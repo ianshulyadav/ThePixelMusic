@@ -263,16 +263,27 @@ object AppModule {
         @ApplicationContext context: Context,
         okHttpClient: OkHttpClient
     ): ImageLoader {
-        // CALM & CONTROLLED IMAGE PIPELINE QUEUE:
-        // - maxRequests = 4, maxRequestsPerHost = 2: keeps network requests in a calm queue without bandwidth contention.
-        // - Dispatchers.IO.limitedParallelism(2): decodes images 2 at a time without thrashing CPU or GPU decoders.
-        // - crossfade(200): Smooth image reveal without visual stutter.
+        val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+        val isLowRamDevice = activityManager?.isLowRamDevice == true
+        // Budget phones (<= 4 cores / ~2 GB RAM / 60 Hz) rarely set the OEM low_ram flag,
+        // so isLowRamDevice alone left them on the flagship image settings.
+        val isLowEndDevice = isLowRamDevice ||
+            com.unshoo.pixelmusic.utils.DevicePerformanceUtils.isLowEndDevice(context)
+
+        // Multiplex HTTP/2 cover requests higher per CDN host while still keeping CPU
+        // bitmap decode concurrency bounded below via Dispatchers.IO.limitedParallelism.
         val imageDispatcher = okhttp3.Dispatcher().apply {
-            maxRequests = 6
-            maxRequestsPerHost = 3
+            maxRequests = if (isLowEndDevice) 10 else 16
+            maxRequestsPerHost = if (isLowEndDevice) 5 else 8
         }
+        val imageConnectionPool = okhttp3.ConnectionPool(
+            if (isLowEndDevice) 6 else 10,
+            60,
+            java.util.concurrent.TimeUnit.SECONDS
+        )
         val imageOkHttpClient = okHttpClient.newBuilder()
             .dispatcher(imageDispatcher)
+            .connectionPool(imageConnectionPool)
             .addInterceptor { chain ->
                 val request = chain.request()
                 val url = request.url.toString()
@@ -289,13 +300,6 @@ object AppModule {
                 chain.proceed(newRequest)
             }
             .build()
-
-        val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
-        val isLowRamDevice = activityManager?.isLowRamDevice == true
-        // Budget phones (<= 4 cores / ~2 GB RAM / 60 Hz) rarely set the OEM low_ram flag,
-        // so isLowRamDevice alone left them on the flagship image settings.
-        val isLowEndDevice = isLowRamDevice ||
-            com.unshoo.pixelmusic.utils.DevicePerformanceUtils.isLowEndDevice(context)
 
         // Coil sizes the memory cache as a percentage of the app's memoryClass (often 256 MB
         // even on 2 GB phones), so 15% is ~38 MB of decoded artwork. Low-end devices keep a

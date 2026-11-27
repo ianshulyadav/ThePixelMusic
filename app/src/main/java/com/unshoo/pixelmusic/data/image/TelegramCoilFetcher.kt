@@ -379,14 +379,19 @@ class TelegramCoilFetcher(
 
     private suspend fun downloadDeezerCover(url: String, outputFile: File): Boolean = withContext(Dispatchers.IO) {
         try {
-            val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
-            conn.connectTimeout = 10000
-            conn.readTimeout = 10000
-            if (conn.responseCode == 200) {
-                conn.inputStream.use { input -> FileOutputStream(outputFile).use { output -> input.copyTo(output) } }
+            val request = okhttp3.Request.Builder()
+                .url(url)
+                .build()
+            com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.client.newCall(request).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext false
+                resp.body.byteStream().use { input ->
+                    FileOutputStream(outputFile).use { output -> input.copyTo(output) }
+                }
                 true
-            } else false
-        } catch (_: Exception) { false }
+            }
+        } catch (_: Exception) {
+            false
+        }
     }
 
     class Factory @Inject constructor(

@@ -48,31 +48,53 @@ object PixelMusicHelper {
     }
 
     suspend fun fetchArtworkBytes(url: String): ByteArray? {
+        if (!url.startsWith("http://", ignoreCase = true) && !url.startsWith("https://", ignoreCase = true)) {
+            return null
+        }
         return withContext(Dispatchers.IO) {
-            try {
-                val client = YoutubeHelper.client
+            val client = YoutubeHelper.client
+            for (candidate in com.unshoo.pixelmusic.data.image.YouTubeThumbnailCache.fallbackCandidates(url)) {
+                try {
+                    val request = Request.Builder()
+                        .url(candidate)
+                        .build()
 
-                val request = Request.Builder()
-                    .url(url)
-                    .build()
-
-                client.newCall(request).execute().use { response ->
-                    if (response.isSuccessful) response.body?.bytes()?.cappedTo() else null
+                    client.newCall(request).execute().use { response ->
+                        if (response.isSuccessful) {
+                            val bytes = response.body.bytes().cappedTo()
+                            if (bytes != null) return@withContext bytes
+                        } else if (com.unshoo.pixelmusic.data.image.YouTubeThumbnailCache.isMaxResUrl(candidate)) {
+                            com.unshoo.pixelmusic.data.image.YouTubeThumbnailCache.markMaxResMissingForUrl(candidate)
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e("Artwork", "Failed to fetch artwork: ${e.message}")
                 }
-            } catch (e: Exception) {
-                Log.e("Artwork", "Failed to fetch artwork: ${e.message}")
-                null
             }
+            null
         }
     }
 }
 
 fun ByteArray.cappedTo(maxSize: Int = PixelMusicHelper.WEAROS_MAX_IMAGE_SIZE): ByteArray? {
-    val bitmap = BitmapFactory.decodeByteArray(this, 0, size) ?: return null
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(this, 0, size, bounds)
+    val srcWidth = bounds.outWidth
+    val srcHeight = bounds.outHeight
+    if (srcWidth <= 0 || srcHeight <= 0) return null
+    // Already within the size bound: return raw compressed bytes without a full bitmap decode/re-encode.
+    if (srcWidth <= maxSize && srcHeight <= maxSize) return this
+
+    var sampleSize = 1
+    while (srcWidth / (sampleSize * 2) >= maxSize && srcHeight / (sampleSize * 2) >= maxSize) {
+        sampleSize *= 2
+    }
+    val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+    val bitmap = BitmapFactory.decodeByteArray(this, 0, size, decodeOpts) ?: return null
     try {
         val capped = if (bitmap.width <= maxSize && bitmap.height <= maxSize) bitmap else {
             val scale = maxSize.toFloat() / maxOf(bitmap.width, bitmap.height)
-            bitmap.scale((bitmap.width * scale).toInt(), (bitmap.height * scale).toInt())
+            bitmap.scale((bitmap.width * scale).toInt().coerceAtLeast(1), (bitmap.height * scale).toInt().coerceAtLeast(1))
         }
         try {
             val stream = ByteArrayOutputStream()

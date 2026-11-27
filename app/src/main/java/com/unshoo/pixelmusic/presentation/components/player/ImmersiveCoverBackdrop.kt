@@ -52,7 +52,20 @@ internal fun ImmersiveCoverBackdrop(
     topOffset: androidx.compose.ui.unit.Dp = 0.dp
 ) {
     val context = LocalContext.current
-    val previewRequest = remember(context, artworkModel) {
+    val targetSize = remember(albumArtQuality) {
+        if (albumArtQuality.maxSize == 0) com.unshoo.pixelmusic.presentation.components.PlayerCoverTargetSize
+        else coil.size.Size(albumArtQuality.maxSize, albumArtQuality.maxSize)
+    }
+    val highInMemory = remember(context, artworkModel, targetSize) {
+        val key = com.unshoo.pixelmusic.presentation.components.smartImageMemoryCacheKey(
+            artworkModel,
+            targetSize,
+            isThumbnail = false
+        )
+        key != null && coil.Coil.imageLoader(context).memoryCache?.get(key) != null
+    }
+    val previewRequest = remember(context, artworkModel, highInMemory) {
+        if (highInMemory) return@remember null
         albumArtPreviewUrl(artworkModel)?.let { preview ->
             ImageRequest.Builder(context)
                 .data(preview)
@@ -61,10 +74,6 @@ internal fun ImmersiveCoverBackdrop(
                 .crossfade(false)
                 .build()
         }
-    }
-    val targetSize = remember(albumArtQuality) {
-        if (albumArtQuality.maxSize == 0) SafeOriginalAlbumArtSize
-        else coil.size.Size(albumArtQuality.maxSize, albumArtQuality.maxSize)
     }
     Box(
         modifier = modifier

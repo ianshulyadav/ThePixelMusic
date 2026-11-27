@@ -339,8 +339,11 @@ val isStableLocalArtwork = when (optimizedModel) {
             onState?.invoke(state)
             if (isRemoteModel && artRetryNonce < SmartImageRetryDelaysMs.size) {
                 val attempt = artRetryNonce
-                // A missing YouTube maxres frame is expected: fall back to hqdefault right away.
-                val missingMaxRes = request.data.toString().endsWith("maxresdefault.jpg")
+                val failedUrl = request.data.toString()
+                val missingMaxRes = com.unshoo.pixelmusic.data.image.YouTubeThumbnailCache.isMaxResUrl(failedUrl)
+                if (missingMaxRes) {
+                    com.unshoo.pixelmusic.data.image.YouTubeThumbnailCache.markMaxResMissingForUrl(failedUrl)
+                }
                 retryScope.launch {
                     kotlinx.coroutines.delay(if (missingMaxRes) 0L else SmartImageRetryDelaysMs[attempt])
                     artRetryNonce = attempt + 1
@@ -399,8 +402,10 @@ internal fun smartImageOptimizedModel(
                 isThumbnail -> "https://i.ytimg.com/vi/$videoId/mqdefault.jpg"
                 // Big cards: hqdefault is 480x360 with letterbox bars, so the cropped square
                 // is only ~270px and looks blurry. Try the 1280x720 frame first; not every
-                // video has one, so the error retry falls back to hqdefault.
-                requestedPx >= SmartImageBuckets.CARD_PX && artRetryNonce == 0 ->
+                // video has one, so the error retry (and shared negative cache) falls back to hqdefault.
+                requestedPx >= SmartImageBuckets.CARD_PX &&
+                    artRetryNonce == 0 &&
+                    !com.unshoo.pixelmusic.data.image.YouTubeThumbnailCache.isMaxResMissing(videoId) ->
                     "https://i.ytimg.com/vi/$videoId/maxresdefault.jpg"
                 else -> "https://i.ytimg.com/vi/$videoId/hqdefault.jpg"
             }
@@ -448,23 +453,41 @@ internal fun smartImageRequestSize(targetSize: Size): Size {
  * will request, so showing it later is instant (used for the next songs in the queue).
  */
 fun prefetchSmartImage(context: android.content.Context, model: String, targetSize: Size) {
+    val appContext = context.applicationContext
     val size = smartImageRequestSize(targetSize)
     val data = smartImageOptimizedModel(model, size, isThumbnail = false) ?: return
     val key = smartImageMemoryCacheKey(model, size, isThumbnail = false)
-    if (key != null && context.imageLoader.memoryCache?.get(key) != null) return
+    if (key != null && appContext.imageLoader.memoryCache?.get(key) != null) return
     val isLocal = (data as? String)?.let { LocalArtworkUri.isLocalArtworkUri(it) } ?: false
-    val request = ImageRequest.Builder(context)
-        .data(data)
-        .size(size)
-        .allowHardware(true)
-        .apply {
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) bitmapConfig(Bitmap.Config.HARDWARE)
-            if (key != null) memoryCacheKey(key)
-        }
-        .memoryCachePolicy(CachePolicy.ENABLED)
-        .diskCachePolicy(if (isLocal) CachePolicy.DISABLED else CachePolicy.ENABLED)
-        .build()
-    context.imageLoader.enqueue(request)
+
+    fun buildRequest(requestData: Any, withMaxResFallback: Boolean): ImageRequest =
+        ImageRequest.Builder(appContext)
+            .data(requestData)
+            .size(size)
+            .allowHardware(true)
+            .apply {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) bitmapConfig(Bitmap.Config.HARDWARE)
+                if (key != null) memoryCacheKey(key)
+                if (withMaxResFallback &&
+                    requestData is String &&
+                    com.unshoo.pixelmusic.data.image.YouTubeThumbnailCache.isMaxResUrl(requestData)
+                ) {
+                    listener(
+                        onError = { _, _ ->
+                            com.unshoo.pixelmusic.data.image.YouTubeThumbnailCache.markMaxResMissingForUrl(requestData)
+                            val fallbackUrl = smartImageOptimizedModel(model, size, isThumbnail = false, artRetryNonce = 1)
+                            if (fallbackUrl != null && fallbackUrl != requestData) {
+                                appContext.imageLoader.enqueue(buildRequest(fallbackUrl, withMaxResFallback = false))
+                            }
+                        }
+                    )
+                }
+            }
+            .memoryCachePolicy(CachePolicy.ENABLED)
+            .diskCachePolicy(if (isLocal) CachePolicy.DISABLED else CachePolicy.ENABLED)
+            .build()
+
+    appContext.imageLoader.enqueue(buildRequest(data, withMaxResFallback = true))
 }
 
 private val SmartImageRetryDelaysMs = longArrayOf(2_000L, 5_000L, 12_000L)

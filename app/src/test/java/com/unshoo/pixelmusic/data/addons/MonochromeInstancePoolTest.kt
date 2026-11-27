@@ -201,18 +201,10 @@ class MonochromeInstancePoolTest {
         val client = OkHttpClient.Builder()
             .addInterceptor(Interceptor { chain ->
                 val url = chain.request().url
+                val urlString = url.toString()
                 hitHosts.add(url.host)
-                if (url.host == "us-west.monochrome.tf") {
-                    Response.Builder()
-                        .request(chain.request())
-                        .protocol(Protocol.HTTP_1_1)
-                        .code(200)
-                        .message("OK")
-                        .header("Content-Type", "application/json")
-                        .body("""{"data":{"items":[{"id":"776655","title":"Found In Wave Two","artistNames":["Artist"],"duration":180}]}}""".toResponseBody("application/json".toMediaType()))
-                        .build()
-                } else if (url.toString().contains("/track/?id=776655")) {
-                    Response.Builder()
+                when {
+                    urlString.contains("/track/?id=776655") -> Response.Builder()
                         .request(chain.request())
                         .protocol(Protocol.HTTP_1_1)
                         .code(200)
@@ -220,8 +212,17 @@ class MonochromeInstancePoolTest {
                         .header("Content-Type", "application/json")
                         .body("""{"data":{"OriginalTrackUrl":"https://cdn.example/wave2.flac"}}""".toResponseBody("application/json".toMediaType()))
                         .build()
-                } else {
-                    Response.Builder()
+
+                    url.host == "us-west.monochrome.tf" -> Response.Builder()
+                        .request(chain.request())
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .header("Content-Type", "application/json")
+                        .body("""{"data":{"items":[{"id":"776655","title":"Found In Wave Two","artistNames":["Artist"],"duration":180}]}}""".toResponseBody("application/json".toMediaType()))
+                        .build()
+
+                    else -> Response.Builder()
                         .request(chain.request())
                         .protocol(Protocol.HTTP_1_1)
                         .code(502)

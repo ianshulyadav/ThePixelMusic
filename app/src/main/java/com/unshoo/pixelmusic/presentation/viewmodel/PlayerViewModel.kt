@@ -1572,7 +1572,7 @@ class PlayerViewModel @Inject constructor(
                         if (qSize > 3) add(queue[(index + 3) % qSize])
                         if (qSize > 1) add(queue[(index - 1 + qSize) % qSize])
                     }.distinctBy { it.id }
-                    artNeighbours.forEach { song ->
+                    artNeighbours.forEachIndexed { artIdx, song ->
                         val artUri = com.unshoo.pixelmusic.utils.MediaItemBuilder.resolveArtworkUri(song.albumArtUriString, song.id, song.youtubeId)
                         if (!artUri.isNullOrBlank()) {
                             com.unshoo.pixelmusic.presentation.components.prefetchSmartImage(
@@ -1580,6 +1580,11 @@ class PlayerViewModel @Inject constructor(
                                 artUri,
                                 com.unshoo.pixelmusic.presentation.components.PlayerCoverTargetSize
                             )
+                            if (artIdx == 0) {
+                                viewModelScope.launch(Dispatchers.IO) {
+                                    com.unshoo.pixelmusic.presentation.components.blur.ArtworkGaussianBlur.load(context, artUri)
+                                }
+                            }
                         }
                     }
                 }
