@@ -514,7 +514,7 @@ fun SearchScreen(
                                     )
                                 }
 
-                                if (searchUiState.searchHistory.isNotEmpty() || recentPicks.isNotEmpty()) {
+                                if (recentPicks.isNotEmpty()) {
                                     item(key = "recent_searches_section", contentType = "recent_searches") {
                                         RecentSearchesSection(
                                             picks = recentPicks,

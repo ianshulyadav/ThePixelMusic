@@ -355,7 +355,7 @@ fun RecentSearchesSection(
     onPickClick: (com.unshoo.pixelmusic.data.preferences.RecentSearchPick) -> Unit = {},
     onPickDelete: (com.unshoo.pixelmusic.data.preferences.RecentSearchPick) -> Unit = {}
 ) {
-    if (searchHistory.isEmpty() && picks.isEmpty()) return
+    if (picks.isEmpty()) return
     val isDark = LocalPixelMusicDarkTheme.current
 
     Column(
@@ -393,21 +393,13 @@ fun RecentSearchesSection(
             }
         }
 
-        // Songs / artists the user opened from results come first, with their artwork.
+        // Only songs / artists the user opened from results, with their artwork. Plain typed
+        // queries (text-only pills) are not listed.
         picks.take(10).forEach { pick ->
             RecentSearchPickItem(
                 pick = pick,
                 onClick = { onPickClick(pick) },
                 onDelete = { onPickDelete(pick) }
-            )
-        }
-
-        // Vertical stack of search pills
-        searchHistory.take(15).forEach { item ->
-            RecentSearchPillItem(
-                query = item.query,
-                onClick = { onItemClick(item.query) },
-                onDelete = { onItemDelete(item.query) }
             )
         }
     }
