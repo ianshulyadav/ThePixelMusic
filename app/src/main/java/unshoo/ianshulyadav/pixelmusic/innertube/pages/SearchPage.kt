@@ -38,7 +38,7 @@ object SearchPage {
         defaultArtist: Artist? = null
     ): YTItem? {
         val title = renderer.titleText ?: return null
-        val thumbnail = renderer.thumbnail?.musicThumbnailRenderer?.getThumbnailUrl()
+        val thumbnail = renderer.thumbnail?.getThumbnailUrl()
         val metadata = renderer.metadataGroups()
         return when {
             renderer.isSong -> {
@@ -49,7 +49,8 @@ object SearchPage {
                         text in setOf("video", "videos", "vídeo", "vídeos", "vidéo", "vidéos", "видео", "동영상", "视频", "動画")
                     } == true
                 } || (endpoint?.watchEndpointMusicSupportedConfigs?.watchEndpointMusicConfig?.musicVideoType?.let {
-                    it != unshoo.ianshulyadav.pixelmusic.innertube.models.WatchEndpoint.WatchEndpointMusicSupportedConfigs.WatchEndpointMusicConfig.MUSIC_VIDEO_TYPE_ATV
+                    it.isNotBlank() &&
+                        it != unshoo.ianshulyadav.pixelmusic.innertube.models.WatchEndpoint.WatchEndpointMusicSupportedConfigs.WatchEndpointMusicConfig.MUSIC_VIDEO_TYPE_ATV
                 } ?: false) || com.unshoo.pixelmusic.utils.ContentFilterUtils.isVideoTitle(title)
 
                 val extracted = PageHelper.extractArtists(renderer, title)
@@ -67,8 +68,12 @@ object SearchPage {
                     featArtists.map { Artist(name = it, id = null) }
                 }
 
+                val videoId = renderer.playlistItemData?.videoId?.takeIf { it.isNotBlank() }
+                    ?: endpoint?.videoId?.takeIf { it.isNotBlank() }
+                    ?: return null
+
                 SongItem(
-                    id = renderer.playlistItemData?.videoId ?: endpoint?.videoId ?: return null,
+                    id = videoId,
                     title = title,
                     artists = artists,
                     album = PageHelper.extractAlbum(renderer)
@@ -79,15 +84,17 @@ object SearchPage {
                             )
                         },
                     duration = metadata.duration(),
-                    thumbnail = thumbnail ?: return null,
+                    thumbnail = thumbnail.orEmpty(),
                     explicit = renderer.isExplicit,
                     endpoint = endpoint,
                     isVideo = isVideo,
                 )
             }
             renderer.isArtist -> {
+                val browseId = renderer.navigationEndpoint?.browseEndpoint?.browseId?.takeIf { it.isNotBlank() }
+                    ?: return null
                 ArtistItem(
-                    id = renderer.navigationEndpoint?.browseEndpoint?.browseId ?: return null,
+                    id = browseId,
                     title = title,
                     thumbnail = thumbnail,
                     playEndpoint = renderer.watchEndpoint(),
@@ -110,17 +117,20 @@ object SearchPage {
                 )
             }
             renderer.isAlbum -> {
+                val browseId = renderer.navigationEndpoint?.browseEndpoint?.browseId?.takeIf { it.isNotBlank() }
+                    ?: return null
                 AlbumItem(
-                    browseId = renderer.navigationEndpoint?.browseEndpoint?.browseId ?: return null,
+                    browseId = browseId,
                     playlistId =
                         renderer.watchEndpoint()
                             ?.playlistId
-                            ?: return null,
+                            ?.takeIf { it.isNotBlank() }
+                            ?: browseId,
                     title = title,
                     artists = PageHelper.extractArtists(renderer, title).takeIf { it.isNotEmpty() }
                         ?: defaultArtist?.let { listOf(it) },
                     year = metadata.year(),
-                    thumbnail = thumbnail ?: return null,
+                    thumbnail = thumbnail.orEmpty(),
                     explicit = renderer.isExplicit,
                 )
             }
@@ -128,8 +138,8 @@ object SearchPage {
                 val playlistMetadata = renderer.metadataGroups(clean = false)
                 PlaylistItem(
                     id =
-                        renderer.navigationEndpoint?.browseEndpoint?.browseId?.removePrefix("VL")
-                            ?: renderer.watchEndpoint()?.playlistId?.removePrefix("VL")
+                        renderer.navigationEndpoint?.browseEndpoint?.browseId?.removePrefix("VL")?.takeIf { it.isNotBlank() }
+                            ?: renderer.watchEndpoint()?.playlistId?.removePrefix("VL")?.takeIf { it.isNotBlank() }
                             ?: return null,
                     title = title,
                     author = playlistMetadata.playlistAuthor(),

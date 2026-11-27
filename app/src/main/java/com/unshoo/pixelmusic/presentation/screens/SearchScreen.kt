@@ -312,8 +312,19 @@ fun SearchScreen(
     }
 
     // Search debouncing is centralized in SearchStateHolder.
-    LaunchedEffect(searchQuery, currentFilter, searchSource, isLocalModeSearch) {
+    LaunchedEffect(searchQuery) {
         playerViewModel.performSearch(searchQuery)
+    }
+
+    var lastSearchSourceContext by remember { mutableStateOf(searchSource to isLocalModeSearch) }
+    LaunchedEffect(searchSource, isLocalModeSearch) {
+        val current = searchSource to isLocalModeSearch
+        if (current != lastSearchSourceContext) {
+            lastSearchSourceContext = current
+            if (searchQuery.isNotBlank()) {
+                playerViewModel.performSearch(searchQuery, immediate = true, force = true)
+            }
+        }
     }
 
     // Reset search results list scroll position to top whenever the filter changes
@@ -462,7 +473,7 @@ fun SearchScreen(
                                         selectedMoodGenre = null
                                         isBrowsingAllMoodsAndGenres = false
                                         playerViewModel.updateSearchQuery(query)
-                                        playerViewModel.performSearch(query)
+                                        playerViewModel.performSearch(query, immediate = true)
                                         playerViewModel.onSearchQuerySubmitted(query)
                                         keyboardController?.hide()
                                         focusManager.clearFocus(force = true)
@@ -543,7 +554,7 @@ fun SearchScreen(
                                                 searchQuery = query
                                                 selectedMoodGenre = null
                                                 playerViewModel.updateSearchQuery(query)
-                                                playerViewModel.performSearch(query)
+                                                playerViewModel.performSearch(query, immediate = true)
                                                 playerViewModel.onSearchQuerySubmitted(query)
                                                 keyboardController?.hide()
                                                 focusManager.clearFocus(force = true)
@@ -779,9 +790,13 @@ fun SearchScreen(
                                             color = MaterialTheme.colorScheme.onSurface
                                         ),
                                         cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
+                                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                                            imeAction = androidx.compose.ui.text.input.ImeAction.Search
+                                        ),
                                         keyboardActions = androidx.compose.foundation.text.KeyboardActions(
                                             onSearch = {
                                                 if (searchQuery.isNotBlank()) {
+                                                    playerViewModel.performSearch(searchQuery, immediate = true)
                                                     playerViewModel.onSearchQuerySubmitted(searchQuery)
                                                 }
                                                 focusManager.clearFocus(force = true)
@@ -892,9 +907,9 @@ fun SearchScreen(
                 currentSong?.let { favoriteSongIds.contains(it.id) }
             }
         }.value ?: false
-        val removeFromListTrigger = remember(currentSong) {
+        val removeFromListTrigger = remember(currentSong, playerViewModel) {
             {
-                searchQuery = "$searchQuery "
+                playerViewModel.refreshSearch()
             }
         }
 

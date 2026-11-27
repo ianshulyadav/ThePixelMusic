@@ -379,9 +379,6 @@ class PlayerViewModel @Inject constructor(
                 com.unshoo.pixelmusic.data.preferences.SearchSource.LOCAL -> com.unshoo.pixelmusic.data.preferences.SearchSource.ONLINE
             }
             userPreferencesRepository.setSearchSource(next)
-            if (searchQuery.isNotBlank()) {
-                performSearch(searchQuery)
-            }
         }
     }
 
@@ -7759,6 +7756,14 @@ class PlayerViewModel @Inject constructor(
 
     fun performSearch(query: String) {
         searchStateHolder.performSearch(query)
+    }
+
+    fun performSearch(query: String, immediate: Boolean, force: Boolean = true) {
+        searchStateHolder.performSearch(query, immediate = immediate, force = force)
+    }
+
+    fun refreshSearch() {
+        searchStateHolder.refreshCurrentSearch()
     }
 
     fun loadMoreSearch() {

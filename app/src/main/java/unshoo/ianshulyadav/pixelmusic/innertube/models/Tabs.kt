@@ -15,22 +15,22 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class Tabs(
-    val tabs: List<Tab>,
+    val tabs: List<Tab> = emptyList(),
 ) {
     @Serializable
     data class Tab(
-        val tabRenderer: TabRenderer,
+        val tabRenderer: TabRenderer = TabRenderer(),
     ) {
         @Serializable
         data class TabRenderer(
-            val title: String?,
-            val content: Content?,
-            val endpoint: NavigationEndpoint?,
+            val title: String? = null,
+            val content: Content? = null,
+            val endpoint: NavigationEndpoint? = null,
         ) {
             @Serializable
             data class Content(
-                val sectionListRenderer: SectionListRenderer?,
-                val musicQueueRenderer: MusicQueueRenderer?,
+                val sectionListRenderer: SectionListRenderer? = null,
+                val musicQueueRenderer: MusicQueueRenderer? = null,
             )
         }
     }

@@ -1,6 +1,5 @@
 package com.unshoo.pixelmusic.presentation.viewmodel
 
-import android.util.LruCache
 import com.unshoo.pixelmusic.data.model.Album
 import com.unshoo.pixelmusic.data.model.Artist
 import com.unshoo.pixelmusic.data.model.Playlist
@@ -12,15 +11,16 @@ import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.channels.BufferOverflow
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.coroutineScope
@@ -30,9 +30,12 @@ import unshoo.ianshulyadav.pixelmusic.innertube.YouTube
 import unshoo.ianshulyadav.pixelmusic.innertube.models.AlbumItem
 import unshoo.ianshulyadav.pixelmusic.innertube.models.ArtistItem
 import unshoo.ianshulyadav.pixelmusic.innertube.models.PlaylistItem
+import unshoo.ianshulyadav.pixelmusic.innertube.models.SearchSuggestions
 import unshoo.ianshulyadav.pixelmusic.innertube.models.SongItem
 import unshoo.ianshulyadav.pixelmusic.innertube.models.YTItem
 import unshoo.ianshulyadav.pixelmusic.innertube.models.filterVideo
+import unshoo.ianshulyadav.pixelmusic.innertube.pages.SearchResult
+import unshoo.ianshulyadav.pixelmusic.innertube.pages.SearchSummaryPage
 import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -40,25 +43,95 @@ import kotlinx.coroutines.FlowPreview
 
 import com.unshoo.pixelmusic.data.preferences.UserPreferencesRepository
 import com.unshoo.pixelmusic.data.preferences.SearchSource
+import com.unshoo.pixelmusic.data.remote.saavn.SaavnService
+import com.unshoo.pixelmusic.data.remote.saavn.SaavnSong
 import com.unshoo.pixelmusic.utils.ContentFilterUtils
 import com.unshoo.pixelmusic.data.repository.MusicRepository
 import kotlinx.coroutines.flow.first
 
+internal interface SearchRemoteDataSource {
+    suspend fun searchYouTubeSummary(query: String): Result<SearchSummaryPage>
+    suspend fun searchYouTube(query: String, filter: YouTube.SearchFilter): Result<SearchResult>
+    suspend fun searchYouTubeContinuation(token: String): Result<SearchResult>
+    suspend fun searchYouTubeSuggestions(query: String): Result<SearchSuggestions>
+    suspend fun searchSaavnSongs(query: String, limit: Int): Result<List<SaavnSong>>
+    suspend fun prefetchSongUrl(context: android.content.Context, song: com.unshoo.pixelmusic.data.model.youtube.Song)
+}
+
+private object DefaultSearchRemoteDataSource : SearchRemoteDataSource {
+    override suspend fun searchYouTubeSummary(query: String): Result<SearchSummaryPage> =
+        YouTube.searchSummary(query)
+
+    override suspend fun searchYouTube(query: String, filter: YouTube.SearchFilter): Result<SearchResult> =
+        YouTube.search(query, filter)
+
+    override suspend fun searchYouTubeContinuation(token: String): Result<SearchResult> =
+        YouTube.searchContinuation(token)
+
+    override suspend fun searchYouTubeSuggestions(query: String): Result<SearchSuggestions> =
+        YouTube.searchSuggestions(query)
+
+    override suspend fun searchSaavnSongs(query: String, limit: Int): Result<List<SaavnSong>> =
+        SaavnService.searchSongs(query, limit = limit)
+
+    override suspend fun prefetchSongUrl(
+        context: android.content.Context,
+        song: com.unshoo.pixelmusic.data.model.youtube.Song
+    ) {
+        com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.getSongPlayerUrl(
+            context = context,
+            song = song,
+            allowLocal = false
+        )
+    }
+}
+
 @Singleton
-class SearchStateHolder @Inject constructor(
-    @param:dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
+class SearchStateHolder internal constructor(
+    private val appContext: android.content.Context,
     private val userPreferencesRepository: UserPreferencesRepository,
-    private val musicRepository: MusicRepository
+    private val musicRepository: MusicRepository,
+    private val remoteDataSource: SearchRemoteDataSource,
+    private val debounceMs: Long = SEARCH_DEBOUNCE_MS,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
+    @Inject
+    constructor(
+        @dagger.hilt.android.qualifiers.ApplicationContext appContext: android.content.Context,
+        userPreferencesRepository: UserPreferencesRepository,
+        musicRepository: MusicRepository,
+    ) : this(
+        appContext = appContext,
+        userPreferencesRepository = userPreferencesRepository,
+        musicRepository = musicRepository,
+        remoteDataSource = DefaultSearchRemoteDataSource,
+    )
+
     companion object {
-        const val SEARCH_DEBOUNCE_MS = 150L
+        const val SEARCH_DEBOUNCE_MS = 300L
         const val SEARCH_CACHE_SIZE = 150
         val albumIdMap = java.util.concurrent.ConcurrentHashMap<Long, String>()
     }
 
-    private val searchResultCache = LruCache<String, ImmutableList<SearchResultItem>>(SEARCH_CACHE_SIZE)
+    private data class SearchCacheEntry(
+        val items: ImmutableList<SearchResultItem>,
+        val continuationToken: String? = null,
+    )
 
-    private data class SearchRequest(val query: String, val requestId: Long)
+    private val searchResultCache = java.util.Collections.synchronizedMap(
+        object : LinkedHashMap<String, SearchCacheEntry>(SEARCH_CACHE_SIZE, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, SearchCacheEntry>?): Boolean =
+                size > SEARCH_CACHE_SIZE
+        }
+    )
+
+    private data class SearchRequest(
+        val query: String,
+        val filter: SearchFilterType,
+        val requestId: Long,
+        val immediate: Boolean = false,
+        val bypassCache: Boolean = false,
+    )
 
     private val _searchResults = MutableStateFlow<ImmutableList<SearchResultItem>>(persistentListOf())
     val searchResults = _searchResults.asStateFlow()
@@ -69,10 +142,7 @@ class SearchStateHolder @Inject constructor(
     private val _searchHistory = MutableStateFlow<ImmutableList<SearchHistoryItem>>(persistentListOf())
     val searchHistory = _searchHistory.asStateFlow()
 
-    private val searchRequests = MutableSharedFlow<SearchRequest>(
-        extraBufferCapacity = 1,
-        onBufferOverflow = BufferOverflow.DROP_OLDEST
-    )
+    private val searchRequests = MutableStateFlow<SearchRequest?>(null)
     private val latestSearchRequestId = AtomicLong(0L)
 
     private val _isSearching = MutableStateFlow(false)
@@ -84,6 +154,8 @@ class SearchStateHolder @Inject constructor(
     private var lastContinuationToken: String? = null
     private var activeSearchQuery: String? = null
     private var activeFilterType: SearchFilterType = SearchFilterType.ALL
+    private var lastDispatchedQuery: String? = null
+    private var lastDispatchedFilter: SearchFilterType? = null
     private var isLoadingMore = false
 
     private fun cacheKey(
@@ -103,15 +175,17 @@ class SearchStateHolder @Inject constructor(
     @OptIn(FlowPreview::class)
     private fun observeSearchRequests() {
         searchJob?.cancel()
-        searchJob = scope?.launch {
+        searchJob = scope?.launch(start = CoroutineStart.UNDISPATCHED) {
             searchRequests
-                .debounce(SEARCH_DEBOUNCE_MS)
+                .filterNotNull()
+                .debounce { request -> if (request.immediate || request.query.isBlank()) 0L else debounceMs }
                 .collectLatest { request ->
                     val query = request.query
-                    val currentFilter = _selectedSearchFilter.value
+                    val currentFilter = request.filter
                     if (query.isBlank()) {
                         _searchResults.value = persistentListOf()
                         _isSearching.value = false
+                        lastContinuationToken = null
                         return@collectLatest
                     }
 
@@ -120,30 +194,56 @@ class SearchStateHolder @Inject constructor(
                     val pureYtMusic = userPreferencesRepository.pureYtMusicOnlyFlow.first()
                     val hideVideo = userPreferencesRepository.hideVideoFlow.first()
                     val key = cacheKey(query, currentFilter, source, pureYtMusic, hideVideo)
-                    val cached = searchResultCache.get(key)
-                    if (cached != null && cached.isNotEmpty()) {
-                        _searchResults.value = cached
-                        _isSearching.value = false
-                    } else {
-                        _searchResults.value = persistentListOf()
-                        _isSearching.value = true
+                    val cached = if (!request.bypassCache && source != SearchSource.LOCAL) searchResultCache[key] else null
+                    if (cached != null && cached.items.isNotEmpty()) {
+                        if (request.requestId == latestSearchRequestId.get()) {
+                            _searchResults.value = cached.items
+                            lastContinuationToken = cached.continuationToken
+                            _isSearching.value = false
+                        }
+                        return@collectLatest
                     }
+
+                    _isSearching.value = true
+
                     if (source == SearchSource.JIOSAAVN) {
                         try {
-                            val songs = com.unshoo.pixelmusic.data.remote.saavn.SaavnService
-                                .searchSongs(query, limit = 30)
-                                .getOrDefault(emptyList())
-                                .mapNotNull { it.toPlayableSong() }
-                            if (request.requestId == latestSearchRequestId.get()) {
-                                val immutable = songs.map { SearchResultItem.SongItem(it) }.toImmutableList()
-                                _searchResults.value = immutable
-                                _isSearching.value = false
-                                if (immutable.isNotEmpty()) searchResultCache.put(key, immutable)
+                            val results = withContext(ioDispatcher) {
+                                var saavnSongs = remoteDataSource.searchSaavnSongs(query, 30)
+                                    .getOrDefault(emptyList())
+                                    .mapNotNull { it.toPlayableSong() }
+                                if (saavnSongs.isEmpty()) {
+                                    val suggestion = remoteDataSource.searchYouTubeSuggestions(query)
+                                        .getOrNull()
+                                        ?.queries
+                                        ?.firstOrNull { !it.equals(query, ignoreCase = true) }
+                                    if (!suggestion.isNullOrBlank()) {
+                                        saavnSongs = remoteDataSource.searchSaavnSongs(suggestion, 30)
+                                            .getOrDefault(emptyList())
+                                            .mapNotNull { it.toPlayableSong() }
+                                    }
+                                }
+                                if (saavnSongs.isNotEmpty()) {
+                                    saavnSongs.map { SearchResultItem.SongItem(it) }
+                                } else {
+                                    searchLocalWithFilter(query, currentFilter, isLocalMode = false, pureYtMusic = pureYtMusic, hideVideo = hideVideo)
+                                }
                             }
-                        } catch (_: CancellationException) {
+                            if (request.requestId == latestSearchRequestId.get()) {
+                                val immutable = results.toImmutableList()
+                                _searchResults.value = immutable
+                                lastContinuationToken = null
+                                _isSearching.value = false
+                                if (immutable.isNotEmpty()) {
+                                    searchResultCache.put(key, SearchCacheEntry(immutable))
+                                }
+                            }
+                        } catch (e: CancellationException) {
+                            throw e
                         } catch (e: Exception) {
                             if (request.requestId == latestSearchRequestId.get()) {
                                 Timber.e(e, "JioSaavn search error: $query")
+                                _searchResults.value = persistentListOf()
                                 _isSearching.value = false
                             }
                         }
@@ -151,33 +251,25 @@ class SearchStateHolder @Inject constructor(
                     }
                     if (source == SearchSource.LOCAL) {
                         try {
-                            val libraryResults = musicRepository.searchAllOnce(query, currentFilter)
-                            // Local mode: only what plays without internet (device files + downloads).
-                            val results = if (isLocalMode) {
-                                withContext(Dispatchers.IO) {
-                                    libraryResults.filter { item ->
-                                        item !is SearchResultItem.SongItem ||
-                                            item.song.isLocal ||
-                                            com.unshoo.pixelmusic.utils.OfflineAudioResolver.hasOfflineAudio(appContext, item.song)
-                                    }
-                                }
-                            } else libraryResults
-                            val shouldFilterVideos = if (currentFilter == SearchFilterType.VIDEOS) false else (pureYtMusic || hideVideo)
-                            val finalResults = if (shouldFilterVideos) {
-                                results.filterNot { it is SearchResultItem.SongItem && ContentFilterUtils.isVideoSong(it.song) }
-                            } else {
-                                results
-                            }
+                            val finalResults = searchLocalWithFilter(
+                                query = query,
+                                filter = currentFilter,
+                                isLocalMode = isLocalMode,
+                                pureYtMusic = pureYtMusic,
+                                hideVideo = hideVideo,
+                            )
                             if (request.requestId == latestSearchRequestId.get()) {
                                 val immutable = finalResults.toImmutableList()
                                 _searchResults.value = immutable
+                                lastContinuationToken = null
                                 _isSearching.value = false
-                                searchResultCache.put(key, immutable)
                             }
-                        } catch (_: CancellationException) {
+                        } catch (e: CancellationException) {
+                            throw e
                         } catch (e: Exception) {
                             if (request.requestId == latestSearchRequestId.get()) {
                                 Timber.e(e, "Local search error: $query")
+                                _searchResults.value = persistentListOf()
                                 _isSearching.value = false
                             }
                         }
@@ -185,22 +277,22 @@ class SearchStateHolder @Inject constructor(
                     }
 
                     try {
-                        val results = withContext(Dispatchers.IO) {
-                            var remote = searchYouTube(query, currentFilter)
-                            if (remote.isEmpty()) {
-                                // One retry: a dropped request or a cold visitor session often
-                                // answers empty the first time.
-                                kotlinx.coroutines.delay(400L)
-                                remote = searchYouTube(query, currentFilter)
+                        val results = withContext(ioDispatcher) {
+                            val attempt = searchYouTube(query, currentFilter)
+                            var remote = attempt.items
+                            if (remote.isEmpty() && attempt.hadFailure) {
+                                // One short retry when a request threw (e.g. cold visitor session reset).
+                                kotlinx.coroutines.delay(250L)
+                                remote = searchYouTube(query, currentFilter).items
                             }
                             if (remote.isEmpty()) {
-                                val localFallback = musicRepository.searchAllOnce(query, currentFilter)
-                                val shouldFilterVideos = if (currentFilter == SearchFilterType.VIDEOS) false else (pureYtMusic || hideVideo)
-                                if (shouldFilterVideos) {
-                                    localFallback.filterNot { it is SearchResultItem.SongItem && ContentFilterUtils.isVideoSong(it.song) }
-                                } else {
-                                    localFallback
-                                }
+                                searchLocalWithFilter(
+                                    query = query,
+                                    filter = currentFilter,
+                                    isLocalMode = false,
+                                    pureYtMusic = pureYtMusic,
+                                    hideVideo = hideVideo,
+                                )
                             } else {
                                 remote
                             }
@@ -210,9 +302,11 @@ class SearchStateHolder @Inject constructor(
                             _searchResults.value = immutable
                             _isSearching.value = false
                             // Never cache "nothing": a failed search must not stick for this query.
-                            if (immutable.isNotEmpty()) searchResultCache.put(key, immutable)
+                            if (immutable.isNotEmpty()) {
+                                searchResultCache.put(key, SearchCacheEntry(immutable, lastContinuationToken))
+                            }
 
-                            scope?.launch(Dispatchers.IO) {
+                            scope?.launch(ioDispatcher) {
                                 try {
                                     kotlinx.coroutines.delay(800L)
                                     if (request.requestId != latestSearchRequestId.get()) return@launch
@@ -232,22 +326,49 @@ class SearchStateHolder @Inject constructor(
                                                 duration = if (song.duration > 0) (song.duration / 1000).toString() else "",
                                                 thumbnailHref = song.albumArtUriString.orEmpty()
                                             )
-                                            com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.getSongPlayerUrl(
-                                                context = appContext, song = ytSong, allowLocal = false
-                                            )
+                                            remoteDataSource.prefetchSongUrl(appContext, ytSong)
                                         }
                                     }
                                 } catch (_: Exception) {}
                             }
                         }
-                    } catch (_: CancellationException) {
+                    } catch (e: CancellationException) {
+                        throw e
                     } catch (e: Exception) {
                         if (request.requestId == latestSearchRequestId.get()) {
                             Timber.e(e, "YouTube search error: $query")
+                            _searchResults.value = persistentListOf()
                             _isSearching.value = false
                         }
                     }
                 }
+        }
+    }
+
+    private suspend fun searchLocalWithFilter(
+        query: String,
+        filter: SearchFilterType,
+        isLocalMode: Boolean,
+        pureYtMusic: Boolean,
+        hideVideo: Boolean,
+    ): List<SearchResultItem> {
+        val libraryResults = musicRepository.searchAllOnce(query, filter)
+        val results = if (isLocalMode) {
+            withContext(ioDispatcher) {
+                libraryResults.filter { item ->
+                    item !is SearchResultItem.SongItem ||
+                        item.song.isLocal ||
+                        com.unshoo.pixelmusic.utils.OfflineAudioResolver.hasOfflineAudio(appContext, item.song)
+                }
+            }
+        } else {
+            libraryResults
+        }
+        val shouldFilterVideos = if (filter == SearchFilterType.VIDEOS) false else (pureYtMusic || hideVideo)
+        return if (shouldFilterVideos) {
+            results.filterNot { it is SearchResultItem.SongItem && ContentFilterUtils.isVideoSong(it.song) }
+        } else {
+            results
         }
     }
 
@@ -293,7 +414,6 @@ class SearchStateHolder @Inject constructor(
             is PlaylistItem -> SearchResultItem.PlaylistItem(
                 Playlist(id = id, name = title, songIds = emptyList(), coverImageUri = thumbnail, source = "YOUTUBE")
             )
-            else -> null
         }
 
     fun loadMoreSearch() {
@@ -303,10 +423,10 @@ class SearchStateHolder @Inject constructor(
         if (token == null || query == null || isLoadingMore) return
 
         isLoadingMore = true
-        scope?.launch(Dispatchers.IO) {
+        scope?.launch(ioDispatcher) {
             try {
                 if (userPreferencesRepository.localModeEnabledFlow.first()) return@launch
-                val result = YouTube.searchContinuation(token).getOrNull()
+                val result = remoteDataSource.searchYouTubeContinuation(token).getOrNull()
                 if (result != null) {
                     val pureYtMusicOnly = userPreferencesRepository.pureYtMusicOnlyFlow.first()
                     val hideVideo = userPreferencesRepository.hideVideoFlow.first()
@@ -327,134 +447,262 @@ class SearchStateHolder @Inject constructor(
         }
     }
 
-    private suspend fun searchYouTube(query: String, filter: SearchFilterType): List<SearchResultItem> {
+    private data class RemoteSearchOutcome(
+        val items: List<SearchResultItem>,
+        val hadFailure: Boolean,
+    )
+
+    private fun itemKey(item: SearchResultItem): String = when (item) {
+        is SearchResultItem.SongItem -> "song_${item.song.id}"
+        is SearchResultItem.ArtistItem -> "artist_${item.artist.id}"
+        is SearchResultItem.AlbumItem -> "album_${item.album.id}"
+        is SearchResultItem.PlaylistItem -> "playlist_${item.playlist.id}"
+    }
+
+    private suspend fun searchYouTube(
+        query: String,
+        filter: SearchFilterType,
+        allowSuggestionFallback: Boolean = true,
+    ): RemoteSearchOutcome {
         val pureYtMusicOnly = userPreferencesRepository.pureYtMusicOnlyFlow.first()
         val hideVideo = userPreferencesRepository.hideVideoFlow.first()
-        val shouldFilterVideos = pureYtMusicOnly || hideVideo
+        val shouldFilterVideos = if (filter == SearchFilterType.VIDEOS) false else (pureYtMusicOnly || hideVideo)
         val items = mutableListOf<SearchResultItem>()
-        
+        val seenKeys = mutableSetOf<String>()
+        var hadFailure = false
+
         activeSearchQuery = query
         activeFilterType = filter
         lastContinuationToken = null
 
+        fun addUnique(mapped: SearchResultItem?) {
+            if (mapped != null && seenKeys.add(itemKey(mapped))) {
+                items.add(mapped)
+            }
+        }
+
         when (filter) {
             SearchFilterType.ALL -> {
-                val summaryResult = YouTube.searchSummary(query)
-                    .onFailure { Timber.w(it, "searchSummary error for '$query'") }
-                    .getOrNull()
+                val summaryAttempt = remoteDataSource.searchYouTubeSummary(query)
+                    .onFailure {
+                        hadFailure = true
+                        Timber.w(it, "searchSummary error for '$query'")
+                    }
+                val summaryResult = summaryAttempt.getOrNull()
                 if (summaryResult != null && summaryResult.summaries.isNotEmpty()) {
                     val filteredSummary = if (shouldFilterVideos) summaryResult.filterVideo(true) else summaryResult
-                    fun itemKey(item: SearchResultItem): String = when (item) {
-                        is SearchResultItem.SongItem -> "song_${item.song.id}"
-                        is SearchResultItem.ArtistItem -> "artist_${item.artist.id}"
-                        is SearchResultItem.AlbumItem -> "album_${item.album.id}"
-                        is SearchResultItem.PlaylistItem -> "playlist_${item.playlist.id}"
-                    }
-
-                    val seenKeys = mutableSetOf<String>()
                     filteredSummary.summaries.forEach { summary ->
                         summary.items.forEach { ytItem ->
-                            ytItem.toSearchResultItem(shouldFilterVideos)?.let { mappedItem ->
-                                if (seenKeys.add(itemKey(mappedItem))) {
-                                    items.add(mappedItem)
-                                }
-                            }
+                            addUnique(ytItem.toSearchResultItem(shouldFilterVideos))
                         }
                     }
                 }
                 // The summary can fail, come back in a layout the parser does not know, or hold
-                // only video shelves that "hide videos" removes. Any of those used to end in
-                // "No results" for songs YouTube Music clearly has, so fall back to the Songs
-                // search (and Videos when videos are allowed) whenever nothing came out of it.
+                // only video shelves that "hide videos" removes. Fall back to both Songs and
+                // Artists in parallel so either a song or artist search still produces results.
                 if (items.isEmpty()) {
-                    if (summaryResult == null) Timber.w("searchSummary failed for '$query', falling back to Songs search")
-                    val songsResult = YouTube.search(query, YouTube.SearchFilter.FILTER_SONG).getOrNull()
-                    lastContinuationToken = songsResult?.continuation
-                    songsResult?.items?.filterIsInstance<SongItem>()
-                        ?.let { list -> if (shouldFilterVideos) list.filterVideo(true) else list }
-                        ?.forEach { songItem ->
-                            songItem.toSearchResultItem(shouldFilterVideos)?.let { items.add(it) }
+                    if (summaryResult == null) Timber.w("searchSummary failed for '$query', falling back to Songs & Artists search")
+                    val (songsResult, artistsResult) = coroutineScope {
+                        val songsDeferred = async {
+                            remoteDataSource.searchYouTube(query, YouTube.SearchFilter.FILTER_SONG)
+                                .onFailure { hadFailure = true }
+                                .getOrNull()
                         }
+                        val artistsDeferred = async {
+                            remoteDataSource.searchYouTube(query, YouTube.SearchFilter.FILTER_ARTIST)
+                                .onFailure { hadFailure = true }
+                                .getOrNull()
+                        }
+                        songsDeferred.await() to artistsDeferred.await()
+                    }
+                    lastContinuationToken = songsResult?.continuation ?: artistsResult?.continuation
+                    val mappedArtists = artistsResult?.items
+                        ?.filterIsInstance<ArtistItem>()
+                        ?.mapNotNull { it.toSearchResultItem(false) }
+                        .orEmpty()
+                    val mappedSongs = songsResult?.items
+                        ?.filterIsInstance<SongItem>()
+                        ?.let { list -> if (shouldFilterVideos) list.filterVideo(true) else list }
+                        ?.mapNotNull { it.toSearchResultItem(shouldFilterVideos) }
+                        .orEmpty()
+
+                    // Prioritize close artist matches near the top when the query looks like an artist search.
+                    val normalizedQuery = query.trim().lowercase()
+                    val (closeArtists, otherArtists) = mappedArtists.partition { item ->
+                        item is SearchResultItem.ArtistItem && (
+                            item.artist.name.lowercase().contains(normalizedQuery) ||
+                                normalizedQuery.contains(item.artist.name.lowercase())
+                            )
+                    }
+                    closeArtists.take(2).forEach(::addUnique)
+                    mappedSongs.forEach(::addUnique)
+                    closeArtists.drop(2).forEach(::addUnique)
+                    otherArtists.take(3).forEach(::addUnique)
                 }
                 if (items.isEmpty() && !shouldFilterVideos) {
-                    val videosResult = YouTube.search(query, YouTube.SearchFilter.FILTER_VIDEO).getOrNull()
+                    val videosResult = remoteDataSource.searchYouTube(query, YouTube.SearchFilter.FILTER_VIDEO)
+                        .onFailure { hadFailure = true }
+                        .getOrNull()
                     lastContinuationToken = videosResult?.continuation
                     videosResult?.items?.forEach { ytItem ->
-                        ytItem.toSearchResultItem(false)?.let { items.add(it) }
+                        addUnique(ytItem.toSearchResultItem(false))
                     }
                 }
             }
             SearchFilterType.SONGS -> {
-                val result = YouTube.search(query, YouTube.SearchFilter.FILTER_SONG).getOrNull()
+                val result = remoteDataSource.searchYouTube(query, YouTube.SearchFilter.FILTER_SONG)
+                    .onFailure { hadFailure = true }
+                    .getOrNull()
                 lastContinuationToken = result?.continuation
                 result?.items?.filterIsInstance<SongItem>()
                     ?.let { list -> if (shouldFilterVideos) list.filterVideo(true) else list }
                     ?.forEach { songItem ->
-                        songItem.toSearchResultItem(shouldFilterVideos)?.let { items.add(it) }
+                        addUnique(songItem.toSearchResultItem(shouldFilterVideos))
                     }
             }
             SearchFilterType.ARTISTS -> {
-                val result = YouTube.search(query, YouTube.SearchFilter.FILTER_ARTIST).getOrNull()
+                val result = remoteDataSource.searchYouTube(query, YouTube.SearchFilter.FILTER_ARTIST)
+                    .onFailure { hadFailure = true }
+                    .getOrNull()
                 lastContinuationToken = result?.continuation
                 result?.items?.filterIsInstance<ArtistItem>()?.forEach { a ->
-                    items.add(SearchResultItem.ArtistItem(Artist(id = ytArtistId(a.title), name = a.title, songCount = 0, imageUrl = a.thumbnail, channelId = a.id)))
+                    addUnique(a.toSearchResultItem(false))
                 }
             }
             SearchFilterType.ALBUMS -> {
-                val result = YouTube.search(query, YouTube.SearchFilter.FILTER_ALBUM).getOrNull()
+                val result = remoteDataSource.searchYouTube(query, YouTube.SearchFilter.FILTER_ALBUM)
+                    .onFailure { hadFailure = true }
+                    .getOrNull()
                 lastContinuationToken = result?.continuation
                 result?.items?.filterIsInstance<AlbumItem>()?.forEach { a ->
-                    val longId = a.browseId.hashCode().toLong()
-                    albumIdMap[longId] = a.browseId
-                    AlbumIdMapper.putMapping(appContext, longId, a.browseId)
-                    items.add(SearchResultItem.AlbumItem(Album(id = longId, title = a.title,
-                        artist = a.artists?.joinToString { it.name }.orEmpty(), year = a.year ?: 0,
-                        dateAdded = System.currentTimeMillis(), albumArtUriString = a.thumbnail, songCount = 0)))
+                    addUnique(a.toSearchResultItem(false))
                 }
             }
             SearchFilterType.PLAYLISTS -> {
-                val featuredResult = YouTube.search(query, YouTube.SearchFilter.FILTER_FEATURED_PLAYLIST).getOrNull()
-                val communityResult = YouTube.search(query, YouTube.SearchFilter.FILTER_COMMUNITY_PLAYLIST).getOrNull()
+                val (featuredResult, communityResult) = coroutineScope {
+                    val featuredDeferred = async {
+                        remoteDataSource.searchYouTube(query, YouTube.SearchFilter.FILTER_FEATURED_PLAYLIST)
+                            .onFailure { hadFailure = true }
+                            .getOrNull()
+                    }
+                    val communityDeferred = async {
+                        remoteDataSource.searchYouTube(query, YouTube.SearchFilter.FILTER_COMMUNITY_PLAYLIST)
+                            .onFailure { hadFailure = true }
+                            .getOrNull()
+                    }
+                    featuredDeferred.await() to communityDeferred.await()
+                }
                 lastContinuationToken = featuredResult?.continuation ?: communityResult?.continuation
-                val seenPlaylistIds = mutableSetOf<String>()
-                val combinedPlaylists = mutableListOf<PlaylistItem>()
                 featuredResult?.items?.filterIsInstance<PlaylistItem>()?.forEach {
-                    if (seenPlaylistIds.add(it.id)) combinedPlaylists.add(it)
+                    addUnique(it.toSearchResultItem(false))
                 }
                 communityResult?.items?.filterIsInstance<PlaylistItem>()?.forEach {
-                    if (seenPlaylistIds.add(it.id)) combinedPlaylists.add(it)
-                }
-                combinedPlaylists.forEach { p ->
-                    items.add(SearchResultItem.PlaylistItem(Playlist(id = p.id, name = p.title, songIds = emptyList(), coverImageUri = p.thumbnail, source = "YOUTUBE")))
+                    addUnique(it.toSearchResultItem(false))
                 }
             }
             SearchFilterType.VIDEOS -> {
-                val result = YouTube.search(query, YouTube.SearchFilter.FILTER_VIDEO).getOrNull()
+                val result = remoteDataSource.searchYouTube(query, YouTube.SearchFilter.FILTER_VIDEO)
+                    .onFailure { hadFailure = true }
+                    .getOrNull()
                 lastContinuationToken = result?.continuation
                 result?.items?.filterIsInstance<SongItem>()?.forEach {
-                    items.add(SearchResultItem.SongItem(it.toNativeSong()))
+                    addUnique(it.toSearchResultItem(false))
                 }
             }
         }
-        return items
+
+        // Typo recovery: when direct search returns nothing, ask YouTube's autocomplete/suggestions
+        // endpoint for recommended items or the closest corrected query.
+        if (items.isEmpty() && allowSuggestionFallback) {
+            val suggestions = remoteDataSource.searchYouTubeSuggestions(query).getOrNull()
+            if (suggestions != null) {
+                suggestions.recommendedItems.forEach { recommended ->
+                    val matchesFilter = when (filter) {
+                        SearchFilterType.ALL -> true
+                        SearchFilterType.SONGS -> recommended is SongItem
+                        SearchFilterType.ARTISTS -> recommended is ArtistItem
+                        SearchFilterType.ALBUMS -> recommended is AlbumItem
+                        SearchFilterType.PLAYLISTS -> recommended is PlaylistItem
+                        SearchFilterType.VIDEOS -> recommended is SongItem && recommended.isMusicVideo
+                    }
+                    if (matchesFilter) {
+                        addUnique(recommended.toSearchResultItem(shouldFilterVideos))
+                    }
+                }
+                if (items.isEmpty()) {
+                    val corrected = suggestions.queries.firstOrNull {
+                        it.isNotBlank() && !it.equals(query.trim(), ignoreCase = true)
+                    }
+                    if (!corrected.isNullOrBlank()) {
+                        return searchYouTube(corrected, filter, allowSuggestionFallback = false)
+                    }
+                }
+            }
+        }
+
+        return RemoteSearchOutcome(items = items, hadFailure = hadFailure)
     }
 
     fun updateSearchFilter(filterType: SearchFilterType) {
+        if (_selectedSearchFilter.value == filterType) return
         _selectedSearchFilter.value = filterType
         activeSearchQuery?.let { query ->
             if (query.isNotBlank()) {
-                performSearch(query)
+                performSearch(query, immediate = true, force = true)
             }
         }
     }
 
     fun performSearch(query: String) {
-        activeSearchQuery = query.trim()
-        val requestId = latestSearchRequestId.incrementAndGet()
-        if (query.trim().isBlank()) {
+        performSearch(query, immediate = false, force = false)
+    }
+
+    fun performSearch(
+        query: String,
+        immediate: Boolean,
+        force: Boolean,
+        bypassCache: Boolean = false,
+    ) {
+        val normalized = query.trim()
+        val filter = _selectedSearchFilter.value
+        activeSearchQuery = normalized
+        if (normalized.isBlank()) {
+            latestSearchRequestId.incrementAndGet()
+            lastDispatchedQuery = ""
+            lastDispatchedFilter = filter
+            lastContinuationToken = null
             _searchResults.value = persistentListOf()
+            _isSearching.value = false
+            searchRequests.value = SearchRequest("", filter, latestSearchRequestId.get(), immediate = true)
+            return
         }
-        searchRequests.tryEmit(SearchRequest(query.trim(), requestId))
+        if (!force &&
+            normalized == lastDispatchedQuery &&
+            filter == lastDispatchedFilter &&
+            (_isSearching.value || _searchResults.value.isNotEmpty())
+        ) {
+            return
+        }
+        lastDispatchedQuery = normalized
+        lastDispatchedFilter = filter
+        val requestId = latestSearchRequestId.incrementAndGet()
+        if (_searchResults.value.isEmpty() || immediate || bypassCache) {
+            _isSearching.value = true
+        }
+        searchRequests.value = SearchRequest(
+            query = normalized,
+            filter = filter,
+            requestId = requestId,
+            immediate = immediate,
+            bypassCache = bypassCache,
+        )
+    }
+
+    fun refreshCurrentSearch() {
+        val current = activeSearchQuery?.trim().orEmpty()
+        if (current.isNotBlank()) {
+            performSearch(current, immediate = true, force = true, bypassCache = true)
+        }
     }
 
     fun loadSearchHistory(limit: Int = 15) {

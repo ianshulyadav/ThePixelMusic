@@ -19,22 +19,23 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class SearchResponse(
-    val contents: Contents?,
-    val continuationContents: ContinuationContents?,
+    val contents: Contents? = null,
+    val continuationContents: ContinuationContents? = null,
 ) {
     @Serializable
     data class Contents(
-        val tabbedSearchResultsRenderer: Tabs?,
+        val tabbedSearchResultsRenderer: Tabs? = null,
+        val sectionListRenderer: unshoo.ianshulyadav.pixelmusic.innertube.models.SectionListRenderer? = null,
     )
 
     @Serializable
     data class ContinuationContents(
-        val musicShelfContinuation: MusicShelfContinuation,
+        val musicShelfContinuation: MusicShelfContinuation? = null,
     ) {
         @Serializable
         data class MusicShelfContinuation(
-            val contents: List<Content>,
-            val continuations: List<Continuation>?,
+            val contents: List<Content> = emptyList(),
+            val continuations: List<Continuation>? = null,
         ) {
             @Serializable
             data class Content(

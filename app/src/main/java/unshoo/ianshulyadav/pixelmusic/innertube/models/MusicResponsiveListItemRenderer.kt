@@ -29,59 +29,68 @@ import kotlinx.serialization.json.JsonNames
  */
 @Serializable
 data class MusicResponsiveListItemRenderer(
-    val badges: List<Badges>?,
-    val fixedColumns: List<FlexColumn>?,
-    val flexColumns: List<FlexColumn>,
-    val thumbnail: ThumbnailRenderer?,
-    val menu: Menu?,
-    val playlistItemData: PlaylistItemData?,
-    val overlay: Overlay?,
-    val navigationEndpoint: NavigationEndpoint?,
+    val badges: List<Badges>? = null,
+    val fixedColumns: List<FlexColumn>? = null,
+    val flexColumns: List<FlexColumn> = emptyList(),
+    val thumbnail: ThumbnailRenderer? = null,
+    val menu: Menu? = null,
+    val playlistItemData: PlaylistItemData? = null,
+    val overlay: Overlay? = null,
+    val navigationEndpoint: NavigationEndpoint? = null,
     val likeStatus: String? = null,
 ) {
+    private val browsePageType: String?
+        get() = navigationEndpoint?.browseEndpoint?.browseEndpointContextSupportedConfigs?.browseEndpointContextMusicConfig?.pageType
+
+    private val browseId: String?
+        get() = navigationEndpoint?.browseEndpoint?.browseId
+
     val isSong: Boolean
         get() = navigationEndpoint == null || navigationEndpoint.watchEndpoint != null || navigationEndpoint.watchPlaylistEndpoint != null
     val isPlaylist: Boolean
-        get() = navigationEndpoint?.browseEndpoint?.browseEndpointContextSupportedConfigs?.browseEndpointContextMusicConfig?.pageType == MUSIC_PAGE_TYPE_PLAYLIST
+        get() = browsePageType == MUSIC_PAGE_TYPE_PLAYLIST ||
+            (browsePageType == null && browseId?.let { it.startsWith("VL") || it.startsWith("PL") || it.startsWith("RD") } == true)
     val isAlbum: Boolean
-        get() = navigationEndpoint?.browseEndpoint?.browseEndpointContextSupportedConfigs?.browseEndpointContextMusicConfig?.pageType == MUSIC_PAGE_TYPE_ALBUM ||
-                navigationEndpoint?.browseEndpoint?.browseEndpointContextSupportedConfigs?.browseEndpointContextMusicConfig?.pageType == MUSIC_PAGE_TYPE_AUDIOBOOK
+        get() = browsePageType == MUSIC_PAGE_TYPE_ALBUM ||
+            browsePageType == MUSIC_PAGE_TYPE_AUDIOBOOK ||
+            (browsePageType == null && browseId?.startsWith("MPRE") == true)
     val isArtist: Boolean
-        get() = navigationEndpoint?.browseEndpoint?.browseEndpointContextSupportedConfigs?.browseEndpointContextMusicConfig?.pageType == MUSIC_PAGE_TYPE_ARTIST
-                || navigationEndpoint?.browseEndpoint?.browseEndpointContextSupportedConfigs?.browseEndpointContextMusicConfig?.pageType == MUSIC_PAGE_TYPE_LIBRARY_ARTIST
+        get() = browsePageType == MUSIC_PAGE_TYPE_ARTIST ||
+            browsePageType == MUSIC_PAGE_TYPE_LIBRARY_ARTIST ||
+            (browsePageType == null && browseId?.startsWith("UC") == true)
 
     @Serializable
     data class FlexColumn(
         @JsonNames("musicResponsiveListItemFixedColumnRenderer")
-        val musicResponsiveListItemFlexColumnRenderer: MusicResponsiveListItemFlexColumnRenderer,
+        val musicResponsiveListItemFlexColumnRenderer: MusicResponsiveListItemFlexColumnRenderer = MusicResponsiveListItemFlexColumnRenderer(),
     ) {
         @Serializable
         data class MusicResponsiveListItemFlexColumnRenderer(
-            val text: Runs?,
+            val text: Runs? = null,
         )
     }
 
     @Serializable
     data class PlaylistItemData(
-        val playlistSetVideoId: String?,
-        val videoId: String,
+        val playlistSetVideoId: String? = null,
+        val videoId: String = "",
     )
 
     @Serializable
     data class Overlay(
-        val musicItemThumbnailOverlayRenderer: MusicItemThumbnailOverlayRenderer,
+        val musicItemThumbnailOverlayRenderer: MusicItemThumbnailOverlayRenderer = MusicItemThumbnailOverlayRenderer(),
     ) {
         @Serializable
         data class MusicItemThumbnailOverlayRenderer(
-            val content: Content,
+            val content: Content = Content(),
         ) {
             @Serializable
             data class Content(
-                val musicPlayButtonRenderer: MusicPlayButtonRenderer,
+                val musicPlayButtonRenderer: MusicPlayButtonRenderer = MusicPlayButtonRenderer(),
             ) {
                 @Serializable
                 data class MusicPlayButtonRenderer(
-                    val playNavigationEndpoint: NavigationEndpoint?,
+                    val playNavigationEndpoint: NavigationEndpoint? = null,
                 )
             }
         }

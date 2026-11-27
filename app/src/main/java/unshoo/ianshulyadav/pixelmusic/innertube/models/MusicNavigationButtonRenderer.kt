@@ -15,18 +15,18 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class MusicNavigationButtonRenderer(
-    val buttonText: Runs,
-    val solid: Solid?,
-    val iconStyle: IconStyle?,
-    val clickCommand: NavigationEndpoint,
+    val buttonText: Runs = Runs(emptyList()),
+    val solid: Solid? = null,
+    val iconStyle: IconStyle? = null,
+    val clickCommand: NavigationEndpoint = NavigationEndpoint(),
 ) {
     @Serializable
     data class Solid(
-        val leftStripeColor: Long,
+        val leftStripeColor: Long = 0L,
     )
 
     @Serializable
     data class IconStyle(
-        val icon: Icon,
+        val icon: Icon = Icon(),
     )
 }

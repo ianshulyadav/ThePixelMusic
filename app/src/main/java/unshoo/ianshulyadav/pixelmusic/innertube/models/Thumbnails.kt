@@ -15,14 +15,14 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class Thumbnails(
-    val thumbnails: List<Thumbnail>,
+    val thumbnails: List<Thumbnail> = emptyList(),
 )
 
 @Serializable
 data class Thumbnail(
-    val url: String,
-    val width: Int?,
-    val height: Int?,
+    val url: String = "",
+    val width: Int? = null,
+    val height: Int? = null,
 ) {
     val normalizedUrl: String get() = if (url.startsWith("//")) "https:$url" else url
 }

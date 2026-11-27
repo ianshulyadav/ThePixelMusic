@@ -19,11 +19,11 @@ import kotlinx.serialization.json.JsonNames
 @Serializable
 data class Continuation(
     @JsonNames("nextContinuationData", "nextRadioContinuationData")
-    val nextContinuationData: NextContinuationData?,
+    val nextContinuationData: NextContinuationData? = null,
 ) {
     @Serializable
     data class NextContinuationData(
-        val continuation: String,
+        val continuation: String = "",
     )
 }
 

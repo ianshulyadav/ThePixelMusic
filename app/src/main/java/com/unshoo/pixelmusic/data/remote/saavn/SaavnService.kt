@@ -46,9 +46,9 @@ object SaavnService {
 
     private val client: OkHttpClient by lazy {
         OkHttpClient.Builder()
-            .connectTimeout(3, TimeUnit.SECONDS)
-            .readTimeout(3, TimeUnit.SECONDS)
-            .writeTimeout(3, TimeUnit.SECONDS)
+            .connectTimeout(8, TimeUnit.SECONDS)
+            .readTimeout(8, TimeUnit.SECONDS)
+            .writeTimeout(8, TimeUnit.SECONDS)
             .followRedirects(true)
             .retryOnConnectionFailure(true)
             .build()
@@ -169,6 +169,7 @@ object SaavnService {
      * Search for songs on JioSaavn directly by a query string.
      */
     suspend fun searchSongs(query: String, limit: Int = 10): Result<List<SaavnSong>> = withContext(Dispatchers.IO) {
+        if (query.isBlank()) return@withContext Result.success(emptyList())
         runCatching {
             Timber.tag(TAG).d("searchSongs: query=\"$query\"")
             val httpUrl = BASE_URL.toHttpUrl().newBuilder()
@@ -177,31 +178,39 @@ object SaavnService {
                 .addQueryParameter("_marker", "0")
                 .addQueryParameter("api_version", "4")
                 .addQueryParameter("ctx", "android")
-                .addQueryParameter("q", query)
+                .addQueryParameter("q", query.trim())
                 .addQueryParameter("p", "1")
                 .addQueryParameter("n", limit.coerceIn(1, 50).toString())
                 .build()
 
-            val request = Request.Builder()
-                .url(httpUrl)
-                .headers(commonHeaders)
-                .get()
-                .build()
+            var lastException: Exception? = null
+            var responseText: String? = null
+            for (attempt in 0 until 2) {
+                try {
+                    val request = Request.Builder()
+                        .url(httpUrl)
+                        .headers(commonHeaders)
+                        .get()
+                        .build()
 
-            val response = client.newCall(request).execute()
-            if (!response.isSuccessful) {
-                throw IllegalStateException("Saavn search failed: HTTP ${response.code}")
+                    client.newCall(request).execute().use { response ->
+                        if (!response.isSuccessful) {
+                            throw IllegalStateException("Saavn search failed: HTTP ${response.code}")
+                        }
+                        responseText = response.body?.string().orEmpty()
+                    }
+                    break
+                } catch (e: java.io.IOException) {
+                    lastException = e
+                    if (attempt == 0) kotlinx.coroutines.delay(250L) else throw e
+                }
             }
 
-            val responseText = response.body?.string().orEmpty()
-            val body = json.decodeFromString<RawSearchResponse>(responseText)
+            val text = responseText ?: throw (lastException ?: IllegalStateException("Empty Saavn response"))
+            if (text.isBlank()) return@runCatching emptyList()
+            val body = json.decodeFromString<RawSearchResponse>(text)
             val results = body.results.map { mapRawToSaavnSong(it) }
             Timber.tag(TAG).d("searchSongs: results.size=${results.size}")
-
-            if (results.isEmpty()) {
-                throw NoSuchElementException("No songs found on JioSaavn for: \"$query\"")
-            }
-
             results
         }.onFailure {
             Timber.tag(TAG).e(it, "searchSongs: failed for query=\"$query\"")

@@ -15,17 +15,17 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class SearchSuggestionsSectionRenderer(
-    val contents: List<Content>,
+    val contents: List<Content> = emptyList(),
 ) {
     @Serializable
     data class Content(
-        val searchSuggestionRenderer: SearchSuggestionRenderer?,
-        val musicResponsiveListItemRenderer: MusicResponsiveListItemRenderer?,
+        val searchSuggestionRenderer: SearchSuggestionRenderer? = null,
+        val musicResponsiveListItemRenderer: MusicResponsiveListItemRenderer? = null,
     ) {
         @Serializable
         data class SearchSuggestionRenderer(
-            val suggestion: Runs,
-            val navigationEndpoint: NavigationEndpoint,
+            val suggestion: Runs = Runs(emptyList()),
+            val navigationEndpoint: NavigationEndpoint = NavigationEndpoint(),
         )
     }
 }

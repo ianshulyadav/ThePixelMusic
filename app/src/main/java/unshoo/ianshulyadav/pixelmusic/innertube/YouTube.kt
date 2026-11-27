@@ -299,56 +299,122 @@ object YouTube {
             searchInternal(query, filter, requestLocale)
         }
 
-    private fun SearchResponse.sections() =
-        contents?.tabbedSearchResultsRenderer?.tabs?.firstOrNull()
-            ?.tabRenderer?.content?.sectionListRenderer?.contents.orEmpty()
+    private fun SearchResponse.sections(): List<SectionListRenderer.Content> =
+        contents?.tabbedSearchResultsRenderer?.tabs
+            ?.firstOrNull { it.tabRenderer.content?.sectionListRenderer != null }
+            ?.tabRenderer?.content?.sectionListRenderer?.contents
+            ?: contents?.sectionListRenderer?.contents
+            ?: emptyList()
 
-    private suspend fun searchSummaryInternal(query: String, requestLocale: YouTubeLocale): SearchSummaryPage {
+    private fun SectionListRenderer.DidYouMeanRenderer.correctedQueryText(): String? =
+        didYouMeanEndpoint?.searchEndpoint?.query?.trim()?.takeIf { it.isNotBlank() }
+            ?: navigationEndpoint?.searchEndpoint?.query?.trim()?.takeIf { it.isNotBlank() }
+            ?: correctedQuery?.runs?.joinToString(separator = "") { it.text }?.trim()?.takeIf { it.isNotBlank() }
+
+    private fun SectionListRenderer.ShowingResultsForRenderer.correctedQueryText(): String? =
+        correctedQueryEndpoint?.searchEndpoint?.query?.trim()?.takeIf { it.isNotBlank() }
+            ?: correctedQuery?.runs?.joinToString(separator = "") { it.text }?.trim()?.takeIf { it.isNotBlank() }
+
+    private fun extractCorrectedQuery(contents: List<SectionListRenderer.Content>): String? {
+        contents.forEach { content ->
+            content.didYouMeanRenderer?.correctedQueryText()?.let { return it }
+            content.showingResultsForRenderer?.correctedQueryText()?.let { return it }
+            content.itemSectionRenderer?.contents?.forEach { item ->
+                item.didYouMeanRenderer?.correctedQueryText()?.let { return it }
+                item.showingResultsForRenderer?.correctedQueryText()?.let { return it }
+            }
+        }
+        return null
+    }
+
+    private fun parseCardShelfItems(renderer: unshoo.ianshulyadav.pixelmusic.innertube.models.MusicCardShelfRenderer): List<YTItem> {
+        val shelfArtist: Artist? = if (renderer.onTap.browseEndpoint?.isArtistEndpoint == true ||
+            renderer.subtitle.runs?.any { it.text.contains("Artist", ignoreCase = true) } == true
+        ) {
+            val name = renderer.title.runs?.joinToString(separator = "") { it.text }?.trim()
+            if (!name.isNullOrBlank()) {
+                Artist(
+                    name = name,
+                    id = renderer.onTap.browseEndpoint?.browseId
+                )
+            } else null
+        } else null
+
+        return listOfNotNull(SearchSummaryPage.fromMusicCardShelfRenderer(renderer))
+            .plus(
+                renderer.contents
+                    ?.mapNotNull { it.musicResponsiveListItemRenderer }
+                    ?.mapNotNull { SearchSummaryPage.fromMusicResponsiveListItemRenderer(it, defaultArtist = shelfArtist) }
+                    .orEmpty()
+            )
+    }
+
+    private fun MusicCarouselShelfRenderer.toSearchSummary(): SearchSummary? {
+        val titleText =
+            header?.musicCarouselShelfBasicHeaderRenderer?.title?.runs
+                ?.joinToString(separator = "") { it.text }
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+                ?: "Other"
+        val items = contents.mapNotNull { content ->
+            content.musicResponsiveListItemRenderer?.let { SearchSummaryPage.fromMusicResponsiveListItemRenderer(it) }
+                ?: content.musicTwoRowItemRenderer?.let { SearchSummaryPage.fromMusicTwoRowItemRenderer(it) }
+        }.distinctBy { it.id }
+        if (items.isEmpty()) return null
+        return SearchSummary(title = titleText, items = items)
+    }
+
+    private fun GridRenderer.toSearchSummary(): SearchSummary? {
+        val titleText =
+            header?.gridHeaderRenderer?.title?.runs
+                ?.joinToString(separator = "") { it.text }
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+                ?: "Other"
+        val items = items.mapNotNull { item ->
+            item.musicTwoRowItemRenderer?.let { SearchSummaryPage.fromMusicTwoRowItemRenderer(it) }
+        }.distinctBy { it.id }
+        if (items.isEmpty()) return null
+        return SearchSummary(title = titleText, items = items)
+    }
+
+    private suspend fun searchSummaryInternal(
+        query: String,
+        requestLocale: YouTubeLocale,
+        allowCorrectionRetry: Boolean = true,
+    ): SearchSummaryPage {
         val contents = innerTube.search(WEB_REMIX, query, requestLocale = requestLocale)
             .body<SearchResponse>().sections()
         val topItems = mutableListOf<YTItem>()
         val summaries = mutableListOf<SearchSummary>()
+        val correctedQuery = extractCorrectedQuery(contents)
 
         contents.forEach { content ->
             content.musicCardShelfRenderer?.let { renderer ->
-                val shelfArtist: Artist? = if (renderer.onTap.browseEndpoint?.isArtistEndpoint == true ||
-                    renderer.subtitle.runs?.any { it.text.contains("Artist", ignoreCase = true) } == true) {
-                    val name = renderer.title.runs?.firstOrNull()?.text?.trim()
-                    if (!name.isNullOrBlank()) {
-                        Artist(
-                            name = name,
-                            id = renderer.onTap.browseEndpoint?.browseId
-                        )
-                    } else null
-                } else null
-
-                topItems +=
-                    listOfNotNull(SearchSummaryPage.fromMusicCardShelfRenderer(renderer))
-                        .plus(
-                            renderer.contents
-                                ?.mapNotNull { it.musicResponsiveListItemRenderer }
-                                ?.mapNotNull { SearchSummaryPage.fromMusicResponsiveListItemRenderer(it, defaultArtist = shelfArtist) }
-                                .orEmpty()
-                        )
+                topItems += parseCardShelfItems(renderer)
                 return@forEach
             }
 
             content.itemSectionRenderer?.contents?.let { sectionContents ->
-                topItems +=
-                    sectionContents.mapNotNull {
-                        it.musicResponsiveListItemRenderer?.let { renderer ->
-                            SearchSummaryPage.fromMusicResponsiveListItemRenderer(renderer)
-                        }
+                sectionContents.forEach { item ->
+                    item.musicCardShelfRenderer?.let { card ->
+                        topItems += parseCardShelfItems(card)
                     }
-                summaries +=
-                    sectionContents.mapNotNull { it.musicShelfRenderer?.toSearchSummary() }
+                    item.musicResponsiveListItemRenderer?.let { renderer ->
+                        SearchSummaryPage.fromMusicResponsiveListItemRenderer(renderer)?.let(topItems::add)
+                    }
+                    item.musicShelfRenderer?.toSearchSummary()?.let(summaries::add)
+                    item.gridRenderer?.toSearchSummary()?.let(summaries::add)
+                }
                 return@forEach
             }
 
             content.musicShelfRenderer?.toSearchSummary()?.let(summaries::add)
+            content.musicCarouselShelfRenderer?.toSearchSummary()?.let(summaries::add)
+            content.gridRenderer?.toSearchSummary()?.let(summaries::add)
         }
 
-        return SearchSummaryPage(
+        val page = SearchSummaryPage(
             summaries =
                 buildList {
                     topItems
@@ -356,17 +422,34 @@ object YouTube {
                         .takeIf { it.isNotEmpty() }
                         ?.let { add(SearchSummary(title = "Top results", items = it)) }
                     addAll(summaries)
-                }
+                },
+            correctedQuery = correctedQuery,
         )
+
+        if (allowCorrectionRetry &&
+            page.summaries.all { it.items.isEmpty() } &&
+            !correctedQuery.isNullOrBlank() &&
+            !correctedQuery.equals(query.trim(), ignoreCase = true)
+        ) {
+            return searchSummaryInternal(
+                query = correctedQuery,
+                requestLocale = requestLocale,
+                allowCorrectionRetry = false,
+            ).copy(correctedQuery = correctedQuery)
+        }
+
+        return page
     }
 
     private suspend fun searchInternal(
         query: String,
         filter: SearchFilter,
         requestLocale: YouTubeLocale,
+        allowCorrectionRetry: Boolean = true,
     ): SearchResult {
         val contents = innerTube.search(WEB_REMIX, query, filter.value, requestLocale = requestLocale)
             .body<SearchResponse>().sections()
+        val correctedQuery = extractCorrectedQuery(contents)
         val shelves =
             contents.flatMap { content ->
                 buildList {
@@ -378,17 +461,45 @@ object YouTube {
             }
         val inlineItems =
             contents.flatMap { content ->
-                content.itemSectionRenderer?.contents
-                    ?.mapNotNull { it.musicResponsiveListItemRenderer }
-                    .orEmpty()
+                buildList {
+                    content.musicCardShelfRenderer?.let { addAll(parseCardShelfItems(it)) }
+                    content.musicCarouselShelfRenderer?.contents?.forEach { c ->
+                        c.musicResponsiveListItemRenderer?.let { SearchPage.toYTItem(it) }?.let(::add)
+                        c.musicTwoRowItemRenderer?.let { SearchSummaryPage.fromMusicTwoRowItemRenderer(it) }?.let(::add)
+                    }
+                    content.gridRenderer?.items?.forEach { item ->
+                        item.musicTwoRowItemRenderer?.let { SearchSummaryPage.fromMusicTwoRowItemRenderer(it) }?.let(::add)
+                    }
+                    content.itemSectionRenderer?.contents?.forEach { item ->
+                        item.musicResponsiveListItemRenderer?.let { SearchPage.toYTItem(it) }?.let(::add)
+                        item.musicCardShelfRenderer?.let { addAll(parseCardShelfItems(it)) }
+                        item.gridRenderer?.items?.forEach { gridItem ->
+                            gridItem.musicTwoRowItemRenderer?.let { SearchSummaryPage.fromMusicTwoRowItemRenderer(it) }?.let(::add)
+                        }
+                    }
+                }
             }
+        val items = shelves
+            .flatMap { it.contents?.getItems().orEmpty() }
+            .mapNotNull { SearchPage.toYTItem(it) }
+            .plus(inlineItems)
+            .distinctBy { it.id }
+
+        if (allowCorrectionRetry &&
+            items.isEmpty() &&
+            !correctedQuery.isNullOrBlank() &&
+            !correctedQuery.equals(query.trim(), ignoreCase = true)
+        ) {
+            return searchInternal(
+                query = correctedQuery,
+                filter = filter,
+                requestLocale = requestLocale,
+                allowCorrectionRetry = false,
+            )
+        }
+
         return SearchResult(
-            items =
-                shelves
-                    .flatMap { it.contents?.getItems().orEmpty() }
-                    .plus(inlineItems)
-                    .mapNotNull { SearchPage.toYTItem(it) }
-                    .distinctBy { it.id },
+            items = items,
             continuation =
                 shelves
                     .asSequence()

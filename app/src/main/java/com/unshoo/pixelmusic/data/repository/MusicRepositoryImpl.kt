@@ -788,17 +788,11 @@ class MusicRepositoryImpl @Inject constructor(
         val downloadedFlow = flow {
             try {
                 val downloaded = com.unshoo.pixelmusic.data.database.youtube.AppDatabase.getInstance(context).songRepository().getDownloadedSongs()
-                val matching = downloaded.filter { ySong ->
+                val mapped = downloaded.mapNotNull { ySong ->
                     val path = ySong.audioFilePath
                     val existsOnDisk = path?.startsWith("content://") == true ||
                         (path != null && java.io.File(path).let { it.isFile && it.length() > 0L })
-                    if (!existsOnDisk) return@filter false
-                    if (titleOnly) {
-                        ySong.title.contains(query, ignoreCase = true)
-                    } else {
-                        ySong.title.contains(query, ignoreCase = true) || ySong.artist.contains(query, ignoreCase = true)
-                    }
-                }.map { ySong ->
+                    if (!existsOnDisk) return@mapNotNull null
                     val primaryArtistId = toUnifiedYoutubeArtistId(ySong.artist.takeIf { it.isNotBlank() } ?: "Unknown Artist")
                     val songAlbum = ySong.album?.takeIf { it.isNotBlank() } ?: "YouTube Music"
                     val unifiedSongId = toUnifiedYoutubeSongId(ySong.youtubeId)
@@ -836,7 +830,7 @@ class MusicRepositoryImpl @Inject constructor(
                         albumBrowseId = ySong.albumBrowseId
                     )
                 }
-                emit(matching)
+                emit(mapped)
             } catch (_: Exception) {
                 emit(emptyList())
             }
@@ -856,6 +850,14 @@ class MusicRepositoryImpl @Inject constructor(
             }
 
             downloaded.forEach { song ->
+                val matches = if (titleOnly) {
+                    song.title.contains(query, ignoreCase = true)
+                } else {
+                    song.title.contains(query, ignoreCase = true) ||
+                        song.artist.contains(query, ignoreCase = true) ||
+                        song.album.contains(query, ignoreCase = true)
+                }
+                if (!matches) return@forEach
                 val key = song.getDeduplicationKey()
                 val existingIndex = localKeyIndexMap[key]
                 if (existingIndex != null) {
@@ -868,31 +870,108 @@ class MusicRepositoryImpl @Inject constructor(
                 }
             }
 
-            result
+            if (result.isEmpty() && query.trim().length >= 2) {
+                val allSongs = (runCatching { getAllSongsOnce() }.getOrDefault(emptyList()) + downloaded)
+                fuzzyMatchSongs(query, allSongs, titleOnly = titleOnly)
+            } else {
+                result
+            }
         }.flowOn(Dispatchers.IO)
+    }
+
+    private fun fuzzyMatchSongs(
+        query: String,
+        candidates: List<Song>,
+        titleOnly: Boolean,
+    ): List<Song> {
+        val seenKeys = HashSet<String>()
+        return candidates
+            .asSequence()
+            .filter { seenKeys.add(it.getDeduplicationKey()) }
+            .mapNotNull { song ->
+                val score = if (titleOnly) {
+                    com.unshoo.pixelmusic.utils.FuzzySearchMatcher.scoreFields(query, song.title to 3)
+                } else {
+                    com.unshoo.pixelmusic.utils.FuzzySearchMatcher.scoreFields(
+                        query,
+                        song.title to 3,
+                        song.artist to 2,
+                        song.album to 1,
+                    )
+                }
+                if (score > 0) song to score else null
+            }
+            .sortedByDescending { it.second }
+            .take(SEARCH_RESULTS_LIMIT)
+            .map { it.first }
+            .toList()
     }
 
 
     override fun searchAlbums(query: String, minTracks: Int): Flow<List<Album>> {
         if (query.isBlank()) return flowOf(emptyList())
         return musicDao.searchAlbums(query, emptyList(), false, minTracks).map { entities ->
-            entities.map { it.toAlbum() }
+            val strict = entities.map { it.toAlbum() }
+            if (strict.isNotEmpty() || query.trim().length < 2) {
+                strict
+            } else {
+                runCatching { getAllAlbumsOnce(minTracks = minTracks) }
+                    .getOrDefault(emptyList())
+                    .mapNotNull { album ->
+                        val score = com.unshoo.pixelmusic.utils.FuzzySearchMatcher.scoreFields(
+                            query,
+                            album.title to 3,
+                            album.artist to 2,
+                        )
+                        if (score > 0) album to score else null
+                    }
+                    .sortedByDescending { it.second }
+                    .take(SEARCH_RESULTS_LIMIT)
+                    .map { it.first }
+            }
         }.flowOn(Dispatchers.IO)
     }
 
     override fun searchArtists(query: String): Flow<List<Artist>> {
         if (query.isBlank()) return flowOf(emptyList())
         return musicDao.searchArtists(query, emptyList(), false).map { entities ->
-            entities.map { it.toArtist() }
+            val strict = entities.map { it.toArtist() }
+            if (strict.isNotEmpty() || query.trim().length < 2) {
+                strict
+            } else {
+                runCatching { getAllArtistsOnce() }
+                    .getOrDefault(emptyList())
+                    .mapNotNull { artist ->
+                        val score = com.unshoo.pixelmusic.utils.FuzzySearchMatcher.scoreFields(
+                            query,
+                            artist.name to 3,
+                        )
+                        if (score > 0) artist to score else null
+                    }
+                    .sortedByDescending { it.second }
+                    .take(SEARCH_RESULTS_LIMIT)
+                    .map { it.first }
+            }
         }.flowOn(Dispatchers.IO)
     }
 
     override suspend fun searchPlaylists(query: String): List<Playlist> {
         if (query.isBlank()) return emptyList()
-        return playlistPreferencesRepository.userPlaylistsFlow.first()
-            .filter { playlist ->
-                playlist.name.contains(query, ignoreCase = true)
+        val all = playlistPreferencesRepository.userPlaylistsFlow.first()
+        val strict = all.filter { playlist ->
+            playlist.name.contains(query, ignoreCase = true)
+        }
+        if (strict.isNotEmpty() || query.trim().length < 2) return strict
+        return all
+            .mapNotNull { playlist ->
+                val score = com.unshoo.pixelmusic.utils.FuzzySearchMatcher.scoreFields(
+                    query,
+                    playlist.name to 3,
+                )
+                if (score > 0) playlist to score else null
             }
+            .sortedByDescending { it.second }
+            .map { it.first }
     }
 
     override fun searchAll(query: String, filterType: SearchFilterType): Flow<List<SearchResultItem>> {
@@ -920,7 +999,7 @@ class MusicRepositoryImpl @Inject constructor(
                         }
                     }
                 }
-                SearchFilterType.SONGS -> searchSongs(query, titleOnly = true).map { songs -> songs.map { SearchResultItem.SongItem(it) } }
+                SearchFilterType.SONGS -> searchSongs(query, titleOnly = false).map { songs -> songs.map { SearchResultItem.SongItem(it) } }
                 SearchFilterType.ALBUMS -> searchAlbums(query, minTracks).map { albums -> albums.map { SearchResultItem.AlbumItem(it) } }
                 SearchFilterType.ARTISTS -> searchArtists(query).map { artists -> artists.map { SearchResultItem.ArtistItem(it) } }
                 SearchFilterType.PLAYLISTS -> playlistsFlow.map { playlists -> playlists.map { SearchResultItem.PlaylistItem(it) } }

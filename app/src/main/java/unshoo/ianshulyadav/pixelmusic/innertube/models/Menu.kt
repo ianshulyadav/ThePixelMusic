@@ -15,47 +15,47 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class Menu(
-    val menuRenderer: MenuRenderer,
+    val menuRenderer: MenuRenderer = MenuRenderer(),
 ) {
     @Serializable
     data class MenuRenderer(
-        val items: List<Item>?,
-        val topLevelButtons: List<TopLevelButton>?,
+        val items: List<Item>? = null,
+        val topLevelButtons: List<TopLevelButton>? = null,
     ) {
         @Serializable
         data class Item(
-            val menuNavigationItemRenderer: MenuNavigationItemRenderer?,
-            val menuServiceItemRenderer: MenuServiceItemRenderer?,
-            val toggleMenuServiceItemRenderer: ToggleMenuServiceRenderer?,
+            val menuNavigationItemRenderer: MenuNavigationItemRenderer? = null,
+            val menuServiceItemRenderer: MenuServiceItemRenderer? = null,
+            val toggleMenuServiceItemRenderer: ToggleMenuServiceRenderer? = null,
         ) {
             @Serializable
             data class MenuNavigationItemRenderer(
-                val text: Runs,
-                val icon: Icon,
-                val navigationEndpoint: NavigationEndpoint,
+                val text: Runs = Runs(emptyList()),
+                val icon: Icon = Icon(),
+                val navigationEndpoint: NavigationEndpoint = NavigationEndpoint(),
             )
 
             @Serializable
             data class MenuServiceItemRenderer(
-                val text: Runs,
-                val icon: Icon,
-                val serviceEndpoint: NavigationEndpoint,
+                val text: Runs = Runs(emptyList()),
+                val icon: Icon = Icon(),
+                val serviceEndpoint: NavigationEndpoint = NavigationEndpoint(),
             )
             @Serializable
             data class ToggleMenuServiceRenderer(
-                val defaultIcon: Icon,
-                val defaultServiceEndpoint: DefaultServiceEndpoint,
+                val defaultIcon: Icon = Icon(),
+                val defaultServiceEndpoint: DefaultServiceEndpoint = DefaultServiceEndpoint(),
             )
         }
 
         @Serializable
         data class TopLevelButton(
-            val buttonRenderer: ButtonRenderer?,
+            val buttonRenderer: ButtonRenderer? = null,
         ) {
             @Serializable
             data class ButtonRenderer(
-                val icon: Icon,
-                val navigationEndpoint: NavigationEndpoint,
+                val icon: Icon = Icon(),
+                val navigationEndpoint: NavigationEndpoint = NavigationEndpoint(),
             )
         }
     }

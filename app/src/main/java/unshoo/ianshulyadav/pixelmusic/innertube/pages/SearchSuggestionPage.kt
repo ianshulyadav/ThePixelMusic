@@ -23,18 +23,24 @@ import unshoo.ianshulyadav.pixelmusic.innertube.models.splitBySeparator
 
 object SearchSuggestionPage {
     fun fromMusicResponsiveListItemRenderer(renderer: MusicResponsiveListItemRenderer): YTItem? {
+        val title = renderer.flexColumns
+            .firstOrNull()
+            ?.musicResponsiveListItemFlexColumnRenderer
+            ?.text
+            ?.runs
+            ?.joinToString(separator = "") { it.text }
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?: return null
+        val thumbnailUrl = renderer.thumbnail?.getThumbnailUrl()
         return when {
             renderer.isSong -> {
+                val videoId = renderer.playlistItemData?.videoId?.takeIf { it.isNotBlank() }
+                    ?: renderer.navigationEndpoint?.watchEndpoint?.videoId?.takeIf { it.isNotBlank() }
+                    ?: return null
                 SongItem(
-                    id = renderer.playlistItemData?.videoId ?: return null,
-                    title =
-                        renderer.flexColumns
-                            .firstOrNull()
-                            ?.musicResponsiveListItemFlexColumnRenderer
-                            ?.text
-                            ?.runs
-                            ?.firstOrNull()
-                            ?.text ?: return null,
+                    id = videoId,
+                    title = title,
                     artists =
                         renderer.flexColumns
                             .getOrNull(1)
@@ -44,28 +50,31 @@ object SearchSuggestionPage {
                             ?.splitBySeparator()
                             ?.getOrNull(1)
                             ?.oddElements()
-                            ?.map {
-                                Artist(
-                                    name = it.text,
-                                    id = it.navigationEndpoint?.browseEndpoint?.browseId,
-                                )
-                            } ?: return null,
+                            ?.mapNotNull {
+                                val name = it.text.trim()
+                                if (name.isNotEmpty()) {
+                                    Artist(
+                                        name = name,
+                                        id = it.navigationEndpoint?.browseEndpoint?.browseId,
+                                    )
+                                } else null
+                            }
+                            .orEmpty(),
                     album =
                         renderer.flexColumns
-                            .getOrNull(
-                                2,
-                            )?.musicResponsiveListItemFlexColumnRenderer
+                            .getOrNull(2)
+                            ?.musicResponsiveListItemFlexColumnRenderer
                             ?.text
                             ?.runs
                             ?.firstOrNull()
                             ?.let {
-                                Album(
-                                    name = it.text,
-                                    id = it.navigationEndpoint?.browseEndpoint?.browseId ?: return null,
-                                )
+                                val albumId = it.navigationEndpoint?.browseEndpoint?.browseId
+                                if (it.text.isNotBlank()) {
+                                    Album(name = it.text, id = albumId)
+                                } else null
                             },
                     duration = null,
-                    thumbnail = renderer.thumbnail?.musicThumbnailRenderer?.getThumbnailUrl() ?: return null,
+                    thumbnail = thumbnailUrl.orEmpty(),
                     explicit =
                         renderer.badges?.find {
                             it.musicInlineBadgeRenderer?.icon?.iconType == "MUSIC_EXPLICIT_BADGE"
@@ -73,18 +82,12 @@ object SearchSuggestionPage {
                 )
             }
             renderer.isArtist -> {
+                val browseId = renderer.navigationEndpoint?.browseEndpoint?.browseId?.takeIf { it.isNotBlank() }
+                    ?: return null
                 ArtistItem(
-                    id = renderer.navigationEndpoint?.browseEndpoint?.browseId ?: return null,
-                    title =
-                        renderer.flexColumns
-                            .firstOrNull()
-                            ?.musicResponsiveListItemFlexColumnRenderer
-                            ?.text
-                            ?.runs
-                            ?.firstOrNull()
-                            ?.text
-                            ?: return null,
-                    thumbnail = renderer.thumbnail?.musicThumbnailRenderer?.getThumbnailUrl() ?: return null,
+                    id = browseId,
+                    title = title,
+                    thumbnail = thumbnailUrl,
                     shuffleEndpoint =
                         renderer.menu
                             ?.menuRenderer
@@ -104,15 +107,17 @@ object SearchSuggestionPage {
                 )
             }
             renderer.isAlbum -> {
+                val browseId = renderer.navigationEndpoint?.browseEndpoint?.browseId?.takeIf { it.isNotBlank() }
+                    ?: return null
                 val secondaryLine =
                     renderer.flexColumns
                         .getOrNull(1)
                         ?.musicResponsiveListItemFlexColumnRenderer
                         ?.text
                         ?.runs
-                        ?.splitBySeparator() ?: return null
+                        ?.splitBySeparator()
                 AlbumItem(
-                    browseId = renderer.navigationEndpoint?.browseEndpoint?.browseId ?: return null,
+                    browseId = browseId,
                     playlistId =
                         renderer.menu
                             ?.menuRenderer
@@ -122,29 +127,27 @@ object SearchSuggestionPage {
                             }?.menuNavigationItemRenderer
                             ?.navigationEndpoint
                             ?.watchPlaylistEndpoint
-                            ?.playlistId ?: return null,
-                    title =
-                        renderer.flexColumns
-                            .firstOrNull()
-                            ?.musicResponsiveListItemFlexColumnRenderer
-                            ?.text
-                            ?.runs
-                            ?.firstOrNull()
-                            ?.text ?: return null,
+                            ?.playlistId
+                            ?.takeIf { it.isNotBlank() }
+                            ?: browseId,
+                    title = title,
                     artists =
-                        secondaryLine.getOrNull(1)?.oddElements()?.map {
-                            Artist(
-                                name = it.text,
-                                id = it.navigationEndpoint?.browseEndpoint?.browseId,
-                            )
-                        } ?: return null,
+                        secondaryLine?.getOrNull(1)?.oddElements()?.mapNotNull {
+                            val name = it.text.trim()
+                            if (name.isNotEmpty()) {
+                                Artist(
+                                    name = name,
+                                    id = it.navigationEndpoint?.browseEndpoint?.browseId,
+                                )
+                            } else null
+                        }?.takeIf { it.isNotEmpty() },
                     year =
                         secondaryLine
-                            .lastOrNull()
+                            ?.lastOrNull()
                             ?.firstOrNull()
                             ?.text
                             ?.toIntOrNull(),
-                    thumbnail = renderer.thumbnail?.musicThumbnailRenderer?.getThumbnailUrl() ?: return null,
+                    thumbnail = thumbnailUrl.orEmpty(),
                     explicit =
                         renderer.badges?.find {
                             it.musicInlineBadgeRenderer?.icon?.iconType == "MUSIC_EXPLICIT_BADGE"

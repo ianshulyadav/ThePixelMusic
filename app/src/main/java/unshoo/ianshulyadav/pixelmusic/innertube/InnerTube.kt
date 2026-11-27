@@ -177,6 +177,7 @@ class InnerTube {
             json(Json {
                 ignoreUnknownKeys = true
                 explicitNulls = false
+                coerceInputValues = true
                 encodeDefaults = true
             })
         }
@@ -332,21 +333,72 @@ class InnerTube {
         params: String? = null,
         continuation: String? = null,
         requestLocale: YouTubeLocale = locale,
+        forceAnonymous: Boolean = false,
     ) = withRetry {
-        httpClient.post("search") {
-            val login = useLoginForBrowse
-            val auth = currentAuthState().forLocale(requestLocale)
-            ytClient(client, setLogin = login, authState = auth, requestLocale = requestLocale)
-            setBody(
-                SearchBody(
-                    context = client.toContext(requestLocale, auth.visitorData, auth.dataSyncId.takeIf { login }),
-                    query = query,
-                    params = params
-                )
+        val login = !forceAnonymous && useLoginForBrowse
+        val auth = currentAuthState().forLocale(requestLocale)
+        try {
+            executeSearchRequest(
+                client = client,
+                query = query,
+                params = params,
+                continuation = continuation,
+                requestLocale = requestLocale,
+                login = login,
+                forceAnonymous = forceAnonymous,
+                auth = auth,
             )
-            parameter("continuation", continuation)
-            parameter("ctoken", continuation)
+        } catch (failure: ClientRequestException) {
+            val status = failure.response.status
+            val canRetryAnonymous = login && (
+                status == HttpStatusCode.BadRequest ||
+                    status == HttpStatusCode.Unauthorized ||
+                    status == HttpStatusCode.Forbidden
+                )
+            if (!canRetryAnonymous) throw failure
+            executeSearchRequest(
+                client = client,
+                query = query,
+                params = params,
+                continuation = continuation,
+                requestLocale = requestLocale,
+                login = false,
+                forceAnonymous = true,
+                auth = auth,
+            )
         }
+    }
+
+    private suspend fun executeSearchRequest(
+        client: YouTubeClient,
+        query: String?,
+        params: String?,
+        continuation: String?,
+        requestLocale: YouTubeLocale,
+        login: Boolean,
+        forceAnonymous: Boolean,
+        auth: PlaybackAuthState,
+    ) = httpClient.post("search") {
+        ytClient(
+            client,
+            setLogin = login,
+            authState = auth,
+            forceAnonymous = forceAnonymous,
+            requestLocale = requestLocale,
+        )
+        setBody(
+            SearchBody(
+                context = client.toContext(
+                    requestLocale,
+                    auth.visitorData.takeUnless { forceAnonymous },
+                    auth.dataSyncId.takeIf { login },
+                ),
+                query = query,
+                params = params
+            )
+        )
+        parameter("continuation", continuation)
+        parameter("ctoken", continuation)
     }
 
     suspend fun player(
