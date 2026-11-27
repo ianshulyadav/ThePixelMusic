@@ -644,7 +644,7 @@ private fun KineticToolbar(
                 onClick = actions.onRepeatToggle
             )
             KineticToolbarItem(painter = R.drawable.rounded_lyrics_24, description = "Lyrics", onClick = actions.onLyrics)
-            KineticToolbarItem(painter = R.drawable.rounded_format_list_bulleted_24, description = "Queue", onClick = actions.onShowQueue)
+            KineticToolbarItem(painter = R.drawable.rounded_queue_music_24, description = "Queue", onClick = actions.onShowQueue)
         }
     }
 }
