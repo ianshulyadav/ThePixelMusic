@@ -157,4 +157,92 @@ class MonochromeInstancePoolTest {
         assertFalse(AddonManager.isBuiltInEnabled(AudioSourceType.MONOCHROME, masterOnExplicitOff))
         assertFalse(AddonManager.isBuiltInEnabled(AudioSourceType.MONOCHROME, masterOffUnset))
     }
+
+    @Test
+    fun `wave 2 is skipped when wave 1 mirrors return clean JSON catalog misses`() {
+        val hitHosts = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val client = OkHttpClient.Builder()
+            .addInterceptor(Interceptor { chain ->
+                val url = chain.request().url
+                hitHosts.add(url.host)
+                val body = if (url.host == "tracks.monochrome.st") {
+                    """{"tracks":[]}"""
+                } else {
+                    """{"data":{"items":[]}}"""
+                }
+                Response.Builder()
+                    .request(chain.request())
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(200)
+                    .message("OK")
+                    .header("Content-Type", "application/json")
+                    .body(body.toResponseBody("application/json".toMediaType()))
+                    .build()
+            })
+            .build()
+
+        val result = MonochromeInstancePool.resolve(
+            httpClient = client,
+            title = "Rare Missing Track",
+            artists = listOf("Unknown Artist"),
+            album = null,
+            durationMs = 180_000L,
+            customInstancesRaw = "https://tracks.monochrome.st\nhttps://api.monochrome.tf\nhttps://eu-central.monochrome.tf\nhttps://us-west.monochrome.tf\nhttps://arran.monochrome.tf",
+        )
+
+        assertEquals(null, result)
+        assertFalse(hitHosts.contains("us-west.monochrome.tf"), "Wave 2 host should be skipped on clean Wave 1 misses: $hitHosts")
+        assertFalse(hitHosts.contains("arran.monochrome.tf"), "Wave 2 host should be skipped on clean Wave 1 misses: $hitHosts")
+    }
+
+    @Test
+    fun `wave 2 still runs when wave 1 hits HTTP errors`() {
+        val hitHosts = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val client = OkHttpClient.Builder()
+            .addInterceptor(Interceptor { chain ->
+                val url = chain.request().url
+                hitHosts.add(url.host)
+                if (url.host == "us-west.monochrome.tf") {
+                    Response.Builder()
+                        .request(chain.request())
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .header("Content-Type", "application/json")
+                        .body("""{"data":{"items":[{"id":"776655","title":"Found In Wave Two","artistNames":["Artist"],"duration":180}]}}""".toResponseBody("application/json".toMediaType()))
+                        .build()
+                } else if (url.toString().contains("/track/?id=776655")) {
+                    Response.Builder()
+                        .request(chain.request())
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .header("Content-Type", "application/json")
+                        .body("""{"data":{"OriginalTrackUrl":"https://cdn.example/wave2.flac"}}""".toResponseBody("application/json".toMediaType()))
+                        .build()
+                } else {
+                    Response.Builder()
+                        .request(chain.request())
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(502)
+                        .message("Bad Gateway")
+                        .body("".toResponseBody())
+                        .build()
+                }
+            })
+            .build()
+
+        val result = MonochromeInstancePool.resolve(
+            httpClient = client,
+            title = "Found In Wave Two",
+            artists = listOf("Artist"),
+            album = null,
+            durationMs = 180_000L,
+            customInstancesRaw = "https://tracks.monochrome.st\nhttps://api.monochrome.tf\nhttps://eu-central.monochrome.tf\nhttps://us-west.monochrome.tf",
+        )
+
+        assertNotNull(result)
+        assertEquals("https://cdn.example/wave2.flac", result!!.uri)
+        assertTrue(hitHosts.contains("us-west.monochrome.tf"))
+    }
 }

@@ -89,6 +89,16 @@ object MonochromeInstancePool {
         return healthy.ifEmpty { combined.take(3) }
     }
 
+    private sealed interface ProbeOutcome {
+        data class Hit(val stream: DirectStream) : ProbeOutcome
+        data object CatalogMiss : ProbeOutcome
+        data object Failed : ProbeOutcome
+    }
+
+    private class ProbeAttempt {
+        var cleanJsonParsed: Boolean = false
+    }
+
     fun resolve(
         httpClient: OkHttpClient,
         title: String,
@@ -110,27 +120,38 @@ object MonochromeInstancePool {
             if (Thread.currentThread().isInterrupted) {
                 throw InterruptedException("Monochrome resolve interrupted")
             }
-            val completion = java.util.concurrent.ExecutorCompletionService<DirectStream?>(probeExecutor)
+            val completion = java.util.concurrent.ExecutorCompletionService<ProbeOutcome>(probeExecutor)
             val futures = wave.map { base ->
                 completion.submit {
                     probeInstance(client, base, encoded, title, artists, album, durationMs, isrc, trustedOverride, activeCalls)
                 }
             }
+            var cleanMisses = 0
+            var failures = 0
             try {
                 repeat(futures.size) {
-                    val result = try {
+                    val outcome = try {
                         completion.take().get()
                     } catch (interrupted: InterruptedException) {
                         throw interrupted
                     } catch (_: Exception) {
-                        null
+                        ProbeOutcome.Failed
                     }
-                    if (result != null) return result
+                    when (outcome) {
+                        is ProbeOutcome.Hit -> return outcome.stream
+                        ProbeOutcome.CatalogMiss -> cleanMisses++
+                        ProbeOutcome.Failed -> failures++
+                    }
                 }
             } finally {
                 activeCalls.forEach { runCatching { it.cancel() } }
                 activeCalls.clear()
                 futures.forEach { it.cancel(true) }
+            }
+            // If Wave 1 mirrors all answered cleanly with valid JSON catalog misses (zero errors),
+            // querying Wave 2 mirrors against the same catalog wastes ~1s for no match.
+            if (failures == 0 && cleanMisses >= 2) {
+                return null
             }
         }
         return null
@@ -147,19 +168,20 @@ object MonochromeInstancePool {
         isrc: String?,
         trustedOverride: Boolean,
         activeCalls: CopyOnWriteArrayList<Call>,
-    ): DirectStream? {
+    ): ProbeOutcome {
         val healthKey = "mono:$base"
         val startedAt = System.currentTimeMillis()
+        val attempt = ProbeAttempt()
         val resolved = runCatching {
             // One protocol per server family: probing all three shapes on every mirror tripled
             // the latency of every dead or non-matching host.
             when {
                 base.contains("monochrome.st", ignoreCase = true) ->
-                    tryStreamerProtocol(client, base, encoded, title, artists, album, durationMs, isrc, trustedOverride, activeCalls)
+                    tryStreamerProtocol(client, base, encoded, title, artists, album, durationMs, isrc, trustedOverride, activeCalls, attempt)
                 else ->
-                    tryHifiApiProtocol(client, base, encoded, title, artists, album, durationMs, isrc, trustedOverride, activeCalls)
+                    tryHifiApiProtocol(client, base, encoded, title, artists, album, durationMs, isrc, trustedOverride, activeCalls, attempt)
                         ?: if (base.contains("relay", ignoreCase = true)) {
-                            tryRelayProtocol(client, base, encoded, title, artists, album, durationMs, isrc, trustedOverride, activeCalls)
+                            tryRelayProtocol(client, base, encoded, title, artists, album, durationMs, isrc, trustedOverride, activeCalls, attempt)
                         } else null
             }
         }.onFailure { err ->
@@ -170,8 +192,9 @@ object MonochromeInstancePool {
         }.getOrNull()
         if (resolved != null) {
             AddonHealthTracker.recordSuccess(healthKey, System.currentTimeMillis() - startedAt)
+            return ProbeOutcome.Hit(resolved)
         }
-        return resolved
+        return if (attempt.cleanJsonParsed) ProbeOutcome.CatalogMiss else ProbeOutcome.Failed
     }
 
     private fun tryHifiApiProtocol(
@@ -185,6 +208,7 @@ object MonochromeInstancePool {
         isrc: String?,
         trustedOverride: Boolean,
         activeCalls: CopyOnWriteArrayList<Call>,
+        attempt: ProbeAttempt? = null,
     ): DirectStream? {
         val searchUrl = "$base/search/?s=$encodedQuery"
         val body = getStringOrThrowOn5xx(httpClient, searchUrl, "mono:$base", activeCalls) ?: return null
@@ -195,6 +219,7 @@ object MonochromeInstancePool {
         val items: JSONArray = root.optJSONObject("data")?.optJSONArray("items")
             ?: root.optJSONArray("items")
             ?: return null
+        attempt?.cleanJsonParsed = true
 
         val candidates = ArrayList<AddonTrackCandidate>()
         for (i in 0 until minOf(items.length(), 15)) {
@@ -330,6 +355,7 @@ object MonochromeInstancePool {
         isrc: String?,
         trustedOverride: Boolean,
         activeCalls: CopyOnWriteArrayList<Call>,
+        attempt: ProbeAttempt? = null,
     ): DirectStream? {
         val body = getStringOrThrowOn5xx(httpClient, "$base/search/tracks?q=$encodedQuery&limit=6", "mono:$base", activeCalls)
             ?: return null
@@ -337,6 +363,7 @@ object MonochromeInstancePool {
             AddonHealthTracker.recordFailure("mono:$base", "Malformed JSON")
             return null
         }
+        attempt?.cleanJsonParsed = true
         val candidates = ArrayList<AddonTrackCandidate>()
         for (i in 0 until tracks.length()) {
             val item = tracks.optJSONObject(i) ?: continue
@@ -387,6 +414,7 @@ object MonochromeInstancePool {
         isrc: String?,
         trustedOverride: Boolean,
         activeCalls: CopyOnWriteArrayList<Call>,
+        attempt: ProbeAttempt? = null,
     ): DirectStream? {
         val body = getStringOrThrowOn5xx(
             httpClient = httpClient,
@@ -397,6 +425,7 @@ object MonochromeInstancePool {
         ) ?: return null
 
         val candidates = HttpAddonClient(httpClient).parseTracksPayload(body)
+        attempt?.cleanJsonParsed = true
         val winner = AddonTrackMatcher.rankCandidates(
             wantedTitle = title,
             wantedArtists = artists,

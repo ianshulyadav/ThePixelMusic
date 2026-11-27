@@ -15,15 +15,21 @@ import com.unshoo.pixelmusic.data.service.player.DualPlayerEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.File
 
 @OptIn(UnstableApi::class)
 object QueuePreloadManager {
 
+    private const val PRELOAD_LOOKAHEAD_CONCURRENCY = 2
     private var preloadJob: Job? = null
     private var scope: CoroutineScope? = null
     private var appContext: Context? = null
@@ -119,23 +125,22 @@ object QueuePreloadManager {
                 .filter { it in 0 until totalCount && (includeCurrent || it != currentIndex) }
                 .distinct()
 
-            for (i in indicesAhead) {
-                // Yield network priority to currently playing track if it is buffering or low on buffer cushion (<20s)
-                if (i > currentIndex) {
+            suspend fun preloadSlot(i: Int, includeArtworkAsync: Boolean) {
+                if (i > currentIndex && i != nextIndex) {
                     val shouldYield = withContext(Dispatchers.Main) {
                         val engine = engineRef ?: return@withContext false
                         engine.isPlaybackBuffering || engine.bufferedAheadMs < 20_000L
                     }
                     if (shouldYield) {
-                        delay(2_000L)
+                        delay(1_500L)
                     }
                 }
 
                 val mediaItem = withContext(Dispatchers.Main) {
                     if (playerRef != null && i < player.mediaItemCount) player.getMediaItemAt(i) else null
-                } ?: continue
+                } ?: return
 
-                val videoId = resolveYoutubeVideoId(mediaItem) ?: continue
+                val videoId = resolveYoutubeVideoId(mediaItem) ?: return
 
                 val durMs = mediaItem.mediaMetadata.extras
                     ?.getLong(com.unshoo.pixelmusic.utils.MediaItemBuilder.EXTERNAL_EXTRA_DURATION, 0L) ?: 0L
@@ -148,12 +153,17 @@ object QueuePreloadManager {
                     thumbnailHref = upgradeThumbnailUrlToHighQuality(mediaItem.mediaMetadata.artworkUri?.toString()).orEmpty()
                 )
 
-                var streamUrl: String? = null
+                val isImmediateNext = (i == nextIndex)
+                if (includeArtworkAsync && song.thumbnailHref.isNotBlank()) {
+                    currentScope.launch(Dispatchers.IO) {
+                        cacheArtworkIfMissing(ctx, videoId, song.thumbnailHref)
+                    }
+                }
+
                 try {
-                    // Only allow lossless (9s preload budget) on the immediate next queue track so
-                    // deeper lookahead slots warm YouTube fast without causing Monochrome 429 bursts.
-                    val isImmediateNext = (i == nextIndex)
-                    streamUrl = YoutubeHelper.getSongPlayerUrl(
+                    // Only allow lossless on the immediate next queue track so deeper lookahead
+                    // slots warm JioSaavn/YouTube fast without causing Monochrome 429 bursts.
+                    val streamUrl = YoutubeHelper.getSongPlayerUrl(
                         ctx,
                         song,
                         allowLocal = false,
@@ -164,7 +174,8 @@ object QueuePreloadManager {
                             com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver.isLosslessUri(streamUrl))) {
                         val ytUri = "youtube://$videoId"
                         engineRef?.cachePreloadedStreamUri(ytUri, android.net.Uri.parse(streamUrl))
-                        if (streamUrl.startsWith("http") &&
+                        if (isImmediateNext &&
+                            streamUrl.startsWith("http") &&
                             !com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver.isLosslessUri(streamUrl) &&
                             !streamUrl.contains("monochrome.st/track/") &&
                             !streamUrl.endsWith(".flac", ignoreCase = true)
@@ -172,7 +183,7 @@ object QueuePreloadManager {
                             engineRef?.preCacheFirstChunk(streamUrl, videoId)
                         }
                     }
-                    if (i == nextIndex && !streamUrl.isNullOrBlank() &&
+                    if (isImmediateNext && !streamUrl.isNullOrBlank() &&
                         com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver.isLosslessUri(streamUrl)) {
                         withContext(Dispatchers.Main) {
                             val engine = engineRef
@@ -191,30 +202,46 @@ object QueuePreloadManager {
                     }
                 } catch (_: Exception) {
                 }
+            }
 
-                // Deduped: engineRef.preCacheFirstChunk already writes to ExoCache with correct client headers;
-                // prefetchAudioBytes was doing a redundant second write of the exact same first 128KB.
+            // Priority 1: warm current (on resume) and immediate next track first so transitions are ready immediately.
+            val priorityIndices = indicesAhead.filter { it == currentIndex || it == nextIndex }
+            for (idx in priorityIndices) {
+                preloadSlot(idx, includeArtworkAsync = true)
+            }
 
-                val thumbnailUrl = song.thumbnailHref
-                if (thumbnailUrl.isNotBlank()) {
-                    try {
-                        val imageDir = PixelMusicHelper.getDownloadDirectory(
-                            ctx,
-                            Constants.Downloads.THUMBNAILS_FOLDER
-                        )
-                        val destFile = File(imageDir, "$videoId.jpg")
-                        if (!destFile.exists()) {
-                            val artBytes = PixelMusicHelper.fetchArtworkBytes(thumbnailUrl)
-                            if (artBytes != null && artBytes.isNotEmpty()) {
-                                destFile.writeBytes(artBytes)
+            // Priority 2: warm deeper lookahead URLs with strictly bounded concurrency (2) while
+            // keeping thumbnail fetches off the URL critical path.
+            val deeperIndices = indicesAhead.filterNot { it == currentIndex || it == nextIndex }
+            if (deeperIndices.isNotEmpty()) {
+                val gate = Semaphore(PRELOAD_LOOKAHEAD_CONCURRENCY)
+                coroutineScope {
+                    deeperIndices.map { idx ->
+                        async {
+                            gate.withPermit {
+                                preloadSlot(idx, includeArtworkAsync = true)
                             }
                         }
-                    } catch (_: Exception) {
-                    }
+                    }.awaitAll()
                 }
-
-                delay(if (includeCurrent && i == currentIndex) 250 else 500)
             }
+        }
+    }
+
+    private suspend fun cacheArtworkIfMissing(ctx: Context, videoId: String, thumbnailUrl: String) {
+        try {
+            val imageDir = PixelMusicHelper.getDownloadDirectory(
+                ctx,
+                Constants.Downloads.THUMBNAILS_FOLDER
+            )
+            val destFile = File(imageDir, "$videoId.jpg")
+            if (!destFile.exists()) {
+                val artBytes = PixelMusicHelper.fetchArtworkBytes(thumbnailUrl)
+                if (artBytes != null && artBytes.isNotEmpty()) {
+                    destFile.writeBytes(artBytes)
+                }
+            }
+        } catch (_: Exception) {
         }
     }
 

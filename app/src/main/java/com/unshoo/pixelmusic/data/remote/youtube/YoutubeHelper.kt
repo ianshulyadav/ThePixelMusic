@@ -1083,6 +1083,7 @@ object YoutubeHelper {
                                     tierWhenLosslessUnavailable = baseFallbackTier,
                                     preResolvedFallbackUrl = preResolvedFallbackUrl,
                                     preResolvedFallbackTier = preResolvedFallbackTier,
+                                    isNextInQueue = isNextInQueue,
                                 )
                             }
                         }
@@ -1128,6 +1129,7 @@ object YoutubeHelper {
             tierWhenLosslessUnavailable = effectiveTier,
             preResolvedFallbackUrl = preResolvedFallbackUrl,
             preResolvedFallbackTier = preResolvedFallbackTier,
+            isNextInQueue = isNextInQueue,
         )
     }
 
@@ -1142,6 +1144,7 @@ object YoutubeHelper {
         tierWhenLosslessUnavailable: StreamFallbackPlanner.ResolutionTier,
         preResolvedFallbackUrl: String? = null,
         preResolvedFallbackTier: StreamFallbackPlanner.ResolutionTier? = null,
+        isNextInQueue: Boolean = false,
     ): String {
         val videoId = song.youtubeId
         val maxBitrate = plan.maxBitrateKbps
@@ -1180,7 +1183,8 @@ object YoutubeHelper {
                         .map { it.trim() }
                         .filter { it.isNotBlank() }
 
-                    val saavnResult = withTimeoutOrNull(3000L) {
+                    val saavnBudgetMs = if (isNextInQueue) 3_000L else 1_800L
+                    val saavnResult = withTimeoutOrNull(saavnBudgetMs) {
                         SaavnService.resolveStream(
                             title = effectiveTitle,
                             artists = if (artistsList.isNotEmpty()) artistsList else listOf(effectiveArtist),
@@ -1521,7 +1525,7 @@ object YoutubeHelper {
             var effectiveDuration = parseDurationToSeconds(song.duration.ifBlank { savedSong?.duration.orEmpty() })
 
             if (effectiveTitle.isBlank() && videoId.isNotBlank()) {
-                val fetched = fetchSongMetadata(videoId)
+                val fetched = withTimeoutOrNull(1_200L) { fetchSongMetadata(videoId) }
                 if (fetched != null) {
                     effectiveTitle = fetched.title
                     effectiveArtist = fetched.artist
@@ -1530,12 +1534,6 @@ object YoutubeHelper {
                 }
             }
             if (effectiveTitle.isBlank()) return null
-            // The real song length is what lets the matcher reject slowed/sped/extended uploads
-            // that share the title and artist (they play back sounding 0.7-0.9x). Queue items
-            // often carry no duration, so look it up instead of resolving without the check.
-            if ((effectiveDuration ?: 0) <= 0 && videoId.isNotBlank()) {
-                effectiveDuration = fetchSongMetadata(videoId)?.duration?.let { parseDurationToSeconds(it) }
-            }
 
             val artistsList = effectiveArtist.split(",", "&", "feat.", "ft.", ";")
                 .map { it.trim() }
@@ -1642,13 +1640,13 @@ object YoutubeHelper {
     }
 
     /** Inline budget for the lossless chain on a user tap (YouTube result is used after this). */
-    const val LOSSLESS_INLINE_BUDGET_MS = 3_000L
-    /** Lossless head start before the parallel YouTube resolve begins (fast answers pay nothing). */
-    private const val LOSSLESS_HEDGE_HEAD_START_MS = 1_200L
-    /** Head start for upcoming queue preloads so YouTube isn't probed unless lossless takes >3s. */
-    private const val LOSSLESS_PRELOAD_HEAD_START_MS = 3_000L
+    const val LOSSLESS_INLINE_BUDGET_MS = 2_500L
+    /** Short lossless head start before overlapping JioSaavn/YouTube fallback (~0ms wait on miss). */
+    private const val LOSSLESS_HEDGE_HEAD_START_MS = 450L
+    /** Head start for upcoming queue preloads before starting fallback in parallel. */
+    private const val LOSSLESS_PRELOAD_HEAD_START_MS = 1_000L
     /** Budget for preloads / explicit per-song overrides, where nobody is waiting on audio yet. */
-    private const val LOSSLESS_PRELOAD_BUDGET_MS = 9_000L
+    private const val LOSSLESS_PRELOAD_BUDGET_MS = 6_000L
 
     /**
      * Drops every cached stream decision. Called when the lossless master switch or the enabled
@@ -2387,17 +2385,23 @@ object YoutubeHelper {
         }
 
         var authState = YouTube.currentPlaybackAuthState()
-        // Signature timestamp once per resolve (NewPipe caches per videoId) — ArchiveTune parity.
-        val signatureTimestamp = try {
-            NewPipeUtils.getSignatureTimestamp(videoId).getOrNull()
-        } catch (_: Exception) {
-            null
+        // Compute signature timestamp lazily only for clients that actually need cipher handling;
+        // direct-URL native clients (ANDROID_VR, IOS, VISIONOS) skip this step with zero CPU cost.
+        var cachedSigTimestamp: Int? = null
+        var sigTimestampLoaded = false
+        suspend fun signatureTimestampFor(forClient: YouTubeClient): Int? {
+            if (!forClient.useSignatureTimestamp) return null
+            if (!sigTimestampLoaded) {
+                sigTimestampLoaded = true
+                cachedSigTimestamp = runCatching {
+                    NewPipeUtils.getSignatureTimestamp(videoId).getOrNull()
+                }.getOrNull()
+            }
+            return cachedSigTimestamp
         }
 
         // Restored c1f0a41 serial resolution (instant tap-to-play): one client at a time,
-        // ANDROID_VR plain-URL clients first, early exit on first success. Parallel racing
-        // + 2s bounds + 60s global quarantine (d145ebe/3500878) regressed this path — do not
-        // reintroduce without measuring tap-to-audio on weak networks.
+        // direct plain-URL clients first, early exit on first success.
         val clients = buildStreamClientOrder(preferredClient, authState)
         var didRepairAuthAfterBotDetection = false
 
@@ -2407,11 +2411,12 @@ object YoutubeHelper {
                 continue
             }
 
+            val sigTs = signatureTimestampFor(client)
             val response = try {
                 YouTube.player(
                     videoId = videoId,
                     client = client,
-                    signatureTimestamp = signatureTimestamp,
+                    signatureTimestamp = sigTs,
                     authState = authState,
                 ).getOrNull()
             } catch (e: Exception) {
@@ -2437,7 +2442,7 @@ object YoutubeHelper {
                         YouTube.player(
                             videoId = videoId,
                             client = client,
-                            signatureTimestamp = signatureTimestamp,
+                            signatureTimestamp = sigTs,
                             authState = authState,
                         ).getOrNull()
                     } catch (_: Exception) {
@@ -2446,7 +2451,12 @@ object YoutubeHelper {
                     status = retried.playabilityStatus.status
                     streamResponse = retried
                 }
-                if (status != "OK") continue
+                if (status != "OK") {
+                    if (status == "LOGIN_REQUIRED" && !authState.hasPlaybackLoginContext) {
+                        quarantineClient(StreamClientUtils.buildClientKey(client))
+                    }
+                    continue
+                }
             }
 
             val candidates = selectArchiveTuneCandidates(streamResponse, lowQuality, maxBitrateKbps)
@@ -2526,7 +2536,10 @@ object YoutubeHelper {
                 (STREAM_FALLBACK_CLIENTS.filter { it.loginSupported } +
                     STREAM_FALLBACK_CLIENTS.filterNot { it.loginSupported })
             } else {
-                STREAM_FALLBACK_CLIENTS.toList()
+                // When anonymous, exhaust plain-URL native clients (ANDROID_VR, IOS, IPADOS, VISIONOS)
+                // before ciphered/Web clients so no signatureTimestamp or decipher work runs needlessly.
+                STREAM_FALLBACK_CLIENTS.filter { !it.loginRequired && !it.useSignatureTimestamp } +
+                    STREAM_FALLBACK_CLIENTS.filter { !it.loginRequired && it.useSignatureTimestamp }
             }.sortedBy { if (isClientQuarantined(StreamClientUtils.buildClientKey(it))) 1 else 0 }
 
         return buildList {

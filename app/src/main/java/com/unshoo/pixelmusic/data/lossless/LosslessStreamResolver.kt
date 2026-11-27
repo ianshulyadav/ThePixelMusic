@@ -296,11 +296,15 @@ object LosslessStreamResolver {
      * set of enabled addons changes. Used by the player to purge stream decisions made under the
      * previous policy so a toggle takes effect on the very next track instead of hours later.
      */
-    fun enabledFlow(context: Context): Flow<Boolean> =
-        kotlinx.coroutines.flow.combine(
+    fun enabledFlow(context: Context): Flow<Boolean> {
+        val appCtx = context.applicationContext ?: context
+        return kotlinx.coroutines.flow.combine(
             context.dataStore.data,
             AddonManager.installedAddons,
         ) { p, addons ->
+            cachedPrefs = p
+            cachedPrefsAppContext = appCtx
+            cachedPrefsAtMs = System.currentTimeMillis()
             when (p[LosslessStreamingEnabledKey]) {
                 true -> true
                 false -> false
@@ -309,6 +313,7 @@ object LosslessStreamResolver {
         }
             .distinctUntilChanged()
             .onEach { updateEnabledSnapshot(it) }
+    }
 
     /** Default for the master switch when the user never touched it: off by default. */
     fun defaultEnabled(): Boolean = false
@@ -537,6 +542,7 @@ object LosslessStreamResolver {
 
     fun clearAll() {
         enabledSnapshot = null
+        cachedPrefs = null
         directStreamCache.clear()
         addonResultCache.clear()
         resolvedByMediaId.clear()
@@ -565,6 +571,7 @@ object LosslessStreamResolver {
             prefs[SongSourceOverrideKey] =
                 UnifiedSongSourceOverride.withOverride(prefs[SongSourceOverrideKey], mediaId, unifiedSourceId)
         }
+        cachedPrefs = null
         clearFailedForTrack(mediaId)
         clearResolved(mediaId)
     }
@@ -576,7 +583,24 @@ object LosslessStreamResolver {
 
     // ── Preference readers ────────────────────────────────────────────────────────────────────
 
-    private suspend fun prefs(context: Context) = context.dataStore.data.first()
+    @Volatile private var cachedPrefs: androidx.datastore.preferences.core.Preferences? = null
+    @Volatile private var cachedPrefsAppContext: Context? = null
+    @Volatile private var cachedPrefsAtMs: Long = 0L
+    private const val PREFS_SNAPSHOT_TTL_MS = 2_500L
+
+    private suspend fun prefs(context: Context): androidx.datastore.preferences.core.Preferences {
+        val appCtx = context.applicationContext ?: context
+        val cached = cachedPrefs
+        val now = System.currentTimeMillis()
+        if (cached != null && cachedPrefsAppContext === appCtx && now - cachedPrefsAtMs < PREFS_SNAPSHOT_TTL_MS) {
+            return cached
+        }
+        val fresh = context.dataStore.data.first()
+        cachedPrefs = fresh
+        cachedPrefsAppContext = appCtx
+        cachedPrefsAtMs = now
+        return fresh
+    }
 
     private fun parseTidalAudioQuality(stored: String?): TidalAudioQuality =
         runCatching { TidalAudioQuality.valueOf(stored ?: TidalAudioQuality.FLAC.name) }.getOrDefault(TidalAudioQuality.FLAC)
@@ -622,6 +646,10 @@ object LosslessStreamResolver {
         val qobuzTokensJson: String,
         val deezerQuality: DeezerAudioQuality,
         val appleQuality: AppleMusicQuality,
+        val tidalConfigured: Boolean = true,
+        val qobuzConfigured: Boolean = true,
+        val deezerConfigured: Boolean = true,
+        val appleConfigured: Boolean = true,
     )
 
     /**
@@ -644,6 +672,22 @@ object LosslessStreamResolver {
         val addons = AddonManager.ensureLoadedBlocking(context)
         val p = prefs(context)
         val losslessMasterEnabled = p[LosslessStreamingEnabledKey] ?: defaultEnabled()
+        val tidalInstances = parseMultiline(p[TidalInstancesKey])
+        val qobuzInstances = parseMultiline(p[QobuzInstancesKey])
+        val hasPoolOrBuildKey = !p[PoolApiKeyKey].isNullOrBlank() ||
+            com.unshoo.pixelmusic.BuildConfig.SOURCE_PROVIDER_KEY.isNotBlank() ||
+            PoolAccountManager.hasReadKey ||
+            PoolAccountManager.hasAccounts()
+        val tidalConfigured = hasPoolOrBuildKey ||
+            !p[TidalAccessTokenKey].isNullOrBlank() ||
+            !p[TidalRefreshTokenKey].isNullOrBlank() ||
+            tidalInstances.isNotEmpty() ||
+            TidalInstanceHealthManager.healthyUrls(context).isNotEmpty()
+        val qobuzTokensJson = p[QobuzTokensKey].orEmpty()
+        val qobuzConfigured = hasPoolOrBuildKey || qobuzTokensJson.isNotBlank() || qobuzInstances.isNotEmpty()
+        val deezerConfigured = hasPoolOrBuildKey || !p[DeezerArlKey].isNullOrBlank() || DeezerAudioProvider.hasAccounts()
+        val appleConfigured = (AppleMusicAudioProvider.mediaUserToken() != null || !p[AppleMusicMediaUserTokenKey].isNullOrBlank()) &&
+            AppleMusicAudioProvider.devToken() != null
         return SourceSettings(
             losslessMasterEnabled = losslessMasterEnabled,
             addonsMasterEnabled = p[AddonsEnabledKey] ?: true,
@@ -662,12 +706,16 @@ object LosslessStreamResolver {
             overrideRaw = p[SongSourceOverrideKey],
             tidalQuality = parseTidalAudioQuality(p[TidalAudioQualityKey]),
             tidalAccountFirst = p[TidalAccountFirstKey] ?: true,
-            tidalInstances = parseMultiline(p[TidalInstancesKey]),
+            tidalInstances = tidalInstances,
             qobuzQuality = parseQobuzAudioQuality(p[QobuzAudioQualityKey]),
-            qobuzInstances = parseMultiline(p[QobuzInstancesKey]),
-            qobuzTokensJson = p[QobuzTokensKey].orEmpty(),
+            qobuzInstances = qobuzInstances,
+            qobuzTokensJson = qobuzTokensJson,
             deezerQuality = parseDeezerAudioQuality(p[DeezerAudioQualityKey]),
             appleQuality = parseAppleMusicQuality(p[AppleMusicQualityKey]),
+            tidalConfigured = tidalConfigured,
+            qobuzConfigured = qobuzConfigured,
+            deezerConfigured = deezerConfigured,
+            appleConfigured = appleConfigured,
         )
     }
 
@@ -733,10 +781,10 @@ object LosslessStreamResolver {
             AudioSourceType.ADDON -> s.addonsMasterEnabled && s.installedAddons.any { it.enabled }
             AudioSourceType.YOUTUBE -> true
             AudioSourceType.MONOCHROME -> s.monochromeEnabled && isMonochromeUp()
-            AudioSourceType.TIDAL -> s.tidalEnabled
-            AudioSourceType.QOBUZ -> s.qobuzEnabled
-            AudioSourceType.DEEZER -> s.deezerEnabled
-            AudioSourceType.APPLE -> s.appleEnabled
+            AudioSourceType.TIDAL -> s.tidalEnabled && s.tidalConfigured
+            AudioSourceType.QOBUZ -> s.qobuzEnabled && s.qobuzConfigured
+            AudioSourceType.DEEZER -> s.deezerEnabled && s.deezerConfigured
+            AudioSourceType.APPLE -> s.appleEnabled && s.appleConfigured
             AudioSourceType.QOBUZ_BACKUP, AudioSourceType.AMAZON, AudioSourceType.JIOSAAVN -> false
         }
 
@@ -1084,7 +1132,7 @@ object LosslessStreamResolver {
     }
 
     private fun readTidalTokenState(context: Context): Triple<String, Long, Pair<String, String>> {
-        val p = runBlocking { context.dataStore.data.first() }
+        val p = runBlocking { prefs(context) }
         return Triple(
             p[TidalAccessTokenKey].orEmpty(),
             p[TidalTokenExpiryKey] ?: 0L,
