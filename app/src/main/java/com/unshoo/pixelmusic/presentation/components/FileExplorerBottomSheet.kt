@@ -404,7 +404,7 @@ fun FileExplorerContent(
                                     ),
                                 contentPadding = PaddingValues(
                                     bottom = 24.dp,
-                                    end = if (listState.canScrollForward || listState.canScrollBackward) 24.dp else 0.dp
+                                    end = if (LocalShowScrollbar.current && (listState.canScrollForward || listState.canScrollBackward)) 24.dp else 0.dp
                                 ),
                                 verticalArrangement = Arrangement.spacedBy(10.dp),
                                 state = listState

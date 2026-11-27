@@ -60,6 +60,7 @@ import com.unshoo.pixelmusic.data.model.Song
 import com.unshoo.pixelmusic.data.model.SortOption
 import com.unshoo.pixelmusic.data.model.StorageFilter
 import com.unshoo.pixelmusic.presentation.components.ExpressiveScrollBar
+import com.unshoo.pixelmusic.presentation.components.LocalShowScrollbar
 import com.unshoo.pixelmusic.presentation.components.MiniPlayerHeight
 import com.unshoo.pixelmusic.presentation.components.songFastScrollLabel
 import com.unshoo.pixelmusic.presentation.components.subcomps.EnhancedSongListItem
@@ -256,10 +257,11 @@ fun LibraryFavoritesTab(
                     }
                 ) {
                     Box(modifier = Modifier.fillMaxSize()) {
+                    val isScrollbarEnabled = LocalShowScrollbar.current
                     LazyColumn(
                         modifier = Modifier
                             .align(Alignment.TopCenter)
-                            .padding(start = 12.dp, end = 22.dp, bottom = 6.dp)
+                            .padding(start = 12.dp, end = if (isScrollbarEnabled) 22.dp else 12.dp, bottom = 6.dp)
                             .clip(
                                 RoundedCornerShape(
                                     topStart = 26.dp,

@@ -43,6 +43,7 @@ object SettingsSearchIndex {
         SettingsSearchEntry(SettingsCategory.APPEARANCE, R.string.setcat_app_font_label, R.string.setcat_app_font_desc),
         SettingsSearchEntry(SettingsCategory.APPEARANCE, R.string.setcat_smooth_corners_title, R.string.setcat_smooth_corners_subtitle),
         SettingsSearchEntry(SettingsCategory.APPEARANCE, R.string.settings_high_refresh_rate_title, R.string.settings_high_refresh_rate_subtitle),
+        SettingsSearchEntry(SettingsCategory.APPEARANCE, R.string.settings_show_scrollbar_title, R.string.settings_show_scrollbar_desc),
         SettingsSearchEntry(SettingsCategory.APPEARANCE, R.string.blur_settings_title, R.string.blur_settings_desc),
         SettingsSearchEntry(SettingsCategory.APPEARANCE, R.string.setcat_now_playing_layout_label, R.string.setcat_now_playing_layout_desc),
         SettingsSearchEntry(SettingsCategory.APPEARANCE, R.string.setcat_player_theme_label, R.string.setcat_player_theme_desc),

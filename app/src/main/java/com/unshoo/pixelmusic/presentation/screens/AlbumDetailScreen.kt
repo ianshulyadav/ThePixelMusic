@@ -101,6 +101,7 @@ import com.unshoo.pixelmusic.data.model.Album
 import com.unshoo.pixelmusic.data.model.Song
 import com.unshoo.pixelmusic.presentation.components.CollapsibleCommonTopBar
 import com.unshoo.pixelmusic.presentation.components.ExpressiveScrollBar
+import com.unshoo.pixelmusic.presentation.components.LocalShowScrollbar
 import com.unshoo.pixelmusic.presentation.components.MiniPlayerHeight
 import com.unshoo.pixelmusic.presentation.components.PlaylistBottomSheet
 import com.unshoo.pixelmusic.presentation.components.SmartImage
@@ -382,7 +383,8 @@ fun AlbumDetailScreen(
                 ) {
                     val currentTopBarHeightDp = with(density) { topBarHeightPx.toDp() }
                     val showScrollBar =
-                        collapseFraction > 0.95f &&
+                        LocalShowScrollbar.current &&
+                            collapseFraction > 0.95f &&
                             (lazyListState.canScrollForward || lazyListState.canScrollBackward)
 
                     LazyColumn(

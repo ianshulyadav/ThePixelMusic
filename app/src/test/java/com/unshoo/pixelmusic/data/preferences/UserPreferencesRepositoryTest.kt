@@ -148,4 +148,28 @@ class UserPreferencesRepositoryTest {
             tempDir.toFile().deleteRecursively()
         }
     }
+
+    @Test
+    fun `showScrollbarFlow defaults to true and persists toggled state`() = runTest {
+        val tempDir = Files.createTempDirectory("user-preferences-repository-test")
+        try {
+            val repository = UserPreferencesRepository(
+                dataStore = PreferenceDataStoreFactory.create(
+                    scope = backgroundScope,
+                    produceFile = { tempDir.resolve("settings.preferences_pb").toFile() }
+                ),
+                json = Json
+            )
+
+            assertTrue(repository.showScrollbarFlow.first())
+
+            repository.setShowScrollbar(false)
+            assertFalse(repository.showScrollbarFlow.first())
+
+            repository.setShowScrollbar(true)
+            assertTrue(repository.showScrollbarFlow.first())
+        } finally {
+            tempDir.toFile().deleteRecursively()
+        }
+    }
 }

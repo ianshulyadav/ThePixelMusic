@@ -143,6 +143,7 @@ import com.unshoo.pixelmusic.presentation.components.PlaylistCover
 import com.unshoo.pixelmusic.presentation.components.QueuePlaylistSongItem
 import com.unshoo.pixelmusic.presentation.components.SongPickerBottomSheet
 import com.unshoo.pixelmusic.presentation.components.ExpressiveScrollBar
+import com.unshoo.pixelmusic.presentation.components.LocalShowScrollbar
 import com.unshoo.pixelmusic.presentation.components.SmartImage
 import com.unshoo.pixelmusic.presentation.components.SongInfoBottomSheet
 import com.unshoo.pixelmusic.presentation.components.resolveNavBarOccupiedHeight
@@ -887,7 +888,8 @@ fun PlaylistDetailScreen(
                             }
                         }
                     } else {
-                        val showScrollBar by remember { derivedStateOf { lazyListState.canScrollForward || lazyListState.canScrollBackward } }
+                        val isScrollbarEnabled = LocalShowScrollbar.current
+                        val showScrollBar by remember(isScrollbarEnabled) { derivedStateOf { isScrollbarEnabled && (lazyListState.canScrollForward || lazyListState.canScrollBackward) } }
                         LazyColumn(
                             state = lazyListState,
                             modifier = Modifier

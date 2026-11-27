@@ -1093,6 +1093,7 @@ class MainActivity : ComponentActivity() {
             key = com.unshoo.pixelmusic.presentation.components.UiEffectPreferenceKeys.NAV_BAR_FROSTED_BLUR,
             default = false
         )
+        val showScrollbar by userPreferencesRepository.showScrollbarFlow.collectAsStateWithLifecycle(initialValue = true)
         val navBarFrostedBlur = !performanceModeEnabled && useBlurEffects && navBarFrostedBlurPreference
         val mainBackdropSource = com.unshoo.pixelmusic.presentation.components.rememberBackdropSource()
 
@@ -1100,7 +1101,8 @@ class MainActivity : ComponentActivity() {
             LocalAppHapticsConfig provides appHapticsConfig,
             LocalHapticFeedback provides scopedHapticFeedback,
             com.unshoo.pixelmusic.presentation.components.LocalBackdropSource provides mainBackdropSource,
-            com.unshoo.pixelmusic.presentation.components.LocalAppWindowLayout provides windowLayout
+            com.unshoo.pixelmusic.presentation.components.LocalAppWindowLayout provides windowLayout,
+            com.unshoo.pixelmusic.presentation.components.LocalShowScrollbar provides showScrollbar
         ) {
             AppSidebarDrawer(
                 drawerState = drawerState,

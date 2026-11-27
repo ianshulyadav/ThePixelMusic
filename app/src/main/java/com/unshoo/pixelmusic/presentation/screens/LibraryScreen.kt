@@ -266,6 +266,7 @@ import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.compose.itemContentType
 import androidx.paging.LoadState
 import com.unshoo.pixelmusic.presentation.components.ExpressiveScrollBar
+import com.unshoo.pixelmusic.presentation.components.LocalShowScrollbar
 import com.unshoo.pixelmusic.presentation.components.LibrarySortBottomSheet
 import com.unshoo.pixelmusic.presentation.components.subcomps.EnhancedSongListItem
 import com.unshoo.pixelmusic.presentation.utils.itemsUnique
@@ -3595,9 +3596,10 @@ fun LibraryFoldersTab(
                         }
                     ) {
                         Box(modifier = Modifier.fillMaxSize()) {
+                            val isScrollbarEnabled = LocalShowScrollbar.current
                             LazyColumn(
                                 modifier = Modifier
-                                    .padding(start = 12.dp, end = if (listState.canScrollForward || listState.canScrollBackward) 22.dp else 12.dp)
+                                    .padding(start = 12.dp, end = if (isScrollbarEnabled && (listState.canScrollForward || listState.canScrollBackward)) 22.dp else 12.dp)
                                     .fillMaxSize()
                                     .clip(
                                         RoundedCornerShape(

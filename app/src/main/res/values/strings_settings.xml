@@ -437,6 +437,8 @@
     <string name="setcat_playback_client_web_remix">Web Client</string>
 
     <!-- Blur Settings -->
+    <string name="settings_show_scrollbar_title">Show Scrollbar</string>
+    <string name="settings_show_scrollbar_desc">Display lateral scrollbar on music lists for quick scrolling</string>
     <string name="blur_settings_title">Blur Settings</string>
     <string name="blur_settings_desc">Customize blur effects across the app</string>
     <string name="blur_settings_use_blur_effects">Use blur effects</string>

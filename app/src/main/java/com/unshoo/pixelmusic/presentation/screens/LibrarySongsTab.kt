@@ -54,6 +54,7 @@ import androidx.paging.compose.LazyPagingItems
 import androidx.paging.LoadState
 import com.unshoo.pixelmusic.R
 import com.unshoo.pixelmusic.presentation.components.ExpressiveScrollBar
+import com.unshoo.pixelmusic.presentation.components.LocalShowScrollbar
 import com.unshoo.pixelmusic.presentation.components.songFastScrollLabel
 import com.unshoo.pixelmusic.presentation.utils.pagedKey
 import androidx.compose.ui.text.style.TextOverflow
@@ -260,11 +261,10 @@ fun LibrarySongsTab(
                     }
                 ) {
                     Box(modifier = Modifier.fillMaxSize()) {
+                        val isScrollbarEnabled = LocalShowScrollbar.current
                         LazyColumn(
                             modifier = Modifier
-                                // Use fixed 22dp end padding to leave room for the scrollbar —
-                                // songs always fill more than a screen when in the content state.
-                                .padding(start = 12.dp, end = 22.dp, bottom = 6.dp)
+                                .padding(start = 12.dp, end = if (isScrollbarEnabled) 22.dp else 12.dp, bottom = 6.dp)
                                 .clip(
                                     RoundedCornerShape(
                                         topStart = 26.dp,

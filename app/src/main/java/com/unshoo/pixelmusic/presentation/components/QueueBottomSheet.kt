@@ -716,7 +716,7 @@ fun QueueBottomSheet(
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                             contentPadding = PaddingValues(
                                 start = 0.dp,
-                                end = if (displaySongCount > 5) 26.dp else 0.dp,
+                                end = if (LocalShowScrollbar.current && displaySongCount > 5) 26.dp else 0.dp,
                                 bottom = MiniPlayerHeight + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 32.dp
                             )
                         ) {

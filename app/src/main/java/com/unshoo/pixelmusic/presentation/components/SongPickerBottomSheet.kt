@@ -551,7 +551,7 @@ fun SongPickerPagingList(
                         bottom = contentPadding.calculateBottomPadding(),
                         top = contentPadding.calculateTopPadding(),
                         start = contentPadding.calculateLeftPadding(LayoutDirection.Ltr),
-                        end = if (listState.canScrollForward || listState.canScrollBackward) 12.dp else 0.dp
+                        end = if (LocalShowScrollbar.current && (listState.canScrollForward || listState.canScrollBackward)) 12.dp else 0.dp
                     ),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
@@ -876,7 +876,7 @@ fun SongPickerList(
                     bottom = contentPadding.calculateBottomPadding(),
                     top = contentPadding.calculateTopPadding(),
                     start = contentPadding.calculateLeftPadding(LayoutDirection.Ltr),
-                    end = if (listState.canScrollForward || listState.canScrollBackward) 12.dp else 0.dp
+                    end = if (LocalShowScrollbar.current && (listState.canScrollForward || listState.canScrollBackward)) 12.dp else 0.dp
                 ),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {

@@ -67,6 +67,7 @@ import com.unshoo.pixelmusic.data.model.Song
 import com.unshoo.pixelmusic.data.model.SortOption
 import com.unshoo.pixelmusic.data.model.StorageFilter
 import com.unshoo.pixelmusic.presentation.components.ExpressiveScrollBar
+import com.unshoo.pixelmusic.presentation.components.LocalShowScrollbar
 import com.unshoo.pixelmusic.presentation.components.MiniPlayerHeight
 import com.unshoo.pixelmusic.presentation.components.PlaylistContainer
 import com.unshoo.pixelmusic.presentation.components.albumFastScrollLabel
@@ -299,10 +300,11 @@ fun LibraryAlbumsTab(
                     }
                 ) {
                     Box(modifier = Modifier.fillMaxSize()) {
+                        val isScrollbarEnabled = LocalShowScrollbar.current
                         if (isListView) {
                             LazyColumn(
                                 modifier = Modifier
-                                    .padding(start = 14.dp, end = if (listState.canScrollForward || listState.canScrollBackward) 24.dp else 14.dp, bottom = 6.dp)
+                                    .padding(start = 14.dp, end = if (isScrollbarEnabled && (listState.canScrollForward || listState.canScrollBackward)) 24.dp else 14.dp, bottom = 6.dp)
                                     .clip(
                                         RoundedCornerShape(
                                             topStart = 16.dp,
@@ -375,7 +377,7 @@ fun LibraryAlbumsTab(
                         } else {
                             LazyVerticalGrid(
                                 modifier = Modifier
-                                    .padding(start = 14.dp, end = if (gridState.canScrollForward || gridState.canScrollBackward) 24.dp else 14.dp, bottom = 6.dp)
+                                    .padding(start = 14.dp, end = if (isScrollbarEnabled && (gridState.canScrollForward || gridState.canScrollBackward)) 24.dp else 14.dp, bottom = 6.dp)
                                     .clip(
                                         RoundedCornerShape(
                                             topStart = 16.dp,
@@ -585,9 +587,10 @@ fun LibraryArtistsTab(
                     }
                 ) {
                     Box(modifier = Modifier.fillMaxSize()) {
+                        val isScrollbarEnabled = LocalShowScrollbar.current
                         LazyColumn(
                             modifier = Modifier
-                                .padding(start = 12.dp, end = if (listState.canScrollForward || listState.canScrollBackward) 22.dp else 12.dp, bottom = 6.dp)
+                                .padding(start = 12.dp, end = if (isScrollbarEnabled && (listState.canScrollForward || listState.canScrollBackward)) 22.dp else 12.dp, bottom = 6.dp)
                                 .clip(
                                     RoundedCornerShape(
                                         topStart = 26.dp,

@@ -59,6 +59,9 @@ private data class VisibleGridLineMetrics(
     val sizePx: Int
 )
 
+/** Controls global visibility of the lateral [ExpressiveScrollBar] across scrollable lists. */
+val LocalShowScrollbar = compositionLocalOf { true }
+
 private fun estimateListFallbackStridePx(
     visibleItems: List<LazyListItemInfo>,
     spacingPx: Int
@@ -225,6 +228,8 @@ fun ExpressiveScrollBar(
     dragLabelSize: Dp = 40.dp,
     dragLabelGap: Dp = 10.dp
 ) {
+    if (!LocalShowScrollbar.current) return
+
     val listMetricsTracker = remember(listState) { AxisObservationTracker() }
     val gridMetricsTracker = remember(gridState) { AxisObservationTracker() }
     var isPressed by remember { mutableStateOf(false) }

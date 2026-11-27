@@ -298,9 +298,10 @@ fun PlaylistItems(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
+        val isScrollbarEnabled = LocalShowScrollbar.current
         LazyColumn(
             modifier = Modifier
-                .padding(start = 12.dp, end = if (listState.canScrollForward || listState.canScrollBackward) 22.dp else 12.dp, bottom = 6.dp)
+                .padding(start = 12.dp, end = if (isScrollbarEnabled && (listState.canScrollForward || listState.canScrollBackward)) 22.dp else 12.dp, bottom = 6.dp)
                 .fillMaxSize()
                 .clip(
                     RoundedCornerShape(

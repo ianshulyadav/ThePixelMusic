@@ -107,6 +107,7 @@ import androidx.compose.material.icons.rounded.Restore
 import androidx.compose.material.icons.rounded.Science
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Timer
+import androidx.compose.material.icons.rounded.UnfoldMore
 import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.automirrored.outlined.QueueMusic
@@ -825,6 +826,7 @@ fun SettingsCategoryScreen(
                         SettingsCategory.APPEARANCE -> {
                             val useSmoothCorners by settingsViewModel.useSmoothCorners.collectAsStateWithLifecycle()
                             val highRefreshRate by settingsViewModel.highRefreshRate.collectAsStateWithLifecycle()
+                            val showScrollbar by settingsViewModel.showScrollbar.collectAsStateWithLifecycle()
 
                             SettingsSubsection(title = stringResource(R.string.tab_home)) {
                                 SettingsItem(
@@ -910,6 +912,13 @@ fun SettingsCategoryScreen(
                                     checked = highRefreshRate,
                                     onCheckedChange = settingsViewModel::setHighRefreshRate,
                                     leadingIcon = { Icon(Icons.Outlined.Speed, null, tint = MaterialTheme.colorScheme.secondary) }
+                                )
+                                SwitchSettingItem(
+                                    title = stringResource(R.string.settings_show_scrollbar_title),
+                                    subtitle = stringResource(R.string.settings_show_scrollbar_desc),
+                                    checked = showScrollbar,
+                                    onCheckedChange = settingsViewModel::setShowScrollbar,
+                                    leadingIcon = { Icon(Icons.Rounded.UnfoldMore, null, tint = MaterialTheme.colorScheme.secondary) }
                                 )
                                 SettingsItem(
                                     title = stringResource(R.string.blur_settings_title),

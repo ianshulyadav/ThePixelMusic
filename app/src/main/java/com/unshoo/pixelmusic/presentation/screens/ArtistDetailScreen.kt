@@ -79,6 +79,7 @@ import com.unshoo.pixelmusic.data.model.Artist
 import com.unshoo.pixelmusic.data.model.Song
 import com.unshoo.pixelmusic.presentation.components.CollapsibleCommonTopBar
 import com.unshoo.pixelmusic.presentation.components.ExpressiveScrollBar
+import com.unshoo.pixelmusic.presentation.components.LocalShowScrollbar
 import com.unshoo.pixelmusic.presentation.components.MiniPlayerHeight
 import com.unshoo.pixelmusic.presentation.components.PlaylistBottomSheet
 import com.unshoo.pixelmusic.presentation.components.SmartImageCompactListTargetSize
@@ -308,9 +309,11 @@ fun ArtistDetailScreen(
                             .forEach { staleKey -> expandedSections.remove(staleKey) }
                     }
 
-                    val showScrollBar by remember {
+                    val isScrollbarEnabled = LocalShowScrollbar.current
+                    val showScrollBar by remember(isScrollbarEnabled) {
                         derivedStateOf {
-                            collapseFraction > 0.95f &&
+                            isScrollbarEnabled &&
+                                collapseFraction > 0.95f &&
                                 (lazyListState.canScrollForward || lazyListState.canScrollBackward)
                         }
                     }

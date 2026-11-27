@@ -276,6 +276,7 @@ constructor(
         val FOLDERS_SOURCE = stringPreferencesKey("folders_source")
         val FOLDER_BACK_GESTURE_NAVIGATION = booleanPreferencesKey("folder_back_gesture_navigation")
         val USE_SMOOTH_CORNERS = booleanPreferencesKey("use_smooth_corners")
+        val SHOW_SCROLLBAR = booleanPreferencesKey("show_scrollbar")
         val HIGH_REFRESH_RATE_ENABLED = booleanPreferencesKey("high_refresh_rate_enabled")
         val KEEP_PLAYING_IN_BACKGROUND = booleanPreferencesKey("keep_playing_in_background")
         val IS_CROSSFADE_ENABLED = booleanPreferencesKey("is_crossfade_enabled")
@@ -2239,6 +2240,18 @@ constructor(
     suspend fun setUseSmoothCorners(enabled: Boolean) {
         dataStore.edit { preferences ->
             preferences[PreferencesKeys.USE_SMOOTH_CORNERS] = enabled
+        }
+    }
+
+    val showScrollbarFlow: Flow<Boolean> = dataStore.data
+        .map { preferences ->
+            preferences[PreferencesKeys.SHOW_SCROLLBAR] ?: true
+        }
+        .distinctUntilChanged()
+
+    suspend fun setShowScrollbar(enabled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.SHOW_SCROLLBAR] = enabled
         }
     }
 
