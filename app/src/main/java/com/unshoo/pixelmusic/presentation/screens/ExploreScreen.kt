@@ -169,10 +169,14 @@ import com.unshoo.pixelmusic.data.feed.YouTubePlaylistSummary
 import com.unshoo.pixelmusic.data.feed.toSong
 import com.unshoo.pixelmusic.data.model.Playlist
 import com.unshoo.pixelmusic.data.model.Song
+import com.unshoo.pixelmusic.data.remote.youtube.PodcastSearchHelper
 import com.unshoo.pixelmusic.presentation.components.MiniPlayerHeight
 import com.unshoo.pixelmusic.presentation.components.PlayingWaveBars
 import com.unshoo.pixelmusic.presentation.components.PlaylistCover
 import com.unshoo.pixelmusic.presentation.components.PlaylistBottomSheet
+import com.unshoo.pixelmusic.presentation.components.PodcastSearchBar
+import com.unshoo.pixelmusic.presentation.components.PodcastSearchFilter
+import com.unshoo.pixelmusic.presentation.components.PodcastSearchResultsContent
 import com.unshoo.pixelmusic.presentation.components.QuickPicksSection
 import com.unshoo.pixelmusic.presentation.components.SmartImage
 import com.unshoo.pixelmusic.presentation.components.SmartImageCardTargetSize
@@ -842,7 +846,67 @@ fun ExploreScreen(
                         }
                     } else if (!selectedCategory.equals("All", ignoreCase = true)) {
                         // Filtered Mood Feed (e.g. Romance, Relax, Workout, Focus, Party, Podcasts, Feel good, etc.)
-                        if (quickPicks.isNotEmpty()) {
+                        val isPodcastsCategory = selectedCategory.equals("Podcasts", ignoreCase = true)
+                        if (isPodcastsCategory) {
+                            item(key = "explore_podcasts_search_section", contentType = "podcast_search") {
+                                val podcastSearchState by exploreViewModel.podcastSearchState.collectAsStateWithLifecycle()
+                                var selectedPodcastFilter by androidx.compose.runtime.saveable.rememberSaveable {
+                                    mutableStateOf(PodcastSearchFilter.ALL)
+                                }
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    PodcastSearchBar(
+                                        query = podcastSearchState.query,
+                                        onQueryChange = { exploreViewModel.updatePodcastSearchQuery(it) },
+                                        onSearchSubmit = { exploreViewModel.updatePodcastSearchQuery(it, immediate = true) },
+                                        onClear = { exploreViewModel.clearPodcastSearch() }
+                                    )
+                                    if (podcastSearchState.query.isNotBlank()) {
+                                        PodcastSearchResultsContent(
+                                            query = podcastSearchState.query,
+                                            isSearching = podcastSearchState.isSearching,
+                                            episodes = podcastSearchState.episodes,
+                                            shows = podcastSearchState.shows,
+                                            selectedFilter = selectedPodcastFilter,
+                                            onFilterSelected = { selectedPodcastFilter = it },
+                                            currentSongId = currentSongId,
+                                            isPlaying = isPlaying,
+                                            onEpisodeClick = { episode ->
+                                                val queue = podcastSearchState.episodes.ifEmpty { listOf(episode) }
+                                                playerViewModel.showAndPlaySong(episode, queue, "Podcasts Search: ${podcastSearchState.query.trim()}")
+                                            },
+                                            onEpisodeMoreClick = { episode ->
+                                                playerViewModel.selectSongForInfo(episode)
+                                                showSongInfoBottomSheet = true
+                                            },
+                                            onShowClick = { show ->
+                                                navController.navigateSafely(Screen.PlaylistDetail.createRoute(show.id))
+                                            },
+                                            onShowPlayClick = { show ->
+                                                scope.launch {
+                                                    val episodes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                                        PodcastSearchHelper.loadShowEpisodes(show.id).getOrDefault(emptyList())
+                                                    }
+                                                    if (episodes.isNotEmpty()) {
+                                                        playerViewModel.insertYoutubeSongs(episodes)
+                                                        playerViewModel.playSongs(episodes, episodes.first(), show.name)
+                                                    } else {
+                                                        playerViewModel.sendToast("Couldn't load episodes for ${show.name}")
+                                                    }
+                                                }
+                                            },
+                                            errorMessage = podcastSearchState.error
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        if (!isPodcastsCategory && quickPicks.isNotEmpty()) {
                             item(key = "mood_quick_picks", contentType = "quick_picks") {
                                 QuickPicksSection(
                                     songs = quickPicks,

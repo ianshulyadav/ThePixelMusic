@@ -24,12 +24,16 @@ data class MusicShelfRenderer(
     @Serializable
     data class Content(
         val musicResponsiveListItemRenderer: MusicResponsiveListItemRenderer? = null,
+        val musicMultiRowListItemRenderer: MusicMultiRowListItemRenderer? = null,
         val continuationItemRenderer: ContinuationItemRenderer? = null,
     )
 }
 
 fun List<MusicShelfRenderer.Content>.getItems(): List<MusicResponsiveListItemRenderer> =
     mapNotNull { it.musicResponsiveListItemRenderer }
+
+fun List<MusicShelfRenderer.Content>.getMultiRowItems(): List<MusicMultiRowListItemRenderer> =
+    mapNotNull { it.musicMultiRowListItemRenderer }
 
 fun List<MusicShelfRenderer.Content>.getContinuation(): String? =
     firstOrNull { it.continuationItemRenderer != null }

@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import unshoo.ianshulyadav.pixelmusic.innertube.models.ArtistItem
 import unshoo.ianshulyadav.pixelmusic.innertube.models.MusicCardShelfRenderer
+import unshoo.ianshulyadav.pixelmusic.innertube.models.MusicMultiRowListItemRenderer
 import unshoo.ianshulyadav.pixelmusic.innertube.models.MusicResponsiveListItemRenderer
 import unshoo.ianshulyadav.pixelmusic.innertube.models.MusicTwoRowItemRenderer
 import unshoo.ianshulyadav.pixelmusic.innertube.models.PlaylistItem
@@ -297,5 +298,88 @@ class InnerTubeSearchParsingTest {
         assertNull(PageHelper.parsePlaylistSongCount("1.2K views"))
         assertNull(PageHelper.parsePlaylistSongCount("2026"))
         assertEquals(50, PageHelper.parsePlaylistSongCount("50", allowBareDigits = true))
+    }
+
+    @Test
+    fun `parses podcast shows and multi-row podcast episodes cleanly`() {
+        val showRaw = """
+            {
+              "flexColumns": [
+                {
+                  "musicResponsiveListItemFlexColumnRenderer": {
+                    "text": { "runs": [ { "text": "Lex Fridman Podcast" } ] }
+                  }
+                },
+                {
+                  "musicResponsiveListItemFlexColumnRenderer": {
+                    "text": {
+                      "runs": [
+                        { "text": "Podcast" },
+                        { "text": " • " },
+                        { "text": "Lex Fridman" }
+                      ]
+                    }
+                  }
+                }
+              ],
+              "navigationEndpoint": {
+                "browseEndpoint": {
+                  "browseId": "MPSPPL_lex_show",
+                  "browseEndpointContextSupportedConfigs": {
+                    "browseEndpointContextMusicConfig": {
+                      "pageType": "MUSIC_PAGE_TYPE_PODCAST_SHOW_DETAIL_PAGE"
+                    }
+                  }
+                }
+              }
+            }
+        """.trimIndent()
+
+        val episodeRaw = """
+            {
+              "title": { "runs": [ { "text": "Ep 400: Systems Engineering" } ] },
+              "secondTitle": {
+                "runs": [
+                  {
+                    "text": "Lex Fridman Podcast",
+                    "navigationEndpoint": {
+                      "browseEndpoint": { "browseId": "MPSPPL_lex_show" }
+                    }
+                  }
+                ]
+              },
+              "subtitle": {
+                "runs": [
+                  { "text": "Yesterday" },
+                  { "text": " • " },
+                  { "text": "45 min" }
+                ]
+              },
+              "onTap": {
+                "watchEndpoint": {
+                  "videoId": "ep_video_400",
+                  "watchEndpointMusicSupportedConfigs": {
+                    "watchEndpointMusicConfig": {
+                      "musicVideoType": "MUSIC_VIDEO_TYPE_PODCAST_EPISODE"
+                    }
+                  }
+                }
+              }
+            }
+        """.trimIndent()
+
+        val show = SearchPage.toYTItem(json.decodeFromString<MusicResponsiveListItemRenderer>(showRaw)) as PlaylistItem
+        val episode = SearchPage.toYTItem(json.decodeFromString<MusicMultiRowListItemRenderer>(episodeRaw))
+
+        assertTrue(show.isPodcast)
+        assertEquals("MPSPPL_lex_show", show.id)
+        assertEquals("Lex Fridman Podcast", show.title)
+
+        assertNotNull(episode)
+        assertEquals("ep_video_400", episode?.id)
+        assertEquals(2700, episode?.duration)
+        assertTrue(episode?.isPodcastEpisode == true)
+        assertEquals(false, episode?.isMusicVideo)
+        assertEquals("Lex Fridman Podcast", episode?.album?.name)
     }
 }

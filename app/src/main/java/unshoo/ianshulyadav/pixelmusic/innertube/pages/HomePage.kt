@@ -96,7 +96,10 @@ data class HomePage(
                     content.musicShelfRenderer != null -> {
                         val renderer = content.musicShelfRenderer
                         val title = renderer.title?.runs?.firstOrNull()?.text ?: ""
-                        val items = renderer.contents?.mapNotNull { it.musicResponsiveListItemRenderer?.let { SearchPage.toYTItem(it) } }.orEmpty()
+                        val items = renderer.contents?.mapNotNull { shelfItem ->
+                            shelfItem.musicResponsiveListItemRenderer?.let { SearchPage.toYTItem(it) }
+                                ?: shelfItem.musicMultiRowListItemRenderer?.let { SearchPage.toYTItem(it) }
+                        }.orEmpty()
                         if (items.isEmpty()) return null
                         Section(
                             title = title,

@@ -13,6 +13,7 @@ package unshoo.ianshulyadav.pixelmusic.innertube.models.response
 
 import unshoo.ianshulyadav.pixelmusic.innertube.models.Continuation
 import unshoo.ianshulyadav.pixelmusic.innertube.models.ContinuationItemRenderer
+import unshoo.ianshulyadav.pixelmusic.innertube.models.MusicMultiRowListItemRenderer
 import unshoo.ianshulyadav.pixelmusic.innertube.models.MusicResponsiveListItemRenderer
 import unshoo.ianshulyadav.pixelmusic.innertube.models.Tabs
 import kotlinx.serialization.Serializable
@@ -40,6 +41,7 @@ data class SearchResponse(
             @Serializable
             data class Content(
                 val musicResponsiveListItemRenderer: MusicResponsiveListItemRenderer? = null,
+                val musicMultiRowListItemRenderer: MusicMultiRowListItemRenderer? = null,
                 val continuationItemRenderer: ContinuationItemRenderer? = null,
             )
         }

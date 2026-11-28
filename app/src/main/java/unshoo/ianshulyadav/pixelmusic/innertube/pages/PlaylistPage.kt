@@ -13,9 +13,11 @@ package unshoo.ianshulyadav.pixelmusic.innertube.pages
 
 import unshoo.ianshulyadav.pixelmusic.innertube.models.Album
 import unshoo.ianshulyadav.pixelmusic.innertube.models.Artist
+import unshoo.ianshulyadav.pixelmusic.innertube.models.MusicMultiRowListItemRenderer
 import unshoo.ianshulyadav.pixelmusic.innertube.models.MusicResponsiveListItemRenderer
 import unshoo.ianshulyadav.pixelmusic.innertube.models.PlaylistItem
 import unshoo.ianshulyadav.pixelmusic.innertube.models.SongItem
+import unshoo.ianshulyadav.pixelmusic.innertube.models.WatchEndpoint.WatchEndpointMusicSupportedConfigs.WatchEndpointMusicConfig.Companion.MUSIC_VIDEO_TYPE_PODCAST_EPISODE
 import unshoo.ianshulyadav.pixelmusic.innertube.models.oddElements
 import unshoo.ianshulyadav.pixelmusic.innertube.utils.parseTime
 
@@ -27,6 +29,9 @@ data class PlaylistPage(
 ) {
     companion object {
         fun fromMusicResponsiveListItemRenderer(renderer: MusicResponsiveListItemRenderer): SongItem? {
+            val endpoint = renderer.overlay?.musicItemThumbnailOverlayRenderer?.content?.musicPlayButtonRenderer?.playNavigationEndpoint?.watchEndpoint
+            val isEpisode = endpoint?.watchEndpointMusicSupportedConfigs?.watchEndpointMusicConfig?.musicVideoType == MUSIC_VIDEO_TYPE_PODCAST_EPISODE ||
+                renderer.navigationEndpoint?.browseEndpoint?.browseId?.startsWith("MPED") == true
             return SongItem(
                 id = renderer.playlistItemData?.videoId ?: return null,
                 title = renderer.flexColumns.firstOrNull()
@@ -44,10 +49,14 @@ data class PlaylistPage(
                 explicit = renderer.badges?.find {
                     it.musicInlineBadgeRenderer?.icon?.iconType == "MUSIC_EXPLICIT_BADGE"
                 } != null,
-                endpoint = renderer.overlay?.musicItemThumbnailOverlayRenderer?.content?.musicPlayButtonRenderer?.playNavigationEndpoint?.watchEndpoint,
+                endpoint = endpoint,
                 setVideoId = renderer.playlistItemData.playlistSetVideoId,
-                likeStatus = renderer.likeStatus
+                likeStatus = renderer.likeStatus,
+                isEpisode = isEpisode
             )
         }
+
+        fun fromMusicMultiRowListItemRenderer(renderer: MusicMultiRowListItemRenderer): SongItem? =
+            SearchPage.toYTItem(renderer)
     }
 }

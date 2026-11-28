@@ -9,5 +9,6 @@ enum class SearchFilterType {
     ALBUMS,
     ARTISTS,
     PLAYLISTS,
-    VIDEOS
+    VIDEOS,
+    PODCASTS
 }

@@ -614,6 +614,7 @@ fun SearchScreen(
                                     SearchFilterChip(SearchFilterType.ALBUMS, currentFilter, playerViewModel)
                                     SearchFilterChip(SearchFilterType.ARTISTS, currentFilter, playerViewModel)
                                     SearchFilterChip(SearchFilterType.PLAYLISTS, currentFilter, playerViewModel)
+                                    SearchFilterChip(SearchFilterType.PODCASTS, currentFilter, playerViewModel)
                                 }
                             }
                             if (isSearching) {
@@ -1178,19 +1179,20 @@ fun SearchResultsList(
                 is SearchResultItem.SongItem -> if (currentFilter == SearchFilterType.VIDEOS) SearchFilterType.VIDEOS else SearchFilterType.SONGS
                 is SearchResultItem.AlbumItem -> SearchFilterType.ALBUMS
                 is SearchResultItem.ArtistItem -> SearchFilterType.ARTISTS
-                is SearchResultItem.PlaylistItem -> SearchFilterType.PLAYLISTS
+                is SearchResultItem.PlaylistItem -> if (currentFilter == SearchFilterType.PODCASTS) SearchFilterType.PODCASTS else SearchFilterType.PLAYLISTS
             }
         }
     }
     val sectionOrder = remember(currentFilter) {
-        if (currentFilter == SearchFilterType.VIDEOS) {
-            listOf(SearchFilterType.VIDEOS)
-        } else {
-            listOf(
+        when (currentFilter) {
+            SearchFilterType.VIDEOS -> listOf(SearchFilterType.VIDEOS)
+            SearchFilterType.PODCASTS -> listOf(SearchFilterType.SONGS, SearchFilterType.PODCASTS)
+            else -> listOf(
                 SearchFilterType.SONGS,
                 SearchFilterType.ALBUMS,
                 SearchFilterType.ARTISTS,
-                SearchFilterType.PLAYLISTS
+                SearchFilterType.PLAYLISTS,
+                SearchFilterType.PODCASTS
             )
         }
     }
@@ -1440,11 +1442,12 @@ fun SearchResultsList(
                     item(key = "header_${filterType.name}") {
                         SearchResultSectionHeader(
                             title = when (filterType) {
-                                SearchFilterType.SONGS -> "Songs"
+                                SearchFilterType.SONGS -> if (currentFilter == SearchFilterType.PODCASTS) "Episodes" else "Songs"
                                 SearchFilterType.VIDEOS -> "Videos"
                                 SearchFilterType.ALBUMS -> "Albums"
                                 SearchFilterType.ARTISTS -> "Artists"
                                 SearchFilterType.PLAYLISTS -> "Playlists"
+                                SearchFilterType.PODCASTS -> "Podcasts"
                                 else -> "Results"
                             }
                         )
@@ -1741,6 +1744,8 @@ fun SearchResultPlaylistItem(
                         formatSongCount(playlist.displaySongCount)
                     playlist.songIds.isNotEmpty() ->
                         formatSongCount(playlist.songIds.size)
+                    playlist.id.startsWith("MPSP") ->
+                        "Podcast"
                     playlist.source.equals("YOUTUBE", ignoreCase = true) ->
                         "Playlist"
                     else ->

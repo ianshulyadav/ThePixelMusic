@@ -105,6 +105,11 @@ data class ExploreUiState(
     val preparedDiscoverSongs: List<Song> = emptyList(),
     val preparedChartTracks: List<YouTubeMusicTrack> = emptyList(),
     val preparedChartPlaylistsAndAlbums: List<YouTubePlaylistSummary> = emptyList(),
+    val podcastSearchQuery: String = "",
+    val podcastSearchEpisodes: List<Song> = emptyList(),
+    val podcastSearchShows: List<Playlist> = emptyList(),
+    val isSearchingPodcasts: Boolean = false,
+    val podcastSearchError: String? = null,
 )
 
 @HiltViewModel
@@ -223,6 +228,69 @@ class ExploreViewModel @Inject constructor(
 
     private val _errorState = MutableStateFlow<String?>(null)
     val errorState: StateFlow<String?> = _errorState.asStateFlow()
+
+    data class ExplorePodcastSearchState(
+        val query: String = "",
+        val episodes: List<Song> = emptyList(),
+        val shows: List<Playlist> = emptyList(),
+        val isSearching: Boolean = false,
+        val error: String? = null,
+    )
+
+    private val _podcastSearchState = MutableStateFlow(ExplorePodcastSearchState())
+    val podcastSearchState: StateFlow<ExplorePodcastSearchState> = _podcastSearchState.asStateFlow()
+    private var podcastSearchJob: Job? = null
+
+    fun updatePodcastSearchQuery(query: String, immediate: Boolean = false) {
+        podcastSearchJob?.cancel()
+        if (query.isBlank()) {
+            _podcastSearchState.value = ExplorePodcastSearchState(query = query)
+            return
+        }
+        _podcastSearchState.update {
+            it.copy(query = query, isSearching = true, error = null)
+        }
+        val capturedQuery = query.trim()
+        podcastSearchJob = viewModelScope.launch {
+            if (!immediate) {
+                kotlinx.coroutines.delay(350L)
+            }
+            val result = withContext(ioDispatcher) {
+                runCatching {
+                    com.unshoo.pixelmusic.data.remote.youtube.PodcastSearchHelper.search(capturedQuery)
+                }
+            }
+            result.onSuccess { batch ->
+                if (_podcastSearchState.value.query.trim() == capturedQuery) {
+                    _podcastSearchState.update {
+                        it.copy(
+                            episodes = batch.episodes,
+                            shows = batch.shows,
+                            isSearching = false,
+                            error = if (batch.hadFailure && batch.episodes.isEmpty() && batch.shows.isEmpty()) {
+                                "Couldn't load podcast search results."
+                            } else null
+                        )
+                    }
+                }
+            }.onFailure { err ->
+                if (err is CancellationException) throw err
+                if (_podcastSearchState.value.query.trim() == capturedQuery) {
+                    _podcastSearchState.update {
+                        it.copy(
+                            isSearching = false,
+                            error = err.message ?: "Podcast search failed"
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun clearPodcastSearch() {
+        podcastSearchJob?.cancel()
+        _podcastSearchState.value = ExplorePodcastSearchState()
+    }
 
     // --- Material 3 Expressive UI State Machine ---
     private val _screenUiState = MutableStateFlow<ExploreScreenUiState>(ExploreScreenUiState.Loading)
@@ -1968,6 +2036,64 @@ class ExploreViewModel @Inject constructor(
     }
 
     private suspend fun fetchMoodFallbackSections(moodName: String, moodGen: Long) {
+        if (moodName.equals("Podcasts", ignoreCase = true)) {
+            val batch = runCatching {
+                com.unshoo.pixelmusic.data.remote.youtube.PodcastSearchHelper.search("podcast")
+            }.getOrNull()
+            if (moodGen != currentMoodGeneration) return
+            val episodeItems = batch?.items?.filterIsInstance<SongItem>().orEmpty()
+            val showItems = batch?.items?.filterIsInstance<PlaylistItem>().orEmpty()
+            val sections = mutableListOf<HomePage.Section>()
+            if (episodeItems.isNotEmpty()) {
+                sections.add(
+                    HomePage.Section(
+                        title = "Popular Podcast Episodes",
+                        label = "Episodes",
+                        thumbnail = episodeItems.firstOrNull()?.thumbnail,
+                        endpoint = null,
+                        items = episodeItems.take(20),
+                        isListShelf = true
+                    )
+                )
+            }
+            if (showItems.isNotEmpty()) {
+                sections.add(
+                    HomePage.Section(
+                        title = "Podcast Shows",
+                        label = "Podcasts",
+                        thumbnail = showItems.firstOrNull()?.thumbnail,
+                        endpoint = null,
+                        items = showItems.take(20)
+                    )
+                )
+            }
+            if (sections.isNotEmpty()) {
+                val uiSections = sections.map { it.toUiModel() }
+                _sectionsState.value = uiSections
+                _isLoadingState.value = false
+                _isSettledState.value = true
+                _errorState.value = null
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        isSettled = true,
+                        error = null,
+                        explorePageSections = sections
+                    )
+                }
+                val updated = (_screenUiState.value as? ExploreScreenUiState.Content)
+                    ?: (_screenUiState.value as? ExploreScreenUiState.Error)?.cachedContent
+                if (updated != null) {
+                    _screenUiState.value = updated.copy(
+                        dynamicShelves = uiSections,
+                        hasMoreContent = false,
+                        legacyState = _uiState.value
+                    )
+                }
+                return
+            }
+        }
+
         val playlistsResult = runCatching {
             YouTube.search(moodName, YouTube.SearchFilter.FILTER_FEATURED_PLAYLIST).getOrNull()
                 ?: YouTube.search(moodName, YouTube.SearchFilter.FILTER_COMMUNITY_PLAYLIST).getOrNull()

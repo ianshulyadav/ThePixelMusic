@@ -1026,6 +1026,23 @@ class MusicRepositoryImpl @Inject constructor(
                 SearchFilterType.ARTISTS -> searchArtists(query).map { artists -> artists.map { SearchResultItem.ArtistItem(it) } }
                 SearchFilterType.PLAYLISTS -> playlistsFlow.map { playlists -> playlists.map { SearchResultItem.PlaylistItem(it) } }
                 SearchFilterType.VIDEOS -> flowOf(emptyList())
+                SearchFilterType.PODCASTS -> combine(
+                    searchSongs(query, titleOnly = false),
+                    playlistsFlow
+                ) { songs, playlists ->
+                    mutableListOf<SearchResultItem>().apply {
+                        songs.filter { song ->
+                            song.genre?.contains("podcast", ignoreCase = true) == true ||
+                                song.path.contains("podcast", ignoreCase = true) ||
+                                song.album.contains("podcast", ignoreCase = true)
+                        }.forEach { add(SearchResultItem.SongItem(it)) }
+                        playlists.filter { playlist ->
+                            playlist.name.contains("podcast", ignoreCase = true) ||
+                                playlist.id.startsWith("MPSP") ||
+                                playlist.id.startsWith("SE")
+                        }.forEach { add(SearchResultItem.PlaylistItem(it)) }
+                    }
+                }
             }
         }.flowOn(Dispatchers.Default)
     }

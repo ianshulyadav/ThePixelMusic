@@ -321,6 +321,7 @@ data class SearchSummaryPage(
                 renderer.isPlaylist -> {
                     val id = renderer.navigationEndpoint.browseEndpoint?.browseId?.removePrefix("VL")?.takeIf { it.isNotBlank() }
                         ?: return null
+                    val pageType = renderer.navigationEndpoint.browseEndpoint?.browseEndpointContextSupportedConfigs?.browseEndpointContextMusicConfig?.pageType
                     PlaylistItem(
                         id = id,
                         title = title,
@@ -331,6 +332,7 @@ data class SearchSummaryPage(
                             ?.musicPlayButtonRenderer?.playNavigationEndpoint?.anyWatchEndpoint,
                         shuffleEndpoint = null,
                         radioEndpoint = null,
+                        isPodcast = pageType == "MUSIC_PAGE_TYPE_PODCAST_SHOW_DETAIL_PAGE" || id.startsWith("MPSP"),
                     )
                 }
                 else -> null

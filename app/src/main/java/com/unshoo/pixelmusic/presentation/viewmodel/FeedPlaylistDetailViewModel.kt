@@ -42,6 +42,12 @@ sealed interface FeedPlaylistDetailUiState {
         val selectedCountryCode: String = "IN",
         val albumArtQuality: com.unshoo.pixelmusic.data.preferences.AlbumArtQuality = com.unshoo.pixelmusic.data.preferences.AlbumArtQuality.ORIGINAL,
         val filterKeywords: List<String> = emptyList(),
+        val curatedPodcastShows: List<com.unshoo.pixelmusic.data.model.Playlist> = emptyList(),
+        val podcastSearchQuery: String = "",
+        val podcastSearchEpisodes: List<com.unshoo.pixelmusic.data.model.Song> = emptyList(),
+        val podcastSearchShows: List<com.unshoo.pixelmusic.data.model.Playlist> = emptyList(),
+        val isSearchingPodcasts: Boolean = false,
+        val podcastSearchError: String? = null,
     ) : FeedPlaylistDetailUiState
 
     data class Error(val message: String) : FeedPlaylistDetailUiState
@@ -58,6 +64,7 @@ class FeedPlaylistDetailViewModel @Inject constructor(
 
     private var currentPlaylistId: String? = null
     private var loadJob: Job? = null
+    private var podcastSearchJob: Job? = null
     private var selectedChartsCountry: String = "IN"
     private val tempChartsCache = mutableMapOf<String, unshoo.ianshulyadav.pixelmusic.innertube.pages.ChartsPage>()
 
@@ -142,6 +149,7 @@ class FeedPlaylistDetailViewModel @Inject constructor(
             var fetchedChartsPage: unshoo.ianshulyadav.pixelmusic.innertube.pages.ChartsPage? = null
             var fetchedNewReleaseAlbums = emptyList<unshoo.ianshulyadav.pixelmusic.innertube.models.AlbumItem>()
             var fetchedAlbumSongs = emptyList<com.unshoo.pixelmusic.data.model.Song>()
+            var fetchedCuratedPodcastShows = emptyList<com.unshoo.pixelmusic.data.model.Playlist>()
             val liked = playlistId == "yt_liked"
             val recent = playlistId == "yt_recent"
             val isNewReleases = playlistId == "new_releases"
@@ -431,25 +439,44 @@ class FeedPlaylistDetailViewModel @Inject constructor(
                         )
                     }
                     isPodcasts -> {
-                        val podcastSections = withContext(Dispatchers.IO) {
-                            runCatching {
-                                innerTube.fetchPlaylist("VLSE", progressive = false)?.tracks.orEmpty()
-                            }.getOrDefault(emptyList())
+                        val (vlseTracks, curatedSearch) = kotlinx.coroutines.coroutineScope {
+                            val vlseDef = async(Dispatchers.IO) {
+                                runCatching {
+                                    innerTube.fetchPlaylist("VLSE", progressive = false)?.tracks.orEmpty()
+                                }.getOrDefault(emptyList())
+                            }
+                            val searchDef = async(Dispatchers.IO) {
+                                runCatching {
+                                    com.unshoo.pixelmusic.data.remote.youtube.PodcastSearchHelper.search("podcast")
+                                }.getOrNull()
+                            }
+                            vlseDef.await() to searchDef.await()
                         }
-                        val finalPodcasts = if (podcastSections.isNotEmpty()) {
-                            podcastSections
-                        } else {
-                            innerTube.searchSongs("podcast")
-                        }
+                        fetchedCuratedPodcastShows = curatedSearch?.shows.orEmpty()
+                        val searchEpisodeTracks = curatedSearch?.items
+                            ?.filterIsInstance<unshoo.ianshulyadav.pixelmusic.innertube.models.SongItem>()
+                            ?.map { ep ->
+                                YouTubeMusicTrack(
+                                    videoId = ep.id,
+                                    title = ep.title,
+                                    artist = ep.artists.joinToString(", ") { it.name }.ifBlank { "Podcast" },
+                                    album = ep.album?.name,
+                                    artworkUrl = ep.thumbnail,
+                                    durationSeconds = ep.duration,
+                                    isVideo = false
+                                )
+                            }.orEmpty()
+                        val finalPodcasts = (vlseTracks + searchEpisodeTracks).distinctBy { it.videoId }
                         val filtered = finalPodcasts.filter(::filterTrack)
-                        if (filtered.isEmpty()) {
+                        if (filtered.isEmpty() && fetchedCuratedPodcastShows.isEmpty()) {
                             throw java.io.IOException("No podcasts found.")
                         }
                         YouTubePlaylistResult(
                             id = playlistId,
                             title = title,
                             author = author,
-                            artworkUrl = filtered.firstOrNull()?.artworkUrl,
+                            artworkUrl = filtered.firstOrNull()?.artworkUrl
+                                ?: fetchedCuratedPodcastShows.firstOrNull()?.coverImageUri,
                             trackCount = filtered.size,
                             tracks = filtered
                         )
@@ -536,7 +563,8 @@ class FeedPlaylistDetailViewModel @Inject constructor(
                     albumSongs = fetchedAlbumSongs,
                     selectedCountryCode = selectedChartsCountry,
                     albumArtQuality = userPreferencesRepository.albumArtQualityFlow.first(),
-                    filterKeywords = filterKeywords
+                    filterKeywords = filterKeywords,
+                    curatedPodcastShows = fetchedCuratedPodcastShows
                 )
             } catch (error: CancellationException) {
                 throw error
@@ -612,6 +640,68 @@ class FeedPlaylistDetailViewModel @Inject constructor(
                 playlist = current.playlist.copy(tracks = finalTracks, trackCount = finalTracks.size)
             )
         }
+    }
+
+    fun updatePodcastSearchQuery(query: String, immediate: Boolean = false) {
+        val currentSuccess = _uiState.value as? FeedPlaylistDetailUiState.Success ?: return
+        podcastSearchJob?.cancel()
+        if (query.isBlank()) {
+            _uiState.value = currentSuccess.copy(
+                podcastSearchQuery = query,
+                podcastSearchEpisodes = emptyList(),
+                podcastSearchShows = emptyList(),
+                isSearchingPodcasts = false,
+                podcastSearchError = null
+            )
+            return
+        }
+
+        _uiState.value = currentSuccess.copy(
+            podcastSearchQuery = query,
+            isSearchingPodcasts = true,
+            podcastSearchError = null
+        )
+        val cleanQuery = query.trim()
+        podcastSearchJob = viewModelScope.launch {
+            if (!immediate) {
+                kotlinx.coroutines.delay(350L)
+            }
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    com.unshoo.pixelmusic.data.remote.youtube.PodcastSearchHelper.search(cleanQuery)
+                }
+            }
+            val latest = _uiState.value as? FeedPlaylistDetailUiState.Success ?: return@launch
+            if (latest.podcastSearchQuery.trim() != cleanQuery) return@launch
+            result.onSuccess { batch ->
+                _uiState.value = latest.copy(
+                    podcastSearchEpisodes = batch.episodes,
+                    podcastSearchShows = batch.shows,
+                    isSearchingPodcasts = false,
+                    podcastSearchError = if (batch.hadFailure && batch.episodes.isEmpty() && batch.shows.isEmpty()) {
+                        "Couldn't load podcast search results."
+                    } else null
+                )
+            }.onFailure { err ->
+                if (err is CancellationException) throw err
+                _uiState.value = latest.copy(
+                    isSearchingPodcasts = false,
+                    podcastSearchError = err.message ?: "Podcast search failed"
+                )
+            }
+        }
+    }
+
+    fun clearPodcastSearch() {
+        podcastSearchJob?.cancel()
+        val currentSuccess = _uiState.value as? FeedPlaylistDetailUiState.Success ?: return
+        _uiState.value = currentSuccess.copy(
+            podcastSearchQuery = "",
+            podcastSearchEpisodes = emptyList(),
+            podcastSearchShows = emptyList(),
+            isSearchingPodcasts = false,
+            podcastSearchError = null
+        )
     }
 
     fun retry() {

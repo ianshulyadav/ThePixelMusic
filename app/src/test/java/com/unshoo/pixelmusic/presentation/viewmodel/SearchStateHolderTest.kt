@@ -365,6 +365,68 @@ class SearchStateHolderTest {
         assertEquals(setOf("RDCLAK5uy_hits", "PL_offline_fail"), fakeRemote.fetchedPlaylistIds.toSet())
     }
 
+    @Test
+    fun `PODCASTS filter returns playable podcast episodes and shows even when hideVideo is true`() {
+        pureYtMusicFlow.value = true
+        hideVideoFlow.value = true
+        val dispatcher = StandardTestDispatcher()
+        val scope = TestScope(dispatcher)
+        val episodeItem = YtSongItem(
+            id = "pod_ep_1",
+            title = "AI & Engineering Deep Dive",
+            artists = listOf(YtArtist("Tech Show", "UC_show")),
+            thumbnail = "https://example.com/ep1.jpg",
+            duration = 1800,
+            isEpisode = true,
+        )
+        val podcastShow = YtPlaylistItem(
+            id = "MPSPPL_tech_show",
+            title = "Tech Show Podcast",
+            author = YtArtist("Tech Media", null),
+            songCountText = "42 episodes",
+            thumbnail = "https://example.com/show.jpg",
+            playEndpoint = null,
+            shuffleEndpoint = null,
+            radioEndpoint = null,
+            isPodcast = true,
+        )
+        val fakeRemote = FakeRemoteDataSource(
+            searchHandler = { _, filter ->
+                if (filter == YouTube.SearchFilter.FILTER_PODCAST) {
+                    Result.success(SearchResult(items = listOf(podcastShow)))
+                } else {
+                    Result.success(SearchResult(emptyList()))
+                }
+            },
+            summaryHandler = {
+                Result.success(
+                    SearchSummaryPage(
+                        summaries = listOf(
+                            unshoo.ianshulyadav.pixelmusic.innertube.pages.SearchSummary(
+                                title = "Episodes",
+                                items = listOf(episodeItem)
+                            )
+                        )
+                    )
+                )
+            }
+        )
+
+        val holder = SearchStateHolder(appContext, prefs, musicRepository, fakeRemote, debounceMs = 300L, ioDispatcher = dispatcher)
+        holder.initialize(scope)
+        holder.updateSearchFilter(SearchFilterType.PODCASTS)
+        holder.performSearch("AI engineering")
+        scope.advanceUntilIdle()
+
+        val results = holder.searchResults.value
+        assertEquals(2, results.size)
+        assertTrue(results[0] is SearchResultItem.SongItem)
+        assertEquals("youtube_pod_ep_1", (results[0] as SearchResultItem.SongItem).song.id)
+        assertEquals("Podcast", (results[0] as SearchResultItem.SongItem).song.genre)
+        assertTrue(results[1] is SearchResultItem.PlaylistItem)
+        assertEquals("MPSPPL_tech_show", (results[1] as SearchResultItem.PlaylistItem).playlist.id)
+    }
+
     private class FakeRemoteDataSource(
         private val summaryHandler: suspend (String) -> Result<SearchSummaryPage> = { Result.success(SearchSummaryPage(emptyList())) },
         private val searchHandler: suspend (String, YouTube.SearchFilter) -> Result<SearchResult> = { _, _ -> Result.success(SearchResult(emptyList())) },

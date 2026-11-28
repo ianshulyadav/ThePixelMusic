@@ -28,8 +28,18 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Podcasts
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Shuffle
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import kotlinx.coroutines.launch
+import com.unshoo.pixelmusic.data.remote.youtube.PodcastSearchHelper
+import com.unshoo.pixelmusic.presentation.components.PodcastSearchBar
+import com.unshoo.pixelmusic.presentation.components.PodcastSearchFilter
+import com.unshoo.pixelmusic.presentation.components.PodcastSearchResultsContent
+import com.unshoo.pixelmusic.presentation.components.PodcastShowCard
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -249,10 +259,28 @@ fun FeedPlaylistDetailScreen(
                     }
                 }
                 is FeedPlaylistDetailUiState.Success -> {
+                    val isPodcasts = playlistId == "podcasts"
                     val playlist = s.playlist
                     val songs = remember(playlist.tracks) { playlist.tracks.map { it.toSong() }.distinctBy { it.id } }
                     val navBarPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
                     val bottomPadding = MiniPlayerHeight + navBarPadding + 16.dp
+                    val coroutineScope = rememberCoroutineScope()
+                    var selectedPodcastFilter by rememberSaveable { mutableStateOf(PodcastSearchFilter.ALL) }
+                    val onPlayPodcastShow: (com.unshoo.pixelmusic.data.model.Playlist) -> Unit = remember(playerViewModel, coroutineScope) {
+                        { show ->
+                            coroutineScope.launch {
+                                val episodes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    PodcastSearchHelper.loadShowEpisodes(show.id).getOrDefault(emptyList())
+                                }
+                                if (episodes.isNotEmpty()) {
+                                    playerViewModel.insertYoutubeSongs(episodes)
+                                    playerViewModel.playSongs(episodes, episodes.first(), show.name)
+                                } else {
+                                    playerViewModel.sendToast("Couldn't load episodes for ${show.name}")
+                                }
+                            }
+                        }
+                    }
 
                     val playButtonShape = remember {
                         AbsoluteSmoothCornerShape(
@@ -283,197 +311,272 @@ fun FeedPlaylistDetailScreen(
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(bottom = bottomPadding)
                     ) {
-                        // Header
-                        item(key = "header") {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 20.dp, vertical = 12.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                Surface(
-                                    modifier = Modifier
-                                        .size(190.dp)
-                                        .clip(AbsoluteSmoothCornerShape(24.dp, 70)),
-                                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                                    shadowElevation = 6.dp
-                                ) {
-                                    if (!playlist.artworkUrl.isNullOrBlank()) {
-                                        AsyncImage(
-                                            model = playlist.artworkUrl,
-                                            contentDescription = playlist.title,
-                                            contentScale = ContentScale.Crop,
-                                            modifier = Modifier.fillMaxSize()
-                                        )
-                                    } else {
-                                        Box(
-                                            modifier = Modifier.fillMaxSize(),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(
-                                                Icons.Filled.Album,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                                modifier = Modifier.size(72.dp)
-                                            )
-                                        }
-                                    }
-                                }
-
-                                Spacer(modifier = Modifier.height(16.dp))
-
-                                Text(
-                                    text = playlist.title,
-                                    style = MaterialTheme.typography.headlineSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    fontFamily = GoogleSansRounded,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                    textAlign = TextAlign.Center
+                        if (isPodcasts) {
+                            item(key = "podcast_search_bar") {
+                                PodcastSearchBar(
+                                    query = s.podcastSearchQuery,
+                                    onQueryChange = { viewModel.updatePodcastSearchQuery(it) },
+                                    onSearchSubmit = { viewModel.updatePodcastSearchQuery(it, immediate = true) },
+                                    onClear = { viewModel.clearPodcastSearch() },
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
                                 )
-
-                                if (!playlist.author.isNullOrBlank()) {
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(
-                                        text = playlist.author,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        fontWeight = FontWeight.Medium,
-                                        fontFamily = GoogleSansRounded,
-                                        textAlign = TextAlign.Center
-                                    )
-                                }
-
-                                Text(
-                                    text = "${playlist.tracks.size} tracks",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-                                    fontFamily = GoogleSansRounded,
-                                    modifier = Modifier.padding(top = 2.dp)
-                                )
-
-                                Spacer(modifier = Modifier.height(16.dp))
-
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Button(
-                                        onClick = {
-                                            if (songs.isNotEmpty()) {
-                                                playerViewModel.playSongs(songs, songs.first(), queueName = playlist.title)
-                                            }
-                                        },
-                                        enabled = songs.isNotEmpty(),
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .height(56.dp),
-                                        shape = playButtonShape,
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = MaterialTheme.colorScheme.primary,
-                                            contentColor = MaterialTheme.colorScheme.onPrimary
-                                        )
-                                    ) {
-                                        Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Play", fontWeight = FontWeight.SemiBold, fontFamily = GoogleSansRounded)
-                                    }
-
-                                    FilledTonalButton(
-                                        onClick = {
-                                            if (songs.isNotEmpty()) {
-                                                playerViewModel.playSongsShuffled(songs, queueName = "${playlist.title} Shuffle")
-                                            }
-                                        },
-                                        enabled = songs.isNotEmpty(),
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .height(56.dp),
-                                        shape = shuffleButtonShape,
-                                        colors = ButtonDefaults.filledTonalButtonColors(
-                                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                            contentColor = MaterialTheme.colorScheme.onSurface
-                                        )
-                                    ) {
-                                        Icon(Icons.Rounded.Shuffle, contentDescription = null, modifier = Modifier.size(20.dp))
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Shuffle", fontWeight = FontWeight.SemiBold, fontFamily = GoogleSansRounded)
-                                    }
-                                }
-
-                                Spacer(modifier = Modifier.height(8.dp))
                             }
                         }
 
-                        if (songs.isEmpty() && !s.isLoadingMore) {
-                            item(key = "empty_state") {
+                        if (isPodcasts && s.podcastSearchQuery.isNotBlank()) {
+                            item(key = "podcast_search_results") {
+                                PodcastSearchResultsContent(
+                                    query = s.podcastSearchQuery,
+                                    isSearching = s.isSearchingPodcasts,
+                                    episodes = s.podcastSearchEpisodes,
+                                    shows = s.podcastSearchShows,
+                                    selectedFilter = selectedPodcastFilter,
+                                    onFilterSelected = { selectedPodcastFilter = it },
+                                    currentSongId = currentSongId,
+                                    isPlaying = isPlaying,
+                                    onEpisodeClick = { episode ->
+                                        val queue = s.podcastSearchEpisodes.ifEmpty { listOf(episode) }
+                                        playerViewModel.showAndPlaySong(episode, queue, "Podcast Search: ${s.podcastSearchQuery.trim()}")
+                                    },
+                                    onEpisodeMoreClick = { episode ->
+                                        playerViewModel.selectSongForInfo(episode)
+                                        showSongInfoBottomSheet = true
+                                    },
+                                    onShowClick = { show ->
+                                        navController.navigateSafely(Screen.PlaylistDetail.createRoute(show.id))
+                                    },
+                                    onShowPlayClick = onPlayPodcastShow,
+                                    errorMessage = s.podcastSearchError,
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                                )
+                            }
+                        } else {
+                            // Header
+                            item(key = "header") {
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(top = 40.dp, bottom = 40.dp),
+                                        .padding(horizontal = 20.dp, vertical = 12.dp),
                                     horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
-                                    Icon(
-                                        Icons.Filled.Album,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                        modifier = Modifier.size(56.dp)
-                                    )
-                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Surface(
+                                        modifier = Modifier
+                                            .size(190.dp)
+                                            .clip(AbsoluteSmoothCornerShape(24.dp, 70)),
+                                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                        shadowElevation = 6.dp
+                                    ) {
+                                        if (!playlist.artworkUrl.isNullOrBlank()) {
+                                            AsyncImage(
+                                                model = playlist.artworkUrl,
+                                                contentDescription = playlist.title,
+                                                contentScale = ContentScale.Crop,
+                                                modifier = Modifier.fillMaxSize()
+                                            )
+                                        } else {
+                                            Box(
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    if (isPodcasts) Icons.Rounded.Podcasts else Icons.Filled.Album,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                                    modifier = Modifier.size(72.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(16.dp))
+
                                     Text(
-                                        text = "No tracks found",
-                                        style = MaterialTheme.typography.titleMedium,
+                                        text = playlist.title,
+                                        style = MaterialTheme.typography.headlineSmall,
+                                        fontWeight = FontWeight.Bold,
                                         fontFamily = GoogleSansRounded,
-                                        color = MaterialTheme.colorScheme.onSurface
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                        textAlign = TextAlign.Center
                                     )
+
+                                    if (!playlist.author.isNullOrBlank()) {
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = playlist.author,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            fontWeight = FontWeight.Medium,
+                                            fontFamily = GoogleSansRounded,
+                                            textAlign = TextAlign.Center
+                                        )
+                                    }
+
                                     Text(
-                                        text = "Latest releases will appear here.",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        fontFamily = GoogleSansRounded
+                                        text = if (isPodcasts) "${playlist.tracks.size} episodes" else "${playlist.tracks.size} tracks",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                                        fontFamily = GoogleSansRounded,
+                                        modifier = Modifier.padding(top = 2.dp)
                                     )
+
+                                    Spacer(modifier = Modifier.height(16.dp))
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Button(
+                                            onClick = {
+                                                if (songs.isNotEmpty()) {
+                                                    playerViewModel.playSongs(songs, songs.first(), queueName = playlist.title)
+                                                }
+                                            },
+                                            enabled = songs.isNotEmpty(),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(56.dp),
+                                            shape = playButtonShape,
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = MaterialTheme.colorScheme.primary,
+                                                contentColor = MaterialTheme.colorScheme.onPrimary
+                                            )
+                                        ) {
+                                            Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("Play", fontWeight = FontWeight.SemiBold, fontFamily = GoogleSansRounded)
+                                        }
+
+                                        FilledTonalButton(
+                                            onClick = {
+                                                if (songs.isNotEmpty()) {
+                                                    playerViewModel.playSongsShuffled(songs, queueName = "${playlist.title} Shuffle")
+                                                }
+                                            },
+                                            enabled = songs.isNotEmpty(),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(56.dp),
+                                            shape = shuffleButtonShape,
+                                            colors = ButtonDefaults.filledTonalButtonColors(
+                                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                                contentColor = MaterialTheme.colorScheme.onSurface
+                                            )
+                                        ) {
+                                            Icon(Icons.Rounded.Shuffle, contentDescription = null, modifier = Modifier.size(20.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("Shuffle", fontWeight = FontWeight.SemiBold, fontFamily = GoogleSansRounded)
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(8.dp))
                                 }
                             }
-                        }
 
-                        // Tracks
-                        items(
-                            items = songs,
-                            key = { song -> song.id },
-                            contentType = { "feed_track_item" }
-                        ) { song ->
-                            EnhancedSongListItem(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 2.dp),
-                                song = song,
-                                isPlaying = isPlaying && currentSongId == song.id,
-                                isCurrentSong = currentSongId == song.id,
-                                onLongPress = {
-                                    if (isNewReleases) {
-                                        songToBlock = song
+                            if (isPodcasts && s.curatedPodcastShows.isNotEmpty()) {
+                                item(key = "curated_podcast_shows") {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(bottom = 12.dp),
+                                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Text(
+                                            text = "Podcasts",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = GoogleSansRounded,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.padding(horizontal = 16.dp)
+                                        )
+                                        LazyRow(
+                                            contentPadding = PaddingValues(horizontal = 16.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                        ) {
+                                            items(s.curatedPodcastShows, key = { "curated_pod_${it.id}" }) { show ->
+                                                PodcastShowCard(
+                                                    show = show,
+                                                    onOpenClick = {
+                                                        navController.navigateSafely(Screen.PlaylistDetail.createRoute(show.id))
+                                                    },
+                                                    onPlayClick = { onPlayPodcastShow(show) }
+                                                )
+                                            }
+                                        }
                                     }
-                                },
-                                onClick = {
-                                    playerViewModel.playSongs(songs, song, queueName = playlist.title)
-                                },
-                                onMoreOptionsClick = {
-                                    playerViewModel.selectSongForInfo(song)
-                                    showSongInfoBottomSheet = true
                                 }
-                            )
-                        }
+                            }
 
-                        if (s.isLoadingMore) {
-                            item(key = "loading_more") {
-                                Box(
+                            if (songs.isEmpty() && !s.isLoadingMore && (!isPodcasts || s.curatedPodcastShows.isEmpty())) {
+                                item(key = "empty_state") {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 40.dp, bottom = 40.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Icon(
+                                            if (isPodcasts) Icons.Rounded.Podcasts else Icons.Filled.Album,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                            modifier = Modifier.size(56.dp)
+                                        )
+                                        Spacer(modifier = Modifier.height(12.dp))
+                                        Text(
+                                            text = if (isPodcasts) "Search to discover podcasts" else "No tracks found",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontFamily = GoogleSansRounded,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            text = if (isPodcasts) "Shows and episodes will appear here." else "Latest releases will appear here.",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            fontFamily = GoogleSansRounded
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Tracks / Episodes
+                            items(
+                                items = songs,
+                                key = { song -> song.id },
+                                contentType = { "feed_track_item" }
+                            ) { song ->
+                                EnhancedSongListItem(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(16.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    ContainedLoadingIndicator()
+                                        .padding(horizontal = 16.dp, vertical = 2.dp),
+                                    song = song,
+                                    isPlaying = isPlaying && currentSongId == song.id,
+                                    isCurrentSong = currentSongId == song.id,
+                                    onLongPress = {
+                                        if (isNewReleases) {
+                                            songToBlock = song
+                                        }
+                                    },
+                                    onClick = {
+                                        playerViewModel.playSongs(songs, song, queueName = playlist.title)
+                                    },
+                                    onMoreOptionsClick = {
+                                        playerViewModel.selectSongForInfo(song)
+                                        showSongInfoBottomSheet = true
+                                    }
+                                )
+                            }
+
+                            if (s.isLoadingMore) {
+                                item(key = "loading_more") {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(16.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        ContainedLoadingIndicator()
+                                    }
                                 }
                             }
                         }

@@ -13,6 +13,7 @@ package unshoo.ianshulyadav.pixelmusic.innertube.models
 
 import androidx.compose.runtime.Immutable
 import unshoo.ianshulyadav.pixelmusic.innertube.models.WatchEndpoint.WatchEndpointMusicSupportedConfigs.WatchEndpointMusicConfig.Companion.MUSIC_VIDEO_TYPE_OMV
+import unshoo.ianshulyadav.pixelmusic.innertube.models.WatchEndpoint.WatchEndpointMusicSupportedConfigs.WatchEndpointMusicConfig.Companion.MUSIC_VIDEO_TYPE_PODCAST_EPISODE
 import unshoo.ianshulyadav.pixelmusic.innertube.models.WatchEndpoint.WatchEndpointMusicSupportedConfigs.WatchEndpointMusicConfig.Companion.MUSIC_VIDEO_TYPE_UGC
 import java.util.Locale
 
@@ -78,14 +79,21 @@ data class SongItem(
     val setVideoId: String? = null,
     val likeStatus: String? = null,
     val isVideo: Boolean = false,
+    val isEpisode: Boolean = false,
 ) : YTItem() {
     override val shareLink: String
         get() = "https://music.youtube.com/watch?v=$id"
 
+    val isPodcastEpisode: Boolean
+        get() = isEpisode ||
+            endpoint?.watchEndpointMusicSupportedConfigs?.watchEndpointMusicConfig?.musicVideoType == MUSIC_VIDEO_TYPE_PODCAST_EPISODE
+
     val isMusicVideo: Boolean
         get() {
             if (isVideo) return true
+            if (isEpisode) return false
             val musicVideoType = endpoint?.watchEndpointMusicSupportedConfigs?.watchEndpointMusicConfig?.musicVideoType
+            if (musicVideoType == MUSIC_VIDEO_TYPE_PODCAST_EPISODE) return false
             if (musicVideoType == MUSIC_VIDEO_TYPE_OMV ||
                 musicVideoType == MUSIC_VIDEO_TYPE_UGC ||
                 (musicVideoType != null && musicVideoType != WatchEndpoint.WatchEndpointMusicSupportedConfigs.WatchEndpointMusicConfig.MUSIC_VIDEO_TYPE_ATV)) {
@@ -124,6 +132,7 @@ data class PlaylistItem(
     val radioEndpoint: WatchEndpoint?,
     val isEditable: Boolean = false,
     val description: String? = null,
+    val isPodcast: Boolean = false,
 ) : YTItem() {
     override val explicit: Boolean
         get() = false

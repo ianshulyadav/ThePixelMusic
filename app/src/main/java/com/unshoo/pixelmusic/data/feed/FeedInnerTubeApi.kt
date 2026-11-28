@@ -534,7 +534,8 @@ class FeedInnerTubeApi @Inject constructor(
     ): YouTubePlaylistResult? = withContext(Dispatchers.IO) {
         if (playlistId.isBlank()) return@withContext null
         val browseId = if (playlistId.startsWith("VL") || playlistId.startsWith("PL") ||
-            playlistId.startsWith("RD") || playlistId.startsWith("OLAK") || playlistId == "LM"
+            playlistId.startsWith("RD") || playlistId.startsWith("OLAK") ||
+            playlistId.startsWith("MPSP") || playlistId == "LM"
         ) {
             if (playlistId.startsWith("PL")) "VL$playlistId" else playlistId
         } else {
@@ -661,7 +662,11 @@ class FeedInnerTubeApi @Inject constructor(
             val txt = run.string("text")?.trim().orEmpty()
             txt.equals("Video", ignoreCase = true) || txt.equals("Music video", ignoreCase = true)
         }
-        val isVideo = (musicVideoType != null && musicVideoType != "MUSIC_VIDEO_TYPE_ATV") || hasVideoBadge || ContentFilterUtils.isVideoTitle(title)
+        val isEpisode = musicVideoType == "MUSIC_VIDEO_TYPE_PODCAST_EPISODE" ||
+            detailRuns.any { it.string("text")?.trim().equals("Episode", ignoreCase = true) }
+        val isVideo = !isEpisode &&
+            ((musicVideoType != null && musicVideoType != "MUSIC_VIDEO_TYPE_ATV" && musicVideoType != "MUSIC_VIDEO_TYPE_PODCAST_EPISODE") ||
+                hasVideoBadge || ContentFilterUtils.isVideoTitle(title))
         return YouTubeMusicTrack(videoId, title, artist, album, artwork, duration, isVideo)
     }
 
@@ -746,7 +751,11 @@ class FeedInnerTubeApi @Inject constructor(
             val txt = run.string("text")?.trim().orEmpty()
             txt.equals("Video", ignoreCase = true) || txt.equals("Music video", ignoreCase = true)
         }
-        val isVideo = (musicVideoType != null && musicVideoType != "MUSIC_VIDEO_TYPE_ATV") || hasVideoBadge || ContentFilterUtils.isVideoTitle(title)
+        val isEpisode = musicVideoType == "MUSIC_VIDEO_TYPE_PODCAST_EPISODE" ||
+            detailRuns.any { it.string("text")?.trim().equals("Episode", ignoreCase = true) }
+        val isVideo = !isEpisode &&
+            ((musicVideoType != null && musicVideoType != "MUSIC_VIDEO_TYPE_ATV" && musicVideoType != "MUSIC_VIDEO_TYPE_PODCAST_EPISODE") ||
+                hasVideoBadge || ContentFilterUtils.isVideoTitle(title))
         return YouTubeMusicTrack(videoId, title, artist, album, artwork, duration, isVideo)
     }
 

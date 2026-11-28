@@ -17,7 +17,9 @@ import unshoo.ianshulyadav.pixelmusic.innertube.models.BrowseEndpoint.BrowseEndp
 import unshoo.ianshulyadav.pixelmusic.innertube.models.BrowseEndpoint.BrowseEndpointContextSupportedConfigs.BrowseEndpointContextMusicConfig.Companion.MUSIC_PAGE_TYPE_ARTIST
 import unshoo.ianshulyadav.pixelmusic.innertube.models.BrowseEndpoint.BrowseEndpointContextSupportedConfigs.BrowseEndpointContextMusicConfig.Companion.MUSIC_PAGE_TYPE_AUDIOBOOK
 import unshoo.ianshulyadav.pixelmusic.innertube.models.BrowseEndpoint.BrowseEndpointContextSupportedConfigs.BrowseEndpointContextMusicConfig.Companion.MUSIC_PAGE_TYPE_LIBRARY_ARTIST
+import unshoo.ianshulyadav.pixelmusic.innertube.models.BrowseEndpoint.BrowseEndpointContextSupportedConfigs.BrowseEndpointContextMusicConfig.Companion.MUSIC_PAGE_TYPE_NON_MUSIC_AUDIO_TRACK_PAGE
 import unshoo.ianshulyadav.pixelmusic.innertube.models.BrowseEndpoint.BrowseEndpointContextSupportedConfigs.BrowseEndpointContextMusicConfig.Companion.MUSIC_PAGE_TYPE_PLAYLIST
+import unshoo.ianshulyadav.pixelmusic.innertube.models.BrowseEndpoint.BrowseEndpointContextSupportedConfigs.BrowseEndpointContextMusicConfig.Companion.MUSIC_PAGE_TYPE_PODCAST_SHOW_DETAIL_PAGE
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonNames
@@ -46,10 +48,18 @@ data class MusicResponsiveListItemRenderer(
         get() = navigationEndpoint?.browseEndpoint?.browseId
 
     val isSong: Boolean
-        get() = navigationEndpoint == null || navigationEndpoint.watchEndpoint != null || navigationEndpoint.watchPlaylistEndpoint != null
+        get() = navigationEndpoint == null ||
+            navigationEndpoint.watchEndpoint != null ||
+            navigationEndpoint.watchPlaylistEndpoint != null ||
+            ((browsePageType == MUSIC_PAGE_TYPE_NON_MUSIC_AUDIO_TRACK_PAGE || browseId?.startsWith("MPED") == true) &&
+                (!playlistItemData?.videoId.isNullOrBlank() ||
+                    overlay?.musicItemThumbnailOverlayRenderer?.content?.musicPlayButtonRenderer?.playNavigationEndpoint?.anyWatchEndpoint != null))
     val isPlaylist: Boolean
         get() = browsePageType == MUSIC_PAGE_TYPE_PLAYLIST ||
-            (browsePageType == null && browseId?.let { it.startsWith("VL") || it.startsWith("PL") || it.startsWith("RD") } == true)
+            browsePageType == MUSIC_PAGE_TYPE_PODCAST_SHOW_DETAIL_PAGE ||
+            (browsePageType == null && browseId?.let {
+                it.startsWith("VL") || it.startsWith("PL") || it.startsWith("RD") || it.startsWith("MPSP")
+            } == true)
     val isAlbum: Boolean
         get() = browsePageType == MUSIC_PAGE_TYPE_ALBUM ||
             browsePageType == MUSIC_PAGE_TYPE_AUDIOBOOK ||

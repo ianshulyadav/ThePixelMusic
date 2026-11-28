@@ -231,7 +231,7 @@ class SearchStateHolder internal constructor(
 
                     _isSearching.value = true
 
-                    if (source == SearchSource.JIOSAAVN) {
+                    if (source == SearchSource.JIOSAAVN && currentFilter != SearchFilterType.PODCASTS) {
                         try {
                             val results = withContext(ioDispatcher) {
                                 var saavnSongs = remoteDataSource.searchSaavnSongs(query, 30)
@@ -390,7 +390,11 @@ class SearchStateHolder internal constructor(
         } else {
             libraryResults
         }
-        val shouldFilterVideos = if (filter == SearchFilterType.VIDEOS) false else (pureYtMusic || hideVideo)
+        val shouldFilterVideos = if (filter == SearchFilterType.VIDEOS || filter == SearchFilterType.PODCASTS) {
+            false
+        } else {
+            pureYtMusic || hideVideo
+        }
         return if (shouldFilterVideos) {
             results.filterNot { it is SearchResultItem.SongItem && ContentFilterUtils.isVideoSong(it.song) }
         } else {
@@ -472,7 +476,11 @@ class SearchStateHolder internal constructor(
                 if (result != null && requestIdAtStart == latestSearchRequestId.get()) {
                     val pureYtMusicOnly = userPreferencesRepository.pureYtMusicOnlyFlow.first()
                     val hideVideo = userPreferencesRepository.hideVideoFlow.first()
-                    val shouldFilterVideos = if (filter == SearchFilterType.VIDEOS) false else (pureYtMusicOnly || hideVideo)
+                    val shouldFilterVideos = if (filter == SearchFilterType.VIDEOS || filter == SearchFilterType.PODCASTS) {
+                        false
+                    } else {
+                        pureYtMusicOnly || hideVideo
+                    }
                     val newItems = result.items.mapNotNull { it.toSearchResultItem(shouldFilterVideos) }
                     if (newItems.isNotEmpty() && requestIdAtStart == latestSearchRequestId.get()) {
                         val currentList = _searchResults.value
@@ -597,7 +605,11 @@ class SearchStateHolder internal constructor(
     ): RemoteSearchOutcome {
         val pureYtMusicOnly = userPreferencesRepository.pureYtMusicOnlyFlow.first()
         val hideVideo = userPreferencesRepository.hideVideoFlow.first()
-        val shouldFilterVideos = if (filter == SearchFilterType.VIDEOS) false else (pureYtMusicOnly || hideVideo)
+        val shouldFilterVideos = if (filter == SearchFilterType.VIDEOS || filter == SearchFilterType.PODCASTS) {
+            false
+        } else {
+            pureYtMusicOnly || hideVideo
+        }
         val items = mutableListOf<SearchResultItem>()
         val seenKeys = mutableSetOf<String>()
         var hadFailure = false
@@ -740,6 +752,18 @@ class SearchStateHolder internal constructor(
                     addUnique(it.toSearchResultItem(false))
                 }
             }
+            SearchFilterType.PODCASTS -> {
+                val podcastBatch = com.unshoo.pixelmusic.data.remote.youtube.PodcastSearchHelper.search(
+                    query = query,
+                    searchByFilter = remoteDataSource::searchYouTube,
+                    searchSummary = remoteDataSource::searchYouTubeSummary,
+                )
+                hadFailure = podcastBatch.hadFailure
+                lastContinuationToken = podcastBatch.continuation
+                podcastBatch.items.forEach { ytItem ->
+                    addUnique(ytItem.toSearchResultItem(filterVideos = false))
+                }
+            }
         }
 
         // Typo recovery: when direct search returns nothing, ask YouTube's autocomplete/suggestions
@@ -755,6 +779,8 @@ class SearchStateHolder internal constructor(
                         SearchFilterType.ALBUMS -> recommended is AlbumItem
                         SearchFilterType.PLAYLISTS -> recommended is PlaylistItem
                         SearchFilterType.VIDEOS -> recommended is SongItem && recommended.isMusicVideo
+                        SearchFilterType.PODCASTS -> (recommended is PlaylistItem && (recommended.isPodcast || recommended.id.startsWith("MPSP"))) ||
+                            (recommended is SongItem && recommended.isPodcastEpisode)
                     }
                     if (matchesFilter) {
                         addUnique(recommended.toSearchResultItem(shouldFilterVideos))

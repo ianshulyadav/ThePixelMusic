@@ -155,7 +155,7 @@ fun SongItem.toNativeSong(): Song {
         contentUriString = "youtube://$id",
         albumArtUriString = upgradeThumbnailUrlToHighQuality(thumbnail),
         duration = (duration ?: 0) * 1000L,
-        genre = "YouTube",
+        genre = if (isPodcastEpisode) "Podcast" else "YouTube",
         lyrics = null,
         isFavorite = likeStatus == "LIKE",
         isDisliked = likeStatus == "DISLIKE",
