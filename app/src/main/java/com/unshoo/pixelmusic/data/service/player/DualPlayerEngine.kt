@@ -47,6 +47,7 @@ import com.unshoo.pixelmusic.data.model.TransitionSettings
 import com.unshoo.pixelmusic.data.preferences.UserPreferencesRepository
 import com.unshoo.pixelmusic.data.remote.youtube.Constants
 import com.unshoo.pixelmusic.data.remote.youtube.PixelMusicHelper
+import com.unshoo.pixelmusic.data.service.restoreQueueWindow
 import com.unshoo.pixelmusic.data.telegram.TelegramRepository
 import com.unshoo.pixelmusic.utils.envelope
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -1773,7 +1774,6 @@ class DualPlayerEngine @Inject constructor(
         val currentIndex = playerA.currentMediaItemIndex.coerceAtLeast(0)
         val mediaItems = (0 until playerA.mediaItemCount).map { playerA.getMediaItemAt(it) }
         val repeatMode = playerA.repeatMode
-        val shuffleMode = playerA.shuffleModeEnabled
         val volume = if (skipFadeActive) {
             if (isDucked) preDuckVolumeA = skipFadeRestVolume
             skipFadeTargetVolume()
@@ -1803,7 +1803,6 @@ class DualPlayerEngine @Inject constructor(
         if (mediaItems.isNotEmpty()) {
             playerA.setMediaItems(mediaItems, currentIndex, positionMs)
             playerA.repeatMode = repeatMode
-            playerA.shuffleModeEnabled = shuffleMode
             playerA.prepare()
             playerA.playWhenReady = desiredPlayWhenReady
         }
@@ -3139,7 +3138,6 @@ class DualPlayerEngine @Inject constructor(
             }
 
             auxiliaryPlayer.repeatMode = playerA.repeatMode
-            auxiliaryPlayer.shuffleModeEnabled = playerA.shuffleModeEnabled
             resetPlaybackSpeedToNormal(auxiliaryPlayer)
             auxiliaryPlayer.prepare()
             auxiliaryPlayer.volume = 0f
@@ -3301,7 +3299,6 @@ class DualPlayerEngine @Inject constructor(
         val incomingPlayer = auxiliaryPlayer
 
         incomingPlayer.repeatMode = outgoingPlayer.repeatMode
-        incomingPlayer.shuffleModeEnabled = outgoingPlayer.shuffleModeEnabled
         resetPlaybackSpeedToNormal(incomingPlayer)
         resetPlaybackSpeedToNormal(outgoingPlayer)
         outgoingPlayer.pauseAtEndOfMediaItems = true
@@ -3396,6 +3393,7 @@ class DualPlayerEngine @Inject constructor(
 
         playerA.pauseAtEndOfMediaItems = false
         playerB?.pauseAtEndOfMediaItems = false
+        restoreFullMasterTimelineIfWindowed()
         playerA.addListener(masterPlayerListener)
         playerA.addAnalyticsListener(masterPlayerListener)
         if (playerA.playWhenReady) requestAudioFocus()
@@ -3421,6 +3419,19 @@ class DualPlayerEngine @Inject constructor(
             refreshQueueSnapshotFromMaster(windowStartIndex = 0, usesWindowedQueue = false)
         }
         return queueSnapshot
+    }
+
+    private fun restoreFullMasterTimelineIfWindowed() {
+        if (!activePlayerUsesWindowedQueue) return
+
+        try {
+            if (!playerA.restoreQueueWindow(queueSnapshot, activeWindowStartIndex)) {
+                Timber.tag("DualPlayerEngine").w("Incoming deck's queue window no longer matches the snapshot")
+            }
+        } catch (e: IllegalStateException) {
+            Timber.tag("DualPlayerEngine").e(e, "Could not expand the incoming deck's queue")
+        }
+        refreshQueueSnapshotFromMaster(windowStartIndex = 0, usesWindowedQueue = false)
     }
 
     private fun refreshQueueSnapshotFromMaster(windowStartIndex: Int, usesWindowedQueue: Boolean) {

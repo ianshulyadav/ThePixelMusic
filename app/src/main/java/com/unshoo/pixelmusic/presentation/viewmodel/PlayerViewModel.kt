@@ -55,15 +55,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.media3.common.Timeline
 import androidx.media3.session.SessionCommand
-import androidx.media3.session.SessionError
-import androidx.media3.session.SessionResult
 import androidx.media3.session.SessionToken
 import androidx.mediarouter.media.MediaControlIntent
 import androidx.mediarouter.media.MediaRouter
 import com.google.android.gms.cast.framework.SessionManager
 import com.google.android.gms.cast.framework.media.RemoteMediaClient
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.unshoo.pixelmusic.R
 import com.unshoo.pixelmusic.data.EotStateHolder
@@ -213,16 +210,6 @@ private fun ImmutableList<Song>.moveSong(fromIndex: Int, toIndex: Int): Immutabl
     return asPersistentPlaybackQueue()
         .removingAt(fromIndex)
         .addingAt(toIndex, movedSong)
-}
-
-private fun moveQueueIndex(index: Int, fromIndex: Int, toIndex: Int): Int {
-    if (index == C.INDEX_UNSET || fromIndex == toIndex) return index
-    return when {
-        index == fromIndex -> toIndex
-        fromIndex < toIndex && index in (fromIndex + 1)..toIndex -> index - 1
-        toIndex < fromIndex && index in toIndex until fromIndex -> index + 1
-        else -> index
-    }
 }
 
 private data class QueueTimelineSignature(
@@ -1818,26 +1805,6 @@ class PlayerViewModel @Inject constructor(
                 }
                 playbackStateHolder.setCurrentPosition(0L)
             }
-        }
-
-        override fun onCustomCommand(
-            controller: MediaController,
-            command: SessionCommand,
-            args: Bundle
-        ): ListenableFuture<SessionResult> {
-            if (command.customAction == MusicNotificationProvider.CUSTOM_COMMAND_SET_SHUFFLE_STATE) {
-                val enabled = args.getBoolean(
-                    MusicNotificationProvider.EXTRA_SHUFFLE_ENABLED,
-                    false
-                )
-                viewModelScope.launch {
-                    if (enabled != playbackStateHolder.stablePlayerState.value.isShuffleEnabled) {
-                        toggleShuffle()
-                    }
-                }
-                return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
-            }
-            return Futures.immediateFuture(SessionResult(SessionError.ERROR_NOT_SUPPORTED))
         }
 
         /**
@@ -4604,16 +4571,20 @@ class PlayerViewModel @Inject constructor(
     fun reorderQueueItem(fromIndex: Int, toIndex: Int) {
         runOnMainImmediate {
             val controller = mediaController ?: return@runOnMainImmediate
-            if (fromIndex >= 0 && fromIndex < controller.mediaItemCount &&
-                toIndex >= 0 && toIndex < controller.mediaItemCount) {
-                val currentIndexBeforeMove = controller.currentMediaItemIndex
-                    .takeIf { it != C.INDEX_UNSET }
-                    ?: playbackStateHolder.stablePlayerState.value.currentMediaItemIndex
-                val updatedCurrentIndex = moveQueueIndex(currentIndexBeforeMove, fromIndex, toIndex)
-
-                // Move the item in the MediaController's timeline.
-                // This is the source of truth for playback.
-                controller.moveMediaItem(fromIndex, toIndex)
+            val player = dualPlayerEngine.masterPlayer
+            val displayedQueue = _playerUiState.value.currentPlaybackQueue
+            if (fromIndex in 0 until player.mediaItemCount && toIndex in 0 until player.mediaItemCount) {
+                val fromId = player.getMediaItemAt(fromIndex).mediaId.removePrefix("song:")
+                val toId = player.getMediaItemAt(toIndex).mediaId.removePrefix("song:")
+                if (displayedQueue.getOrNull(fromIndex)?.id != fromId ||
+                    displayedQueue.getOrNull(toIndex)?.id != toId
+                ) {
+                    updateCurrentPlaybackQueueFromPlayer(controller)
+                    return@runOnMainImmediate
+                }
+                // The controller can still report the pre-shuffle timeline during session updates.
+                player.moveMediaItem(fromIndex, toIndex)
+                val updatedCurrentIndex = player.currentMediaItemIndex
 
                 // Optimistically mirror the committed move in UI state. The drag preview stays
                 // local while dragging, so this single state update does not add per-frame work.
@@ -4861,6 +4832,11 @@ class PlayerViewModel @Inject constructor(
 
             lastQueueSignature = signature
             if (queue.isNotEmpty() || count == 0) {
+                val currentIndex = currentMediaController.currentMediaItemIndex
+                val currentSongId = currentMediaController.currentMediaItem?.mediaId?.removePrefix("song:")
+                if (currentSongId != null && queue.getOrNull(currentIndex)?.id == currentSongId) {
+                    playbackStateHolder.updateStablePlayerState { it.copy(currentMediaItemIndex = currentIndex) }
+                }
                 _playerUiState.update { it.copy(currentPlaybackQueue = queue.toPlaybackQueue()) }
             }
         }
@@ -5983,15 +5959,6 @@ class PlayerViewModel @Inject constructor(
             override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
                 syncDisplayedMediaItemIfChanged(playerCtrl)
             }
-            override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
-                if (isRemoteSessionControllingPlayback()) return
-                if (playbackStateHolder.stablePlayerState.value.isShuffleEnabled != shuffleModeEnabled) {
-                    if (!playbackStateHolder.stablePlayerState.value.isShuffleTransitionInProgress) {
-                        toggleShuffle()
-                    }
-                }
-                updateCurrentPlaybackQueueFromPlayer(playerCtrl)
-            }
             override fun onRepeatModeChanged(repeatMode: Int) {
                 playbackStateHolder.updateStablePlayerState { it.copy(repeatMode = repeatMode) }
                 viewModelScope.launch { userPreferencesRepository.setRepeatMode(repeatMode) }
@@ -6568,13 +6535,6 @@ class PlayerViewModel @Inject constructor(
                         dualPlayerEngine.cancelNext()
                         val player = dualPlayerEngine.masterPlayer
                         dualPlayerEngine.replacePlaybackQueue(items, startIndex, queueName)
-                        val isShuffle = playbackStateHolder.stablePlayerState.value.isShuffleEnabled
-                        player.shuffleModeEnabled = isShuffle
-                        if (isShuffle) {
-                            (player as? androidx.media3.exoplayer.ExoPlayer)?.setShuffleOrder(
-                                androidx.media3.exoplayer.source.ShuffleOrder.UnshuffledShuffleOrder(items.size)
-                            )
-                        }
                         player.prepare()
                         player.playWhenReady = true
                         player.play()
@@ -6738,23 +6698,11 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
-    fun toggleShuffle(currentSongOverride: Song? = null) {
-        cancelPendingFullQueuePlayback()
-        val currentQueue = _playerUiState.value.currentPlaybackQueue.toList()
-        val currentSong = currentSongOverride
-            ?: playbackStateHolder.stablePlayerState.value.currentSong
-            ?: mediaController?.currentMediaItem?.let { resolveSongFromMediaItem(it) }
-            ?: currentQueue.firstOrNull()
-
-        playbackStateHolder.toggleShuffle(
-            currentSongs = currentQueue,
-            currentSong = currentSong,
-            currentQueueSourceName = _playerUiState.value.currentQueueSourceName,
-            updateQueueCallback = { newQueue ->
-                _playerUiState.update { it.copy(currentPlaybackQueue = newQueue.toPlaybackQueue()) }
-                syncShuffleStateWithSession(playbackStateHolder.stablePlayerState.value.isShuffleEnabled)
-            }
-        )
+    fun toggleShuffle() {
+        runOnMainImmediate {
+            cancelPendingFullQueuePlayback()
+            playbackStateHolder.toggleShuffle()
+        }
     }
 
     fun cycleRepeatMode() {
@@ -7010,7 +6958,7 @@ class PlayerViewModel @Inject constructor(
                 }
             }
             withContext(Dispatchers.Main.immediate) {
-                val player = mediaController ?: dualPlayerEngine.masterPlayer
+                val player = dualPlayerEngine.masterPlayer
                 val insertionIndex = if (player.currentMediaItemIndex != C.INDEX_UNSET) {
                     (player.currentMediaItemIndex + 1).coerceAtMost(player.mediaItemCount)
                 } else {

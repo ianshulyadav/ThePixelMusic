@@ -40,6 +40,7 @@ internal class CastSessionPlayer(
      * player. Null, or while casting, the change happens at once.
      */
     var skipTransition: ((change: () -> Unit) -> Unit)? = null
+    var onShuffleModeRequested: ((Boolean) -> Unit)? = null
 
     var beforeQueueReplacement: ((Player, List<MediaItem>, Int) -> Unit)? = null
 
@@ -328,7 +329,7 @@ internal class CastSessionPlayer(
     }
 
     override fun setShuffleModeEnabled(shuffleModeEnabled: Boolean) {
-        super.setShuffleModeEnabled(shuffleModeEnabled)
+        onShuffleModeRequested?.invoke(shuffleModeEnabled)
     }
 
     // ---- told by the receiver ----------------------------------------------

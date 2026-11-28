@@ -26,7 +26,7 @@ object QueueUtils {
         return mutable
     }
 
-    private fun generateShuffleOrder(size: Int, anchorIndex: Int, random: Random = Random.Default): IntArray {
+    internal fun generateShuffleOrder(size: Int, anchorIndex: Int, random: Random = Random.Default): IntArray {
         if (size <= 1) return IntArray(size) { it }
 
         val clampedAnchor = anchorIndex.coerceIn(0, size - 1)
@@ -53,6 +53,33 @@ object QueueUtils {
             order[i] = if (i == clampedAnchor) clampedAnchor else pool[poolIndex++]
         }
         return order
+    }
+
+    /** Restores surviving original entries and keeps additions next to their preceding entry. */
+    internal fun <T> restoreQueueOrder(currentIds: List<T>, originalIds: List<T>): IntArray {
+        val remainingIndices = currentIds.indices.groupBy { currentIds[it] }
+            .mapValues { (_, indices) -> ArrayDeque(indices) }
+        val originalIndices = originalIds.mapNotNull { remainingIndices[it]?.removeFirstOrNull() }
+        val isOriginal = BooleanArray(currentIds.size)
+        originalIndices.forEach { isOriginal[it] = true }
+
+        val additionsAfter = mutableMapOf<Int, MutableList<Int>>()
+        var previousOriginal = -1
+        for (index in currentIds.indices) {
+            if (isOriginal[index]) {
+                previousOriginal = index
+            } else {
+                additionsAfter.getOrPut(previousOriginal) { mutableListOf() }.add(index)
+            }
+        }
+
+        return buildList(currentIds.size) {
+            additionsAfter[-1]?.let(::addAll)
+            for (index in originalIndices) {
+                add(index)
+                additionsAfter[index]?.let(::addAll)
+            }
+        }.toIntArray()
     }
 
     /**

@@ -107,6 +107,7 @@ import com.unshoo.pixelmusic.utils.ArtworkTransportSanitizer
 import com.unshoo.pixelmusic.utils.MediaItemBuilder
 import com.unshoo.pixelmusic.di.AppScope
 import com.unshoo.pixelmusic.presentation.viewmodel.ListeningStatsTracker
+import com.unshoo.pixelmusic.presentation.viewmodel.PlaybackStateHolder
 import com.unshoo.pixelmusic.data.remote.youtube.AutoQueueManager
 import com.unshoo.pixelmusic.data.remote.youtube.QueuePreloadManager
 import com.unshoo.pixelmusic.data.remote.youtube.ExoCache
@@ -133,6 +134,8 @@ class MusicService : MediaLibraryService() {
 
     @Inject
     lateinit var engine: DualPlayerEngine
+    @Inject
+    lateinit var playbackStateHolder: PlaybackStateHolder
     @Inject
     lateinit var controller: TransitionController
     @Inject
@@ -889,13 +892,9 @@ class MusicService : MediaLibraryService() {
                         updateManualShuffleState(session, enabled = enabled, broadcast = true)
                     }
                     MusicNotificationProvider.CUSTOM_COMMAND_SHUFFLE_ON -> {
-                        Timber.tag("MusicService")
-                            .d("Executing SHUFFLE_ON. Current shuffleMode: ${session.player.shuffleModeEnabled}")
                         updateManualShuffleState(session, enabled = true, broadcast = true)
                     }
                     MusicNotificationProvider.CUSTOM_COMMAND_SHUFFLE_OFF -> {
-                        Timber.tag("MusicService")
-                            .d("Executing SHUFFLE_OFF. Current shuffleMode: ${session.player.shuffleModeEnabled}")
                         updateManualShuffleState(session, enabled = false, broadcast = true)
                     }
                     MusicNotificationProvider.CUSTOM_COMMAND_SET_SHUFFLE_STATE -> {
@@ -1211,6 +1210,7 @@ class MusicService : MediaLibraryService() {
         ).also {
             castSessionPlayer = it
             it.skipTransition = engine::fadedSkip
+            it.onShuffleModeRequested = ::requestLocalShuffle
             it.beforeQueueReplacement = { player, items, startIndex ->
                 archiveReplacedQueue(player, items, startIndex, null)
             }
@@ -1945,10 +1945,6 @@ class MusicService : MediaLibraryService() {
             if (nextIndex != androidx.media3.common.C.INDEX_UNSET) {
                 runCatching { prefetchReplayGain(player.getMediaItemAt(nextIndex)) }
             }
-            val activePlayer = mediaSession?.player ?: engine.masterPlayer
-            if (activePlayer.shuffleModeEnabled && reason == Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED) {
-                applyCurrentFirstShuffleOrder()
-            }
         }
 
         override fun onPositionDiscontinuity(
@@ -1999,18 +1995,6 @@ class MusicService : MediaLibraryService() {
                     if (!engine.isTransitionRunning()) setPlayerVolume(engine.masterPlayer, it)
                 }
             }
-        }
-
-        override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
-            Timber.tag("MusicService")
-                .d("playerListener.onShuffleModeEnabledChanged: $shuffleModeEnabled")
-            clearLastShuffleTimelineCache()
-            if (shuffleModeEnabled) {
-                applyCurrentFirstShuffleOrder()
-            }
-            requestWidgetFullUpdate(force = true)
-            mediaSession?.let { refreshMediaSessionUi(it) }
-            schedulePlaybackSnapshotPersist()
         }
 
 
@@ -2284,7 +2268,7 @@ class MusicService : MediaLibraryService() {
             streamRecoveryAttempts = 0
             lastStreamRecoveryMediaId = null
         }
-        
+
         val durationMs = if (player.duration != androidx.media3.common.C.TIME_UNSET && player.duration > 0) {
             player.duration
         } else {
@@ -2542,6 +2526,7 @@ class MusicService : MediaLibraryService() {
             localPlayer, playback, playbackNavigationHistory, engine::isSkipFadeActive
         )
         wrapper.skipTransition = engine::fadedSkip
+        wrapper.onShuffleModeRequested = ::requestLocalShuffle
         wrapper.beforeQueueReplacement = { player, items, startIndex ->
             archiveReplacedQueue(player, items, startIndex, null)
         }
@@ -3105,6 +3090,7 @@ class MusicService : MediaLibraryService() {
                 player.repeatMode = safeRepeatMode
                 player.shuffleModeEnabled = false
                 isManualShuffleEnabled = snapshot.shuffleEnabled
+                playbackStateHolder.updateStablePlayerState { it.copy(isShuffleEnabled = snapshot.shuffleEnabled) }
                 // Paused restore: do NOT call player.prepare()!
                 // setMediaItems() alone creates the timeline and populates currentMediaItem.
                 // Delaying prepare() until playback is actually requested avoids loading
@@ -4019,24 +4005,28 @@ class MusicService : MediaLibraryService() {
         }
     }
 
+    private fun requestLocalShuffle(enabled: Boolean) {
+        mediaSession?.let { updateManualShuffleState(it, enabled, broadcast = true) }
+    }
+
     private fun updateManualShuffleState(
         session: MediaSession,
         enabled: Boolean,
         broadcast: Boolean
     ) {
-        val changed = isManualShuffleEnabled != enabled
-        isManualShuffleEnabled = enabled
-        session.player.shuffleModeEnabled = enabled
+        val applied = if (broadcast) playbackStateHolder.setLocalShuffleEnabled(enabled) else enabled
+        val changed = isManualShuffleEnabled != applied
+        isManualShuffleEnabled = applied
         
-        if (persistentShuffleEnabled) {
+        if (changed && persistentShuffleEnabled) {
             serviceScope.launch {
-                userPreferencesRepository.setShuffleOn(enabled)
+                userPreferencesRepository.setShuffleOn(applied)
             }
         }
 
         if (broadcast && changed) {
             val args = Bundle().apply {
-                putBoolean(MusicNotificationProvider.EXTRA_SHUFFLE_ENABLED, enabled)
+                putBoolean(MusicNotificationProvider.EXTRA_SHUFFLE_ENABLED, applied)
             }
             session.broadcastCustomCommand(
                 SessionCommand(MusicNotificationProvider.CUSTOM_COMMAND_SET_SHUFFLE_STATE, Bundle.EMPTY),
@@ -4045,38 +4035,7 @@ class MusicService : MediaLibraryService() {
         }
         refreshMediaSessionUi(session)
         requestWidgetFullUpdate(force = true)
-    }
-
-    private var isApplyingShuffleOrder = false
-    private var lastShuffleTimelineSize = -1
-    private var lastShuffleFirstItemId: String? = null
-    private var lastShuffleMediaItemIds: List<String>? = null
-
-    private fun clearLastShuffleTimelineCache() {
-        lastShuffleTimelineSize = -1
-        lastShuffleFirstItemId = null
-        lastShuffleMediaItemIds = null
-    }
-
-    private fun getMediaItemIds(player: Player): List<String> {
-        val count = player.mediaItemCount
-        return List(count) { idx -> player.getMediaItemAt(idx).mediaId }
-    }
-
-    private fun applyCurrentFirstShuffleOrder() {
-        if (isApplyingShuffleOrder) return
-        val player = mediaSession?.player ?: engine.masterPlayer
-        val count = player.mediaItemCount
-        if (count <= 1) return
-
-        isApplyingShuffleOrder = true
-        try {
-            (player as? androidx.media3.exoplayer.ExoPlayer)?.setShuffleOrder(
-                androidx.media3.exoplayer.source.ShuffleOrder.UnshuffledShuffleOrder(count)
-            )
-        } finally {
-            isApplyingShuffleOrder = false
-        }
+        if (changed) schedulePlaybackSnapshotPersist()
     }
 
     private fun setCurrentSongFavoriteState(
