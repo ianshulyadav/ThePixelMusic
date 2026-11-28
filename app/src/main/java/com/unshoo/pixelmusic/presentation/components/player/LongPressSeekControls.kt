@@ -8,9 +8,11 @@ import androidx.compose.foundation.indication
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -22,7 +24,9 @@ import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.unshoo.pixelmusic.data.preferences.DEFAULT_LONG_PRESS_SEEK_SPEED
 import com.unshoo.pixelmusic.data.preferences.DEFAULT_LONG_PRESS_SEEK_TIME_RATE_SECONDS
 import com.unshoo.pixelmusic.data.preferences.LongPressSeekMode
@@ -74,10 +78,39 @@ internal fun Modifier.transportHoldToSeek(
     }
 
     val haptics = LocalHapticFeedback.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val latestOnTap by rememberUpdatedState(onTap)
     val latestOnHoldStart by rememberUpdatedState(onHoldStart)
     val latestOnHoldEnd by rememberUpdatedState(onHoldEnd)
     val latestOnTapHaptic by rememberUpdatedState(onTapHaptic)
+    val activeHoldFlag = remember { BooleanArray(1) }
+    val finishHoldIfActive = remember {
+        {
+            if (activeHoldFlag[0]) {
+                activeHoldFlag[0] = false
+                latestOnHoldEnd()
+            }
+        }
+    }
+
+    DisposableEffect(enabled) {
+        onDispose {
+            finishHoldIfActive()
+        }
+    }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
+                finishHoldIfActive()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            finishHoldIfActive()
+        }
+    }
 
     return this
         .semantics(mergeDescendants = false) {
@@ -100,7 +133,7 @@ internal fun Modifier.transportHoldToSeek(
             if (!enabled) return@pointerInput
 
             awaitEachGesture {
-                val down = awaitFirstDown(requireUnconsumed = false)
+                val down = awaitFirstDown(requireUnconsumed = true)
                 val press = PressInteraction.Press(down.position)
                 interactionSource.tryEmit(press)
                 var interactionClosed = false
@@ -108,7 +141,10 @@ internal fun Modifier.transportHoldToSeek(
 
                 try {
                     val longPressTimeoutMs = viewConfiguration.longPressTimeoutMillis
-                    val slopLimit = maxOf(viewConfiguration.touchSlop * 2f, 24.dp.toPx())
+                    val slopLimit = viewConfiguration.touchSlop
+                    val minBound = -slopLimit
+                    val maxBoundX = size.width + slopLimit
+                    val maxBoundY = size.height + slopLimit
                     var releasedNormally = false
                     var canceled = false
 
@@ -118,18 +154,31 @@ internal fun Modifier.transportHoldToSeek(
                             val event = awaitPointerEvent()
                             val change = event.changes.firstOrNull { it.id == down.id }
                                 ?: event.changes.firstOrNull()
-                            if (change == null) {
+                            if (
+                                change == null ||
+                                change.isConsumed ||
+                                event.changes.count { it.pressed } > 1
+                            ) {
                                 canceled = true
                                 return@withTimeoutOrNull
                             }
+                            val outOfBounds =
+                                change.position.x < minBound ||
+                                    change.position.y < minBound ||
+                                    change.position.x > maxBoundX ||
+                                    change.position.y > maxBoundY
                             if (change.changedToUpIgnoreConsumed()) {
-                                change.consume()
-                                releasedNormally = true
+                                if (!outOfBounds) {
+                                    change.consume()
+                                    releasedNormally = true
+                                } else {
+                                    canceled = true
+                                }
                                 return@withTimeoutOrNull
                             }
                             if (
-                                change.isConsumed ||
                                 !change.pressed ||
+                                outOfBounds ||
                                 (change.position - down.position).getDistance() > slopLimit
                             ) {
                                 canceled = true
@@ -153,6 +202,7 @@ internal fun Modifier.transportHoldToSeek(
 
                     // Long press active: engage continuous speed seek once, then await lift cleanly.
                     holdActive = true
+                    activeHoldFlag[0] = true
                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                     latestOnHoldStart()
 
@@ -177,7 +227,7 @@ internal fun Modifier.transportHoldToSeek(
                     }
                 } finally {
                     if (holdActive) {
-                        latestOnHoldEnd()
+                        finishHoldIfActive()
                     }
                     if (!interactionClosed) {
                         interactionSource.tryEmit(PressInteraction.Cancel(press))

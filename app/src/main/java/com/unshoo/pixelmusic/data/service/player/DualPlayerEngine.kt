@@ -416,6 +416,14 @@ class DualPlayerEngine @Inject constructor(
                 .filter { it != incomingUri?.toString() && activePlaybackResolvedUris[it] != incomingUri }
                 .forEach { activePlaybackResolvedUris.remove(it) }
             cancelAudioOffloadFallback()
+
+            // A track transition (auto-advance or manual skip/seek) must always begin at 1.0x
+            // even if a hold-to-seek gesture was still active or recently tore down.
+            if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO ||
+                reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK
+            ) {
+                resetPlaybackSpeedToNormal(playerA)
+            }
             
             // If the transition was not automatic (e.g. user skip or playlist change),
             // immediately cancel any background crossfade logic to ensure responsiveness.
@@ -1773,7 +1781,6 @@ class DualPlayerEngine @Inject constructor(
             playerA.volume
         }
         val pauseAtEnd = playerA.pauseAtEndOfMediaItems
-        val playbackParameters: PlaybackParameters = playerA.playbackParameters
 
         cancelSkipFade()
         playerA.removeListener(masterPlayerListener)
@@ -1791,7 +1798,7 @@ class DualPlayerEngine @Inject constructor(
         playerA.addAnalyticsListener(masterPlayerListener)
         playerA.volume = volume
         playerA.pauseAtEndOfMediaItems = pauseAtEnd
-        playerA.playbackParameters = playbackParameters
+        playerA.playbackParameters = PlaybackParameters.DEFAULT
 
         if (mediaItems.isNotEmpty()) {
             playerA.setMediaItems(mediaItems, currentIndex, positionMs)
@@ -2362,11 +2369,18 @@ class DualPlayerEngine @Inject constructor(
         aux.addListener(listener)
     }
 
+    private fun resetPlaybackSpeedToNormal(player: Player?) {
+        if (player != null && player.playbackParameters != PlaybackParameters.DEFAULT) {
+            player.playbackParameters = PlaybackParameters.DEFAULT
+        }
+    }
+
     private fun getOrCreateAuxiliaryPlayer(): ExoPlayer {
         playerB?.let { existing ->
             val unusable = (existing.playbackState == Player.STATE_IDLE && existing.playerError != null) ||
                 !existing.applicationLooper.thread.isAlive
             if (!unusable) {
+                resetPlaybackSpeedToNormal(existing)
                 attachAuxiliaryErrorListener(existing)
                 return existing
             }
@@ -3020,13 +3034,16 @@ class DualPlayerEngine @Inject constructor(
             resolvedUri.toString().contains("monochrome.st/track/") -> "monochrome_" + resolvedUri.toString().substringAfterLast("/")
             else -> mediaItem.mediaId.removePrefix("youtube_").takeIf { it.isNotBlank() }
         }
-        // If this track is already 100% complete in the lossless disk cache, serve directly from file
-        val cachedComplete = cleanId?.let { LosslessFileCache.getCompleteFile(context, it) }
-        if (cachedComplete != null) {
-            return mediaItem.buildUpon()
-                .setUri(Uri.fromFile(cachedComplete))
-                .setMimeType(androidx.media3.common.MimeTypes.AUDIO_FLAC)
-                .build()
+        // If this resolved lossless track is already 100% complete in the lossless disk cache
+        // (and not overridden to a lossy/non-matching source), serve directly from file.
+        if (isLossless) {
+            val cachedComplete = cleanId?.let { LosslessFileCache.getCompleteFile(context, it) }
+            if (cachedComplete != null) {
+                return mediaItem.buildUpon()
+                    .setUri(Uri.fromFile(cachedComplete))
+                    .setMimeType(androidx.media3.common.MimeTypes.AUDIO_FLAC)
+                    .build()
+            }
         }
 
         // ONLY attach custom cache key to YouTube streams; NEVER attach to Lossless streams
@@ -3123,6 +3140,7 @@ class DualPlayerEngine @Inject constructor(
 
             auxiliaryPlayer.repeatMode = playerA.repeatMode
             auxiliaryPlayer.shuffleModeEnabled = playerA.shuffleModeEnabled
+            resetPlaybackSpeedToNormal(auxiliaryPlayer)
             auxiliaryPlayer.prepare()
             auxiliaryPlayer.volume = 0f
             auxiliaryPlayer.pause()
@@ -3149,11 +3167,14 @@ class DualPlayerEngine @Inject constructor(
         transitionJob = null
         transitionRunning = false
         resetPreparedWindowState()
-        playerB?.takeIf { it.mediaItemCount > 0 }?.let { auxiliaryPlayer ->
+        playerB?.let { auxiliaryPlayer ->
             try {
-                auxiliaryPlayer.stop()
-                auxiliaryPlayer.clearMediaItems()
-                auxiliaryPlayer.volume = 0f
+                resetPlaybackSpeedToNormal(auxiliaryPlayer)
+                if (auxiliaryPlayer.mediaItemCount > 0) {
+                    auxiliaryPlayer.stop()
+                    auxiliaryPlayer.clearMediaItems()
+                    auxiliaryPlayer.volume = 0f
+                }
             } catch (e: Exception) { /* Ignore */ }
         }
         if (::playerA.isInitialized) {
@@ -3281,6 +3302,8 @@ class DualPlayerEngine @Inject constructor(
 
         incomingPlayer.repeatMode = outgoingPlayer.repeatMode
         incomingPlayer.shuffleModeEnabled = outgoingPlayer.shuffleModeEnabled
+        resetPlaybackSpeedToNormal(incomingPlayer)
+        resetPlaybackSpeedToNormal(outgoingPlayer)
         outgoingPlayer.pauseAtEndOfMediaItems = true
         incomingPlayer.pauseAtEndOfMediaItems = false
         onTransitionDisplayPlayerListeners.forEach { listener ->
@@ -3384,6 +3407,7 @@ class DualPlayerEngine @Inject constructor(
         playerB?.stop()
         playerB?.clearMediaItems()
         playerB?.volume = 0f
+        resetPlaybackSpeedToNormal(playerB)
         playerB?.let { attachAuxiliaryErrorListener(it) }
 
         setPauseAtEndOfMediaItems(false)

@@ -152,7 +152,17 @@ class LosslessCachingDataSource(
             fileOutputStream?.close()
             fileOutputStream = null
             if (temp.exists() && bytesWritten >= 64 * 1024L) {
-                LosslessFileCache.commitFile(context, key, temp, bytesWritten)
+                val activeResult = com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver.resultFor(key)
+                val sourceMeta = activeResult?.let {
+                    LosslessFileCache.CachedSourceMetadata(
+                        sourceId = it.sourceId,
+                        label = it.label,
+                        sampleRate = it.sampleRate,
+                        bitDepth = it.bitDepth,
+                        bitrate = it.bitrate.takeIf { b -> b > 0 },
+                    )
+                }
+                LosslessFileCache.commitFile(context, key, temp, bytesWritten, sourceMeta)
                 Timber.tag("LosslessCache").i("Committed complete lossless cache for %s (%d bytes)", key, bytesWritten)
             } else {
                 temp.delete()

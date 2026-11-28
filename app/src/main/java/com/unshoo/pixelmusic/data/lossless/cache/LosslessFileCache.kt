@@ -68,16 +68,72 @@ object LosslessFileCache {
         return File(getCacheDir(context), "$clean.flac.part")
     }
 
+    data class CachedSourceMetadata(
+        val sourceId: String,
+        val label: String?,
+        val sampleRate: Int?,
+        val bitDepth: Int?,
+        val bitrate: Int?,
+    )
+
+    private fun metaFileFor(cacheDir: File, clean: String): File = File(cacheDir, "$clean.flac.meta")
+
+    fun getCachedSourceMetadata(context: Context, key: String): CachedSourceMetadata? {
+        if (key.isBlank()) return null
+        val clean = cleanKey(key)
+        val metaFile = metaFileFor(getCacheDir(context), clean)
+        if (!metaFile.isFile) return null
+        return runCatching {
+            val lines = metaFile.readLines(Charsets.UTF_8)
+            val sourceId = lines.getOrNull(0)?.trim()?.takeIf { it.isNotBlank() } ?: return null
+            val label = lines.getOrNull(1)?.trim()?.takeIf { it.isNotBlank() }
+            val sampleRate = lines.getOrNull(2)?.trim()?.toIntOrNull()?.takeIf { it > 0 }
+            val bitDepth = lines.getOrNull(3)?.trim()?.toIntOrNull()?.takeIf { it > 0 }
+            val bitrate = lines.getOrNull(4)?.trim()?.toIntOrNull()?.takeIf { it > 0 }
+            CachedSourceMetadata(
+                sourceId = sourceId,
+                label = label,
+                sampleRate = sampleRate,
+                bitDepth = bitDepth,
+                bitrate = bitrate,
+            )
+        }.getOrNull()
+    }
+
     /**
      * Atomically commits a fully captured temp file into the permanent complete-file cache.
      */
-    fun commitFile(context: Context, key: String, tempFile: File, expectedLength: Long = 0L) {
+    fun commitFile(
+        context: Context,
+        key: String,
+        tempFile: File,
+        expectedLength: Long = 0L,
+        sourceMetadata: CachedSourceMetadata? = null,
+    ) {
         val clean = cleanKey(key)
-        val dest = File(getCacheDir(context), "$clean.flac")
+        val dir = getCacheDir(context)
+        val dest = File(dir, "$clean.flac")
         if (dest.exists()) dest.delete()
         val success = tempFile.renameTo(dest)
         if (success) {
             dest.setLastModified(System.currentTimeMillis())
+            val metaFile = metaFileFor(dir, clean)
+            if (sourceMetadata != null) {
+                runCatching {
+                    metaFile.writeText(
+                        listOf(
+                            sourceMetadata.sourceId,
+                            sourceMetadata.label.orEmpty(),
+                            sourceMetadata.sampleRate?.toString().orEmpty(),
+                            sourceMetadata.bitDepth?.toString().orEmpty(),
+                            sourceMetadata.bitrate?.toString().orEmpty(),
+                        ).joinToString("\n"),
+                        Charsets.UTF_8,
+                    )
+                }
+            } else if (metaFile.exists()) {
+                metaFile.delete()
+            }
             trimCacheAsync(context)
         }
     }
@@ -95,6 +151,7 @@ object LosslessFileCache {
                         val size = file.length()
                         if (file.delete()) {
                             totalBytes -= size
+                            metaFileFor(dir, file.name.removeSuffix(".flac")).takeIf { it.exists() }?.delete()
                         }
                     }
                 }

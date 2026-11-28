@@ -5065,6 +5065,32 @@ class PlayerViewModel @Inject constructor(
         isConfirmed = true
     )
 
+    private fun resolveLosslessResult(
+        mediaId: String?,
+        player: Player? = mediaController,
+    ): com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver.Result? {
+        if (mediaId == null) return null
+        val song = _playerUiState.value.currentPlaybackQueue.find { it.id == mediaId }
+            ?: libraryStateHolder.allSongsById.value[mediaId]
+            ?: runCatching { player?.currentMediaItem?.let(::resolveSongFromMediaItem) }.getOrNull()
+        val itemUriStr = runCatching {
+            player?.currentMediaItem?.localConfiguration?.uri?.toString()
+        }.getOrNull()
+        val candidates = listOfNotNull(
+            mediaId.removePrefix("youtube_").removePrefix("monochrome_"),
+            mediaId,
+            song?.youtubeId?.takeIf { it.isNotBlank() },
+            itemUriStr?.takeIf { it.startsWith("youtube://") }?.removePrefix("youtube://"),
+            song?.contentUriString?.takeIf { it.startsWith("youtube://") }?.removePrefix("youtube://"),
+        ).distinct()
+        for (candidate in candidates) {
+            com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver.resultFor(candidate)?.let {
+                return it
+            }
+        }
+        return null
+    }
+
     private fun preparePlaybackAudioMetadataForMedia(mediaId: String?) {
         metadataProbeJob?.cancel()
         metadataProbeJob = null
@@ -5075,10 +5101,7 @@ class PlayerViewModel @Inject constructor(
         }
 
         // 1. Check if LosslessStreamResolver has a cached resolution for this track
-        val cleanMediaId = mediaId.removePrefix("youtube_")
-        val losslessResult = com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver
-            .resultFor(cleanMediaId)
-            ?: com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver.resultFor(mediaId)
+        val losslessResult = resolveLosslessResult(mediaId)
         if (losslessResult != null) {
             val tag = when {
                 losslessResult.isDolbyAtmos -> "DOLBY ATMOS"
@@ -5158,7 +5181,7 @@ class PlayerViewModel @Inject constructor(
 
         // 3. Online/remote streams (YouTube, JioSaavn):
         val isSaavn = song?.contentUriString?.contains("saavn") == true
-        val videoId = song?.youtubeId ?: cleanMediaId
+        val videoId = song?.youtubeId ?: mediaId.removePrefix("youtube_")
         val ytHelper = com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper
         val mime = ytHelper.streamMimeTypeLruCache.get("${videoId}_high")
             ?: ytHelper.streamMimeTypeLruCache.get("${videoId}_low")
@@ -5209,6 +5232,9 @@ class PlayerViewModel @Inject constructor(
             withContext(Dispatchers.IO) {
                 com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver
                     .setUnifiedSongSourceOverride(context, videoId, unifiedSourceId)
+                if (song.id != videoId) {
+                    com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver.clearResolved(song.id)
+                }
                 com.unshoo.pixelmusic.data.remote.youtube.YoutubeHelper.invalidateStreamCache(videoId)
                 com.unshoo.pixelmusic.data.service.player.StreamChoice.forget(videoId)
                 dualPlayerEngine.invalidateResolvedUri("youtube://$videoId")
@@ -5307,13 +5333,44 @@ class PlayerViewModel @Inject constructor(
             }
 
             val cleanMediaId = mediaId.removePrefix("youtube_")
-            val offered = com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver.resultFor(cleanMediaId)
-                ?: com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver.resultFor(mediaId)
-
             val playingUri = resolvePlayingUri(player, mediaId)
             val playingUriString = playingUri?.toString().orEmpty()
-            if (playingUriString.contains("monochrome.st/track/") || playingUriString.startsWith("monochrome://") || mediaId.startsWith("monochrome_") || offered?.source == com.unshoo.pixelmusic.data.lossless.constants.AudioSourceType.MONOCHROME) {
+            val offered = resolveLosslessResult(mediaId, player)
+            val isLosslessCacheFile = playingUriString.contains("/lossless_cache/") &&
+                playingUriString.endsWith(".flac", ignoreCase = true)
+
+            if (playingUriString.contains("monochrome.st/track/") ||
+                playingUriString.startsWith("monochrome://") ||
+                mediaId.startsWith("monochrome_") ||
+                offered?.source == com.unshoo.pixelmusic.data.lossless.constants.AudioSourceType.MONOCHROME
+            ) {
                 _playbackAudioMetadata.value = monochromeMetadata(mediaId, offered?.bitrate, offered?.sampleRate, offered?.bitDepth)
+                return@runCatching
+            }
+            if (isLosslessCacheFile && offered == null) {
+                val cachedKey = playingUri?.let(com.unshoo.pixelmusic.data.lossless.cache.LosslessFileCache::extractCacheKey)
+                val cachedMeta = cachedKey?.let {
+                    com.unshoo.pixelmusic.data.lossless.cache.LosslessFileCache.getCachedSourceMetadata(context, it)
+                }
+                val builtIn = cachedMeta?.sourceId?.let(com.unshoo.pixelmusic.data.addons.UnifiedSourceId::builtInTypeOrNull)
+                val cachedSourceName = when {
+                    cachedMeta != null && com.unshoo.pixelmusic.data.addons.UnifiedSourceId.isAddon(cachedMeta.sourceId) ->
+                        cachedMeta.label?.substringBefore(" · ")?.trim()?.takeIf { it.isNotBlank() } ?: cachedMeta.sourceId
+                    builtIn != null -> com.unshoo.pixelmusic.data.addons.UnifiedSourceId.builtInTitle(builtIn)
+                    else -> "Monochrome"
+                }
+                val cachedSampleRate = cachedMeta?.sampleRate ?: 44100
+                val cachedBitDepth = cachedMeta?.bitDepth ?: 16
+                _playbackAudioMetadata.value = PlaybackAudioMetadata(
+                    mediaId = mediaId,
+                    mimeType = "audio/flac",
+                    bitrate = cachedMeta?.bitrate ?: 1411_200,
+                    sampleRate = cachedSampleRate,
+                    bitDepth = cachedBitDepth,
+                    formatTag = if (cachedSampleRate > 48_000 || cachedBitDepth >= 24) "HI-RES LOSSLESS" else "LOSSLESS",
+                    sourceName = cachedSourceName,
+                    isConfirmed = true
+                )
                 return@runCatching
             }
             if (playingUriString.contains("saavncdn.com") || playingUriString.contains("jiosaavn.com")) {
@@ -5373,8 +5430,7 @@ class PlayerViewModel @Inject constructor(
         val playingUriString = uri.toString()
 
         val cleanMediaId = mediaId.removePrefix("youtube_")
-        if (com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver.resultFor(cleanMediaId) != null ||
-            com.unshoo.pixelmusic.data.lossless.LosslessStreamResolver.resultFor(mediaId) != null) return
+        if (resolveLosslessResult(mediaId, player) != null) return
 
         if (metadata.isConfirmed && (metadata.bitrate ?: 0) >= 65_000 && !metadata.mimeType.isNullOrBlank()) return
 
@@ -7605,7 +7661,11 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
+    @Volatile
+    private var holdSeekGeneration: Long = 0L
+
     fun seekTo(position: Long) {
+        ++holdSeekGeneration
         runWhenMediaControllerReady {
             playbackStateHolder.stopSpeedSeek(commitReverseSeek = false)
             playbackStateHolder.seekTo(position)
@@ -7617,7 +7677,9 @@ class PlayerViewModel @Inject constructor(
         speed: Float = longPressSeekSpeed.value,
         timeRateSeconds: Int = longPressSeekTimeRateSeconds.value
     ) {
+        val generation = ++holdSeekGeneration
         runWhenMediaControllerReady {
+            if (holdSeekGeneration != generation) return@runWhenMediaControllerReady
             playbackStateHolder.startForwardLongPressSeek(
                 mode = mode,
                 speed = speed,
@@ -7631,7 +7693,9 @@ class PlayerViewModel @Inject constructor(
         speed: Float = longPressSeekSpeed.value,
         timeRateSeconds: Int = longPressSeekTimeRateSeconds.value
     ) {
+        val generation = ++holdSeekGeneration
         runWhenMediaControllerReady {
+            if (holdSeekGeneration != generation) return@runWhenMediaControllerReady
             playbackStateHolder.startReverseLongPressSeek(
                 mode = mode,
                 speed = speed,
@@ -7641,14 +7705,17 @@ class PlayerViewModel @Inject constructor(
     }
 
     fun stopSpeedSeek() {
+        ++holdSeekGeneration
         playbackStateHolder.stopSpeedSeek()
     }
 
     fun nextSong() {
+        ++holdSeekGeneration
         runWhenMediaControllerReady { playbackStateHolder.nextSong() }
     }
 
     fun previousSong() {
+        ++holdSeekGeneration
         runWhenMediaControllerReady { playbackStateHolder.previousSong() }
     }
 

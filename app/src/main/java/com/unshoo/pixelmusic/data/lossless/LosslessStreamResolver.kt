@@ -840,24 +840,39 @@ object LosslessStreamResolver {
         val cleanMediaId = mediaId.removePrefix("youtube_").removePrefix("monochrome_")
         val settings = readSettings(context)
         val unifiedOverride = UnifiedSongSourceOverride.get(settings.overrideRaw, mediaId)
+        val cachedMeta = LosslessFileCache.getCachedSourceMetadata(context, mediaId)
 
-        // 1. Instant offline cache check (only when no explicit source override is active)
-        if (!forDownload && unifiedOverride == null) {
+        // 1. Instant offline cache check (when no conflicting explicit source override is active)
+        if (!forDownload && (unifiedOverride == null || unifiedOverride == cachedMeta?.sourceId)) {
             val cachedLossless = LosslessFileCache.getCompleteFile(context, mediaId)
             if (cachedLossless != null) {
                 val fileUri = Uri.fromFile(cachedLossless).toString()
                 markUriFresh(fileUri)
+                val cachedSourceId = cachedMeta?.sourceId ?: UnifiedSourceId.forBuiltIn(AudioSourceType.MONOCHROME)
+                val cachedBuiltIn = UnifiedSourceId.builtInTypeOrNull(cachedSourceId)
+                    ?: AudioSourceType.MONOCHROME
+                val cachedDisplayName = cachedMeta?.let { meta ->
+                    if (UnifiedSourceId.isAddon(meta.sourceId)) {
+                        meta.label?.substringBefore(" · ")?.trim()?.takeIf { it.isNotBlank() }
+                    } else {
+                        UnifiedSourceId.builtInTitle(cachedBuiltIn)
+                    }
+                }
                 val result = Result(
                     mediaId = mediaId,
                     uri = fileUri,
                     mimeType = "audio/flac",
                     codecs = "flac",
-                    bitrate = 1411200,
-                    sampleRate = 44100,
-                    bitDepth = 16,
+                    bitrate = cachedMeta?.bitrate ?: 1411200,
+                    sampleRate = cachedMeta?.sampleRate ?: 44100,
+                    bitDepth = cachedMeta?.bitDepth ?: 16,
                     contentLength = cachedLossless.length(),
-                    label = "FLAC (Cached)",
-                    source = AudioSourceType.MONOCHROME,
+                    label = cachedMeta?.label?.let { base ->
+                        if (base.contains("Cached", ignoreCase = true)) base else "$base (Cached)"
+                    } ?: "FLAC (Cached)",
+                    source = cachedBuiltIn,
+                    sourceId = cachedSourceId,
+                    providerDisplayName = cachedDisplayName,
                 )
                 resolvedByMediaId[mediaId] = result
                 return result

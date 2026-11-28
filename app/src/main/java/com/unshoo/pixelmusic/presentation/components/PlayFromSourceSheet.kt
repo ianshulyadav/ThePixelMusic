@@ -61,6 +61,26 @@ private data class SwitcherOptionUi(
     val isActiveNow: Boolean,
 )
 
+internal fun resolveActivePlayFromSourceId(
+    activeLosslessSourceId: String?,
+    activeSourceName: String?,
+    candidates: List<Pair<String, List<String>>>,
+): String? {
+    if (!activeLosslessSourceId.isNullOrBlank()) {
+        val exactLossless = candidates.firstOrNull { (id, _) -> id == activeLosslessSourceId }?.first
+        if (exactLossless != null) return exactLossless
+    }
+    val rawName = activeSourceName?.trim()?.takeIf { it.isNotBlank() } ?: return null
+    val normalizedName = rawName.substringBefore(" (").trim()
+    return candidates.firstOrNull { (id, aliases) ->
+        id == rawName ||
+            aliases.any { alias ->
+                rawName.equals(alias, ignoreCase = true) ||
+                    normalizedName.equals(alias, ignoreCase = true)
+            }
+    }?.first
+}
+
 @Composable
 fun PlayFromSourceSheet(
     song: Song,
@@ -126,66 +146,93 @@ fun PlayFromSourceSheet(
 
             // 2. Only show actively enabled addons and built-in modules in priority order
             var priorityCounter = 1
-            orderIds.forEach { id ->
-                if (UnifiedSourceId.isAddon(id)) {
-                    val addonId = UnifiedSourceId.addonIdOrNull(id) ?: return@forEach
-                    val addon = addonMap[addonId] ?: return@forEach
-                    val masterEnabled = s?.addonsMasterEnabled ?: true
-                    if (!masterEnabled || !addon.enabled) return@forEach
-
-                    val active = activeLossless?.sourceId == id ||
-                        activeSourceName?.equals(addon.name, ignoreCase = true) == true
-                    add(
-                        SwitcherOptionUi(
-                            sourceId = id,
-                            title = addon.name,
-                            subtitle = buildString {
-                                append(addon.protocol.displayLabel)
-                                if (active && activeLossless != null) {
-                                    append(" · ${activeLossless.label.removePrefix("${addon.name} · ")}")
-                                }
-                            },
-                            isAddon = true,
-                            badgeNumber = "${priorityCounter++}",
-                            isActiveNow = active,
+            data class RawRow(
+                val sourceId: String,
+                val title: String,
+                val defaultSubtitle: String,
+                val isAddon: Boolean,
+                val aliases: List<String>,
+            )
+            val rawRows = buildList {
+                orderIds.forEach { id ->
+                    if (UnifiedSourceId.isAddon(id)) {
+                        val addonId = UnifiedSourceId.addonIdOrNull(id) ?: return@forEach
+                        val addon = addonMap[addonId] ?: return@forEach
+                        val masterEnabled = s?.addonsMasterEnabled ?: true
+                        if (!masterEnabled || !addon.enabled) return@forEach
+                        add(
+                            RawRow(
+                                sourceId = id,
+                                title = addon.name,
+                                defaultSubtitle = addon.protocol.displayLabel,
+                                isAddon = true,
+                                aliases = listOf(addon.name),
+                            )
                         )
-                    )
-                } else {
-                    val builtIn = UnifiedSourceId.builtInTypeOrNull(id) ?: return@forEach
+                    } else {
+                        val builtIn = UnifiedSourceId.builtInTypeOrNull(id) ?: return@forEach
 
-                    // Only show if activated / on, with YouTube always available as fallback
-                    val isEnabled = when (builtIn) {
-                        AudioSourceType.YOUTUBE -> true
-                        AudioSourceType.MONOCHROME -> (s?.losslessMasterEnabled ?: true) && (s?.monochromeEnabled ?: true)
-                        AudioSourceType.APPLE -> (s?.losslessMasterEnabled ?: true) && (s?.appleEnabled ?: true)
-                        // Pooled sources only when Lossless settings would show them too.
-                        AudioSourceType.TIDAL -> (s?.losslessMasterEnabled ?: true) && (s?.tidalEnabled ?: false) && AudioSourceType.TIDAL in configuredPooled
-                        AudioSourceType.QOBUZ -> (s?.losslessMasterEnabled ?: true) && (s?.qobuzEnabled ?: false) && AudioSourceType.QOBUZ in configuredPooled
-                        AudioSourceType.DEEZER -> (s?.losslessMasterEnabled ?: true) && (s?.deezerEnabled ?: false) && AudioSourceType.DEEZER in configuredPooled
-                        AudioSourceType.JIOSAAVN -> s?.saavnEnabled ?: false
-                        else -> false
+                        // Only show if activated / on, with YouTube always available as fallback
+                        val isEnabled = when (builtIn) {
+                            AudioSourceType.YOUTUBE -> true
+                            AudioSourceType.MONOCHROME -> (s?.losslessMasterEnabled ?: true) && (s?.monochromeEnabled ?: true)
+                            AudioSourceType.APPLE -> (s?.losslessMasterEnabled ?: true) && (s?.appleEnabled ?: true)
+                            // Pooled sources only when Lossless settings would show them too.
+                            AudioSourceType.TIDAL -> (s?.losslessMasterEnabled ?: true) && (s?.tidalEnabled ?: false) && AudioSourceType.TIDAL in configuredPooled
+                            AudioSourceType.QOBUZ -> (s?.losslessMasterEnabled ?: true) && (s?.qobuzEnabled ?: false) && AudioSourceType.QOBUZ in configuredPooled
+                            AudioSourceType.DEEZER -> (s?.losslessMasterEnabled ?: true) && (s?.deezerEnabled ?: false) && AudioSourceType.DEEZER in configuredPooled
+                            AudioSourceType.JIOSAAVN -> s?.saavnEnabled ?: false
+                            else -> false
+                        }
+                        if (!isEnabled) return@forEach
+
+                        val title = UnifiedSourceId.builtInTitle(builtIn)
+                        add(
+                            RawRow(
+                                sourceId = id,
+                                title = title,
+                                defaultSubtitle = UnifiedSourceId.builtInSubtitle(builtIn),
+                                isAddon = false,
+                                aliases = listOf(title, builtIn.name),
+                            )
+                        )
                     }
-                    if (!isEnabled) return@forEach
-
-                    val title = UnifiedSourceId.builtInTitle(builtIn)
-                    val active = activeLossless?.sourceId == id ||
-                        activeSourceName?.equals(title, ignoreCase = true) == true ||
-                        activeSourceName?.equals(builtIn.name, ignoreCase = true) == true
-                    add(
-                        SwitcherOptionUi(
-                            sourceId = id,
-                            title = title,
-                            subtitle = if (active && activeLossless != null) {
-                                activeLossless.label
-                            } else {
-                                UnifiedSourceId.builtInSubtitle(builtIn)
-                            },
-                            isAddon = false,
-                            badgeNumber = "${priorityCounter++}",
-                            isActiveNow = active,
-                        )
-                    )
                 }
+            }
+
+            val winningActiveSourceId = resolveActivePlayFromSourceId(
+                activeLosslessSourceId = activeLossless?.sourceId,
+                activeSourceName = activeSourceName,
+                candidates = rawRows.map { it.sourceId to it.aliases },
+            )
+
+            rawRows.forEach { row ->
+                val active = winningActiveSourceId == row.sourceId
+                val matchesLosslessResult = active && activeLossless?.sourceId == row.sourceId
+                val subtitle = if (row.isAddon) {
+                    buildString {
+                        append(row.defaultSubtitle)
+                        if (matchesLosslessResult && activeLossless != null) {
+                            append(" · ${activeLossless.label.removePrefix("${row.title} · ")}")
+                        }
+                    }
+                } else {
+                    if (matchesLosslessResult && activeLossless != null) {
+                        activeLossless.label
+                    } else {
+                        row.defaultSubtitle
+                    }
+                }
+                add(
+                    SwitcherOptionUi(
+                        sourceId = row.sourceId,
+                        title = row.title,
+                        subtitle = subtitle,
+                        isAddon = row.isAddon,
+                        badgeNumber = "${priorityCounter++}",
+                        isActiveNow = active,
+                    )
+                )
             }
         }
     }

@@ -306,4 +306,57 @@ class PlaybackStateHolderTest {
         holder.stopSpeedSeek()
         verify(exactly = 1) { controller.seekTo(105_000L) }
     }
+
+    @Test
+    fun `track transition stops active forward speed seek and resets leaked speed to 1x`() {
+        var currentSpeed = 1.0f
+        val controller = mockk<MediaController>(relaxed = true)
+        io.mockk.every { controller.playbackParameters } answers { PlaybackParameters(currentSpeed) }
+        io.mockk.every { controller.setPlaybackSpeed(any()) } answers {
+            currentSpeed = firstArg()
+        }
+        every { controller.isPlaying } returns true
+        every { controller.playWhenReady } returns true
+
+        val holder = createHolder()
+        holder.setMediaController(controller)
+
+        holder.startForwardSpeedSeek(2.0f)
+        assertEquals(2.0f, currentSpeed)
+
+        holder.onPlaybackOccurrenceTransition("next-track")
+        org.junit.jupiter.api.Assertions.assertFalse(holder.isLongPressSeeking.value)
+        assertEquals(1.0f, currentSpeed)
+
+        // Also recovers if a non-1x speed ever leaked while not actively hold-seeking.
+        currentSpeed = 2.0f
+        holder.onPlaybackOccurrenceTransition("third-track")
+        assertEquals(1.0f, currentSpeed)
+    }
+
+    @Test
+    fun `resuming playback and second hold clear any leaked non-1x speed`() = runTest {
+        Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
+        var currentSpeed = 2.0f
+        val controller = mockk<MediaController>(relaxed = true)
+        every { controller.isPlaying } returns false
+        every { controller.playWhenReady } returns false
+        io.mockk.every { controller.playbackParameters } answers { PlaybackParameters(currentSpeed) }
+        io.mockk.every { controller.setPlaybackSpeed(any()) } answers {
+            currentSpeed = firstArg()
+        }
+
+        val holder = createHolder()
+        holder.setMediaController(controller)
+
+        holder.playPause()
+        advanceUntilIdle()
+        assertEquals(1.0f, currentSpeed)
+
+        holder.startForwardSpeedSeek(3.0f)
+        assertEquals(3.0f, currentSpeed)
+
+        holder.stopSpeedSeek()
+        assertEquals(1.0f, currentSpeed)
+    }
 }

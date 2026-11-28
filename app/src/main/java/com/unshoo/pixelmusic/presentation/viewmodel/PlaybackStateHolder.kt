@@ -296,8 +296,17 @@ class PlaybackStateHolder @Inject constructor(
     }
 
     fun onPlaybackOccurrenceTransition(mediaId: String?) {
-        if (activeSpeedSeekDirection == SpeedSeekDirection.REVERSE) {
+        if (activeSpeedSeekDirection != SpeedSeekDirection.NONE) {
             stopSpeedSeek(commitReverseSeek = false)
+        }
+        val controller = mediaController
+        if (controller != null && activeSpeedSeekDirection == SpeedSeekDirection.NONE) {
+            try {
+                if (abs(controller.playbackParameters.speed - 1f) > 0.01f) {
+                    controller.setPlaybackSpeed(1f)
+                }
+            } catch (_: IllegalStateException) {
+            }
         }
         activatePlaybackOccurrence(mediaId, forceNewOccurrence = true)
     }
@@ -500,6 +509,16 @@ class PlaybackStateHolder @Inject constructor(
                                 }
                                 else -> { /* STATE_READY — just play */ }
                             }
+                            if (activeSpeedSeekDirection == SpeedSeekDirection.NONE) {
+                                val currentSpeed = try {
+                                    activeCtrl.playbackParameters.speed
+                                } catch (_: IllegalStateException) {
+                                    1f
+                                }
+                                if (abs(currentSpeed - 1f) > 0.01f) {
+                                    activeCtrl.setPlaybackSpeed(1f)
+                                }
+                            }
                             activeCtrl.play()
                         }
                     } catch (e: Exception) {
@@ -608,11 +627,7 @@ class PlaybackStateHolder @Inject constructor(
 
         if (mode == LongPressSeekMode.SPEED_BASED && remoteClient == null && controller != null) {
             speedSeekRemoteFallback = false
-            speedSeekPreHoldSpeed = try {
-                controller.playbackParameters.speed.takeIf { it > 0f } ?: 1f
-            } catch (_: IllegalStateException) {
-                1f
-            }
+            speedSeekPreHoldSpeed = 1f
             speedSeekPreHoldVolume = try {
                 controller.volume.takeIf { it > 0.001f } ?: 1f
             } catch (_: IllegalStateException) {
@@ -883,9 +898,14 @@ class PlaybackStateHolder @Inject constructor(
                     } else {
                         isSeeking = false
                     }
-                    if (controller != null && speedSeekPreHoldWasPlaying) {
+                    if (controller != null) {
                         try {
-                            controller.volume = speedSeekPreHoldVolume
+                            if (abs(controller.playbackParameters.speed - speedSeekPreHoldSpeed) > 0.01f) {
+                                controller.setPlaybackSpeed(speedSeekPreHoldSpeed)
+                            }
+                            if (speedSeekPreHoldWasPlaying) {
+                                controller.volume = speedSeekPreHoldVolume
+                            }
                         } catch (_: IllegalStateException) {
                         }
                     }
@@ -1172,6 +1192,19 @@ class PlaybackStateHolder @Inject constructor(
                         }
                     } else {
                          val controller = mediaController
+                         if (controller != null && activeSpeedSeekDirection == SpeedSeekDirection.NONE) {
+                             val currentSpeed = try {
+                                 controller.playbackParameters.speed
+                             } catch (_: IllegalStateException) {
+                                 1f
+                             }
+                             if (abs(currentSpeed - 1f) > 0.01f) {
+                                 try {
+                                     controller.setPlaybackSpeed(1f)
+                                 } catch (_: IllegalStateException) {
+                                 }
+                             }
+                         }
                          // Media3: Check isPlaying or playbackState == READY/BUFFERING
                          if (controller != null && controller.isPlaying && !isSeeking) {
                              val visibleSong = _stablePlayerState.value.currentSong
