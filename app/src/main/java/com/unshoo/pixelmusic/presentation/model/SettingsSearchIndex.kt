@@ -25,6 +25,8 @@ object SettingsSearchIndex {
         SettingsSearchEntry(SettingsCategory.CONTENT, R.string.settings_my_top_size_title, R.string.settings_my_top_size_desc),
         SettingsSearchEntry(SettingsCategory.LIBRARY, R.string.setcat_excluded_directories_title, R.string.setcat_excluded_directories_subtitle),
         SettingsSearchEntry(SettingsCategory.LIBRARY, R.string.setcat_artists_title, R.string.setcat_artists_subtitle),
+        SettingsSearchEntry(SettingsCategory.LIBRARY, R.string.presentation_batch_g_artist_group_by_album_artist, R.string.presentation_batch_g_artist_group_by_album_artist_sub),
+        SettingsSearchEntry(SettingsCategory.LIBRARY, R.string.presentation_batch_g_artist_group_albums_by_name, R.string.presentation_batch_g_artist_group_albums_by_name_sub),
         SettingsSearchEntry(SettingsCategory.LIBRARY, R.string.settings_download_directory_title, R.string.settings_download_directory_desc),
         SettingsSearchEntry(SettingsCategory.LIBRARY, R.string.settings_download_audio_quality_title, R.string.settings_download_audio_quality_desc),
         SettingsSearchEntry(SettingsCategory.LIBRARY, R.string.setcat_min_song_duration, null),

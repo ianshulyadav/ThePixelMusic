@@ -346,6 +346,7 @@ constructor(
         val ARTIST_WORD_DELIMITERS = stringPreferencesKey("artist_word_delimiters")
         val EXTRACT_ARTISTS_FROM_TITLE = booleanPreferencesKey("extract_artists_from_title")
         val GROUP_BY_ALBUM_ARTIST = booleanPreferencesKey("group_by_album_artist")
+        val GROUP_ALBUMS_BY_NAME = booleanPreferencesKey("group_albums_by_name")
         val ARTIST_SETTINGS_RESCAN_REQUIRED =
                 booleanPreferencesKey("artist_settings_rescan_required")
         val ARTIST_IMAGE_CACHE_VERSION = intPreferencesKey("artist_image_cache_version")
@@ -1000,6 +1001,21 @@ constructor(
             preferences[PreferencesKeys.GROUP_BY_ALBUM_ARTIST] = enabled
             // Mark rescan as required when this setting changes
             preferences[PreferencesKeys.ARTIST_SETTINGS_RESCAN_REQUIRED] = true
+        }
+    }
+
+    val groupAlbumsByNameFlow: Flow<Boolean> =
+            dataStore.data.map { preferences ->
+                preferences[PreferencesKeys.GROUP_ALBUMS_BY_NAME] ?: false
+            }
+
+    suspend fun setGroupAlbumsByName(enabled: Boolean, markRescanRequired: Boolean = true) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.GROUP_ALBUMS_BY_NAME] = enabled
+            if (markRescanRequired) {
+                // Mark rescan as required when changed without triggering an immediate sync
+                preferences[PreferencesKeys.ARTIST_SETTINGS_RESCAN_REQUIRED] = true
+            }
         }
     }
 

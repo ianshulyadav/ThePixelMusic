@@ -322,12 +322,28 @@ fun ArtistSettingsScreen(
                         )
                     }
                 ) {
-                    Column(modifier = Modifier.clip(shape = RoundedCornerShape(24.dp))) {
+                    Column(
+                        modifier = Modifier.clip(shape = RoundedCornerShape(24.dp)),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
                         SwitchSettingItem(
                             title = stringResource(R.string.presentation_batch_g_artist_group_by_album_artist),
                             subtitle = stringResource(R.string.presentation_batch_g_artist_group_by_album_artist_sub),
                             checked = uiState.groupByAlbumArtist,
                             onCheckedChange = { viewModel.setGroupByAlbumArtist(it) },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Rounded.Album,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.secondary
+                                )
+                            }
+                        )
+                        SwitchSettingItem(
+                            title = stringResource(R.string.presentation_batch_g_artist_group_albums_by_name),
+                            subtitle = stringResource(R.string.presentation_batch_g_artist_group_albums_by_name_sub),
+                            checked = uiState.groupAlbumsByName,
+                            onCheckedChange = { viewModel.setGroupAlbumsByName(it) },
                             leadingIcon = {
                                 Icon(
                                     imageVector = Icons.Rounded.Album,

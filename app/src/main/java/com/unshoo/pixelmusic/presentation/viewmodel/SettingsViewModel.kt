@@ -146,6 +146,7 @@ data class SettingsUiState(
     val collageEnabled: Boolean = true,
     val minSongDuration: Int = 10000,
     val minTracksPerAlbum: Int = 1,
+    val groupAlbumsByName: Boolean = false,
     val replayGainEnabled: Boolean = false,
     val replayGainUseAlbumGain: Boolean = false,
     val isSafeTokenLimitEnabled: Boolean = true,
@@ -923,6 +924,12 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             userPreferencesRepository.minTracksPerAlbumFlow.collect { minTracks ->
                 _uiState.update { it.copy(minTracksPerAlbum = minTracks) }
+            }
+        }
+
+        viewModelScope.launch {
+            userPreferencesRepository.groupAlbumsByNameFlow.collect { enabled ->
+                _uiState.update { it.copy(groupAlbumsByName = enabled) }
             }
         }
 
@@ -1804,6 +1811,18 @@ fun setBeta05CleanInstallDisclaimerDismissed(dismissed: Boolean) {
     fun setMinTracksPerAlbum(minTracks: Int) {
         viewModelScope.launch {
             userPreferencesRepository.setMinTracksPerAlbum(minTracks)
+        }
+    }
+
+    fun setGroupAlbumsByName(enabled: Boolean) {
+        viewModelScope.launch {
+            if (enabled == _uiState.value.groupAlbumsByName) return@launch
+            userPreferencesRepository.setGroupAlbumsByName(
+                enabled = enabled,
+                markRescanRequired = false
+            )
+            // Trigger a full library rescan so album grouping updates immediately.
+            syncManager.fullSync()
         }
     }
 

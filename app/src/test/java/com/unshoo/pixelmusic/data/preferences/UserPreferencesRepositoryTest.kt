@@ -270,4 +270,31 @@ class UserPreferencesRepositoryTest {
             tempDir.toFile().deleteRecursively()
         }
     }
+
+    @Test
+    fun `groupAlbumsByNameFlow defaults to false and updates rescan flag according to parameter`() = runTest {
+        val tempDir = Files.createTempDirectory("user-preferences-repository-test")
+        try {
+            val repository = UserPreferencesRepository(
+                dataStore = PreferenceDataStoreFactory.create(
+                    scope = backgroundScope,
+                    produceFile = { tempDir.resolve("settings.preferences_pb").toFile() }
+                ),
+                json = Json
+            )
+
+            assertFalse(repository.groupAlbumsByNameFlow.first())
+            assertFalse(repository.artistSettingsRescanRequiredFlow.first())
+
+            repository.setGroupAlbumsByName(enabled = true, markRescanRequired = false)
+            assertTrue(repository.groupAlbumsByNameFlow.first())
+            assertFalse(repository.artistSettingsRescanRequiredFlow.first())
+
+            repository.setGroupAlbumsByName(enabled = false)
+            assertFalse(repository.groupAlbumsByNameFlow.first())
+            assertTrue(repository.artistSettingsRescanRequiredFlow.first())
+        } finally {
+            tempDir.toFile().deleteRecursively()
+        }
+    }
 }

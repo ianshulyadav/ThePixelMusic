@@ -24,18 +24,38 @@ internal fun resolveAlbumArtist(
         .firstOrNull()
 }
 
-internal fun buildAlbumGroupingKey(song: SongEntity): AlbumGroupingKey {
+internal fun buildAlbumGroupingKey(
+    song: SongEntity,
+    groupByAlbumNameOnly: Boolean = false
+): AlbumGroupingKey {
     return buildAlbumGroupingKey(
         albumName = song.albumName,
         albumArtist = song.albumArtist,
         albumArtUriString = song.albumArtUriString,
         parentDirectoryPath = song.parentDirectoryPath,
         fallbackAlbumId = song.albumId,
-        preferStableLocalIdentity = LocalArtworkUri.isLikelyLocalMedia(song.contentUriString)
+        preferStableLocalIdentity = LocalArtworkUri.isLikelyLocalMedia(song.contentUriString),
+        groupByAlbumNameOnly = groupByAlbumNameOnly
     )
 }
 
-internal fun buildAlbumGroupingKeys(album: AlbumEntity): List<AlbumGroupingKey> {
+internal fun buildAlbumGroupingKeys(
+    album: AlbumEntity,
+    groupByAlbumNameOnly: Boolean = false
+): List<AlbumGroupingKey> {
+    val normalizedTitle = album.title.normalizeMetadataTextOrEmpty()
+        .ifBlank { "Unknown Album" }
+        .lowercase()
+
+    if (groupByAlbumNameOnly && !isDefaultAlbumTitle(normalizedTitle)) {
+        return listOf(
+            AlbumGroupingKey(
+                normalizedTitle = normalizedTitle,
+                identity = "name"
+            )
+        )
+    }
+
     val albumKeys = mutableListOf<AlbumGroupingKey>()
 
     albumKeys += buildAlbumGroupingKey(
@@ -43,21 +63,18 @@ internal fun buildAlbumGroupingKeys(album: AlbumEntity): List<AlbumGroupingKey> 
         albumArtist = album.artistName,
         albumArtUriString = album.albumArtUriString,
         parentDirectoryPath = null,
-        fallbackAlbumId = album.id
+        fallbackAlbumId = album.id,
+        groupByAlbumNameOnly = false
     )
 
     albumKeys += AlbumGroupingKey(
-        normalizedTitle = album.title.normalizeMetadataTextOrEmpty()
-            .ifBlank { "Unknown Album" }
-            .lowercase(),
+        normalizedTitle = normalizedTitle,
         identity = "media:${album.id}"
     )
 
     if (!album.albumArtUriString.isNullOrBlank()) {
         albumKeys += AlbumGroupingKey(
-            normalizedTitle = album.title.normalizeMetadataTextOrEmpty()
-                .ifBlank { "Unknown Album" }
-                .lowercase(),
+            normalizedTitle = normalizedTitle,
             identity = "art:${album.albumArtUriString.trim()}"
         )
     }
@@ -67,20 +84,51 @@ internal fun buildAlbumGroupingKeys(album: AlbumEntity): List<AlbumGroupingKey> 
 
 internal fun chooseAlbumDisplayArtist(
     songs: List<SongEntity>,
-    preferAlbumArtist: Boolean
+    preferAlbumArtist: Boolean,
+    groupByAlbumNameOnly: Boolean = false
 ): String {
     if (songs.isEmpty()) return "Unknown Artist"
 
-    val albumArtist = mostCommonValue(
-        songs.mapNotNull { song ->
-            song.albumArtist.normalizeMetadataText()?.takeIf { it.isNotBlank() }
+    val albumArtists = songs.mapNotNull { song ->
+        song.albumArtist.normalizeMetadataText()?.takeIf {
+            it.isNotBlank() && !it.equals("<unknown>", ignoreCase = true)
         }
-    )
-    val trackArtist = mostCommonValue(
-        songs.map { song ->
-            song.artistName.normalizeMetadataTextOrEmpty()
+    }
+    val trackArtists = songs.map { song ->
+        song.artistName.normalizeMetadataTextOrEmpty()
+    }.filter {
+        it.isNotBlank() &&
+            !it.equals("<unknown>", ignoreCase = true) &&
+            !it.equals("Unknown Artist", ignoreCase = true)
+    }
+
+    if (groupByAlbumNameOnly && songs.size > 1) {
+        val dominantAlbumArtist = majorityValue(albumArtists)
+        val albumArtistMajorityCount = dominantAlbumArtist?.let { candidate ->
+            albumArtists.count { it.equals(candidate, ignoreCase = true) }
+        } ?: 0
+        val distinctTrackArtists = trackArtists.map { it.lowercase() }.distinct()
+        val dominantTrackArtist = majorityValue(trackArtists)
+
+        if (preferAlbumArtist &&
+            dominantAlbumArtist != null &&
+            (distinctTrackArtists.size <= 1 || albumArtistMajorityCount * 2 >= songs.size)
+        ) {
+            return dominantAlbumArtist
         }
-    )
+        if (dominantTrackArtist != null) {
+            return dominantTrackArtist
+        }
+        if (distinctTrackArtists.size > 1) {
+            // Multiple track artists with no single consensus in a name-grouped compilation album.
+            return dominantAlbumArtist?.takeIf { albumArtistMajorityCount * 2 >= songs.size }
+                ?: "Various Artists"
+        }
+        return dominantAlbumArtist ?: "Unknown Artist"
+    }
+
+    val albumArtist = mostCommonValue(albumArtists)
+    val trackArtist = mostCommonValue(trackArtists)
 
     return when {
         preferAlbumArtist && albumArtist != null -> albumArtist
@@ -107,7 +155,29 @@ internal fun resolveAlbumDisplayArtistId(
         artistNameToId[primaryArtistName]?.let { return it }
     }
 
+    if (displayArtist.equals("Various Artists", ignoreCase = true)) {
+        return 0L
+    }
+
     return songs.firstOrNull()?.artistId ?: 0L
+}
+
+internal fun isDefaultAlbumTitle(normalizedLowerTitle: String): Boolean {
+    return normalizedLowerTitle.isBlank() ||
+        normalizedLowerTitle == "<unknown>" ||
+        normalizedLowerTitle == "unknown" ||
+        normalizedLowerTitle == "unknown album"
+}
+
+private fun majorityValue(values: List<String>): String? {
+    if (values.isEmpty()) return null
+    val grouped = values
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+        .groupBy { it.lowercase() }
+    val topGroup = grouped.values.maxByOrNull { it.size } ?: return null
+    if (topGroup.size * 2 <= values.size) return null
+    return mostCommonValue(topGroup)
 }
 
 private fun mostCommonValue(values: List<String>): String? {
@@ -126,11 +196,18 @@ private fun buildAlbumGroupingKey(
     albumArtUriString: String?,
     parentDirectoryPath: String?,
     fallbackAlbumId: Long,
-    preferStableLocalIdentity: Boolean = false
+    preferStableLocalIdentity: Boolean = false,
+    groupByAlbumNameOnly: Boolean = false
 ): AlbumGroupingKey {
     val normalizedTitle = albumName.normalizeMetadataTextOrEmpty()
         .ifBlank { "Unknown Album" }
         .lowercase()
+    if (groupByAlbumNameOnly && !isDefaultAlbumTitle(normalizedTitle)) {
+        return AlbumGroupingKey(
+            normalizedTitle = normalizedTitle,
+            identity = "name"
+        )
+    }
     val stableLocalIdentity = when {
         !parentDirectoryPath.isNullOrBlank() -> {
             "dir:${parentDirectoryPath.trim().lowercase()}"

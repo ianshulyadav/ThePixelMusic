@@ -20,6 +20,7 @@ data class ArtistSettingsUiState(
     val filterKeywords: List<String> = UserPreferencesRepository.DEFAULT_FILTER_KEYWORDS,
     val extractArtistsFromTitle: Boolean = true,
     val groupByAlbumArtist: Boolean = false,
+    val groupAlbumsByName: Boolean = false,
     val rescanRequired: Boolean = false,
     val isResyncing: Boolean = false
 )
@@ -72,6 +73,12 @@ class ArtistSettingsViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
+            userPreferencesRepository.groupAlbumsByNameFlow.collect { enabled ->
+                _uiState.update { it.copy(groupAlbumsByName = enabled) }
+            }
+        }
+
+        viewModelScope.launch {
             userPreferencesRepository.artistSettingsRescanRequiredFlow.collect { required ->
                 _uiState.update { it.copy(rescanRequired = required) }
             }
@@ -87,6 +94,12 @@ class ArtistSettingsViewModel @Inject constructor(
     fun setGroupByAlbumArtist(enabled: Boolean) {
         viewModelScope.launch {
             userPreferencesRepository.setGroupByAlbumArtist(enabled)
+        }
+    }
+
+    fun setGroupAlbumsByName(enabled: Boolean) {
+        viewModelScope.launch {
+            userPreferencesRepository.setGroupAlbumsByName(enabled)
         }
     }
 

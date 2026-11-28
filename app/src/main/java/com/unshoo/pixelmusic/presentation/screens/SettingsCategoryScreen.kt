@@ -72,6 +72,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Album
 import androidx.compose.material.icons.outlined.ClearAll
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Info
@@ -621,6 +622,13 @@ fun SettingsCategoryScreen(
                                     leadingIcon = { Icon(Icons.Outlined.Person, null, tint = MaterialTheme.colorScheme.secondary) },
                                     trailingIcon = { Icon(Icons.Rounded.ChevronRight, stringResource(R.string.cd_open), tint = MaterialTheme.colorScheme.onSurfaceVariant) },
                                     onClick = { navController.navigateSafely(Screen.ArtistSettings.route) }
+                                )
+                                SwitchSettingItem(
+                                    title = stringResource(R.string.presentation_batch_g_artist_group_albums_by_name),
+                                    subtitle = stringResource(R.string.presentation_batch_g_artist_group_albums_by_name_sub),
+                                    checked = uiState.groupAlbumsByName,
+                                    onCheckedChange = { settingsViewModel.setGroupAlbumsByName(it) },
+                                    leadingIcon = { Icon(Icons.Outlined.Album, null, tint = MaterialTheme.colorScheme.secondary) }
                                 )
                                 val customDownloadPath by settingsViewModel.customDownloadPath.collectAsStateWithLifecycle()
                                 val downloadDirLabel = remember(customDownloadPath) {

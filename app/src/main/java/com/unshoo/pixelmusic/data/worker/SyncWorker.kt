@@ -146,6 +146,8 @@ constructor(
                     val extractArtistsFromTitle = userPreferencesRepository.extractArtistsFromTitleFlow.first()
                     val groupByAlbumArtist =
                             userPreferencesRepository.groupByAlbumArtistFlow.first()
+                    val groupAlbumsByName =
+                            userPreferencesRepository.groupAlbumsByNameFlow.first()
                     val rescanRequired =
                             userPreferencesRepository.artistSettingsRescanRequiredFlow.first()
                     val directoryRulesVersion =
@@ -243,11 +245,15 @@ constructor(
 
                     val songsToInsert =
                             fetchMusicFromMediaStore(
-                                    fetchTimestamp,
-                                    forceMetadata,
-                                    directoryResolver,
-                                    syncMode == SyncMode.REBUILD,
-                                    progressBatchSize
+                                    sinceTimestamp = fetchTimestamp,
+                                    forceMetadata = forceMetadata,
+                                    directoryResolver = directoryResolver,
+                                    isRebuild = (syncMode == SyncMode.REBUILD),
+                                    reprocessExisting = (syncMode == SyncMode.REBUILD ||
+                                            syncMode == SyncMode.FULL ||
+                                            rescanRequired ||
+                                            forceMetadata),
+                                    progressBatchSize = progressBatchSize
                             ) { current, total, phaseOrdinal ->
                                 reportProgressThrottled(current, total, phaseOrdinal)
                             }
@@ -289,6 +295,7 @@ constructor(
                                         wordDelimiters = artistWordDelimiters,
                                         extractFromTitle = extractArtistsFromTitle,
                                         groupByAlbumArtist = groupByAlbumArtist,
+                                        groupAlbumsByName = groupAlbumsByName,
                                         existingArtistMetadata = existingArtistMetadata,
                                         existingAlbums = allExistingAlbums,
                                         existingArtistIdMap = existingArtistIdMap,
@@ -318,12 +325,15 @@ constructor(
                             )
                         }
 
-                        // Clear the rescan required flag
-                        userPreferencesRepository.clearArtistSettingsRescanRequired()
-
                         userPreferencesRepository.markDirectoryRulesVersionApplied(
                             directoryRulesVersion
                         )
+                    }
+
+                    // Clear the rescan-required flag after FULL/REBUILD or explicit rescan syncs
+                    // even if MediaStore returned 0 songs so ArtistSettings does not remain stuck.
+                    if (rescanRequired || syncMode == SyncMode.FULL || syncMode == SyncMode.REBUILD) {
+                        userPreferencesRepository.clearArtistSettingsRescanRequired()
                     }
 
                     // Always update last sync timestamp if we reached this point successfully,
@@ -479,6 +489,7 @@ constructor(
             wordDelimiters: List<String> = emptyList(),
             extractFromTitle: Boolean = true,
             groupByAlbumArtist: Boolean,
+            groupAlbumsByName: Boolean = false,
             existingArtistMetadata: Map<Long, Pair<String?, String?>>,
             existingAlbums: List<AlbumEntity>,
             existingArtistIdMap: MutableMap<String, Long>,
@@ -497,7 +508,10 @@ constructor(
         existingAlbums
             .sortedBy { it.id }
             .forEach { album ->
-                buildAlbumGroupingKeys(album).forEach { key ->
+                buildAlbumGroupingKeys(
+                    album = album,
+                    groupByAlbumNameOnly = groupAlbumsByName
+                ).forEach { key ->
                     albumMap.putIfAbsent(key, album.id)
                 }
             }
@@ -548,7 +562,10 @@ constructor(
             }
 
             // --- Album Logic ---
-            val albumKey = buildAlbumGroupingKey(song)
+            val albumKey = buildAlbumGroupingKey(
+                song = song,
+                groupByAlbumNameOnly = groupAlbumsByName
+            )
             val finalAlbumId = albumMap.getOrPut(albumKey) { song.albumId }
 
             // Build serialized artists JSON for efficient loading without JOINs
@@ -588,7 +605,8 @@ constructor(
              val representativeAlbumArt = songsInAlbum.firstNotNullOfOrNull { it.albumArtUriString }
              val determinedAlbumArtist = chooseAlbumDisplayArtist(
                  songs = songsInAlbum,
-                 preferAlbumArtist = groupByAlbumArtist
+                 preferAlbumArtist = groupByAlbumArtist,
+                 groupByAlbumNameOnly = groupAlbumsByName
              )
              val determinedAlbumArtistId = resolveAlbumDisplayArtistId(
                  displayArtist = determinedAlbumArtist,
@@ -597,14 +615,26 @@ constructor(
                  artistDelimiters = artistDelimiters,
                  wordDelimiters = wordDelimiters
              )
-             val metadataAlbumArtist = songsInAlbum
-                 .mapNotNull { song ->
-                     song.albumArtist?.takeIf { it.isNotBlank() }
-                 }
-                 .groupingBy { it }
-                 .eachCount()
-                 .maxByOrNull { it.value }
-                 ?.key
+             val distinctNonBlankAlbumArtists = songsInAlbum
+                 .mapNotNull { it.albumArtist?.trim()?.takeIf { aa -> aa.isNotEmpty() } }
+                 .map { it.lowercase() }
+                 .distinct()
+             val metadataAlbumArtist = if (
+                 groupAlbumsByName &&
+                 determinedAlbumArtist.equals("Various Artists", ignoreCase = true) &&
+                 distinctNonBlankAlbumArtists.size > 1
+             ) {
+                 null
+             } else {
+                 songsInAlbum
+                     .mapNotNull { song ->
+                         song.albumArtist?.takeIf { it.isNotBlank() }
+                     }
+                     .groupingBy { it }
+                     .eachCount()
+                     .maxByOrNull { it.value }
+                     ?.key
+             }
 
              AlbumEntity(
                  id = catAlbumId,
@@ -782,6 +812,7 @@ constructor(
             forceMetadata: Boolean,
             directoryResolver: DirectoryRuleResolver,
             isRebuild: Boolean,
+            reprocessExisting: Boolean = false,
             progressBatchSize: Int,
             onProgress: suspend (current: Int, total: Int, phaseOrdinal: Int) -> Unit
     ): List<SongEntity> {
@@ -924,7 +955,7 @@ constructor(
         val artistDelimiters = userPreferencesRepository.artistDelimitersFlow.first()
         val artistWordDelimiters = userPreferencesRepository.artistWordDelimitersFlow.first()
         val rawSongCount = rawDataList.size
-        val songsToProcess = if (isRebuild) {
+        val songsToProcess = if (reprocessExisting) {
              rawDataList.toList()
         } else {
             // Find existing data for these songs to avoid unnecessary reprocessing
@@ -952,7 +983,7 @@ constructor(
         val totalCount = songsToProcess.size
         Log.i(
             TAG,
-            "MediaStore raw=$rawSongCount, songsToProcess=$totalCount, isRebuild=$isRebuild"
+            "MediaStore raw=$rawSongCount, songsToProcess=$totalCount, isRebuild=$isRebuild, reprocessExisting=$reprocessExisting"
         )
         if (totalCount == 0) {
             Trace.endSection()
@@ -991,6 +1022,8 @@ constructor(
                                 mediaStoreSong.copy(
                                     dateAdded = localSong.dateAdded,
                                     lyrics = localSong.lyrics,
+                                    isFavorite = localSong.isFavorite,
+                                    isDisliked = localSong.isDisliked,
                                     title = if (localSong.title.isNotBlank() && localSong.title != mediaStoreSong.title) localSong.title else mediaStoreSong.title,
                                     artistName = choosePreferredArtistName(
                                         localArtistName = localSong.artistName,
@@ -998,10 +1031,14 @@ constructor(
                                         artistDelimiters = artistDelimiters,
                                         wordDelimiters = artistWordDelimiters
                                     ),
+                                    albumArtist = localSong.albumArtist?.takeIf { it.isNotBlank() } ?: mediaStoreSong.albumArtist,
                                     albumName = if (localSong.albumName.isNotBlank() && localSong.albumName != mediaStoreSong.albumName) localSong.albumName else mediaStoreSong.albumName,
                                     genre = localSong.genre ?: mediaStoreSong.genre,
                                     trackNumber = if (localSong.trackNumber != 0) localSong.trackNumber else mediaStoreSong.trackNumber,
                                     discNumber = localSong.discNumber ?: mediaStoreSong.discNumber,
+                                    mimeType = localSong.mimeType ?: mediaStoreSong.mimeType,
+                                    bitrate = localSong.bitrate ?: mediaStoreSong.bitrate,
+                                    sampleRate = localSong.sampleRate ?: mediaStoreSong.sampleRate,
                                     albumArtUriString = mediaStoreSong.albumArtUriString
                                 )
                             } else {
@@ -1624,8 +1661,21 @@ constructor(
             }
 
             // 1. Pre-load Local Data for Merging
+            val groupAlbumsByName = userPreferencesRepository.groupAlbumsByNameFlow.first()
             val existingArtists = musicDao.getAllArtistsListRaw().associate { it.name.trim().lowercase() to it.id }
-            val existingAlbums = musicDao.getAllAlbumsList(emptyList(), false, 0).associate { "${it.title.trim().lowercase()}_${it.artistName.trim().lowercase()}" to it.id }
+            val existingAlbums = buildMap<String, Long> {
+                musicDao.getAllAlbumsList(emptyList(), false, 0)
+                    .sortedBy { it.id }
+                    .forEach { album ->
+                        val normalizedTitle = album.title.trim().lowercase()
+                        val key = if (groupAlbumsByName && !isDefaultAlbumTitle(normalizedTitle)) {
+                            normalizedTitle
+                        } else {
+                            "${normalizedTitle}_${album.artistName.trim().lowercase()}"
+                        }
+                        putIfAbsent(key, album.id)
+                    }
+            }
             val existingArtistImageUrls = musicDao.getAllArtistsListRaw().associate { it.id to it.imageUrl }
             val nextArtistId = AtomicLong((musicDao.getMaxArtistId() ?: 0L) + 1)
             val delimiters = userPreferencesRepository.artistDelimitersFlow.first()
@@ -1751,8 +1801,13 @@ constructor(
                 }
 
                 // 4. Album Logic
-                // Try to match existing album by Name + Album Artist
-                val albumKey = "${realAlbumName.trim().lowercase()}_${realAlbumArtist.trim().lowercase()}"
+                // Match existing album by title only (when enabled) or by Name + Album Artist
+                val normalizedTelegramAlbumTitle = realAlbumName.trim().lowercase()
+                val albumKey = if (groupAlbumsByName && !isDefaultAlbumTitle(normalizedTelegramAlbumTitle)) {
+                    normalizedTelegramAlbumTitle
+                } else {
+                    "${normalizedTelegramAlbumTitle}_${realAlbumArtist.trim().lowercase()}"
+                }
                 val existingAlbumId = existingAlbums[albumKey]
                 
                 val finalAlbumId = if (existingAlbumId != null) {
@@ -1763,7 +1818,8 @@ constructor(
                     if (synthId == 0L) -1L else synthId
                 }
                 
-                if (!albumsToInsert.containsKey(finalAlbumId)) {
+                val existingInsertedAlbum = albumsToInsert[finalAlbumId]
+                if (existingInsertedAlbum == null) {
                      albumsToInsert[finalAlbumId] = AlbumEntity(
                         id = finalAlbumId,
                         title = realAlbumName,
@@ -1773,6 +1829,15 @@ constructor(
                         dateAdded = realDateAdded,
                         year = realYear,
                         albumArtUriString = resolvedAlbumArtUri
+                    )
+                } else if (
+                    groupAlbumsByName &&
+                    !existingInsertedAlbum.artistName.equals(realAlbumArtist, ignoreCase = true) &&
+                    !existingInsertedAlbum.artistName.equals("Various Artists", ignoreCase = true)
+                ) {
+                    albumsToInsert[finalAlbumId] = existingInsertedAlbum.copy(
+                        artistName = "Various Artists",
+                        artistId = 0L
                     )
                 }
 

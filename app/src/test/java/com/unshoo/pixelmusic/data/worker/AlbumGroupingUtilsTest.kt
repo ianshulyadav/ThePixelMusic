@@ -1,6 +1,7 @@
 package com.unshoo.pixelmusic.data.worker
 
 import com.google.common.truth.Truth.assertThat
+import com.unshoo.pixelmusic.data.database.AlbumEntity
 import com.unshoo.pixelmusic.data.database.SongEntity
 import org.junit.Test
 
@@ -126,6 +127,122 @@ class AlbumGroupingUtilsTest {
         )
 
         assertThat(displayArtist).isEqualTo("The Weeknd & Justice")
+    }
+
+    @Test
+    fun `buildAlbumGroupingKey merges tracks with different artists when groupByAlbumNameOnly is enabled`() {
+        val track1 = testSong(
+            artistName = "Blues Image",
+            albumArtist = "Blues Image",
+            parentDirectoryPath = "/music/mixtape/disc1",
+            albumName = "70's Mixtape Vol. 1",
+            albumId = 101L
+        )
+        val track2 = testSong(
+            artistName = "Elton John",
+            albumArtist = "Elton John",
+            parentDirectoryPath = "/music/mixtape/disc2",
+            albumName = " 70's Mixtape Vol. 1 ",
+            albumId = 202L
+        )
+
+        assertThat(buildAlbumGroupingKey(track1, groupByAlbumNameOnly = true))
+            .isEqualTo(buildAlbumGroupingKey(track2, groupByAlbumNameOnly = true))
+    }
+
+    @Test
+    fun `buildAlbumGroupingKey keeps unknown albums separate even when groupByAlbumNameOnly is enabled`() {
+        val track1 = testSong(
+            artistName = "Artist A",
+            albumArtist = null,
+            parentDirectoryPath = "/music/folderA",
+            albumName = "Unknown Album",
+            albumId = 101L
+        )
+        val track2 = testSong(
+            artistName = "Artist B",
+            albumArtist = null,
+            parentDirectoryPath = "/music/folderB",
+            albumName = "Unknown Album",
+            albumId = 202L
+        )
+
+        assertThat(buildAlbumGroupingKey(track1, groupByAlbumNameOnly = true))
+            .isNotEqualTo(buildAlbumGroupingKey(track2, groupByAlbumNameOnly = true))
+    }
+
+    @Test
+    fun `buildAlbumGroupingKeys maps split albums to single name key when groupByAlbumNameOnly is enabled`() {
+        val album1 = AlbumEntity(
+            id = 10L,
+            title = "70's Mixtape Vol. 1",
+            artistName = "Blues Image",
+            artistId = 1L,
+            albumArtUriString = null,
+            songCount = 1,
+            dateAdded = 100L,
+            year = 1970,
+            albumArtist = "Blues Image"
+        )
+        val album2 = album1.copy(
+            id = 20L,
+            artistName = "Elton John",
+            artistId = 2L,
+            albumArtist = "Elton John"
+        )
+
+        val keys1 = buildAlbumGroupingKeys(album1, groupByAlbumNameOnly = true)
+        val keys2 = buildAlbumGroupingKeys(album2, groupByAlbumNameOnly = true)
+
+        assertThat(keys1).containsExactly(
+            AlbumGroupingKey(
+                normalizedTitle = "70's mixtape vol. 1",
+                identity = "name"
+            )
+        )
+        assertThat(keys2).isEqualTo(keys1)
+    }
+
+    @Test
+    fun `chooseAlbumDisplayArtist returns Various Artists and resolves 0L id for conflicting compilation artists`() {
+        val songs = listOf(
+            testSong(artistName = "Blues Image", albumArtist = "Blues Image", albumId = 1L),
+            testSong(artistName = "Cherie Currie", albumArtist = "Cherie Currie", albumId = 2L),
+            testSong(artistName = "Eddie Money", albumArtist = "Eddie Money", albumId = 3L),
+            testSong(artistName = "Elton John", albumArtist = "Elton John", albumId = 4L)
+        )
+
+        val displayArtist = chooseAlbumDisplayArtist(
+            songs = songs,
+            preferAlbumArtist = true,
+            groupByAlbumNameOnly = true
+        )
+        val artistId = resolveAlbumDisplayArtistId(
+            displayArtist = displayArtist,
+            songs = songs,
+            artistNameToId = mapOf("Blues Image" to 10L, "Elton John" to 20L),
+            artistDelimiters = listOf(",", "&")
+        )
+
+        assertThat(displayArtist).isEqualTo("Various Artists")
+        assertThat(artistId).isEqualTo(0L)
+    }
+
+    @Test
+    fun `chooseAlbumDisplayArtist preserves dominant shared artist when groupByAlbumNameOnly is enabled`() {
+        val songs = listOf(
+            testSong(artistName = "Daft Punk", albumArtist = "Daft Punk"),
+            testSong(artistName = "Daft Punk", albumArtist = "Daft Punk"),
+            testSong(artistName = "Daft Punk feat. Julian Casablancas", albumArtist = "Daft Punk")
+        )
+
+        val displayArtist = chooseAlbumDisplayArtist(
+            songs = songs,
+            preferAlbumArtist = true,
+            groupByAlbumNameOnly = true
+        )
+
+        assertThat(displayArtist).isEqualTo("Daft Punk")
     }
 
     private fun testSong(

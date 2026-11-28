@@ -181,6 +181,8 @@
     <string name="presentation_batch_g_artist_section_library_org">Library Organization</string>
     <string name="presentation_batch_g_artist_group_by_album_artist">Group by Album Artist</string>
     <string name="presentation_batch_g_artist_group_by_album_artist_sub">Show collaboration albums under main artist</string>
+    <string name="presentation_batch_g_artist_group_albums_by_name">Group Albums by Name Only</string>
+    <string name="presentation_batch_g_artist_group_albums_by_name_sub">Merge compilation or multi-artist tracks sharing the same album title</string>
     <string name="presentation_batch_g_artist_info_title">About Multi-Artist Parsing</string>
     <string name="presentation_batch_g_artist_info_body">PixelMusic splits artist tags using character delimiters (/, ;, &amp;) and word delimiters (feat., ft., vs., x). Word delimiters are matched case-insensitively.
 
